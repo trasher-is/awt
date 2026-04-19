@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alliance Hub - Login</title>
+    <style>
+        body { background-color: #121212; color: #ffffff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .login-box { background: #1e1e1e; padding: 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); width: 100%; max-width: 350px; text-align: center; }
+        input { width: 100%; padding: 10px; margin: 10px 0; background: #2d2d2d; border: 1px solid #444; color: white; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; background: #007acc; border: none; color: white; font-weight: bold; border-radius: 4px; cursor: pointer; margin-top: 10px; }
+        button:hover { background: #005f9e; }
+        #error-msg { color: #ff4c4c; margin-top: 10px; font-size: 0.9em; min-height: 20px; }
+    </style>
+</head>
+<body>
+
+<div class="login-box">
+    <h2>Alliance Intel Hub</h2>
+    <form id="loginForm">
+        <input type="text" id="game_name" placeholder="In-Game Name" required>
+        <input type="password" id="password" placeholder="Password" required>
+        <button type="submit">Authenticate</button>
+    </form>
+    <div id="error-msg"></div>
+</div>
+
+<script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault(); // Stop the page from reloading
+        const game_name = document.getElementById('game_name').value;
+        const password = document.getElementById('password').value;
+        const errorDiv = document.getElementById('error-msg');
+
+        errorDiv.textContent = 'Authenticating...';
+
+        try {
+            const response = await fetch('/hub-api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ game_name, password })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                // Send everyone straight to the game dashboard
+                window.location.href = '/dashboard';
+            } else {
+                errorDiv.textContent = data.error || 'Login failed.';
+            }
+        } catch (err) {
+            errorDiv.textContent = 'Server error. Try again.';
+        }
+    });
+</script>
+
+</body>
+</html>

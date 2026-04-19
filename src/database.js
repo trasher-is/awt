@@ -205,6 +205,15 @@ function initDatabase() {
         )
     `);
 
+    // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
+    const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
+    if (userCount.count === 0) {
+        const bcrypt = require('bcryptjs');
+        const defaultPassword = bcrypt.hashSync('Shaltibarshchiai67', 10);
+        db.prepare(`INSERT INTO app_users (game_name, password_hash, role) VALUES (?, ?, ?)`).run('admin', defaultPassword, 'admin');
+        console.log("[DB] Default admin account created (Username: admin | Password: Shaltibarshchiai67)");
+    }
+
     console.log("[DB] Schema initialized successfully.");
 }
 

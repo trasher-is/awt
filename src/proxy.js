@@ -32,7 +32,7 @@ const proxyOptions = {
                 let html = responseBuffer.toString('utf8');
                 
                 // Inject the scraper script right before the body closes
-                const scriptTag = `<script src="/assets/alliance-tools.js"></script>\n</body>`;
+                const scriptTag = `<script type="module" src="/hub-assets/js/main.js"></script>\n</body>`;
                 html = html.replace('</body>', scriptTag);
                 
                 return html;

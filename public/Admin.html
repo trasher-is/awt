@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alliance Hub - Admin</title>
+    <style>
+        body { background-color: #121212; color: #ddd; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; }
+        .container { max-width: 900px; margin: auto; background: #1e1e1e; padding: 20px; border-radius: 8px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 10px; border-bottom: 1px solid #333; text-align: left; }
+        th { background: #2d2d2d; }
+        button { padding: 5px 10px; cursor: pointer; border: none; border-radius: 3px; font-weight: bold; }
+        .btn-green { background: #28a745; color: white; }
+        .btn-red { background: #dc3545; color: white; }
+        .btn-blue { background: #007acc; color: white; }
+        .header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .form-group { margin-bottom: 15px; background: #2a2a2a; padding: 15px; border-radius: 5px; }
+        input, select { padding: 8px; background: #121212; border: 1px solid #444; color: white; border-radius: 4px; margin-right: 10px;}
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header-bar">
+        <h2>Admin Control Panel</h2>
+        <div>
+            <button class="btn-blue" onclick="window.location.href='/dashboard'">Go to Tools/Proxy</button>
+            <button class="btn-red" onclick="logout()">Logout</button>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <h3>Add New Alliance Member</h3>
+        <input type="text" id="newName" placeholder="In-Game Name">
+        <input type="password" id="newPass" placeholder="Password">
+        <select id="newRole">
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
+        </select>
+        <button class="btn-green" onclick="addUser()">Create Account</button>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Game Name</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="userTableBody">
+            </tbody>
+    </table>
+</div>
+
+<script>
+    async function loadUsers() {
+        const response = await fetch('/hub-api/admin/users');
+        if (!response.ok) return alert('Failed to load users. Are you logged in as admin?');
+        
+        const users = await response.json();
+        const tbody = document.getElementById('userTableBody');
+        tbody.innerHTML = '';
+
+        users.forEach(user => {
+            const isMasterAdmin = user.game_name === 'admin';
+            const statusText = user.is_active ? '<span style="color:#28a745">Active</span>' : '<span style="color:#dc3545">Banned</span>';
+            const toggleBtnClass = user.is_active ? 'btn-red' : 'btn-green';
+            const toggleBtnText = user.is_active ? 'Ban' : 'Unban';
+
+            // Disable ban button if it's the master admin
+            const banBtn = isMasterAdmin ? 
+                `<button class="btn-red" disabled style="opacity: 0.5; cursor: not-allowed;">Ban</button>` : 
+                `<button class="${toggleBtnClass}" onclick="toggleUser(${user.id})">${toggleBtnText}</button>`;
+
+            // Role Dropdown (Disabled for master admin)
+            const roleSelect = isMasterAdmin ? 
+                `<span>${user.role}</span>` : 
+                `<select onchange="changeRole(${user.id}, this.value)" style="padding: 4px; background: #2d2d2d; color: white; border: 1px solid #444; border-radius: 3px;">
+                    <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
+                    <option value="user"  ${user.role === 'user' ? 'selected' : ''}>User</option>
+                    <option value="guest" ${user.role === 'guest' ? 'selected' : ''}>Guest</option>
+                </select>`;
+
+            tbody.innerHTML += `
+                <tr>
+                    <td>${user.id}</td>
+                    <td>${user.game_name}</td>
+                    <td>${roleSelect}</td>
+                    <td>${statusText}</td>
+                    <td>
+                        ${banBtn}
+                        <button class="btn-blue" onclick="changePassword(${user.id}, '${user.game_name}')">Change Pass</button>
+                    </td>
+                </tr>
+            `;
+        });
+    }
+
+    async function changeRole(id, newRole) {
+        const response = await fetch(`/api/admin/users/${id}/role`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: newRole })
+        });
+        
+        const data = await response.json();
+        if(!data.success) {
+            alert(data.error);
+            loadUsers(); // Refresh to undo the dropdown change if it failed
+        }
+    }
+
+    async function addUser() {
+        const game_name = document.getElementById('newName').value;
+        const password = document.getElementById('newPass').value;
+        const role = document.getElementById('newRole').value;
+
+        if(!game_name || !password) return alert("Name and Password required");
+
+        const response = await fetch('/hub-api/admin/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ game_name, password, role })
+        });
+
+        const data = await response.json();
+        if(data.success) {
+            document.getElementById('newName').value = '';
+            document.getElementById('newPass').value = '';
+            loadUsers();
+        } else {
+            alert(data.error);
+        }
+    }
+
+    async function toggleUser(id) {
+        await fetch(`/api/admin/users/${id}/toggle`, { method: 'POST' });
+        loadUsers();
+    }
+
+    async function changePassword(id, name) {
+        const new_password = prompt(`Enter new password for ${name}:`);
+        if (!new_password) return;
+
+        const response = await fetch(`/api/admin/users/${id}/password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_password })
+        });
+
+        if(response.ok) alert("Password updated.");
+    }
+
+    async function logout() {
+        await fetch('/hub-api/logout', { method: 'POST' });
+        window.location.href = '/hub-assets/login.html';
+    }
+
+    loadUsers();
+</script>
+
+</body>
+</html>
