@@ -1,0 +1,213 @@
+const Database = require('better-sqlite3');
+const path = require('path');
+
+const dbPath = path.join(__dirname, '..', 'awt.db');
+const db = new Database(dbPath);
+
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+
+function initDatabase() {
+    // 1. Admin Control
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS app_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_name TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT DEFAULT 'user',
+            is_active INTEGER DEFAULT 1
+        )
+    `);
+
+    // 2. Alliances
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS alliances (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            tag TEXT COLLATE NOCASE,
+            leader_id INTEGER,
+            ranking INTEGER,
+            points_update INTEGER,
+            points_current INTEGER,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    // 3. Players (Flat Table)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS players (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL COLLATE NOCASE,
+            alliance_id INTEGER,
+            
+            -- Constants
+            country TEXT,
+            local_time TEXT,
+            origin_system INTEGER,
+            race_growth INTEGER DEFAULT 0,
+            race_science INTEGER DEFAULT 0,
+            race_culture INTEGER DEFAULT 0,
+            race_production INTEGER DEFAULT 0,
+            race_speed INTEGER DEFAULT 0,
+            race_attack INTEGER DEFAULT 0,
+            race_defense INTEGER DEFAULT 0,
+            race_trader INTEGER DEFAULT 0,
+            race_sul INTEGER DEFAULT 0,
+            
+            -- Variables (Core)
+            level INTEGER DEFAULT 0,
+            science_level INTEGER DEFAULT 0,
+            culture_level INTEGER DEFAULT 0,
+            points INTEGER DEFAULT 0,
+            ranking INTEGER,
+            
+            -- Variables (Economy & Output)
+            astro_dollars INTEGER DEFAULT 0,
+            production_points INTEGER DEFAULT 0,
+            production_rate INTEGER DEFAULT 0,
+            science_rate INTEGER DEFAULT 0,
+            culture_rate INTEGER DEFAULT 0,
+            
+            -- Variables (Infrastructure & Limits)
+            total_planets INTEGER DEFAULT 0,
+            total_population INTEGER DEFAULT 0,
+            total_farms INTEGER DEFAULT 0,
+            total_factories INTEGER DEFAULT 0,
+            total_labs INTEGER DEFAULT 0,
+            total_cybernetics INTEGER DEFAULT 0,
+            cv_used INTEGER DEFAULT 0,
+            cv_limit INTEGER DEFAULT 0,
+            
+            -- Variables (Sciences)
+            biology INTEGER DEFAULT 0,
+            economy INTEGER DEFAULT 0,
+            energy INTEGER DEFAULT 0,
+            mathematics INTEGER DEFAULT 0,
+            physics INTEGER DEFAULT 0,
+            social INTEGER DEFAULT 0,
+            
+            -- Variables (Trade & Misc)
+            trade_revenue INTEGER DEFAULT 0,
+            trade_partners TEXT, -- Stored as a JSON array of player IDs: e.g., '[42, 89, 103]'
+            artefact TEXT,
+            
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(alliance_id) REFERENCES alliances(id) ON DELETE SET NULL
+        )
+    `);
+
+    // 4. Map & Systems
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS systems (
+            id INTEGER PRIMARY KEY,
+            name TEXT,
+            x INTEGER,
+            y INTEGER,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS planets (
+            system_id INTEGER,
+            planet_index INTEGER,
+            owner_id INTEGER,
+            population INTEGER DEFAULT 0,
+            starbase INTEGER DEFAULT 0,
+            
+            -- High-performance "boolean" flags (0=False, 1=True)
+            is_ally INTEGER DEFAULT 0,
+            has_fleet INTEGER DEFAULT 0,
+            is_sieged INTEGER DEFAULT 0,
+            
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (system_id, planet_index),
+            FOREIGN KEY(system_id) REFERENCES systems(id) ON DELETE CASCADE,
+            FOREIGN KEY(owner_id) REFERENCES players(id) ON DELETE SET NULL
+        )
+    `);
+
+    // 4.5 Alliance Meta-Data (Planning)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS planet_plans (
+            system_id INTEGER,
+            planet_index INTEGER,
+            author_id INTEGER, -- Links to the admin/user who wrote it
+            note TEXT NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            
+            -- The primary key ensures only ONE active note per planet
+            PRIMARY KEY (system_id, planet_index),
+            FOREIGN KEY(system_id) REFERENCES systems(id) ON DELETE CASCADE,
+            FOREIGN KEY(author_id) REFERENCES app_users(id) ON DELETE SET NULL
+        )
+    `);
+
+    // 5. Fleets
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS fleets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_fleet_id INTEGER, 
+            owner_id INTEGER,
+            system_id INTEGER,
+            planet_index INTEGER,
+            destination_system_id INTEGER,
+            destination_planet_index INTEGER,
+            transports INTEGER DEFAULT 0,
+            colony_ships INTEGER DEFAULT 0,
+            destroyers INTEGER DEFAULT 0,
+            cruisers INTEGER DEFAULT 0,
+            battleships INTEGER DEFAULT 0,
+            combat_value INTEGER DEFAULT 0,
+            arrival_time DATETIME,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(owner_id) REFERENCES players(id) ON DELETE CASCADE
+        )
+    `);
+
+    // 6. History Logs & Event Types
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS event_types (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL
+        )
+    `);
+
+    // Pre-populate the event types dictionary
+    db.exec(`
+        INSERT OR IGNORE INTO event_types (id, name) VALUES 
+        (1, 'OWNER_CHANGE'),
+        (2, 'POP_DROP'),
+        (3, 'BATTLE'),
+        (4, 'SIEGE')
+    `);
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS planet_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            system_id INTEGER NOT NULL,
+            planet_index INTEGER NOT NULL,
+            event_type_id INTEGER NOT NULL,
+            old_value INTEGER,
+            new_value INTEGER,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(system_id) REFERENCES systems(id) ON DELETE CASCADE,
+            FOREIGN KEY(event_type_id) REFERENCES event_types(id)
+        )
+    `);
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS player_logins (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id INTEGER NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+        )
+    `);
+
+    console.log("[DB] Schema initialized successfully.");
+}
+
+initDatabase();
+
+module.exports = db;
