@@ -3,6 +3,20 @@ const bcrypt = require('bcryptjs');
 const db = require('../database');
 const router = express.Router();
 
+
+// --- MIDDLEWARE: AUTH CHECK ---
+const requireAuth = (req, res, next) => {
+    if (req.session && req.session.userId) return next();
+    return res.status(401).json({ error: 'Unauthorized: Please log in' });
+};
+
+// --- 2. MIDDLEWARE: ADMIN CHECK ---
+// Put this in front of any route that only admins should touch
+const requireAdmin = (req, res, next) => {
+    if (req.session && req.session.role === 'admin') return next();
+    return res.status(403).json({ error: 'Unauthorized: Admins only' });
+};
+
 // --- 1. LOGIN SYSTEM ---
 router.post('/login', (req, res) => {
     const { game_name, password } = req.body;
@@ -58,13 +72,6 @@ router.post('/nuke', requireAuth, (req, res) => {
     req.session.destroy();
     res.json({ success: true });
 });
-
-// --- 2. MIDDLEWARE: ADMIN CHECK ---
-// Put this in front of any route that only admins should touch
-const requireAdmin = (req, res, next) => {
-    if (req.session && req.session.role === 'admin') return next();
-    return res.status(403).json({ error: 'Unauthorized: Admins only' });
-};
 
 // --- 3. ADMIN DASHBOARD TOOLS ---
 // Get all users
