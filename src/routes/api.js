@@ -29,6 +29,36 @@ router.post('/logout', (req, res) => {
     res.json({ success: true });
 });
 
+// --- TOOL USER CONTEXT ---
+// The Wrapper calls this to figure out who is supposed to be playing
+router.get('/me', requireAuth, (req, res) => {
+    res.json({ 
+        id: req.session.userId, 
+        gameName: req.session.gameName, 
+        role: req.session.role 
+    });
+});
+
+// --- THE SPY TRAP NUKE ---
+// Triggered by the Wrapper if a name mismatch is detected
+router.post('/nuke', requireAuth, (req, res) => {
+    const { detectedName } = req.body;
+    const toolName = req.session.gameName;
+    const userId = req.session.userId;
+
+    console.error(`\n[!!! CRITICAL SECURITY ALERT !!!]`);
+    console.error(`Tool Account '${toolName}' was caught sharing credentials.`);
+    console.error(`In-Game Player detected: '${detectedName}'`);
+    console.error(`Action: PERMANENT BAN EXECUTED.\n`);
+
+    // Ban the account
+    db.prepare(`UPDATE app_users SET is_active = 0 WHERE id = ?`).run(userId);
+    
+    // Destroy their session
+    req.session.destroy();
+    res.json({ success: true });
+});
+
 // --- 2. MIDDLEWARE: ADMIN CHECK ---
 // Put this in front of any route that only admins should touch
 const requireAdmin = (req, res, next) => {

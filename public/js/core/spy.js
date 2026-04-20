@@ -1,6 +1,39 @@
 export function initSpy() {
     let currentMapX = null;
     let currentMapY = null;
+    let verifiedPlayerName = null; // Store it so we don't spam the game server
+
+    // --- THE SILENT SPY TRAP ---
+    async function backgroundIdentityCheck() {
+        // If we already caught their name this session, skip.
+        if (verifiedPlayerName) return; 
+
+        try {
+            console.log("[Alliance Tools] Running silent identity check...");
+            // Silently request the player's profile page in the background
+            const response = await fetch('/Game/Players');
+            const html = await response.text();
+
+            // Convert the raw HTML string into a queryable Document Object in memory
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+
+            // Run our exact CSS selector on the hidden document
+            const nameNode = doc.querySelector('th span a[href^="/Game/Players/Profile/"]');
+            
+            if (nameNode) {
+                verifiedPlayerName = nameNode.innerText.trim();
+                console.log(`[Alliance Tools] Target locked: ${verifiedPlayerName}`);
+                // Instantly beam the updated context to the wrapper
+                sendContext(); 
+            }
+        } catch (error) {
+            console.error("[Alliance Tools] Identity check failed", error);
+        }
+    }
+
+    // Fire the silent check the moment the script boots
+    backgroundIdentityCheck();
 
     function extractCoords(urlStr) {
         try {
@@ -32,9 +65,10 @@ export function initSpy() {
             isMap: pathLower.includes('/game/map'),
             systemId: null,
             mapX: currentMapX,
-            mapY: currentMapY
+            mapY: currentMapY,
+            playerName: verifiedPlayerName // Attach the securely fetched name
         };
-
+        
         if (context.isSystemView) {
             const urlParams = new URLSearchParams(window.location.search);
             context.systemId = urlParams.get('id') || urlParams.get('system');

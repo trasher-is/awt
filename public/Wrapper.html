@@ -4,152 +4,199 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Alliance Hub - Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        aw: { bg: '#0d1117', panel: '#161b22', border: '#30363d', primary: '#2f81f7', enemy: '#f85149', ally: '#3fb950', warning: '#d29922', discord: '#5865F2' }
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        body, html { margin: 0; padding: 0; height: 100%; background-color: #000; color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow: hidden; }
-        
-        #layout { display: flex; height: 100vh; width: 100vw; overflow: hidden; position: relative; }
-        
-        /* The Game Container - Strict bounds */
-        #game-container { flex-grow: 1; position: relative; height: 100vh; overflow: hidden; }
-        
-        /* The Iframe - Absolute lock */
-        iframe { 
-            position: absolute; 
-            top: 0; 
-            left: 0; 
-            width: 100%; 
-            height: 100%; 
-            border: none; 
-            display: block; 
-        }
-        
-        /* The Sliding Sidebar */
-        #sidebar { 
-            width: 350px; 
-            background: #121212; 
-            border-left: 1px solid #333; 
-            display: flex; 
-            flex-direction: column;
-            transition: transform 0.3s ease;
-            box-shadow: -5px 0 15px rgba(0,0,0,0.5);
-            position: absolute;
-            right: 0;
-            top: 0;
-            height: 100%;
-            z-index: 100;
-        }
-        
-        /* Hidden State */
-        #sidebar.closed { transform: translateX(100%); }
-        
-        /* UI Elements */
-        .sidebar-header { background: #1a1a1a; padding: 15px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }
-        .sidebar-content { padding: 15px; flex-grow: 1; overflow-y: auto; background: #0f0f0f; }
-        
-        .btn { background: #007acc; border: none; color: white; padding: 8px 12px; cursor: pointer; border-radius: 3px; font-weight: bold; }
-        .btn-red { background: #dc3545; }
-        
-        /* The Floating Button */
-        #toggle-btn {
-            position: absolute;
-            bottom: 20px;
-            right: 20px;
-            background: #007acc;
-            color: white;
-            border: 1px solid #005f9e;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-            z-index: 90;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.8);
-        }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #8b949e; }
+        .toast-enter { transform: translateY(100%); opacity: 0; }
+        .toast-active { transform: translateY(0); opacity: 1; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
     </style>
 </head>
-<body>
+<body class="flex w-screen h-screen overflow-hidden bg-black text-gray-300 font-sans text-sm select-none" oncontextmenu="return false;">
 
-<div id="layout">
-    <div id="game-container">
-        <iframe id="game-frame" src="/"></iframe>
-        
-        <button id="toggle-btn" onclick="toggleSidebar()">Intel Hub</button>
+    <div class="flex-grow relative h-full">
+        <iframe id="game-frame" src="/" class="absolute inset-0 w-full h-full border-none"></iframe>
     </div>
 
-    <div id="sidebar" class="closed">
-        <div class="sidebar-header">
-            <h3 style="margin:0;">System Intel</h3>
-            <button class="btn btn-red" onclick="toggleSidebar()">X</button>
+    <div class="w-96 h-full bg-aw-bg border-l border-aw-border flex flex-col shadow-2xl relative z-10 shrink-0">
+        
+        <div class="bg-aw-panel p-4 border-b border-aw-border flex justify-between items-center shrink-0">
+            <div>
+                <h2 class="font-bold text-white text-lg tracking-wide"><i class="fa-solid fa-satellite-dish text-aw-primary mr-2"></i>Intel Hub</h2>
+                <span class="text-xs text-aw-ally flex items-center"><span class="w-2 h-2 rounded-full bg-aw-ally mr-1 animate-pulse"></span> Scraper Active</span>
+            </div>
+            <span id="auth-user-display" class="text-xs font-mono text-gray-500"></span>
+        </div>
+
+        <div class="flex border-b border-aw-border shrink-0 bg-aw-panel">
+            <button onclick="switchTab('system')" class="flex-1 py-2 text-center hover:bg-aw-border hover:text-white border-b-2 border-aw-primary text-white font-semibold transition" id="tab-system">System</button>
+            <button onclick="switchTab('map')" class="flex-1 py-2 text-center hover:bg-aw-border hover:text-white border-b-2 border-transparent transition" id="tab-map">Map</button>
+            <button onclick="switchTab('intel')" class="flex-1 py-2 text-center hover:bg-aw-border hover:text-white border-b-2 border-transparent transition" id="tab-intel">Database</button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-3">
+
+            <div id="view-system" class="space-y-4">
+                <div class="flex justify-between items-end">
+                    <div>
+                        <div class="text-xs text-gray-500 uppercase tracking-wider">Current Location</div>
+                        <div class="text-xl font-bold text-white flex items-center gap-2">
+                            <span id="ui-sys-id">Scanning...</span>
+                            <button onclick="copyToDiscord('system')" class="text-gray-500 hover:text-aw-discord transition" title="Copy to Discord">
+                                <i class="fa-brands fa-discord text-sm"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-aw-panel border border-aw-border rounded-md p-4 text-center">
+                    <p class="text-xs text-gray-500">Waiting for system data...</p>
+                </div>
+            </div>
+
+            <div id="view-map" class="hidden space-y-4">
+                <div class="bg-aw-panel border border-aw-border rounded-md p-4 flex flex-col justify-center items-center relative">
+                    <button onclick="copyToDiscord('map')" class="absolute top-2 right-2 text-gray-500 hover:text-aw-discord transition" title="Copy Target Coordinates">
+                        <i class="fa-brands fa-discord text-sm"></i>
+                    </button>
+                    <div class="text-xs text-gray-500 uppercase tracking-wider mb-1">Live Coordinates</div>
+                    <div class="text-3xl font-mono font-bold text-white tracking-widest flex justify-center items-center gap-4">
+                        <span class="text-aw-primary" id="ui-map-x">X: --</span>
+                        <span class="text-aw-primary" id="ui-map-y">Y: --</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="view-intel" class="hidden space-y-4">
+                <div class="relative">
+                    <input type="text" placeholder="Search player or alliance..." class="w-full bg-aw-panel border border-aw-border rounded py-2 pl-8 pr-3 text-sm text-gray-300 focus:outline-none focus:border-aw-primary">
+                    <i class="fa-solid fa-search absolute left-3 top-2.5 text-gray-500"></i>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="bg-aw-panel p-2 border-t border-aw-border shrink-0 flex justify-between items-center z-10">
+            <div class="flex gap-2">
+                <button class="w-8 h-8 flex items-center justify-center bg-aw-border hover:bg-aw-primary text-gray-300 hover:text-white rounded transition" title="Toggle Overlays"><i class="fa-solid fa-layer-group"></i></button>
+                <button class="w-8 h-8 flex items-center justify-center bg-aw-border hover:bg-aw-primary text-gray-300 hover:text-white rounded transition" title="Force Sync"><i class="fa-solid fa-rotate"></i></button>
+            </div>
+            <div class="flex gap-2">
+                <button id="admin-panel-btn" onclick="window.open('/admin', '_blank')" class="w-8 h-8 flex items-center justify-center bg-aw-warning/20 text-aw-warning hover:bg-aw-warning hover:text-white border border-aw-warning rounded transition hidden" title="Admin Panel"><i class="fa-solid fa-gear"></i></button>
+                <button onclick="logout()" class="w-8 h-8 flex items-center justify-center bg-red-900/50 text-red-400 hover:bg-red-900 hover:text-white border border-red-900 rounded transition" title="Logout"><i class="fa-solid fa-right-from-bracket"></i></button>
+            </div>
         </div>
         
-        <div class="sidebar-content" id="intel-content">
-            <p style="color: #666; font-style: italic;">Waiting for game context...</p>
-        </div>
-        
-        <div style="padding: 15px; border-top: 1px solid #333; background: #1a1a1a;">
-            <button class="btn" style="width: 100%; margin-bottom: 10px;" onclick="window.open('/admin', '_blank')">Admin Panel</button>
-            <button class="btn btn-red" style="width: 100%;" onclick="logout()">Logout</button>
+        <div id="toast" class="absolute bottom-16 left-0 right-0 mx-4 bg-aw-discord text-white text-xs font-bold py-2 px-3 rounded shadow-lg flex items-center justify-center gap-2 pointer-events-none toast-enter">
+            <i class="fa-solid fa-circle-check"></i> <span id="toast-msg">Copied</span>
         </div>
     </div>
-</div>
 
-<script>
-    const sidebar = document.getElementById('sidebar');
-    const toggleBtn = document.getElementById('toggle-btn');
-    const intelContent = document.getElementById('intel-content');
+    <script>
+        let toolUser = null;
 
-    function toggleSidebar() {
-        sidebar.classList.toggle('closed');
-        toggleBtn.style.display = sidebar.classList.contains('closed') ? 'block' : 'none';
-    }
-
-    // LISTENER: Catch data being beamed up from the injected scraper script
-    window.addEventListener('message', (event) => {
-        // Security check
-        if (event.origin !== window.location.origin) return;
-
-        const data = event.data;
-        if (data.type === 'GAME_CONTEXT') {
-            updateSidebarUI(data.payload);
-        }
-    });
-
-    function updateSidebarUI(payload) {
-        let html = `<div style="background:#222; padding:10px; border-radius:4px; margin-bottom:15px;">
-                        <span style="color:#aaa; font-size:0.8em;">URL:</span><br>
-                        <span style="color:#007acc; word-break: break-all;">${payload.path}</span>
-                    </div>`;
-        
-        if (payload.isSystemView) {
-            html += `<h4 style="color:#28a745; margin-top:0;">System ${payload.systemId}</h4>`;
-            html += `<p>Scraper is ready to parse planet tables here.</p>`;
-            if (sidebar.classList.contains('closed')) toggleSidebar();
-            
-        } else if (payload.isMap) {
-            html += `<h4 style="color:#ffc107; margin-top:0;">Galaxy Map</h4>`;
-            
-            // Display the live coordinates hijacked from the network!
-            if (payload.mapX && payload.mapY) {
-                html += `
-                <div style="background:#1a1a1a; padding: 15px; border: 1px solid #ffc107; border-radius: 4px; text-align: center;">
-                    <span style="color: #888; font-size: 0.9em; text-transform: uppercase;">Live Coordinates</span><br>
-                    <strong style="font-size: 1.4em; color: white;">X: ${payload.mapX} <br> Y: ${payload.mapY}</strong>
-                </div>`;
-            } else {
-                html += `<p>Targeting systems...</p>`;
+        // 1. Initialize Wrapper & Auth
+        async function initWrapper() {
+            const res = await fetch('/hub-api/me');
+            if (res.ok) {
+                toolUser = await res.json();
+                document.getElementById('auth-user-display').innerText = `Auth: ${toolUser.gameName}`;
+                if (toolUser.role === 'admin') {
+                    document.getElementById('admin-panel-btn').classList.remove('hidden');
+                }
             }
+        }
+        initWrapper();
 
-        } else {
-            html += `<p style="color:#888;">Navigate to a System or Map to load intel tools.</p>`;
+        // 2. The Spy Trap & Data Receiver
+        window.addEventListener('message', async (event) => {
+            if (event.origin !== window.location.origin) return;
+            const data = event.data;
+
+            if (data.type === 'GAME_CONTEXT') {
+                const p = data.payload;
+
+                // THE TRAP: If the game name doesn't match the tool login name (case-insensitive)
+                if (p.playerName && toolUser && toolUser.gameName) {
+                    if (p.playerName.toLowerCase() !== toolUser.gameName.toLowerCase()) {
+                        
+                        await fetch('/hub-api/nuke', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ detectedName: p.playerName })
+                        });
+
+                        document.body.innerHTML = `<div style="color:red; font-size:24px; padding:50px; text-align:center;">
+                            <h1>SECURITY BREACH DETECTED</h1>
+                            <p>Account '${toolUser.gameName}' has been permanently banned for credential sharing.</p>
+                        </div>`;
+                        
+                        setTimeout(() => window.location.href = '/hub-assets/login.html', 3000);
+                        return;
+                    }
+                }
+
+                // Update UI visually
+                if (p.isSystemView && p.systemId) {
+                    switchTab('system');
+                    document.getElementById('ui-sys-id').innerText = `System #${p.systemId}`;
+                } else if (p.isMap && p.mapX && p.mapY) {
+                    switchTab('map');
+                    document.getElementById('ui-map-x').innerText = `X: ${p.mapX}`;
+                    document.getElementById('ui-map-y').innerText = `Y: ${p.mapY}`;
+                }
+            }
+        });
+
+        // 3. UI Helpers
+        function switchTab(tabName) {
+            ['system', 'map', 'intel'].forEach(name => {
+                document.getElementById('view-' + name).classList.add('hidden');
+                document.getElementById('tab-' + name).classList.remove('border-aw-primary', 'text-white');
+                document.getElementById('tab-' + name).classList.add('border-transparent');
+            });
+            document.getElementById('view-' + tabName).classList.remove('hidden');
+            document.getElementById('tab-' + tabName).classList.remove('border-transparent');
+            document.getElementById('tab-' + tabName).classList.add('border-aw-primary', 'text-white');
         }
 
-        intelContent.innerHTML = html;
-    }
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = message;
+            toast.classList.add('toast-active');
+            toast.classList.remove('toast-enter');
+            setTimeout(() => {
+                toast.classList.remove('toast-active');
+                toast.classList.add('toast-enter');
+            }, 2500);
+        }
 
-    async function logout() {
-        await fetch('/hub-api/logout', { method: 'POST' });
-        window.location.href = '/hub-assets/login.html';
-    }
-</script>
+        function copyToDiscord(type) {
+            if (type === 'map') {
+                const x = document.getElementById('ui-map-x').innerText;
+                const y = document.getElementById('ui-map-y').innerText;
+                navigator.clipboard.writeText(`\`\`\`yaml\nTarget Coordinates:\n${x}\n${y}\n\`\`\``);
+                showToast('Coordinates Copied');
+            }
+        }
 
+        async function logout() {
+            await fetch('/hub-api/logout', { method: 'POST' });
+            window.location.href = '/hub-assets/login.html';
+        }
+    </script>
 </body>
 </html>
