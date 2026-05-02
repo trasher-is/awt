@@ -101,7 +101,7 @@
     }
 
     async function changeRole(id, newRole) {
-        const response = await fetch(`/api/admin/users/${id}/role`, {
+        const response = await fetch(`/hub-api/admin/users/${id}/role`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ role: newRole })
@@ -138,7 +138,7 @@
     }
 
     async function toggleUser(id) {
-        await fetch(`/api/admin/users/${id}/toggle`, { method: 'POST' });
+        await fetch(`/hub-api/admin/users/${id}/toggle`, { method: 'POST' });
         loadUsers();
     }
 
@@ -146,7 +146,7 @@
         const new_password = prompt(`Enter new password for ${name}:`);
         if (!new_password) return;
 
-        const response = await fetch(`/api/admin/users/${id}/password`, {
+        const response = await fetch(`/hub-api/admin/users/${id}/password`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ new_password })
