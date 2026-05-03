@@ -1,30 +1,21 @@
 export function initSpy() {
     let currentMapX = null;
     let currentMapY = null;
-    let verifiedPlayerName = null; // Store it so we don't spam the game server
+    let verifiedPlayerName = null;
 
-    // --- THE SILENT SPY TRAP ---
     async function backgroundIdentityCheck() {
-        // If we already caught their name this session, skip.
         if (verifiedPlayerName) return; 
-
         try {
             console.log("[Alliance Tools] Running silent identity check...");
-            // Silently request the player's profile page in the background
             const response = await fetch('/Game/Players');
             const html = await response.text();
-
-            // Convert the raw HTML string into a queryable Document Object in memory
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
-
-            // Run our exact CSS selector on the hidden document
             const nameNode = doc.querySelector('th span a[href^="/Game/Players/Profile/"]');
             
             if (nameNode) {
                 verifiedPlayerName = nameNode.innerText.trim();
                 console.log(`[Alliance Tools] Target locked: ${verifiedPlayerName}`);
-                // Instantly beam the updated context to the wrapper
                 sendContext(); 
             }
         } catch (error) {
@@ -32,7 +23,6 @@ export function initSpy() {
         }
     }
 
-    // Fire the silent check the moment the script boots
     backgroundIdentityCheck();
 
     function extractCoords(urlStr) {
@@ -59,26 +49,68 @@ export function initSpy() {
         
         extractCoords(currentUrl);
 
-        const context = {
-            path: currentUrl,
-            isSystemView: pathLower.includes('/game/system'), 
-            isMap: pathLower.includes('/game/map'),
-            systemId: null,
-            mapX: currentMapX,
-            mapY: currentMapY,
-            playerName: verifiedPlayerName // Attach the securely fetched name
-        };
-        
-        if (context.isSystemView) {
-            const urlParams = new URLSearchParams(window.location.search);
-            context.systemId = urlParams.get('id') || urlParams.get('system');
-            if (!context.systemId) {
-                const match = pathLower.match(/\/game\/system\/(\d+)/);
-                if (match) context.systemId = match[1];
+        const isSystemView = pathLower.includes('/game/map/solarsystem') || pathLower.includes('/game/system');
+        let sysId = null;
+        if (isSystemView) {
+            const match = pathLower.match(/solarsystem\/(\d+)/) || pathLower.match(/\/system\/(\d+)/);
+            if (match) {
+                sysId = match[1];
+            } else {
+                const urlParams = new URLSearchParams(window.location.search);
+                sysId = urlParams.get('id') || urlParams.get('system');
             }
         }
 
-        window.parent.postMessage({ type: 'GAME_CONTEXT', payload: context }, window.location.origin);
+        const isPlayerView = pathLower.includes('/game/players/profile/');
+        let targetPlayerId = null;
+        if (isPlayerView) {
+            const match = pathLower.match(/\/profile\/(\d+)/);
+            if (match) targetPlayerId = match[1];
+        }
+
+        const isAllianceView = pathLower.includes('/game/alliance');
+
+        const isCalculatorView = pathLower.includes('/about/traveltimecalculator');
+
+        const contextPayload = {
+            path: currentUrl,
+            isSystemView: isSystemView, 
+            isMap: pathLower.includes('/game/map'),
+            isAllianceView: isAllianceView,
+            isCalculatorView: isCalculatorView, // <-- Added here
+            systemId: sysId,
+            mapX: currentMapX,
+            mapY: currentMapY,
+            playerName: verifiedPlayerName 
+        };
+        
+        // Beam it to Wrapper
+        window.parent.postMessage({ type: 'GAME_CONTEXT', payload: contextPayload }, window.location.origin);
+
+        // NOW we can safely read from the Payload to trigger scrapers
+        if (contextPayload.isSystemView && contextPayload.systemId) {
+            import('../scrapers/system-parser.js')
+                .then(module => module.scrapeSystem(contextPayload.systemId))
+                .catch(err => console.error("[Spy] Error loading system parser:", err));
+        }
+
+        if (isPlayerView && targetPlayerId) {
+            import('../scrapers/player-parser.js')
+                .then(module => module.scrapePlayer(targetPlayerId))
+                .catch(err => console.error("[Spy] Error loading player parser:", err));
+        }
+        
+        if (contextPayload.isAllianceView) {
+            import('../scrapers/alliance-parser.js')
+                .then(module => module.scrapeAlliance())
+                .catch(err => console.error("[Spy] Error loading alliance parser:", err));
+        }
+
+        if (contextPayload.isCalculatorView) {
+            import('../scrapers/galaxy-parser.js')
+                .then(module => module.scrapeGalaxy())
+                .catch(err => console.error("[Spy] Error loading galaxy parser:", err));
+        }
     }
 
     sendContext();

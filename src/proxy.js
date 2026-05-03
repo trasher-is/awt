@@ -1,7 +1,7 @@
 const { createProxyMiddleware, responseInterceptor } = require('http-proxy-middleware');
 
 const proxyOptions = {
-    target: process.env.TARGET_URL || 'https://astrowars.games',
+    target: process.env.TARGET_URL || 'https://redzone.astrowars.games',
     changeOrigin: true,
     selfHandleResponse: true, // This tells the proxy to let us modify the HTML before sending it to the user
     

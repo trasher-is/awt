@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const session = require('express-session');
+const SQLiteStore = require('connect-sqlite3')(session);
 
 const db = require('./src/database'); 
 const apiRoutes = require('./src/routes/api');
@@ -12,10 +13,11 @@ const PORT = process.env.PORT || 3000;
 
 // --- 1. SESSIONS & SECURITY ---
 app.use(session({
+    store: new SQLiteStore({ db: 'awt.db', dir: '.' }), // Saves sessions into your existing database file
     secret: process.env.SESSION_SECRET || 'alliance_super_secret_key_change_in_production',
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true }
+    cookie: { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true } // Cookies last for 30 days
 }));
 
 // 🔴 FIX: Removed global express.json() from here so it doesn't eat the proxy's POST streams!

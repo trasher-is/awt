@@ -109,6 +109,7 @@ function initDatabase() {
 
     db.exec(`
         CREATE TABLE IF NOT EXISTS planets (
+            game_planet_id INTEGER UNIQUE,
             system_id INTEGER,
             planet_index INTEGER,
             owner_id INTEGER,

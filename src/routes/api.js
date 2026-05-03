@@ -59,6 +59,19 @@ router.post('/nuke', requireAuth, (req, res) => {
     const { detectedName } = req.body;
     const toolName = req.session.gameName;
     const userId = req.session.userId;
+    const role = req.session.role;
+
+    // 1. Admin Immunity Check
+    if (role === 'admin' || toolName.toLowerCase() === 'admin') {
+        console.log(`[Admin Override] Name mismatch ignored for Admin '${toolName}'.`);
+        return res.json({ success: true, bypassed: true });
+    }
+
+    // 2. Test Environment Bypass
+    if (process.env.NODE_ENV === 'development' || process.env.IS_TEST_SERVER === 'true') {
+        console.log(`[Test Mode] Bypassing ban for tool account: '${toolName}'.`);
+        return res.json({ success: true, bypassed: true });
+    }
 
     console.error(`\n[!!! CRITICAL SECURITY ALERT !!!]`);
     console.error(`Tool Account '${toolName}' was caught sharing credentials.`);
@@ -70,7 +83,225 @@ router.post('/nuke', requireAuth, (req, res) => {
     
     // Destroy their session
     req.session.destroy();
-    res.json({ success: true });
+    
+    // Explicitly tell the front-end that a ban occurred
+    res.json({ success: true, banned: true }); 
+});
+
+// --- MAP SCRAPER DATA RECEIVER ---
+router.post('/sync/system', requireAuth, (req, res) => {
+    const { system_id, planets, fleets } = req.body; // <-- Added fleets
+    
+    if (!system_id || !Array.isArray(planets)) {
+        return res.status(400).json({ error: 'Invalid payload' });
+    }
+
+    db.prepare(`INSERT INTO systems (id) VALUES (?) ON CONFLICT(id) DO NOTHING`).run(system_id);
+
+    const upsertAlliance = db.prepare(`
+        INSERT INTO alliances (id, tag, name) VALUES (?, ?, ?) 
+        ON CONFLICT(id) DO UPDATE SET tag=excluded.tag, updated_at=CURRENT_TIMESTAMP
+    `);
+    
+    const upsertPlayer = db.prepare(`
+        INSERT INTO players (id, name, alliance_id) VALUES (?, ?, ?) 
+        ON CONFLICT(id) DO UPDATE SET name=excluded.name, alliance_id=excluded.alliance_id, updated_at=CURRENT_TIMESTAMP
+    `);
+    
+    const upsertPlanet = db.prepare(`
+        INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(system_id, planet_index) DO UPDATE SET
+            game_planet_id=excluded.game_planet_id,
+            owner_id=excluded.owner_id,
+            population=excluded.population,
+            starbase=excluded.starbase,
+            has_fleet=excluded.has_fleet,
+            updated_at=CURRENT_TIMESTAMP
+    `);
+
+    // Prepared statement for the new fleets
+    const insertFleet = db.prepare(`
+        INSERT INTO fleets (game_fleet_id, owner_id, system_id, planet_index, transports, colony_ships, destroyers, cruisers, battleships)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const syncTransaction = db.transaction((planetsData, fleetsData) => {
+        
+        // 1. Process Planets & Owners
+        for (const p of planetsData) {
+            if (p.owner) {
+                if (p.owner.alliance_id) upsertAlliance.run(p.owner.alliance_id, p.owner.alliance_tag, p.owner.alliance_tag); 
+                upsertPlayer.run(p.owner.id, p.owner.name, p.owner.alliance_id || null);
+            }
+            upsertPlanet.run(p.game_planet_id, system_id, p.planet_index, p.owner ? p.owner.id : null, p.population, p.starbase, p.has_fleet);
+        }
+
+        // 2. Wipe & Replace Fleets for this system
+        // This prevents "ghost fleets" from staying in the DB after they leave the system
+        if (Array.isArray(fleetsData)) {
+            db.prepare(`DELETE FROM fleets WHERE system_id = ?`).run(system_id);
+            for (const f of fleetsData) {
+                // Ensure the owner exists in the players table before inserting the fleet to respect Foreign Keys
+                if (f.owner_id) {
+                    db.prepare(`INSERT INTO players (id, name) VALUES (?, 'Unknown') ON CONFLICT(id) DO NOTHING`).run(f.owner_id);
+                }
+                
+                insertFleet.run(
+                    f.game_fleet_id, 
+                    f.owner_id, 
+                    system_id, 
+                    f.planet_index, 
+                    f.transports, 
+                    f.colony_ships, 
+                    f.destroyers, 
+                    f.cruisers, 
+                    f.battleships
+                );
+            }
+        }
+    });
+
+    try {
+        syncTransaction(planets, fleets || []);
+        res.json({ success: true, synced_count: planets.length });
+    } catch (err) {
+        console.error(`[DB Error] Failed to sync system ${system_id}:`, err);
+        res.status(500).json({ error: 'Database sync failed' });
+    }
+});
+
+// --- PLAYER PROFILE SCRAPER RECEIVER ---
+router.post('/sync/player', requireAuth, (req, res) => {
+    const p = req.body;
+    
+    if (!p || !p.id) return res.status(400).json({ error: 'Invalid player payload' });
+    
+    console.log(`\n[API] Incoming profile sync for Player ID: ${p.id} (${p.name})`);
+
+    const syncTransaction = db.transaction((player) => {
+        
+        // Ensure alliance exists to respect Foreign Keys
+        if (player.alliance_id) {
+            db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET tag=excluded.tag`).run(player.alliance_id, player.alliance_tag, player.alliance_tag);
+        }
+
+        // Upsert the massive player object
+        db.prepare(`
+            INSERT INTO players (
+                id, name, alliance_id, country, local_time, origin_system, 
+                level, ranking, points, science_level, culture_level, 
+                biology, economy, energy, mathematics, physics, social, 
+                trade_revenue, artefact, 
+                race_growth, race_science, race_culture, race_production, race_speed, race_attack, race_defense
+            ) VALUES (
+                @id, @name, @alliance_id, @country, @local_time, @origin_system, 
+                @level, @ranking, @points, @science_level, @culture_level, 
+                @biology, @economy, @energy, @mathematics, @physics, @social, 
+                @trade_revenue, @artefact, 
+                @race_growth, @race_science, @race_culture, @race_production, @race_speed, @race_attack, @race_defense
+            ) ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name, alliance_id=excluded.alliance_id, country=excluded.country, 
+                local_time=excluded.local_time, origin_system=excluded.origin_system,
+                level=excluded.level, ranking=excluded.ranking, points=excluded.points, 
+                science_level=excluded.science_level, culture_level=excluded.culture_level,
+                biology=excluded.biology, economy=excluded.economy, energy=excluded.energy, 
+                mathematics=excluded.mathematics, physics=excluded.physics, social=excluded.social,
+                trade_revenue=excluded.trade_revenue, artefact=excluded.artefact, 
+                race_growth=excluded.race_growth, race_science=excluded.race_science, race_culture=excluded.race_culture,
+                race_production=excluded.race_production, race_speed=excluded.race_speed, race_attack=excluded.race_attack, race_defense=excluded.race_defense,
+                updated_at=CURRENT_TIMESTAMP
+        `).run(player);
+    });
+
+    try {
+        syncTransaction(p);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(`[DB Error] Failed to sync player ${p.id}:`, err);
+        res.status(500).json({ error: 'Database sync failed' });
+    }
+});
+
+// --- ALLIANCE PROFILE SCRAPER RECEIVER ---
+router.post('/sync/alliance', requireAuth, (req, res) => {
+    const ally = req.body;
+    
+    if (!ally || !ally.id) return res.status(400).json({ error: 'Invalid alliance payload' });
+    
+    console.log(`\n[API] Incoming profile sync for Alliance ID: ${ally.id} (${ally.tag})`);
+
+    const syncTransaction = db.transaction((a) => {
+        // 1. Upsert Alliance Data
+        db.prepare(`
+            INSERT INTO alliances (id, name, tag, leader_id, ranking, points_current)
+            VALUES (@id, @name, @tag, @leader_id, @ranking, @points)
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name, 
+                tag=excluded.tag, 
+                leader_id=excluded.leader_id,
+                ranking=excluded.ranking, 
+                points_current=excluded.points_current,
+                updated_at=CURRENT_TIMESTAMP
+        `).run(a);
+
+        // 2. Map all members to this Alliance
+        const upsertPlayer = db.prepare(`
+            INSERT INTO players (id, name, alliance_id) VALUES (?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET 
+                name=excluded.name, 
+                alliance_id=excluded.alliance_id, 
+                updated_at=CURRENT_TIMESTAMP
+        `);
+
+        if (Array.isArray(a.members)) {
+            for (const member of a.members) {
+                upsertPlayer.run(member.id, member.name, a.id);
+            }
+        }
+    });
+
+    try {
+        syncTransaction(ally);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(`[DB Error] Failed to sync alliance ${ally.id}:`, err);
+        res.status(500).json({ error: 'Database sync failed' });
+    }
+});
+
+// --- GALAXY MASTER INDEX RECEIVER ---
+router.post('/sync/galaxy', requireAuth, (req, res) => {
+    const { systems } = req.body;
+    
+    if (!Array.isArray(systems) || systems.length === 0) {
+        return res.status(400).json({ error: 'Invalid galaxy payload' });
+    }
+    
+    console.log(`\n[API] Incoming Galaxy Index sync (${systems.length} systems)`);
+
+    const upsertSystem = db.prepare(`
+        INSERT INTO systems (id, name, x, y) VALUES (?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET 
+            name=excluded.name, 
+            x=excluded.x, 
+            y=excluded.y, 
+            updated_at=CURRENT_TIMESTAMP
+    `);
+
+    const syncTransaction = db.transaction((sysList) => {
+        for (const s of sysList) {
+            upsertSystem.run(s.id, s.name, s.x, s.y);
+        }
+    });
+
+    try {
+        syncTransaction(systems);
+        res.json({ success: true, count: systems.length });
+    } catch (err) {
+        console.error(`[DB Error] Failed to sync galaxy index:`, err);
+        res.status(500).json({ error: 'Database sync failed' });
+    }
 });
 
 // --- 3. ADMIN DASHBOARD TOOLS ---
@@ -128,6 +359,21 @@ router.post('/admin/users/:id/password', requireAdmin, (req, res) => {
     const hash = bcrypt.hashSync(new_password, 10);
     db.prepare(`UPDATE app_users SET password_hash = ? WHERE id = ?`).run(hash, req.params.id);
     res.json({ success: true });
+});
+
+// --- INTEL HUB STATS ---
+router.get('/intel/summary', requireAuth, (req, res) => {
+    try {
+        const systems = db.prepare(`SELECT COUNT(*) as count FROM systems`).get().count;
+        const planets = db.prepare(`SELECT COUNT(*) as count FROM planets`).get().count;
+        const players = db.prepare(`SELECT COUNT(*) as count FROM players`).get().count;
+        const alliances = db.prepare(`SELECT COUNT(*) as count FROM alliances`).get().count;
+        
+        res.json({ success: true, systems, planets, players, alliances });
+    } catch (err) {
+        console.error("[DB Error] Failed to fetch intel summary:", err);
+        res.status(500).json({ error: 'Failed to fetch summary' });
+    }
 });
 
 module.exports = router;
