@@ -96,6 +96,14 @@ function initDatabase() {
         )
     `);
 
+    // Safely inject the new idle_time column if it doesn't exist
+    try {
+        db.exec(`ALTER TABLE players ADD COLUMN idle_time TEXT`);
+        console.log("[DB] Added idle_time column to players table.");
+    } catch (e) {
+        // If it throws an error, the column already exists, so we just ignore it.
+    }
+
     // 4. Map & Systems
     db.exec(`
         CREATE TABLE IF NOT EXISTS systems (

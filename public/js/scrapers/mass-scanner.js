@@ -20,7 +20,7 @@ export async function runMassScan(updateProgressCb) {
                     const parenEnd = text.lastIndexOf(')');
                     if (bracketStart !== -1 && parenStart !== -1 && parenEnd !== -1) {
                         const namePart = text.substring(0, bracketStart).trim();
-                        const coords = text.substring(parenStart + 1, parenEnd).split('/');
+                        const coords = text.substring(parenStart + 1, parenEnd).replace(/[−—–]/g, '-').split('/');
                         if (coords.length === 2 && namePart) {
                             systems.push({ id, name: namePart, x: parseInt(coords[0], 10), y: parseInt(coords[1], 10) });
                         }
@@ -110,15 +110,25 @@ export async function runMassScan(updateProgressCb) {
                                         if (match) gameFleetId = parseInt(match[1], 10);
                                     }
 
+                                    let arrival_time = null;
+                                    if (fTds.length >= 8) {
+                                        const clone = fTds[7].cloneNode(true);
+                                        clone.querySelectorAll('a, button').forEach(n => n.remove());
+                                        const text = clone.innerText.trim();
+                                        if (text.length > 3) arrival_time = text;
+                                    }
+
                                     fleets.push({
                                         game_fleet_id: gameFleetId,
                                         owner_id: fleetOwnerId,
                                         planet_index: planetIndex,
-                                        transports: parseInt(fTds[1].innerText.replace(/,/g, ''), 10) || 0,
-                                        colony_ships: parseInt(fTds[2].innerText.replace(/,/g, ''), 10) || 0,
-                                        destroyers: parseInt(fTds[3].innerText.replace(/,/g, ''), 10) || 0,
-                                        cruisers: parseInt(fTds[4].innerText.replace(/,/g, ''), 10) || 0,
-                                        battleships: parseInt(fTds[5].innerText.replace(/,/g, ''), 10) || 0
+                                        // The aggressive regex strips everything that isn't a digit
+                                        transports: parseInt(fTds[1].innerText.replace(/[^\d]/g, ''), 10) || 0,
+                                        colony_ships: parseInt(fTds[2].innerText.replace(/[^\d]/g, ''), 10) || 0,
+                                        destroyers: parseInt(fTds[3].innerText.replace(/[^\d]/g, ''), 10) || 0,
+                                        cruisers: parseInt(fTds[4].innerText.replace(/[^\d]/g, ''), 10) || 0,
+                                        battleships: parseInt(fTds[5].innerText.replace(/[^\d]/g, ''), 10) || 0,
+                                        arrival_time: arrival_time
                                     });
                                 }
                             } catch (e) {}
@@ -155,37 +165,34 @@ export async function runPlayerScan(updateProgressCb) {
         const playerIds = dataList.players;
         const total = playerIds.length;
 
-        if (!total) {
-            updateProgressCb("Error: No players in DB", 0, 0);
-            return;
-        }
+        if (!total) { updateProgressCb("Error: No players in DB", 0, 0); return; }
 
         for (let i = 0; i < total; i++) {
             const playerId = playerIds[i];
             updateProgressCb(`Scanning Player #${playerId}...`, i + 1, total);
 
             const res = await fetch(`/Game/Players/Profile/${playerId}`);
-            if (!res.ok) continue; // Skip if they deleted their account or got banned
+            if (!res.ok) continue; 
             
             const html = await res.text();
             const doc = new DOMParser().parseFromString(html, 'text/html');
 
             const p = {
-                id: parseInt(playerId, 10),
-                name: null, alliance_id: null, alliance_tag: null,
-                country: null, local_time: null, origin_system: null,
-                level: 0, ranking: null, points: 0,
-                science_level: 0, culture_level: 0,
+                id: parseInt(playerId, 10), name: null, alliance_id: null, alliance_tag: null,
+                country: null, local_time: null, idle_time: null, origin_system: null,
+                level: 0, ranking: null, points: 0, science_level: 0, culture_level: 0,
                 biology: 0, economy: 0, energy: 0, mathematics: 0, physics: 0, social: 0,
                 trade_revenue: 0, artefact: null,
                 race_growth: 0, race_science: 0, race_culture: 0, race_production: 0, race_speed: 0, race_attack: 0, race_defense: 0
             };
 
-            const headerLinks = doc.querySelectorAll('th[colspan="2"] a');
-            if (headerLinks.length >= 1) p.name = headerLinks[0].innerText.trim();
-            if (headerLinks.length >= 2 && headerLinks[1].getAttribute('href').includes('Alliance')) {
-                p.alliance_tag = headerLinks[1].innerText.trim();
-                p.alliance_id = parseInt(headerLinks[1].getAttribute('href').split('/').pop(), 10);
+            const nameLink = doc.querySelector('th[colspan="2"] a[href^="/Game/Players/Profile/"]');
+            if (nameLink) p.name = nameLink.innerText.trim();
+
+            const allyLink = doc.querySelector('th[colspan="2"] a[href^="/Game/Alliance/Profile/"]');
+            if (allyLink) {
+                p.alliance_tag = allyLink.innerText.trim();
+                p.alliance_id = parseInt(allyLink.getAttribute('href').split('/').pop(), 10);
             }
 
             const getRowVal = (labelMatch) => {
@@ -198,6 +205,7 @@ export async function runPlayerScan(updateProgressCb) {
             };
 
             p.local_time = getRowVal('Local Time');
+            p.idle_time = getRowVal('Idle');
             const countrySpan = doc.querySelector('img[src^="/img/country/"]')?.nextElementSibling;
             if (countrySpan) p.country = countrySpan.innerText.trim();
 
@@ -233,8 +241,8 @@ export async function runPlayerScan(updateProgressCb) {
             artefactRows.forEach(row => {
                 const tds = row.querySelectorAll('td');
                 if (tds[0]?.innerText.includes('Artefact')) {
-                    const span = tds[1].querySelectorAll('span')[1];
-                    if (span) p.artefact = span.innerText.trim();
+                    const rawText = tds[1].innerText.trim();
+                    p.artefact = rawText.split(/\s+/)[0] || null;
                 }
             });
 
@@ -250,20 +258,12 @@ export async function runPlayerScan(updateProgressCb) {
                 if (text.includes('Defence') || text.includes('Defense')) p.race_defense = parseRace(text);
             });
 
-            // Only submit if we successfully parsed a name (validates the DOM structure didn't break)
             if (p.name) {
-                await fetch('/hub-api/sync/player', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(p)
-                });
+                await fetch('/hub-api/sync/player', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
             }
-
-            await new Promise(resolve => setTimeout(resolve, 100)); // The 100ms delay
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
-
         updateProgressCb("Player Scan Complete!", total, total);
-
     } catch (err) {
         console.error("[Mass Scan] Fatal Error", err);
         updateProgressCb("Scan Failed. Check Console.", 0, 0);

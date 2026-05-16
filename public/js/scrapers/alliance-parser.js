@@ -62,6 +62,13 @@ export async function scrapeAlliance() {
         });
         if (response.ok) {
             console.log(`[Spy] Alliance '${p.tag}' synced! (${p.members.length} members mapped)`);
+            
+            window.parent.postMessage({ type: 'SHOW_TOAST', payload: `Alliance [${p.tag}] Synced` }, window.location.origin);
+            
+            const header = document.querySelector('h5 span');
+            if (header && !header.querySelector('.aw-synced')) {
+                header.innerHTML += ' <span class="badge bg-success ms-2 aw-synced" style="font-size: 0.6em; vertical-align: middle; background-color: #22c55e !important; color: #fff;"><i class="bi bi-cloud-check"></i> Alliance Synced</span>';
+            }
         }
     } catch (err) {
         console.error(`[Spy] Alliance API request failed`, err);

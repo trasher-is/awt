@@ -61,16 +61,28 @@ export async function scrapeSystem(systemId) {
                                 if (match) gameFleetId = parseInt(match[1], 10);
                             }
 
-                            fleets.push({
-                                game_fleet_id: gameFleetId,
-                                owner_id: fleetOwnerId,
-                                planet_index: planetIndex,
-                                transports: parseInt(fTds[1].innerText.replace(/,/g, ''), 10) || 0,
-                                colony_ships: parseInt(fTds[2].innerText.replace(/,/g, ''), 10) || 0,
-                                destroyers: parseInt(fTds[3].innerText.replace(/,/g, ''), 10) || 0,
-                                cruisers: parseInt(fTds[4].innerText.replace(/,/g, ''), 10) || 0,
-                                battleships: parseInt(fTds[5].innerText.replace(/,/g, ''), 10) || 0
-                            });
+                            let arrival_time = null;
+                                    // The 8th column (index 7) contains the Arrival Time and the BC button
+                                    if (fTds.length >= 8) {
+                                        const clone = fTds[7].cloneNode(true);
+                                        // Rip out the buttons so we only get the raw text
+                                        clone.querySelectorAll('a, button').forEach(n => n.remove());
+                                        const text = clone.innerText.trim();
+                                        if (text.length > 3) arrival_time = text;
+                                    }
+
+                                    fleets.push({
+                                        game_fleet_id: gameFleetId,
+                                        owner_id: fleetOwnerId,
+                                        planet_index: planetIndex,
+                                        // The aggressive regex strips everything that isn't a digit
+                                        transports: parseInt(fTds[1].innerText.replace(/[^\d]/g, ''), 10) || 0,
+                                        colony_ships: parseInt(fTds[2].innerText.replace(/[^\d]/g, ''), 10) || 0,
+                                        destroyers: parseInt(fTds[3].innerText.replace(/[^\d]/g, ''), 10) || 0,
+                                        cruisers: parseInt(fTds[4].innerText.replace(/[^\d]/g, ''), 10) || 0,
+                                        battleships: parseInt(fTds[5].innerText.replace(/[^\d]/g, ''), 10) || 0,
+                                        arrival_time: arrival_time
+                                    });
                         }
                     } catch (fleetErr) {
                         console.warn(`[Spy] Skipped malformed fleet at planet ${planetIndex}`, fleetErr);
@@ -93,6 +105,15 @@ export async function scrapeSystem(systemId) {
         
         if (response.ok) {
             console.log(`[Spy] System ${systemId} synced! (${planets.length} planets, ${fleets.length} fleets)`);
+            
+            // Tell the Wrapper to show a Toast & update stats
+            window.parent.postMessage({ type: 'SHOW_TOAST', payload: `System #${systemId} Synced` }, window.location.origin);
+            
+            // Inject a native-looking Bootstrap badge directly into the game's header
+            const header = document.querySelector('h5');
+            if (header && !header.querySelector('.aw-synced')) {
+                header.innerHTML += ' <span class="badge bg-success ms-2 aw-synced" style="font-size: 0.6em; vertical-align: middle; background-color: #22c55e !important; color: #fff;"><i class="bi bi-cloud-check"></i> System Synced</span>';
+            }
         }
     } catch (err) {
         console.error(`[Spy] API request failed`, err);

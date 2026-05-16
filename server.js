@@ -43,7 +43,7 @@ app.get('/admin', requireAuth, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'Admin.html'));
 });
 
-// Force all direct browser navigation into the Wrapper
+// Force all direct browser navigation into the Wrapper g
 app.use('/', requireAuth, (req, res, next) => {
     // If the browser is requesting a full page document directly (not an iframe or fetch request)
     if (req.headers['sec-fetch-dest'] === 'document') {

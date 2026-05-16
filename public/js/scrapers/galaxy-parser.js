@@ -33,7 +33,7 @@ export async function scrapeGalaxy() {
 
                 // 2. Extract the coordinates (everything inside the last '()')
                 const coordString = text.substring(parenStart + 1, parenEnd);
-                const coords = coordString.split('/');
+                const coords = coordString.replace(/[−—–]/g, '-').split('/');
 
                 if (coords.length === 2 && namePart) {
                     systems.push({

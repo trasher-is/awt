@@ -122,8 +122,8 @@ router.post('/sync/system', requireAuth, (req, res) => {
 
     // Prepared statement for the new fleets
     const insertFleet = db.prepare(`
-        INSERT INTO fleets (game_fleet_id, owner_id, system_id, planet_index, transports, colony_ships, destroyers, cruisers, battleships)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO fleets (game_fleet_id, owner_id, system_id, planet_index, transports, colony_ships, destroyers, cruisers, battleships, status, arrival_time)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     // --- NEW: History Logging Prep ---
@@ -167,7 +167,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 if (f.owner_id) {
                     db.prepare(`INSERT INTO players (id, name) VALUES (?, 'Unknown') ON CONFLICT(id) DO NOTHING`).run(f.owner_id);
                 }
-                insertFleet.run(f.game_fleet_id, f.owner_id, system_id, f.planet_index, f.transports, f.colony_ships, f.destroyers, f.cruisers, f.battleships);
+                insertFleet.run(f.game_fleet_id, f.owner_id, system_id, f.planet_index, f.transports, f.colony_ships, f.destroyers, f.cruisers, f.battleships, f.status || 'Orbit', f.arrival_time || null);
             }
         }
     });
@@ -189,30 +189,59 @@ router.post('/sync/player', requireAuth, (req, res) => {
     
     console.log(`\n[API] Incoming profile sync for Player ID: ${p.id} (${p.name})`);
 
+    // Bulletproof sanitization: Ensure no properties are 'undefined'
+    const safePlayer = {
+        id: p.id,
+        name: p.name || null,
+        alliance_id: p.alliance_id || null,
+        alliance_tag: p.alliance_tag || null,
+        country: p.country || null,
+        local_time: p.local_time || null,
+        idle_time: p.idle_time || null, // Prevents the RangeError
+        origin_system: p.origin_system || null,
+        level: p.level || 0,
+        ranking: p.ranking || null,
+        points: p.points || 0,
+        science_level: p.science_level || 0,
+        culture_level: p.culture_level || 0,
+        biology: p.biology || 0,
+        economy: p.economy || 0,
+        energy: p.energy || 0,
+        mathematics: p.mathematics || 0,
+        physics: p.physics || 0,
+        social: p.social || 0,
+        trade_revenue: p.trade_revenue || 0,
+        artefact: p.artefact || null,
+        race_growth: p.race_growth || 0,
+        race_science: p.race_science || 0,
+        race_culture: p.race_culture || 0,
+        race_production: p.race_production || 0,
+        race_speed: p.race_speed || 0,
+        race_attack: p.race_attack || 0,
+        race_defense: p.race_defense || 0
+    };
+
     const syncTransaction = db.transaction((player) => {
-        
-        // Ensure alliance exists to respect Foreign Keys
         if (player.alliance_id) {
             db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET tag=excluded.tag`).run(player.alliance_id, player.alliance_tag, player.alliance_tag);
         }
 
-        // Upsert the massive player object
         db.prepare(`
             INSERT INTO players (
-                id, name, alliance_id, country, local_time, origin_system, 
+                id, name, alliance_id, country, local_time, idle_time, origin_system, 
                 level, ranking, points, science_level, culture_level, 
                 biology, economy, energy, mathematics, physics, social, 
                 trade_revenue, artefact, 
                 race_growth, race_science, race_culture, race_production, race_speed, race_attack, race_defense
             ) VALUES (
-                @id, @name, @alliance_id, @country, @local_time, @origin_system, 
+                @id, @name, @alliance_id, @country, @local_time, @idle_time, @origin_system, 
                 @level, @ranking, @points, @science_level, @culture_level, 
                 @biology, @economy, @energy, @mathematics, @physics, @social, 
                 @trade_revenue, @artefact, 
                 @race_growth, @race_science, @race_culture, @race_production, @race_speed, @race_attack, @race_defense
             ) ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name, alliance_id=excluded.alliance_id, country=excluded.country, 
-                local_time=excluded.local_time, origin_system=excluded.origin_system,
+                local_time=excluded.local_time, idle_time=excluded.idle_time, origin_system=excluded.origin_system,
                 level=excluded.level, ranking=excluded.ranking, points=excluded.points, 
                 science_level=excluded.science_level, culture_level=excluded.culture_level,
                 biology=excluded.biology, economy=excluded.economy, energy=excluded.energy, 
@@ -225,7 +254,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
     });
 
     try {
-        syncTransaction(p);
+        syncTransaction(safePlayer);
         res.json({ success: true });
     } catch (err) {
         console.error(`[DB Error] Failed to sync player ${p.id}:`, err);
@@ -521,18 +550,23 @@ router.get('/intel/system/:id', requireAuth, (req, res) => {
 
 // --- DATABASE SEARCH ENDPOINTS ---
 
-// Search Players by Name or ID
+// Search Players by Name or Exact ID
 router.get('/search/player', requireAuth, (req, res) => {
     const q = req.query.q;
     if (!q) return res.json({ success: true, results: [] });
     
     try {
-        const isNum = !isNaN(q);
-        const query = isNum 
-            ? db.prepare(`SELECT p.id, p.name, a.tag as alliance_tag FROM players p LEFT JOIN alliances a ON p.alliance_id = a.id WHERE p.id = ? OR p.name LIKE ? LIMIT 20`)
-            : db.prepare(`SELECT p.id, p.name, a.tag as alliance_tag FROM players p LEFT JOIN alliances a ON p.alliance_id = a.id WHERE p.name LIKE ? LIMIT 20`);
+        const searchTerm = `%${q}%`;
+        const query = db.prepare(`
+            SELECT p.id, p.name, a.tag as alliance_tag 
+            FROM players p 
+            LEFT JOIN alliances a ON p.alliance_id = a.id 
+            WHERE p.name LIKE ? OR CAST(p.id AS TEXT) = ? 
+            LIMIT 20
+        `);
         
-        const results = isNum ? query.all(parseInt(q, 10), `%${q}%`) : query.all(`%${q}%`);
+        // Pass the wildcard string for the LIKE, and the raw string for the exact ID match
+        const results = query.all(searchTerm, q);
         res.json({ success: true, results });
     } catch (err) {
         console.error("[DB Error] Player search failed:", err);
@@ -540,22 +574,100 @@ router.get('/search/player', requireAuth, (req, res) => {
     }
 });
 
-// Search Systems by Name or ID
+// Search Systems by Name or Exact ID
 router.get('/search/system', requireAuth, (req, res) => {
     const q = req.query.q;
     if (!q) return res.json({ success: true, results: [] });
     
     try {
-        const isNum = !isNaN(q);
-        const query = isNum
-            ? db.prepare(`SELECT id, name, x, y FROM systems WHERE id = ? OR name LIKE ? LIMIT 20`)
-            : db.prepare(`SELECT id, name, x, y FROM systems WHERE name LIKE ? LIMIT 20`);
+        const searchTerm = `%${q}%`;
+        const query = db.prepare(`
+            SELECT id, name, x, y 
+            FROM systems 
+            WHERE name LIKE ? OR CAST(id AS TEXT) = ? 
+            LIMIT 20
+        `);
         
-        const results = isNum ? query.all(parseInt(q, 10), `%${q}%`) : query.all(`%${q}%`);
+        const results = query.all(searchTerm, q);
         res.json({ success: true, results });
     } catch (err) {
         console.error("[DB Error] System search failed:", err);
         res.status(500).json({ error: 'Search failed' });
+    }
+});
+
+// --- FULL DATABASE ENDPOINTS ---
+router.get('/intel/players', requireAuth, (req, res) => {
+    try {
+        // Fetch every player, join their alliance tag, and count how many planets they own in our DB
+        const players = db.prepare(`
+            SELECT p.*, a.tag as alliance_tag, 
+                   (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as planet_count
+            FROM players p 
+            LEFT JOIN alliances a ON p.alliance_id = a.id
+        `).all();
+        
+        res.json({ success: true, players });
+    } catch (err) {
+        console.error("[DB Error] Failed to fetch full player DB:", err);
+        res.status(500).json({ error: 'Failed to fetch players' });
+    }
+});
+
+// Get Full Systems Database
+router.get('/intel/systems_db', requireAuth, (req, res) => {
+    try {
+        const systems = db.prepare(`
+            SELECT s.*, 
+                   (SELECT COUNT(*) FROM planets WHERE system_id = s.id) as planet_count,
+                   (SELECT COUNT(*) FROM fleets WHERE system_id = s.id) as fleet_count
+            FROM systems s
+        `).all();
+        
+        res.json({ success: true, systems });
+    } catch (err) {
+        console.error("[DB Error] Failed to fetch full system DB:", err);
+        res.status(500).json({ error: 'Failed to fetch systems' });
+    }
+});
+
+// Get Full Planets Database
+router.get('/intel/planets_db', requireAuth, (req, res) => {
+    try {
+        const planets = db.prepare(`
+            SELECT p.system_id, p.planet_index, p.population, p.starbase, p.is_sieged, p.updated_at,
+                   s.name as system_name, s.x, s.y,
+                   u.name as owner_name, a.tag as alliance_tag
+            FROM planets p
+            LEFT JOIN systems s ON p.system_id = s.id
+            LEFT JOIN players u ON p.owner_id = u.id
+            LEFT JOIN alliances a ON u.alliance_id = a.id
+        `).all();
+        
+        res.json({ success: true, planets });
+    } catch (err) {
+        console.error("[DB Error] Failed to fetch full planet DB:", err);
+        res.status(500).json({ error: 'Failed to fetch planets' });
+    }
+});
+
+// Get Full Fleets Database
+router.get('/intel/fleets_db', requireAuth, (req, res) => {
+    try {
+        const fleets = db.prepare(`
+            SELECT f.*, 
+                   s.name as system_name, s.x, s.y,
+                   u.name as owner_name, a.tag as alliance_tag
+            FROM fleets f
+            LEFT JOIN systems s ON f.system_id = s.id
+            LEFT JOIN players u ON f.owner_id = u.id
+            LEFT JOIN alliances a ON u.alliance_id = a.id
+        `).all();
+        
+        res.json({ success: true, fleets });
+    } catch (err) {
+        console.error("[DB Error] Failed to fetch full fleet DB:", err);
+        res.status(500).json({ error: 'Failed to fetch fleets' });
     }
 });
 
