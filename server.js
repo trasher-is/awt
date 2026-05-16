@@ -43,8 +43,21 @@ app.get('/admin', requireAuth, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'Admin.html'));
 });
 
-// The proxy catches everything else natively, leaving the data streams completely untouched
-app.use('/', requireAuth, proxyMiddleware);
+// Force all direct browser navigation into the Wrapper
+app.use('/', requireAuth, (req, res, next) => {
+    // If the browser is requesting a full page document directly (not an iframe or fetch request)
+    if (req.headers['sec-fetch-dest'] === 'document') {
+        
+        // Ignore our actual hub tool routes so we don't cause an infinite redirect loop
+        if (req.path !== '/dashboard' && !req.path.startsWith('/admin')) {
+            
+            console.log(`[Core] Trapped direct navigation to ${req.originalUrl}. Redirecting to Wrapper...`);
+            // Wrap the requested game URL inside the dashboard's URL parameter
+            return res.redirect(`/dashboard?p=${encodeURIComponent(req.originalUrl)}`);
+        }
+    }
+    next(); // Pass control to the proxy
+}, proxyMiddleware);
 
 app.listen(PORT, () => {
     console.log(`[Core] Alliance Intelligence Hub v2 online on port ${PORT}`);
