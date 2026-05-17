@@ -3,30 +3,67 @@ export function initSpy() {
     let currentMapY = null;
     let verifiedPlayerName = null;
     let knownSysIdsCache = null;
+    let alliedSysIdsCache = null; 
+    let alliedPlayerNamesCache = new Set(); // NEW: Stores all app_users
     let isFetchingSystems = false;
-    let simulatedSystemId = null; // NEW: Locks the UI open when clicking out-of-range systems
+    let simulatedSystemId = null;
 
     async function injectMapIndicators() {
-        // 1. Fetch the list of scanned systems safely
         if (knownSysIdsCache === null && !isFetchingSystems) {
             isFetchingSystems = true;
             try {
-                const res = await fetch('/hub-api/intel/systems_db');
-                const data = await res.json();
-                if (data.success) {
-                    knownSysIdsCache = new Set(data.systems.map(s => String(s.id)));
+                // Fetch systems, planets, fleets, AND your registered tool users
+                const [sysRes, plnRes, fltRes, memRes] = await Promise.all([
+                    fetch('/hub-api/intel/systems_db'),
+                    fetch('/hub-api/intel/planets_db'),
+                    fetch('/hub-api/intel/fleets_db'),
+                    fetch('/hub-api/intel/members') // NEW ROUTE
+                ]);
+
+                const sysData = await sysRes.json();
+                const plnData = await plnRes.json();
+                const fltData = await fltRes.json();
+                const memData = await memRes.json();
+
+                // Save active members to memory (lowercase for safe matching)
+                if (memData.success) {
+                    alliedPlayerNamesCache = new Set(memData.members.map(m => m.toLowerCase()));
+                }
+
+                if (sysData.success) {
+                    knownSysIdsCache = new Set(sysData.systems.map(s => String(s.id)));
+                    alliedSysIdsCache = new Set();
+
+                    // Highlight system if an app_user owns a planet here
+                    if (plnData.success) {
+                        plnData.planets.forEach(p => {
+                            if (p.owner_name && alliedPlayerNamesCache.has(p.owner_name.toLowerCase())) {
+                                alliedSysIdsCache.add(String(p.system_id));
+                            }
+                        });
+                    }
+
+                    // Highlight system if an app_user parked a fleet here
+                    if (fltData.success) {
+                        fltData.fleets.forEach(f => {
+                            if (f.owner_name && alliedPlayerNamesCache.has(f.owner_name.toLowerCase())) {
+                                alliedSysIdsCache.add(String(f.system_id));
+                            }
+                        });
+                    }
                 } else {
                     knownSysIdsCache = new Set();
+                    alliedSysIdsCache = new Set();
                 }
             } catch (err) {
                 knownSysIdsCache = new Set();
+                alliedSysIdsCache = new Set();
             }
             isFetchingSystems = false;
         }
 
         if (!knownSysIdsCache) return;
 
-        // 2. Find ALL map planets
         const systemNodes = document.querySelectorAll('.map-planet:not([data-hub-tagged="true"])');
 
         systemNodes.forEach(node => {
@@ -38,34 +75,23 @@ export function initSpy() {
             if (!match) return;
             const sysId = match[1];
 
-            // --- DEFEAT DISABLED STATE ---
             node.style.pointerEvents = 'auto !important';
             node.style.cursor = 'crosshair';
 
-            // --- SMART CLICK INTERCEPTOR ---
             node.addEventListener('click', (e) => {
-                // If AstroWars didn't put the '.link' class here, it's out-of-range.
-                // We block the click so the game doesn't throw a popup error.
                 const isClickable = !!node.querySelector('.link');
                 if (!isClickable) {
                     e.preventDefault();
                     e.stopPropagation();
                 }
 
-                // 1. Lock this system ID in memory so the background loop doesn't erase our UI
                 simulatedSystemId = sysId;
-
-                // 2. Force the context update immediately
                 sendContext();
 
-                // 3. Auto-open the main sidebar
                 if (typeof window.parent.toggleSidebar === 'function') {
                     const sidebar = window.parent.document.getElementById('sidebar');
-                    if (sidebar && !sidebar.classList.contains('expanded')) {
-                        window.parent.toggleSidebar();
-                    }
+                    if (sidebar && !sidebar.classList.contains('expanded')) window.parent.toggleSidebar();
                     
-                    // Close any full-screen archives blocking the view
                     if (typeof window.parent.closeSystemDatabasePanel === 'function') window.parent.closeSystemDatabasePanel();
                     if (typeof window.parent.closePlanetDatabasePanel === 'function') window.parent.closePlanetDatabasePanel();
                     if (typeof window.parent.closeFleetDatabasePanel === 'function') window.parent.closeFleetDatabasePanel();
@@ -73,16 +99,28 @@ export function initSpy() {
                 }
             }, { capture: true }); 
 
-            // --- VISUAL INDICATOR ---
+            // --- VISUAL INDICATOR LOGIC ---
             if (knownSysIdsCache.has(sysId)) {
                 const icon = node.querySelector('img') || node; 
-                icon.style.boxShadow = '0 0 15px 5px #22c55e, inset 0 0 10px #22c55e';
-                icon.style.borderRadius = '50%';
-                icon.style.border = '2px solid #22c55e';
-                icon.style.backgroundColor = 'rgba(34, 197, 94, 0.4)';
                 
-                span.style.color = '#4ade80';
-                span.style.fontWeight = 'bold';
+                if (alliedSysIdsCache.has(sysId)) {
+                    // HIGH VISIBILITY: A registered app_user is in this system
+                    icon.style.boxShadow = '0 0 15px 5px #22c55e, inset 0 0 10px #22c55e';
+                    icon.style.borderRadius = '50%';
+                    icon.style.border = '2px solid #22c55e';
+                    icon.style.backgroundColor = 'rgba(34, 197, 94, 0.4)';
+                    
+                    span.style.color = '#4ade80';
+                    span.style.fontWeight = 'bold';
+                } else {
+                    // LOW VISIBILITY: Standard scanned system
+                    icon.style.boxShadow = '0 0 4px 1px rgba(34, 197, 94, 0.3)';
+                    icon.style.borderRadius = '50%';
+                    icon.style.border = '1px solid rgba(34, 197, 94, 0.5)';
+                    
+                    span.style.color = 'rgba(74, 222, 128, 0.7)'; 
+                    span.style.fontWeight = 'normal';
+                }
             }
         });
     }
@@ -115,10 +153,7 @@ export function initSpy() {
             const x = params.get('centerX') || params.get('centerx');
             const y = params.get('centerY') || params.get('centery');
             if (x && y) {
-                // If the user dragged the map to new coordinates, break the simulation lock
-                if (currentMapX !== x || currentMapY !== y) {
-                    simulatedSystemId = null; 
-                }
+                if (currentMapX !== x || currentMapY !== y) simulatedSystemId = null; 
                 currentMapX = x;
                 currentMapY = y;
                 return true;
@@ -145,9 +180,6 @@ export function initSpy() {
             }
         }
 
-        // --- THE UI LOCK ---
-        // If the user clicked an out-of-range system, override the URL data
-        // so the Wrapper thinks we are inside the system and shows the Plans UI.
         if (simulatedSystemId) {
             isSystemView = true;
             sysId = simulatedSystemId;
@@ -177,7 +209,6 @@ export function initSpy() {
         
         window.parent.postMessage({ type: 'GAME_CONTEXT', payload: contextPayload }, window.location.origin);
 
-        // Only trigger backend scrapers if it's a REAL view, not our simulation
         if (isSystemView && sysId && !simulatedSystemId) {
             import('../scrapers/system-parser.js')
                 .then(module => module.scrapeSystem(sysId))
@@ -244,8 +275,6 @@ export function initSpy() {
             document.querySelectorAll('.aw-hub-indicator').forEach(el => el.remove());
             document.querySelectorAll('#solarSystem tr').forEach(row => { row.style.borderLeft = ''; });
 
-            const myAllianceTag = 'YELW'; 
-
             const rows = document.querySelectorAll('#solarSystem > tbody > tr[data-planet-id]');
             
             rows.forEach(row => {
@@ -255,9 +284,12 @@ export function initSpy() {
                 const planetIndex = parseInt(firstCell.innerText.trim(), 10);
                 if (isNaN(planetIndex)) return;
 
-                const ownerLink = row.querySelectorAll('td')[3]?.querySelector('a[href^="/Game/Alliance/"]');
-                const rowAllyTag = ownerLink ? ownerLink.innerText.trim() : null;
-                const isAlliedPlanet = rowAllyTag === myAllianceTag;
+                // NEW: Target the Player Name link instead of the Alliance link
+                const ownerLink = row.querySelectorAll('td')[3]?.querySelector('a[href^="/Game/Players/Profile/"]');
+                const rowPlayerName = ownerLink ? ownerLink.innerText.trim().toLowerCase() : null;
+                
+                // NEW: Check if the player name matches one of your app_users
+                const isAlliedPlanet = rowPlayerName && alliedPlayerNamesCache.has(rowPlayerName);
 
                 const isSieged = row.classList.contains('siege');
                 const actionHtml = row.querySelectorAll('td')[4]?.innerHTML || ''; 

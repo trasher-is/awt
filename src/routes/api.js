@@ -790,4 +790,15 @@ router.get('/intel/fleets_db', requireAuth, (req, res) => {
     }
 });
 
+// --- GET ACTIVE ALLIANCE MEMBERS (From app_users) ---
+router.get('/intel/members', requireAuth, (req, res) => {
+    try {
+        const members = db.prepare(`SELECT game_name FROM app_users WHERE is_active = 1`).all();
+        res.json({ success: true, members: members.map(m => m.game_name) });
+    } catch (err) {
+        console.error("[DB Error] Failed to fetch members:", err);
+        res.status(500).json({ error: 'Failed to fetch members' });
+    }
+});
+
 module.exports = router;
