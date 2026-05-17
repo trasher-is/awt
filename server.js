@@ -11,6 +11,8 @@ const proxyMiddleware = require('./src/proxy');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const { initDiscordBot } = require('./src/discord_bot');
+
 // --- 1. SESSIONS & SECURITY ---
 app.use(session({
     store: new SQLiteStore({ db: 'awt.db', dir: '.' }), // Saves sessions into your existing database file
@@ -62,3 +64,5 @@ app.use('/', requireAuth, (req, res, next) => {
 app.listen(PORT, () => {
     console.log(`[Core] Alliance Intelligence Hub v2 online on port ${PORT}`);
 });
+
+initDiscordBot(process.env.DISCORD_TOKEN);
