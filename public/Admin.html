@@ -114,7 +114,7 @@
                 </div>
                 <div class="bg-card border border-border rounded-lg p-4 shadow-sm flex flex-col items-center">
                     <span class="text-muted-foreground text-xs font-medium uppercase tracking-wider mb-1">Fleets</span>
-                    <span id="stat-flt" class="text-2xl font-semibold text-aw-enemy text-red-500">--</span>
+                    <span id="stat-flt" class="text-2xl font-semibold text-red-500">--</span>
                 </div>
             </div>
 
@@ -227,29 +227,6 @@
             }).join('');
         }
 
-        async function editName(id, currentName) {
-            const new_name = prompt(`Enter new In-Game Name for ${currentName}:`, currentName);
-            if (!new_name || new_name.trim() === '' || new_name === currentName) return;
-
-            const res = await fetch(`/hub-api/admin/users/${id}/name`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ new_name })
-            });
-            const data = await res.json();
-            if(data.success) loadUsers();
-            else alert(data.error);
-        }
-
-        async function deleteUser(id, name) {
-            if (!confirm(`CRITICAL WARNING: Are you sure you want to permanently delete user '${name}'?`)) return;
-            
-            const res = await fetch(`/hub-api/admin/users/${id}`, { method: 'DELETE' });
-            const data = await res.json();
-            if(data.success) loadUsers();
-            else alert(data.error);
-        }
-
         async function addUser() {
             const game_name = document.getElementById('newName').value;
             const discord_name = document.getElementById('newDiscord').value;
@@ -311,6 +288,29 @@
             });
             const data = await res.json();
             if(data.success) alert("Password updated.");
+            else alert(data.error);
+        }
+
+        async function editName(id, currentName) {
+            const new_name = prompt(`Enter new In-Game Name for ${currentName}:`, currentName);
+            if (!new_name || new_name.trim() === '' || new_name === currentName) return;
+
+            const res = await fetch(`/hub-api/admin/users/${id}/name`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_name })
+            });
+            const data = await res.json();
+            if(data.success) loadUsers();
+            else alert(data.error);
+        }
+
+        async function deleteUser(id, name) {
+            if (!confirm(`CRITICAL WARNING: Are you sure you want to permanently delete user '${name}'?`)) return;
+            
+            const res = await fetch(`/hub-api/admin/users/${id}`, { method: 'DELETE' });
+            const data = await res.json();
+            if(data.success) loadUsers();
             else alert(data.error);
         }
 

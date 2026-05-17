@@ -2,6 +2,78 @@ export function initSpy() {
     let currentMapX = null;
     let currentMapY = null;
     let verifiedPlayerName = null;
+    let knownSysIdsCache = null;
+
+async function injectMapIndicators() {
+    // 1. Fetch the list of scanned systems from the database (Cached to save server load)
+    if (!knownSysIdsCache) {
+        try {
+            const res = await fetch('/hub-api/systems');
+            const data = await res.json();
+            if (data.success) {
+                knownSysIdsCache = new Set(data.systems.map(id => String(id)));
+            } else {
+                return;
+            }
+        } catch (err) {
+            return;
+        }
+    }
+
+    // 2. Find all system links on the map that we haven't modified yet
+    const systemNodes = document.querySelectorAll('a[href*="/SolarSystem/"]:not([data-hub-tagged="true"])');
+    
+    systemNodes.forEach(node => {
+        // Tag it so we don't process the same system twice when the user drags the map
+        node.setAttribute('data-hub-tagged', 'true');
+        
+        const match = node.href.match(/\/SolarSystem\/(\d+)/i);
+        if (!match) return;
+        const sysId = match[1];
+
+        // --- THE MAGIC: Force unclickable/out-of-range systems to accept clicks ---
+        node.style.pointerEvents = 'auto';
+
+        // Add our custom click interceptor
+        node.addEventListener('click', (e) => {
+            // Beam the ID straight to the Wrapper sidebar instantly
+            window.parent.postMessage({ 
+                type: 'GAME_CONTEXT', 
+                payload: { isSystemView: true, systemId: sysId } 
+            }, window.location.origin);
+
+            // If the system is grayed out or restricted by the game, prevent the browser 
+            // from navigating so you don't get the "Out of Scanner Range" error page.
+            if (node.classList.contains('disabled') || node.closest('.disabled') || (node.style.opacity && parseFloat(node.style.opacity) < 1)) {
+                e.preventDefault();
+            }
+        });
+
+        // --- VISUAL INDICATOR: Add a green dot if the system is in our database ---
+        if (knownSysIdsCache.has(sysId)) {
+            // Ensure the system node can hold an absolute positioned badge
+            if (window.getComputedStyle(node).position === 'static') {
+                node.style.position = 'relative';
+            }
+            
+            const indicator = document.createElement('div');
+            indicator.style.position = 'absolute';
+            indicator.style.top = '0px';
+            indicator.style.right = '0px';
+            indicator.style.width = '12px';
+            indicator.style.height = '12px';
+            indicator.style.backgroundColor = '#22c55e'; // Ally Green
+            indicator.style.border = '2px solid #000';
+            indicator.style.borderRadius = '50%';
+            indicator.style.boxShadow = '0 0 6px #22c55e';
+            indicator.style.zIndex = '999';
+            indicator.style.pointerEvents = 'none'; // Ensures the dot doesn't block the click
+            indicator.title = 'Intel available in Hub';
+            
+            node.appendChild(indicator);
+        }
+    });
+}
 
     async function backgroundIdentityCheck() {
         if (verifiedPlayerName) return; 
@@ -138,7 +210,12 @@ export function initSpy() {
             lastUrl = currentUrl;
             sendContext();
         }
-    }, 500);
+
+        // NEW: Constantly check the map for new systems rendering as the user drags it
+        if (currentUrl.toLowerCase().includes('/game/map')) {
+            injectMapIndicators();
+        }
+    }, 200);
 
     // --- RECEIVE DATA FROM WRAPPER ---
     window.addEventListener('message', (event) => {
@@ -227,3 +304,4 @@ export function initSpy() {
         }
     });
 }
+
