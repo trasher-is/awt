@@ -3,82 +3,93 @@ export function initSpy() {
     let currentMapY = null;
     let verifiedPlayerName = null;
     let knownSysIdsCache = null;
+    let isFetchingSystems = false;
+    let simulatedSystemId = null; // NEW: Locks the UI open when clicking out-of-range systems
 
-async function injectMapIndicators() {
-    // 1. Fetch the list of scanned systems from the database (Cached to save server load)
-    if (!knownSysIdsCache) {
-        try {
-            const res = await fetch('/hub-api/systems');
-            const data = await res.json();
-            if (data.success) {
-                knownSysIdsCache = new Set(data.systems.map(id => String(id)));
-            } else {
-                return;
+    async function injectMapIndicators() {
+        // 1. Fetch the list of scanned systems safely
+        if (knownSysIdsCache === null && !isFetchingSystems) {
+            isFetchingSystems = true;
+            try {
+                const res = await fetch('/hub-api/intel/systems_db');
+                const data = await res.json();
+                if (data.success) {
+                    knownSysIdsCache = new Set(data.systems.map(s => String(s.id)));
+                } else {
+                    knownSysIdsCache = new Set();
+                }
+            } catch (err) {
+                knownSysIdsCache = new Set();
             }
-        } catch (err) {
-            return;
+            isFetchingSystems = false;
         }
-    }
 
-    // 2. Find all system links on the map that we haven't modified yet
-    const systemNodes = document.querySelectorAll('a[href*="/SolarSystem/"]:not([data-hub-tagged="true"])');
-    
-    systemNodes.forEach(node => {
-        // Tag it so we don't process the same system twice when the user drags the map
-        node.setAttribute('data-hub-tagged', 'true');
-        
-        const match = node.href.match(/\/SolarSystem\/(\d+)/i);
-        if (!match) return;
-        const sysId = match[1];
+        if (!knownSysIdsCache) return;
 
-        // --- THE MAGIC: Force unclickable/out-of-range systems to accept clicks ---
-        node.style.pointerEvents = 'auto';
+        // 2. Find ALL map planets
+        const systemNodes = document.querySelectorAll('.map-planet:not([data-hub-tagged="true"])');
 
-        // Add our custom click interceptor
-        node.addEventListener('click', (e) => {
-            // Beam the ID straight to the Wrapper sidebar instantly
-            window.parent.postMessage({ 
-                type: 'GAME_CONTEXT', 
-                payload: { isSystemView: true, systemId: sysId } 
-            }, window.location.origin);
+        systemNodes.forEach(node => {
+            node.setAttribute('data-hub-tagged', 'true');
+            
+            const span = node.querySelector('span');
+            if (!span) return;
+            const match = span.innerText.match(/\[(\d+)\]/);
+            if (!match) return;
+            const sysId = match[1];
 
-            // If the system is grayed out or restricted by the game, prevent the browser 
-            // from navigating so you don't get the "Out of Scanner Range" error page.
-            if (node.classList.contains('disabled') || node.closest('.disabled') || (node.style.opacity && parseFloat(node.style.opacity) < 1)) {
-                e.preventDefault();
+            // --- DEFEAT DISABLED STATE ---
+            node.style.pointerEvents = 'auto !important';
+            node.style.cursor = 'crosshair';
+
+            // --- SMART CLICK INTERCEPTOR ---
+            node.addEventListener('click', (e) => {
+                // If AstroWars didn't put the '.link' class here, it's out-of-range.
+                // We block the click so the game doesn't throw a popup error.
+                const isClickable = !!node.querySelector('.link');
+                if (!isClickable) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+
+                // 1. Lock this system ID in memory so the background loop doesn't erase our UI
+                simulatedSystemId = sysId;
+
+                // 2. Force the context update immediately
+                sendContext();
+
+                // 3. Auto-open the main sidebar
+                if (typeof window.parent.toggleSidebar === 'function') {
+                    const sidebar = window.parent.document.getElementById('sidebar');
+                    if (sidebar && !sidebar.classList.contains('expanded')) {
+                        window.parent.toggleSidebar();
+                    }
+                    
+                    // Close any full-screen archives blocking the view
+                    if (typeof window.parent.closeSystemDatabasePanel === 'function') window.parent.closeSystemDatabasePanel();
+                    if (typeof window.parent.closePlanetDatabasePanel === 'function') window.parent.closePlanetDatabasePanel();
+                    if (typeof window.parent.closeFleetDatabasePanel === 'function') window.parent.closeFleetDatabasePanel();
+                    if (typeof window.parent.closeDatabasePanel === 'function') window.parent.closeDatabasePanel();
+                }
+            }, { capture: true }); 
+
+            // --- VISUAL INDICATOR ---
+            if (knownSysIdsCache.has(sysId)) {
+                const icon = node.querySelector('img') || node; 
+                icon.style.boxShadow = '0 0 15px 5px #22c55e, inset 0 0 10px #22c55e';
+                icon.style.borderRadius = '50%';
+                icon.style.border = '2px solid #22c55e';
+                icon.style.backgroundColor = 'rgba(34, 197, 94, 0.4)';
+                
+                span.style.color = '#4ade80';
+                span.style.fontWeight = 'bold';
             }
         });
-
-        // --- VISUAL INDICATOR: Add a green dot if the system is in our database ---
-        if (knownSysIdsCache.has(sysId)) {
-            // Ensure the system node can hold an absolute positioned badge
-            if (window.getComputedStyle(node).position === 'static') {
-                node.style.position = 'relative';
-            }
-            
-            const indicator = document.createElement('div');
-            indicator.style.position = 'absolute';
-            indicator.style.top = '0px';
-            indicator.style.right = '0px';
-            indicator.style.width = '12px';
-            indicator.style.height = '12px';
-            indicator.style.backgroundColor = '#22c55e'; // Ally Green
-            indicator.style.border = '2px solid #000';
-            indicator.style.borderRadius = '50%';
-            indicator.style.boxShadow = '0 0 6px #22c55e';
-            indicator.style.zIndex = '999';
-            indicator.style.pointerEvents = 'none'; // Ensures the dot doesn't block the click
-            indicator.title = 'Intel available in Hub';
-            
-            node.appendChild(indicator);
-        }
-    });
-}
+    }
 
     async function backgroundIdentityCheck() {
         if (verifiedPlayerName) return; 
         try {
-            console.log("[Alliance Tools] Running silent identity check...");
             const response = await fetch('/Game/Players');
             const html = await response.text();
             const parser = new DOMParser();
@@ -87,12 +98,9 @@ async function injectMapIndicators() {
             
             if (nameNode) {
                 verifiedPlayerName = nameNode.innerText.trim();
-                console.log(`[Alliance Tools] Target locked: ${verifiedPlayerName}`);
                 sendContext(); 
             }
-        } catch (error) {
-            console.error("[Alliance Tools] Identity check failed", error);
-        }
+        } catch (error) {}
     }
 
     backgroundIdentityCheck();
@@ -107,6 +115,10 @@ async function injectMapIndicators() {
             const x = params.get('centerX') || params.get('centerx');
             const y = params.get('centerY') || params.get('centery');
             if (x && y) {
+                // If the user dragged the map to new coordinates, break the simulation lock
+                if (currentMapX !== x || currentMapY !== y) {
+                    simulatedSystemId = null; 
+                }
                 currentMapX = x;
                 currentMapY = y;
                 return true;
@@ -121,16 +133,24 @@ async function injectMapIndicators() {
         
         extractCoords(currentUrl);
 
-        const isSystemView = pathLower.includes('/game/map/solarsystem') || pathLower.includes('/game/system');
+        let isSystemView = pathLower.includes('/game/map/solarsystem') || pathLower.includes('/game/system');
         let sysId = null;
+
         if (isSystemView) {
             const match = pathLower.match(/solarsystem\/(\d+)/) || pathLower.match(/\/system\/(\d+)/);
-            if (match) {
-                sysId = match[1];
-            } else {
+            if (match) sysId = match[1];
+            else {
                 const urlParams = new URLSearchParams(window.location.search);
                 sysId = urlParams.get('id') || urlParams.get('system');
             }
+        }
+
+        // --- THE UI LOCK ---
+        // If the user clicked an out-of-range system, override the URL data
+        // so the Wrapper thinks we are inside the system and shows the Plans UI.
+        if (simulatedSystemId) {
+            isSystemView = true;
+            sysId = simulatedSystemId;
         }
 
         const isPlayerView = pathLower.includes('/game/players/profile/');
@@ -141,7 +161,6 @@ async function injectMapIndicators() {
         }
 
         const isAllianceView = pathLower.includes('/game/alliance');
-
         const isCalculatorView = pathLower.includes('/about/traveltimecalculator');
 
         const contextPayload = {
@@ -149,39 +168,38 @@ async function injectMapIndicators() {
             isSystemView: isSystemView, 
             isMap: pathLower.includes('/game/map'),
             isAllianceView: isAllianceView,
-            isCalculatorView: isCalculatorView, // <-- Added here
+            isCalculatorView: isCalculatorView,
             systemId: sysId,
             mapX: currentMapX,
             mapY: currentMapY,
             playerName: verifiedPlayerName 
         };
         
-        // Beam it to Wrapper
         window.parent.postMessage({ type: 'GAME_CONTEXT', payload: contextPayload }, window.location.origin);
 
-        // NOW we can safely read from the Payload to trigger scrapers
-        if (contextPayload.isSystemView && contextPayload.systemId) {
+        // Only trigger backend scrapers if it's a REAL view, not our simulation
+        if (isSystemView && sysId && !simulatedSystemId) {
             import('../scrapers/system-parser.js')
-                .then(module => module.scrapeSystem(contextPayload.systemId))
-                .catch(err => console.error("[Spy] Error loading system parser:", err));
+                .then(module => module.scrapeSystem(sysId))
+                .catch(err => console.error(err));
         }
 
         if (isPlayerView && targetPlayerId) {
             import('../scrapers/player-parser.js')
                 .then(module => module.scrapePlayer(targetPlayerId))
-                .catch(err => console.error("[Spy] Error loading player parser:", err));
+                .catch(err => console.error(err));
         }
 
-        if (contextPayload.isAllianceView) {
+        if (isAllianceView) {
             import('../scrapers/alliance-parser.js')
                 .then(module => module.scrapeAlliance())
-                .catch(err => console.error("[Spy] Error loading alliance parser:", err));
+                .catch(err => console.error(err));
         }
 
-        if (contextPayload.isCalculatorView) {
+        if (isCalculatorView) {
             import('../scrapers/galaxy-parser.js')
                 .then(module => module.scrapeGalaxy())
-                .catch(err => console.error("[Spy] Error loading galaxy parser:", err));
+                .catch(err => console.error(err));
         }
     }
 
@@ -211,26 +229,21 @@ async function injectMapIndicators() {
             sendContext();
         }
 
-        // NEW: Constantly check the map for new systems rendering as the user drags it
         if (currentUrl.toLowerCase().includes('/game/map')) {
             injectMapIndicators();
         }
     }, 200);
 
-    // --- RECEIVE DATA FROM WRAPPER ---
     window.addEventListener('message', (event) => {
         if (event.origin !== window.location.origin) return;
         const data = event.data;
 
-        // Tactical Overlay Injection (DOM-Based)
         if (data.type === 'INJECT_TACTICAL_OVERLAYS') {
-            const { plans } = data.payload; // We only need plans from the DB now
+            const { plans } = data.payload; 
             
-            // Clear existing Hub overlays
             document.querySelectorAll('.aw-hub-indicator').forEach(el => el.remove());
             document.querySelectorAll('#solarSystem tr').forEach(row => { row.style.borderLeft = ''; });
 
-            // Hardcode your alliance tag here so the script knows who is an ally vs enemy
             const myAllianceTag = 'YELW'; 
 
             const rows = document.querySelectorAll('#solarSystem > tbody > tr[data-planet-id]');
@@ -242,12 +255,10 @@ async function injectMapIndicators() {
                 const planetIndex = parseInt(firstCell.innerText.trim(), 10);
                 if (isNaN(planetIndex)) return;
 
-                // 1. Identify Alliance Status
                 const ownerLink = row.querySelectorAll('td')[3]?.querySelector('a[href^="/Game/Alliance/"]');
                 const rowAllyTag = ownerLink ? ownerLink.innerText.trim() : null;
                 const isAlliedPlanet = rowAllyTag === myAllianceTag;
 
-                // 2. Parse the pure DOM for 100% accurate status
                 const isSieged = row.classList.contains('siege');
                 const actionHtml = row.querySelectorAll('td')[4]?.innerHTML || ''; 
                 
@@ -255,7 +266,6 @@ async function injectMapIndicators() {
                 const hostileOrbit = actionHtml.includes('Hostile fleet in orbit');
                 const alliedTransit = actionHtml.includes('Incoming allied') || actionHtml.includes('Allied fleet');
 
-                // 3. Build the indicators based on priority
                 let indicatorHTML = '';
                 let borderColor = '';
                 let titleText = '';
@@ -282,7 +292,6 @@ async function injectMapIndicators() {
                     titleText = 'Allied Fleet Detected';
                 }
 
-                // Check Plans (Lowest visual priority)
                 const plan = plans.find(p => p.planet_index === planetIndex);
                 if (plan && !indicatorHTML) { 
                     indicatorHTML = `<span class="badge bg-light text-dark border ms-2">Plan</span>`;
@@ -290,7 +299,6 @@ async function injectMapIndicators() {
                     titleText = `Intel Note: ${plan.note} (${plan.author})`;
                 }
 
-                // Inject if an action was found
                 if (indicatorHTML) {
                     row.style.borderLeft = `3px solid ${borderColor}`;
                     const indicator = document.createElement('span');
@@ -304,4 +312,3 @@ async function injectMapIndicators() {
         }
     });
 }
-
