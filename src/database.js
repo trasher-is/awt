@@ -104,6 +104,14 @@ function initDatabase() {
         // If it throws an error, the column already exists, so we just ignore it.
     }
 
+    // Safely inject the discord_name column if it doesn't exist
+    try {
+        db.exec(`ALTER TABLE app_users ADD COLUMN discord_name TEXT`);
+        console.log("[DB] Added discord_name column to app_users table.");
+    } catch (e) {
+        // Ignored
+    }
+
     // 4. Map & Systems
     db.exec(`
         CREATE TABLE IF NOT EXISTS systems (

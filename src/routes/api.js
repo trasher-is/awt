@@ -122,8 +122,8 @@ router.post('/sync/system', requireAuth, (req, res) => {
 
     // Prepared statement for the new fleets
     const insertFleet = db.prepare(`
-        INSERT INTO fleets (game_fleet_id, owner_id, system_id, planet_index, transports, colony_ships, destroyers, cruisers, battleships, status, arrival_time)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO fleets (game_fleet_id, owner_id, system_id, planet_index, transports, colony_ships, destroyers, cruisers, battleships, arrival_time)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     // --- NEW: History Logging Prep ---
@@ -167,7 +167,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 if (f.owner_id) {
                     db.prepare(`INSERT INTO players (id, name) VALUES (?, 'Unknown') ON CONFLICT(id) DO NOTHING`).run(f.owner_id);
                 }
-                insertFleet.run(f.game_fleet_id, f.owner_id, system_id, f.planet_index, f.transports, f.colony_ships, f.destroyers, f.cruisers, f.battleships, f.status || 'Orbit', f.arrival_time || null);
+                insertFleet.run(f.game_fleet_id, f.owner_id, system_id, f.planet_index, f.transports, f.colony_ships, f.destroyers, f.cruisers, f.battleships, f.arrival_time || null);
             }
         }
     });
@@ -344,18 +344,28 @@ router.post('/sync/galaxy', requireAuth, (req, res) => {
 });
 
 // --- 3. ADMIN DASHBOARD TOOLS ---
-// Get all users
+
+// Get all users (joined with players table for idle_time)
 router.get('/admin/users', requireAdmin, (req, res) => {
-    const users = db.prepare(`SELECT id, game_name, role, is_active FROM app_users`).all();
-    res.json(users);
+    try {
+        const users = db.prepare(`
+            SELECT u.id, u.game_name, u.role, u.is_active, u.discord_name, p.idle_time 
+            FROM app_users u 
+            LEFT JOIN players p ON LOWER(u.game_name) = LOWER(p.name)
+            ORDER BY u.id ASC
+        `).all();
+        res.json({ success: true, users });
+    } catch (err) {
+        res.status(500).json({ error: 'Database error' });
+    }
 });
 
 // Add a new user
 router.post('/admin/users', requireAdmin, (req, res) => {
-    const { game_name, password, role } = req.body;
+    const { game_name, password, role, discord_name } = req.body;
     try {
         const hash = bcrypt.hashSync(password, 10);
-        db.prepare(`INSERT INTO app_users (game_name, password_hash, role) VALUES (?, ?, ?)`).run(game_name, hash, role || 'user');
+        db.prepare(`INSERT INTO app_users (game_name, password_hash, role, discord_name) VALUES (?, ?, ?, ?)`).run(game_name, hash, role || 'user', discord_name || null);
         res.json({ success: true });
     } catch (err) {
         if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(400).json({ error: 'Username already exists' });
@@ -363,12 +373,21 @@ router.post('/admin/users', requireAdmin, (req, res) => {
     }
 });
 
-// Toggle Active Status (Ban/Unban instantly)
+// Update Discord Name
+router.post('/admin/users/:id/discord', requireAdmin, (req, res) => {
+    const { discord_name } = req.body;
+    try {
+        db.prepare(`UPDATE app_users SET discord_name = ? WHERE id = ?`).run(discord_name, req.params.id);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to update discord name' });
+    }
+});
+
+// Toggle Active Status (Ban/Unban)
 router.post('/admin/users/:id/toggle', requireAdmin, (req, res) => {
     const user = db.prepare(`SELECT game_name, is_active FROM app_users WHERE id = ?`).get(req.params.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    
-    // HARD LOCK: Prevent banning the master admin
     if (user.game_name === 'admin') return res.status(403).json({ error: 'Cannot ban the master admin' });
     
     const newStatus = user.is_active === 1 ? 0 : 1;
@@ -384,8 +403,6 @@ router.post('/admin/users/:id/role', requireAdmin, (req, res) => {
 
     const user = db.prepare(`SELECT game_name FROM app_users WHERE id = ?`).get(req.params.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    
-    // HARD LOCK: Prevent demoting the master admin
     if (user.game_name === 'admin') return res.status(403).json({ error: 'Cannot change the master admin role' });
 
     db.prepare(`UPDATE app_users SET role = ? WHERE id = ?`).run(role, req.params.id);
@@ -395,9 +412,78 @@ router.post('/admin/users/:id/role', requireAdmin, (req, res) => {
 // Change a user's password
 router.post('/admin/users/:id/password', requireAdmin, (req, res) => {
     const { new_password } = req.body;
+    const targetUser = db.prepare(`SELECT game_name FROM app_users WHERE id = ?`).get(req.params.id);
+    
+    if (!targetUser) return res.status(404).json({ error: 'User not found' });
+    
+    // SECURITY: Only the session holding the 'admin' game_name can change the master admin password
+    if (targetUser.game_name === 'admin' && req.session.gameName !== 'admin') {
+        return res.status(403).json({ error: 'Only the Master Admin can change this password.' });
+    }
+
     const hash = bcrypt.hashSync(new_password, 10);
     db.prepare(`UPDATE app_users SET password_hash = ? WHERE id = ?`).run(hash, req.params.id);
     res.json({ success: true });
+});
+
+// --- DATABASE CONTROLS ---
+
+// Get DB Status
+router.get('/admin/status', requireAdmin, (req, res) => {
+    try {
+        const stats = {
+            systems: db.prepare(`SELECT COUNT(*) as count FROM systems`).get().count,
+            planets: db.prepare(`SELECT COUNT(*) as count FROM planets`).get().count,
+            players: db.prepare(`SELECT COUNT(*) as count FROM players`).get().count,
+            fleets: db.prepare(`SELECT COUNT(*) as count FROM fleets`).get().count,
+            uptime: process.uptime()
+        };
+        res.json({ success: true, stats });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch status' });
+    }
+});
+
+// Clear Old Fleets (> 10 Days)
+router.post('/admin/clear-fleets', requireAdmin, (req, res) => {
+    try {
+        const result = db.prepare(`DELETE FROM fleets WHERE updated_at <= datetime('now', '-10 days')`).run();
+        res.json({ success: true, deleted: result.changes });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to clear fleets' });
+    }
+});
+
+// Nuke All Intel (Requires Master Admin Password)
+router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
+    const { password } = req.body;
+    
+    if (req.session.gameName !== 'admin') {
+        return res.status(403).json({ error: 'Only the Master Admin can execute a database nuke.' });
+    }
+
+    const adminUser = db.prepare(`SELECT password_hash FROM app_users WHERE game_name = 'admin'`).get();
+    if (!bcrypt.compareSync(password, adminUser.password_hash)) {
+        return res.status(401).json({ error: 'Invalid master password. Aborting nuke.' });
+    }
+
+    try {
+        const nukeTx = db.transaction(() => {
+            db.prepare(`DELETE FROM fleets`).run();
+            db.prepare(`DELETE FROM planet_plans`).run();
+            db.prepare(`DELETE FROM planet_events`).run();
+            db.prepare(`DELETE FROM planets`).run();
+            db.prepare(`DELETE FROM players`).run();
+            db.prepare(`DELETE FROM alliances`).run();
+            db.prepare(`DELETE FROM systems`).run();
+        });
+        
+        nukeTx();
+        res.json({ success: true });
+    } catch (err) {
+        console.error("[DB Error] Nuke failed:", err);
+        res.status(500).json({ error: 'Nuke transaction failed.' });
+    }
 });
 
 // --- INTEL HUB STATS ---

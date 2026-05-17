@@ -136,7 +136,7 @@
         </div>
 
         <div class="border-t border-border flex flex-col py-2 shrink-0">
-            <button id="admin-panel-btn" onclick="window.open('/admin', '_blank')" class="hidden h-10 w-full items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"><i class="fa-solid fa-gear w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-xs">Admin Panel</span></button>
+            <button id="admin-panel-btn" onclick="window.location.href='/admin'" class="hidden h-10 w-full items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"><i class="fa-solid fa-gear w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-xs">Admin Panel</span></button>
             <button onclick="logout()" class="h-10 w-full flex items-center justify-start px-4 hover:bg-red-950/30 text-red-400 transition-colors"><i class="fa-solid fa-right-from-bracket w-6 text-center text-sm"></i><div class="ml-4 flex items-center gap-2 sidebar-text"><span class="text-xs font-medium">Logout</span><span id="auth-user-display" class="text-[10px] opacity-70 font-mono">(--)</span></div></button>
         </div>
     </nav>
@@ -344,8 +344,12 @@
                 document.getElementById('intel-fleets-list').innerHTML = data.fleets.length ? data.fleets.map(f => {
                     const cv = (f.destroyers * 3) + (f.cruisers * 24) + (f.battleships * 60);
                     let statBadge = '';
-                    if(f.status === 'Siege') statBadge = '<span class="text-[9px] bg-purple-500/20 text-purple-400 px-1 rounded ml-1">Siege</span>';
-                    else if(f.status === 'Incoming') statBadge = '<span class="text-[9px] bg-red-500/20 text-red-400 px-1 rounded ml-1">Transit</span>';
+                    
+                    // If arrival_time is present, it's in transit. Otherwise, it's stationed.
+                    if(f.arrival_time && f.arrival_time !== '-') {
+                        statBadge = `<span class="text-[9px] bg-red-500/20 text-red-400 px-1 rounded ml-1">Transit: ${f.arrival_time}</span>`;
+                    }
+                    
                     return `<div class="flex justify-between items-center py-0.5 text-[10px]">
                         <span class="text-muted-foreground">At #${f.planet_index} ${statBadge}</span>
                         <span class="text-red-400 font-medium">by [${f.alliance_tag || '?'}] ${f.owner_name || 'Unknown'} (CV: ${cv.toLocaleString()})</span>

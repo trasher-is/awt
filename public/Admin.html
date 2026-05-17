@@ -1,167 +1,340 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Alliance Hub - Admin</title>
+    <title>Alliance Hub - Command Center</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        border: "hsl(240 3.7% 15.9%)",
+                        input: "hsl(240 3.7% 15.9%)",
+                        ring: "hsl(240 4.9% 83.9%)",
+                        background: "hsl(240 10% 3.9%)",
+                        foreground: "hsl(0 0% 98%)",
+                        primary: { DEFAULT: "hsl(0 0% 98%)", foreground: "hsl(240 5.9% 10%)" },
+                        secondary: { DEFAULT: "hsl(240 3.7% 15.9%)", foreground: "hsl(0 0% 98%)" },
+                        muted: { DEFAULT: "hsl(240 3.7% 15.9%)", foreground: "hsl(240 5% 64.9%)" },
+                        destructive: { DEFAULT: "hsl(0 62.8% 30.6%)", foreground: "hsl(0 0% 98%)" },
+                        card: { DEFAULT: "hsl(240 10% 3.9%)", foreground: "hsl(0 0% 98%)" },
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        body { background-color: #121212; color: #ddd; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; }
-        .container { max-width: 900px; margin: auto; background: #1e1e1e; padding: 20px; border-radius: 8px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { padding: 10px; border-bottom: 1px solid #333; text-align: left; }
-        th { background: #2d2d2d; }
-        button { padding: 5px 10px; cursor: pointer; border: none; border-radius: 3px; font-weight: bold; }
-        .btn-green { background: #28a745; color: white; }
-        .btn-red { background: #dc3545; color: white; }
-        .btn-blue { background: #007acc; color: white; }
-        .header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .form-group { margin-bottom: 15px; background: #2a2a2a; padding: 15px; border-radius: 5px; }
-        input, select { padding: 8px; background: #121212; border: 1px solid #444; color: white; border-radius: 4px; margin-right: 10px;}
+        body { background-color: hsl(240 10% 3.9%); display: none; }
+        .fade-in { animation: fadeIn 0.3s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     </style>
 </head>
-<body>
+<body class="min-h-screen text-foreground font-sans selection:bg-primary selection:text-primary-foreground pb-20">
 
-<div class="container">
-    <div class="header-bar">
-        <h2>Admin Control Panel</h2>
-        <div>
-            <button class="btn-blue" onclick="window.location.href='/dashboard'">Go to Tools/Proxy</button>
-            <button class="btn-red" onclick="logout()">Logout</button>
+    <header class="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur">
+        <div class="container mx-auto flex h-14 items-center px-4 justify-between">
+            <div class="flex items-center gap-2 font-semibold text-destructive">
+                <i class="fa-solid fa-shield-halved"></i>
+                <span>Command Center</span>
+            </div>
+            <nav class="flex items-center gap-4 text-sm">
+                <a href="/dashboard" class="text-muted-foreground hover:text-foreground transition-colors"><i class="fa-solid fa-arrow-left mr-1"></i> Back to Tools</a>
+                <button onclick="logout()" class="text-destructive hover:text-destructive/80 transition-colors font-medium">Terminate Session</button>
+            </nav>
         </div>
-    </div>
+    </header>
 
-    <div class="form-group">
-        <h3>Add New Alliance Member</h3>
-        <input type="text" id="newName" placeholder="In-Game Name">
-        <input type="password" id="newPass" placeholder="Password">
-        <select id="newRole">
-            <option value="user">User</option>
-            <option value="admin">Admin</option>
-        </select>
-        <button class="btn-green" onclick="addUser()">Create Account</button>
-    </div>
-
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Game Name</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody id="userTableBody">
-            </tbody>
-    </table>
-</div>
-
-<script>
-    async function loadUsers() {
-        const response = await fetch('/hub-api/admin/users');
-        if (!response.ok) return alert('Failed to load users. Are you logged in as admin?');
+    <main class="container mx-auto p-4 md:p-8 max-w-6xl fade-in mt-4 flex flex-col gap-8">
         
-        const users = await response.json();
-        const tbody = document.getElementById('userTableBody');
-        tbody.innerHTML = '';
+        <section class="flex flex-col gap-4">
+            <div>
+                <h2 class="text-xl font-bold tracking-tight border-b border-border pb-2">User Access Management</h2>
+            </div>
+            
+            <div class="bg-card border border-border rounded-lg shadow-sm p-4">
+                <div class="flex flex-col md:flex-row gap-3 items-end border-b border-border pb-4 mb-4">
+                    <div class="w-full md:w-1/4">
+                        <label class="text-xs text-muted-foreground font-medium mb-1 block">In-Game Name</label>
+                        <input type="text" id="newName" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm" placeholder="Player Name">
+                    </div>
+                    <div class="w-full md:w-1/4">
+                        <label class="text-xs text-muted-foreground font-medium mb-1 block">Discord Name (Optional)</label>
+                        <input type="text" id="newDiscord" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm" placeholder="@username">
+                    </div>
+                    <div class="w-full md:w-1/4">
+                        <label class="text-xs text-muted-foreground font-medium mb-1 block">Password</label>
+                        <input type="password" id="newPass" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm" placeholder="••••••••">
+                    </div>
+                    <div class="w-full md:w-auto">
+                        <button onclick="addUser()" class="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 w-full"><i class="fa-solid fa-user-plus mr-1"></i> Add User</button>
+                    </div>
+                </div>
 
-        users.forEach(user => {
-            const isMasterAdmin = user.game_name === 'admin';
-            const statusText = user.is_active ? '<span style="color:#28a745">Active</span>' : '<span style="color:#dc3545">Banned</span>';
-            const toggleBtnClass = user.is_active ? 'btn-red' : 'btn-green';
-            const toggleBtnText = user.is_active ? 'Ban' : 'Unban';
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm whitespace-nowrap">
+                        <thead class="text-muted-foreground border-b border-border">
+                            <tr>
+                                <th class="pb-2 font-medium">Game Name</th>
+                                <th class="pb-2 font-medium">Discord ID</th>
+                                <th class="pb-2 font-medium">Role</th>
+                                <th class="pb-2 font-medium">Status</th>
+                                <th class="pb-2 font-medium">In-Game Idle</th>
+                                <th class="pb-2 font-medium text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="userTableBody" class="divide-y divide-border">
+                            <tr><td colspan="6" class="text-center py-4 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
 
-            // Disable ban button if it's the master admin
-            const banBtn = isMasterAdmin ? 
-                `<button class="btn-red" disabled style="opacity: 0.5; cursor: not-allowed;">Ban</button>` : 
-                `<button class="${toggleBtnClass}" onclick="toggleUser(${user.id})">${toggleBtnText}</button>`;
+        <section class="flex flex-col gap-4">
+            <div>
+                <h2 class="text-xl font-bold tracking-tight border-b border-border pb-2">Tool Status & Metrics</h2>
+            </div>
+            
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-card border border-border rounded-lg p-4 shadow-sm flex flex-col items-center">
+                    <span class="text-muted-foreground text-xs font-medium uppercase tracking-wider mb-1">Systems</span>
+                    <span id="stat-sys" class="text-2xl font-semibold text-foreground">--</span>
+                </div>
+                <div class="bg-card border border-border rounded-lg p-4 shadow-sm flex flex-col items-center">
+                    <span class="text-muted-foreground text-xs font-medium uppercase tracking-wider mb-1">Planets</span>
+                    <span id="stat-pln" class="text-2xl font-semibold text-foreground">--</span>
+                </div>
+                <div class="bg-card border border-border rounded-lg p-4 shadow-sm flex flex-col items-center">
+                    <span class="text-muted-foreground text-xs font-medium uppercase tracking-wider mb-1">Players</span>
+                    <span id="stat-ply" class="text-2xl font-semibold text-foreground">--</span>
+                </div>
+                <div class="bg-card border border-border rounded-lg p-4 shadow-sm flex flex-col items-center">
+                    <span class="text-muted-foreground text-xs font-medium uppercase tracking-wider mb-1">Fleets</span>
+                    <span id="stat-flt" class="text-2xl font-semibold text-aw-enemy text-red-500">--</span>
+                </div>
+            </div>
 
-            // Role Dropdown (Disabled for master admin)
-            const roleSelect = isMasterAdmin ? 
-                `<span>${user.role}</span>` : 
-                `<select onchange="changeRole(${user.id}, this.value)" style="padding: 4px; background: #2d2d2d; color: white; border: 1px solid #444; border-radius: 3px;">
-                    <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
-                    <option value="user"  ${user.role === 'user' ? 'selected' : ''}>User</option>
-                    <option value="guest" ${user.role === 'guest' ? 'selected' : ''}>Guest</option>
-                </select>`;
+            <div class="bg-card border border-border rounded-lg p-4 shadow-sm">
+                <div class="flex justify-between items-center border-b border-border pb-2 mb-2">
+                    <span class="text-sm font-medium">Server Uptime</span>
+                    <span id="stat-uptime" class="text-sm font-mono text-green-400">--</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-sm font-medium">Error Logs</span>
+                    <span class="text-xs text-muted-foreground italic">Backend logging not configured. Native console logs only.</span>
+                </div>
+            </div>
+        </section>
 
-            tbody.innerHTML += `
-                <tr>
-                    <td>${user.id}</td>
-                    <td>${user.game_name}</td>
-                    <td>${roleSelect}</td>
-                    <td>${statusText}</td>
-                    <td>
-                        ${banBtn}
-                        <button class="btn-blue" onclick="changePassword(${user.id}, '${user.game_name}')">Change Pass</button>
-                    </td>
-                </tr>
-            `;
-        });
-    }
+        <section class="flex flex-col gap-4">
+            <div>
+                <h2 class="text-xl font-bold tracking-tight text-destructive border-b border-destructive/30 pb-2">Danger Zone</h2>
+            </div>
+            
+            <div class="grid md:grid-cols-2 gap-4">
+                <div class="border border-border bg-card rounded-lg p-6 shadow-sm flex flex-col justify-between">
+                    <div class="mb-4">
+                        <h3 class="font-bold text-foreground mb-1"><i class="fa-solid fa-broom text-muted-foreground mr-1"></i> Flush Stale Fleets</h3>
+                        <p class="text-xs text-muted-foreground">Removes all fleet signatures that haven't been updated in over 10 days to maintain dashboard speed.</p>
+                    </div>
+                    <button onclick="clearFleets()" class="h-9 px-4 rounded-md border border-border bg-transparent hover:bg-secondary text-sm font-medium transition-colors">Execute Cleanup</button>
+                </div>
 
-    async function changeRole(id, newRole) {
-        const response = await fetch(`/hub-api/admin/users/${id}/role`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role: newRole })
-        });
+                <div class="border border-destructive/50 bg-destructive/10 rounded-lg p-6 shadow-sm flex flex-col justify-between">
+                    <div class="mb-4">
+                        <h3 class="font-bold text-destructive mb-1"><i class="fa-solid fa-skull mr-1"></i> Nuke All Intel - New Round</h3>
+                        <p class="text-xs text-destructive/80">Obliterates ALL systems, planets, fleets, and map data. User accounts remain. Requires Master Admin password.</p>
+                    </div>
+                    <button onclick="nukeIntel()" class="h-9 px-4 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 text-sm font-medium transition-colors">Initiate Server Wipe</button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // --- 1. CORE AUTH & INIT ---
+        let currentAdminUser = null;
         
-        const data = await response.json();
-        if(!data.success) {
-            alert(data.error);
-            loadUsers(); // Refresh to undo the dropdown change if it failed
+        async function initAdmin() {
+            try {
+                const response = await fetch('/hub-api/me');
+                const data = await response.json();
+                if (data.id && data.role === 'admin') {
+                    currentAdminUser = data.gameName;
+                    document.body.style.display = 'block';
+                    loadUsers();
+                    loadStatus();
+                } else {
+                    window.location.href = '/dashboard';
+                }
+            } catch (e) {
+                window.location.href = '/hub-assets/login.html';
+            }
         }
-    }
+        initAdmin();
 
-    async function addUser() {
-        const game_name = document.getElementById('newName').value;
-        const password = document.getElementById('newPass').value;
-        const role = document.getElementById('newRole').value;
+        function logout() {
+            fetch('/hub-api/logout', { method: 'POST' }).then(() => { window.location.href = '/hub-assets/login.html'; });
+        }
 
-        if(!game_name || !password) return alert("Name and Password required");
+        // --- 2. USER MANAGEMENT ---
+        async function loadUsers() {
+            const res = await fetch('/hub-api/admin/users');
+            const data = await res.json();
+            const tbody = document.getElementById('userTableBody');
+            
+            if(!data.success) return tbody.innerHTML = `<tr><td colspan="6" class="text-red-500 py-4 text-center">Failed to load users</td></tr>`;
+            
+            tbody.innerHTML = data.users.map(u => {
+                const isMasterAdmin = u.game_name === 'admin';
+                const statusBadge = u.is_active ? '<span class="text-[10px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded uppercase font-bold tracking-wider">Active</span>' : '<span class="text-[10px] bg-red-500/20 text-red-500 px-2 py-0.5 rounded uppercase font-bold tracking-wider">Banned</span>';
+                const toggleBtn = isMasterAdmin ? `<button disabled class="text-xs opacity-30 cursor-not-allowed text-red-500"><i class="fa-solid fa-ban"></i> Ban</button>` : `<button onclick="toggleUser(${u.id})" class="text-xs hover:underline text-${u.is_active ? 'red-500' : 'green-500'}"><i class="fa-solid fa-${u.is_active ? 'ban' : 'check'}"></i> ${u.is_active ? 'Ban' : 'Unban'}</button>`;
+                
+                // Only render role dropdown if not master admin
+                const roleSelect = isMasterAdmin ? 
+                    `<span class="text-xs text-muted-foreground uppercase tracking-widest font-bold">Admin</span>` : 
+                    `<select onchange="changeRole(${u.id}, this.value)" class="text-xs bg-transparent border border-border rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-ring">
+                        <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option>
+                        <option value="user"  ${u.role === 'user' ? 'selected' : ''}>User</option>
+                    </select>`;
 
-        const response = await fetch('/hub-api/admin/users', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ game_name, password, role })
-        });
+                return `
+                    <tr class="hover:bg-muted/30 transition-colors">
+                        <td class="py-3 font-medium">${u.game_name}</td>
+                        <td class="py-3">
+                            <input type="text" value="${u.discord_name || ''}" placeholder="None" onblur="updateDiscord(${u.id}, this.value)" class="bg-transparent border-b border-border/50 focus:border-primary outline-none text-xs w-32 pb-0.5">
+                        </td>
+                        <td class="py-3">${roleSelect}</td>
+                        <td class="py-3">${statusBadge}</td>
+                        <td class="py-3 font-mono text-xs text-muted-foreground">${u.idle_time || '-'}</td>
+                        <td class="py-3 text-right flex gap-3 justify-end items-center">
+                            <button onclick="changePassword(${u.id}, '${u.game_name}')" class="text-xs text-muted-foreground hover:text-foreground transition-colors"><i class="fa-solid fa-key"></i> Pass</button>
+                            ${toggleBtn}
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
 
-        const data = await response.json();
-        if(data.success) {
-            document.getElementById('newName').value = '';
-            document.getElementById('newPass').value = '';
+        async function addUser() {
+            const game_name = document.getElementById('newName').value;
+            const discord_name = document.getElementById('newDiscord').value;
+            const password = document.getElementById('newPass').value;
+
+            if(!game_name || !password) return alert("Game Name and Password required.");
+
+            const res = await fetch('/hub-api/admin/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ game_name, password, discord_name, role: 'user' })
+            });
+
+            const data = await res.json();
+            if(data.success) {
+                document.getElementById('newName').value = '';
+                document.getElementById('newDiscord').value = '';
+                document.getElementById('newPass').value = '';
+                loadUsers();
+            } else {
+                alert(data.error);
+            }
+        }
+
+        async function updateDiscord(id, newDiscord) {
+            await fetch(`/hub-api/admin/users/${id}/discord`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ discord_name: newDiscord })
+            });
+        }
+
+        async function changeRole(id, newRole) {
+            const res = await fetch(`/hub-api/admin/users/${id}/role`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role: newRole })
+            });
+            const data = await res.json();
+            if(!data.success) { alert(data.error); loadUsers(); }
+        }
+
+        async function toggleUser(id) {
+            await fetch(`/hub-api/admin/users/${id}/toggle`, { method: 'POST' });
             loadUsers();
-        } else {
-            alert(data.error);
         }
-    }
 
-    async function toggleUser(id) {
-        await fetch(`/hub-api/admin/users/${id}/toggle`, { method: 'POST' });
-        loadUsers();
-    }
+        async function changePassword(id, name) {
+            if (name === 'admin' && currentAdminUser !== 'admin') {
+                return alert("Access Denied: Only the Master Admin can change this password.");
+            }
+            const new_password = prompt(`Enter new password for ${name}:`);
+            if (!new_password) return;
 
-    async function changePassword(id, name) {
-        const new_password = prompt(`Enter new password for ${name}:`);
-        if (!new_password) return;
+            const res = await fetch(`/hub-api/admin/users/${id}/password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_password })
+            });
+            const data = await res.json();
+            if(data.success) alert("Password updated.");
+            else alert(data.error);
+        }
 
-        const response = await fetch(`/hub-api/admin/users/${id}/password`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ new_password })
-        });
+        // --- 3. STATUS & DATABASE CONTROLS ---
+        function formatUptime(seconds) {
+            const d = Math.floor(seconds / (3600*24));
+            const h = Math.floor(seconds % (3600*24) / 3600);
+            const m = Math.floor(seconds % 3600 / 60);
+            return `${d}d ${h}h ${m}m`;
+        }
 
-        if(response.ok) alert("Password updated.");
-    }
+        async function loadStatus() {
+            const res = await fetch('/hub-api/admin/status');
+            const data = await res.json();
+            if(data.success) {
+                document.getElementById('stat-sys').innerText = data.stats.systems.toLocaleString();
+                document.getElementById('stat-pln').innerText = data.stats.planets.toLocaleString();
+                document.getElementById('stat-ply').innerText = data.stats.players.toLocaleString();
+                document.getElementById('stat-flt').innerText = data.stats.fleets.toLocaleString();
+                document.getElementById('stat-uptime').innerText = formatUptime(data.stats.uptime);
+            }
+        }
 
-    async function logout() {
-        await fetch('/hub-api/logout', { method: 'POST' });
-        window.location.href = '/hub-assets/login.html';
-    }
+        async function clearFleets() {
+            if(!confirm("Clear all fleet intelligence older than 10 days?")) return;
+            const res = await fetch('/hub-api/admin/clear-fleets', { method: 'POST' });
+            const data = await res.json();
+            if(data.success) {
+                alert(`Cleanup complete. Deleted ${data.deleted} stale fleet entries.`);
+                loadStatus();
+            }
+        }
 
-    loadUsers();
-</script>
+        async function nukeIntel() {
+            if(currentAdminUser !== 'admin') {
+                return alert("AUTHORIZATION DENIED: Only the Master Admin account can initiate a server wipe.");
+            }
+            const pass = prompt("CRITICAL WARNING: This will permanently destroy all mapping and intel data. To proceed, enter the Master Admin password:");
+            if(!pass) return;
 
+            const res = await fetch('/hub-api/admin/nuke-intel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pass })
+            });
+            const data = await res.json();
+            
+            if(data.success) {
+                alert("SERVER WIPE EXECUTED. All intelligence data has been destroyed.");
+                loadStatus();
+            } else {
+                alert(data.error);
+            }
+        }
+    </script>
 </body>
 </html>

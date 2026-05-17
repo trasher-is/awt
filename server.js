@@ -39,7 +39,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
 });
 
 app.get('/admin', requireAuth, (req, res) => {
-    if (req.session.role !== 'admin') return res.status(403).send("Admins only.");
+    if (req.session.role !== 'admin') return res.redirect('/dashboard');
     res.sendFile(path.join(__dirname, 'public', 'Admin.html'));
 });
 
