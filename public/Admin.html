@@ -192,7 +192,6 @@
             tbody.innerHTML = data.users.map(u => {
                 const isMasterAdmin = u.game_name === 'admin';
                 const statusBadge = u.is_active ? '<span class="text-[10px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded uppercase font-bold tracking-wider">Active</span>' : '<span class="text-[10px] bg-red-500/20 text-red-500 px-2 py-0.5 rounded uppercase font-bold tracking-wider">Banned</span>';
-                const toggleBtn = isMasterAdmin ? `<button disabled class="text-xs opacity-30 cursor-not-allowed text-red-500"><i class="fa-solid fa-ban"></i> Ban</button>` : `<button onclick="toggleUser(${u.id})" class="text-xs hover:underline text-${u.is_active ? 'red-500' : 'green-500'}"><i class="fa-solid fa-${u.is_active ? 'ban' : 'check'}"></i> ${u.is_active ? 'Ban' : 'Unban'}</button>`;
                 
                 // Only render role dropdown if not master admin
                 const roleSelect = isMasterAdmin ? 
@@ -201,6 +200,12 @@
                         <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option>
                         <option value="user"  ${u.role === 'user' ? 'selected' : ''}>User</option>
                     </select>`;
+
+                // Action Buttons
+                const editBtn = isMasterAdmin ? '' : `<button onclick="editName(${u.id}, '${u.game_name}')" class="text-xs text-muted-foreground hover:text-foreground transition-colors" title="Edit Name"><i class="fa-solid fa-pen"></i></button>`;
+                const passBtn = `<button onclick="changePassword(${u.id}, '${u.game_name}')" class="text-xs text-muted-foreground hover:text-foreground transition-colors" title="Change Password"><i class="fa-solid fa-key"></i></button>`;
+                const toggleBtn = isMasterAdmin ? `<button disabled class="text-xs opacity-30 cursor-not-allowed text-red-500"><i class="fa-solid fa-ban"></i></button>` : `<button onclick="toggleUser(${u.id})" class="text-xs hover:underline text-${u.is_active ? 'red-500' : 'green-500'}" title="${u.is_active ? 'Ban' : 'Unban'}"><i class="fa-solid fa-${u.is_active ? 'ban' : 'check'}"></i></button>`;
+                const deleteBtn = isMasterAdmin ? '' : `<button onclick="deleteUser(${u.id}, '${u.game_name}')" class="text-xs text-destructive hover:text-destructive/80 transition-colors" title="Delete User"><i class="fa-solid fa-trash"></i></button>`;
 
                 return `
                     <tr class="hover:bg-muted/30 transition-colors">
@@ -212,12 +217,37 @@
                         <td class="py-3">${statusBadge}</td>
                         <td class="py-3 font-mono text-xs text-muted-foreground">${u.idle_time || '-'}</td>
                         <td class="py-3 text-right flex gap-3 justify-end items-center">
-                            <button onclick="changePassword(${u.id}, '${u.game_name}')" class="text-xs text-muted-foreground hover:text-foreground transition-colors"><i class="fa-solid fa-key"></i> Pass</button>
+                            ${editBtn}
+                            ${passBtn}
                             ${toggleBtn}
+                            ${deleteBtn}
                         </td>
                     </tr>
                 `;
             }).join('');
+        }
+
+        async function editName(id, currentName) {
+            const new_name = prompt(`Enter new In-Game Name for ${currentName}:`, currentName);
+            if (!new_name || new_name.trim() === '' || new_name === currentName) return;
+
+            const res = await fetch(`/hub-api/admin/users/${id}/name`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_name })
+            });
+            const data = await res.json();
+            if(data.success) loadUsers();
+            else alert(data.error);
+        }
+
+        async function deleteUser(id, name) {
+            if (!confirm(`CRITICAL WARNING: Are you sure you want to permanently delete user '${name}'?`)) return;
+            
+            const res = await fetch(`/hub-api/admin/users/${id}`, { method: 'DELETE' });
+            const data = await res.json();
+            if(data.success) loadUsers();
+            else alert(data.error);
         }
 
         async function addUser() {

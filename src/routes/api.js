@@ -360,6 +360,39 @@ router.get('/admin/users', requireAdmin, (req, res) => {
     }
 });
 
+// Edit User Name
+router.post('/admin/users/:id/name', requireAdmin, (req, res) => {
+    const { new_name } = req.body;
+    if (!new_name || new_name.trim() === '') return res.status(400).json({ error: 'Name cannot be empty' });
+
+    try {
+        const user = db.prepare(`SELECT game_name FROM app_users WHERE id = ?`).get(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        if (user.game_name === 'admin') return res.status(403).json({ error: 'Cannot rename the master admin' });
+        if (new_name.toLowerCase() === 'admin') return res.status(400).json({ error: 'Cannot use reserved name' });
+
+        db.prepare(`UPDATE app_users SET game_name = ? WHERE id = ?`).run(new_name.trim(), req.params.id);
+        res.json({ success: true });
+    } catch (err) {
+        if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(400).json({ error: 'Username already exists' });
+        res.status(500).json({ error: 'Failed to update name' });
+    }
+});
+
+// Delete User
+router.delete('/admin/users/:id', requireAdmin, (req, res) => {
+    try {
+        const user = db.prepare(`SELECT game_name FROM app_users WHERE id = ?`).get(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        if (user.game_name === 'admin') return res.status(403).json({ error: 'Cannot delete the master admin' });
+
+        db.prepare(`DELETE FROM app_users WHERE id = ?`).run(req.params.id);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to delete user' });
+    }
+});
+
 // Add a new user
 router.post('/admin/users', requireAdmin, (req, res) => {
     const { game_name, password, role, discord_name } = req.body;
