@@ -485,7 +485,12 @@
         let rawDbPlayers = []; let dbSortCol = 'points'; let dbSortDesc = true;
 
         async function openDatabasePanel() {
-            document.getElementById('database-panel').classList.replace('translate-x-full', 'translate-x-0');
+            const panel = document.getElementById('database-panel');
+            if (panel.classList.contains('translate-x-0')) return closeDatabasePanel();
+            
+            closeSystemDatabasePanel(); closePlanetDatabasePanel(); closeFleetDatabasePanel();
+
+            panel.classList.replace('translate-x-full', 'translate-x-0');
             if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
             document.getElementById('db-table-body').innerHTML = '<tr><td colspan="16" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Intelligence...</td></tr>';
             try {
@@ -559,7 +564,12 @@
         let rawDbSystems = []; let sysDbSortCol = 'id'; let sysDbSortDesc = false;
 
         async function openSystemDatabasePanel() {
-            document.getElementById('system-database-panel').classList.replace('translate-x-full', 'translate-x-0');
+            const panel = document.getElementById('system-database-panel');
+            if (panel.classList.contains('translate-x-0')) return closeSystemDatabasePanel();
+            
+            closeDatabasePanel(); closePlanetDatabasePanel(); closeFleetDatabasePanel();
+
+            panel.classList.replace('translate-x-full', 'translate-x-0');
             if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
             document.getElementById('sys-db-table-body').innerHTML = '<tr><td colspan="7" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Archive...</td></tr>';
             try {
@@ -611,7 +621,12 @@
         let rawDbPlanets = []; let plnDbSortCol = 'population'; let plnDbSortDesc = true;
 
         async function openPlanetDatabasePanel() {
-            document.getElementById('planet-database-panel').classList.replace('translate-x-full', 'translate-x-0');
+            const panel = document.getElementById('planet-database-panel');
+            if (panel.classList.contains('translate-x-0')) return closePlanetDatabasePanel();
+            
+            closeDatabasePanel(); closeSystemDatabasePanel(); closeFleetDatabasePanel();
+
+            panel.classList.replace('translate-x-full', 'translate-x-0');
             if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
             document.getElementById('pln-db-table-body').innerHTML = '<tr><td colspan="8" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Archive...</td></tr>';
             try {
@@ -664,7 +679,12 @@
         let rawDbFleets = []; let fltDbSortCol = 'battleships'; let fltDbSortDesc = true;
 
         async function openFleetDatabasePanel() {
-            document.getElementById('fleet-database-panel').classList.replace('translate-x-full', 'translate-x-0');
+            const panel = document.getElementById('fleet-database-panel');
+            if (panel.classList.contains('translate-x-0')) return closeFleetDatabasePanel();
+            
+            closeDatabasePanel(); closeSystemDatabasePanel(); closePlanetDatabasePanel();
+
+            panel.classList.replace('translate-x-full', 'translate-x-0');
             if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
             document.getElementById('flt-db-table-body').innerHTML = '<tr><td colspan="9" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Archive...</td></tr>';
             try {
