@@ -96,6 +96,26 @@ function initDatabase() {
         )
     `);
 
+    try {
+        db.exec(`ALTER TABLE players ADD COLUMN eco_bonus INTEGER DEFAULT 0`);
+        console.log("[DB] Added eco_bonus column to players table.");
+    } catch (e) {}
+
+    try {
+        db.exec(`ALTER TABLE players ADD COLUMN joined TEXT`);
+        console.log("[DB] Added joined column to players table.");
+    } catch (e) {}
+
+    try {
+        db.exec(`ALTER TABLE players ADD COLUMN logins INTEGER DEFAULT 0`);
+        console.log("[DB] Added logins column to players table.");
+    } catch (e) {}
+
+    try {
+        db.exec(`ALTER TABLE player_logins ADD COLUMN total_logins INTEGER DEFAULT 0`);
+        console.log("[DB] Added total_logins column to player_logins table.");
+    } catch (e) {}
+
     // Safely inject the new idle_time column if it doesn't exist
     try {
         db.exec(`ALTER TABLE players ADD COLUMN idle_time TEXT`);

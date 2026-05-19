@@ -197,7 +197,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
         alliance_tag: p.alliance_tag || null,
         country: p.country || null,
         local_time: p.local_time || null,
-        idle_time: p.idle_time || null, // Prevents the RangeError
+        idle_time: p.idle_time || null,
         origin_system: p.origin_system || null,
         level: p.level || 0,
         ranking: p.ranking || null,
@@ -212,6 +212,9 @@ router.post('/sync/player', requireAuth, (req, res) => {
         social: p.social || 0,
         trade_revenue: p.trade_revenue || 0,
         artefact: p.artefact || null,
+        eco_bonus: p.eco_bonus || 0,
+        joined: p.joined || null,
+        logins: p.logins || 0,
         race_growth: p.race_growth || 0,
         race_science: p.race_science || 0,
         race_culture: p.race_culture || 0,
@@ -221,24 +224,45 @@ router.post('/sync/player', requireAuth, (req, res) => {
         race_defense: p.race_defense || 0
     };
 
+    const oldPlayer = db.prepare(`SELECT joined, logins FROM players WHERE id = ?`).get(p.id);
+
     const syncTransaction = db.transaction((player) => {
+        // 1. Rejoin / Account Reset check
+        if (oldPlayer && oldPlayer.joined && player.joined && oldPlayer.joined !== player.joined) {
+            console.log(`[API] Player ${player.id} rejoined/reset detected (Old: ${oldPlayer.joined} | New: ${player.joined}). Wiping old data.`);
+            
+            // Strip ownership of old planets
+            db.prepare(`
+                UPDATE planets 
+                SET owner_id = NULL, population = 0, starbase = 0, has_fleet = 0, is_sieged = 0 
+                WHERE owner_id = ?
+            `).run(player.id);
+            
+            // Delete old fleets
+            db.prepare(`DELETE FROM fleets WHERE owner_id = ?`).run(player.id);
+        }
+
+        // 2. Alliance mapping
         if (player.alliance_id) {
             db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET tag=excluded.tag`).run(player.alliance_id, player.alliance_tag, player.alliance_tag);
         }
 
+        // 3. Upsert Player Profile
         db.prepare(`
             INSERT INTO players (
                 id, name, alliance_id, country, local_time, idle_time, origin_system, 
                 level, ranking, points, science_level, culture_level, 
                 biology, economy, energy, mathematics, physics, social, 
-                trade_revenue, artefact, 
-                race_growth, race_science, race_culture, race_production, race_speed, race_attack, race_defense
+                trade_revenue, artefact, eco_bonus,
+                race_growth, race_science, race_culture, race_production, race_speed, race_attack, race_defense,
+                joined, logins
             ) VALUES (
                 @id, @name, @alliance_id, @country, @local_time, @idle_time, @origin_system, 
                 @level, @ranking, @points, @science_level, @culture_level, 
                 @biology, @economy, @energy, @mathematics, @physics, @social, 
-                @trade_revenue, @artefact, 
-                @race_growth, @race_science, @race_culture, @race_production, @race_speed, @race_attack, @race_defense
+                @trade_revenue, @artefact, @eco_bonus,
+                @race_growth, @race_science, @race_culture, @race_production, @race_speed, @race_attack, @race_defense,
+                @joined, @logins
             ) ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name, alliance_id=excluded.alliance_id, country=excluded.country, 
                 local_time=excluded.local_time, idle_time=excluded.idle_time, origin_system=excluded.origin_system,
@@ -246,11 +270,17 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 science_level=excluded.science_level, culture_level=excluded.culture_level,
                 biology=excluded.biology, economy=excluded.economy, energy=excluded.energy, 
                 mathematics=excluded.mathematics, physics=excluded.physics, social=excluded.social,
-                trade_revenue=excluded.trade_revenue, artefact=excluded.artefact, 
+                trade_revenue=excluded.trade_revenue, artefact=excluded.artefact, eco_bonus=excluded.eco_bonus,
                 race_growth=excluded.race_growth, race_science=excluded.race_science, race_culture=excluded.race_culture,
                 race_production=excluded.race_production, race_speed=excluded.race_speed, race_attack=excluded.race_attack, race_defense=excluded.race_defense,
+                joined=excluded.joined, logins=excluded.logins,
                 updated_at=CURRENT_TIMESTAMP
         `).run(player);
+
+        // 4. Logins Timeseries Tracker
+        if (!oldPlayer || oldPlayer.logins !== player.logins) {
+            db.prepare(`INSERT INTO player_logins (player_id, total_logins) VALUES (?, ?)`).run(player.id, player.logins);
+        }
     });
 
     try {

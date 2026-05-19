@@ -4,9 +4,10 @@ export async function scrapePlayer(playerId) {
     const p = {
         id: parseInt(playerId, 10), name: null, alliance_id: null, alliance_tag: null,
         country: null, local_time: null, idle_time: null, origin_system: null,
+        joined: null, logins: 0,
         level: 0, ranking: null, points: 0, science_level: 0, culture_level: 0,
         biology: 0, economy: 0, energy: 0, mathematics: 0, physics: 0, social: 0,
-        trade_revenue: 0, artefact: null,
+        trade_revenue: 0, artefact: null, eco_bonus: 0, // <--- Added here
         race_growth: 0, race_science: 0, race_culture: 0, race_production: 0, race_speed: 0, race_attack: 0, race_defense: 0
     };
 
@@ -20,12 +21,15 @@ export async function scrapePlayer(playerId) {
     }
 
     // FIX 1: Look for both <th> and <td>. This stops the script from going blind on headers.
-    const getRowVal = (labelMatch) => {
+    const getRowVal = (labelMatch, exact = false) => {
         const rows = document.querySelectorAll('table tbody tr');
         for (let row of rows) {
             const cells = row.querySelectorAll('th, td');
-            if (cells.length >= 2 && cells[0].innerText.includes(labelMatch)) {
-                return cells[1].innerText.trim();
+            if (cells.length >= 2) {
+                const labelText = cells[0].innerText.trim();
+                if (exact ? labelText === labelMatch : labelText.includes(labelMatch)) {
+                    return cells[1].innerText.trim();
+                }
             }
         }
         return null;
@@ -33,13 +37,13 @@ export async function scrapePlayer(playerId) {
 
     p.local_time = getRowVal('Local Time');
     p.idle_time = getRowVal('Idle');
+    p.joined = getRowVal('Joined'); // <--- Extract Joined Date
+    p.logins = parseInt(getRowVal('Logins'), 10) || 0; // <--- Extract Logins
     
-    // FIX 2: Better Country extraction. Try the image title/alt first, then text content.
+    // FIX 2: Better Country extraction. Try the image alt first, then title.
     const countryImg = document.querySelector('img[src^="/img/country/"]');
     if (countryImg) {
-        p.country = countryImg.getAttribute('title') || countryImg.getAttribute('alt') || countryImg.nextSibling?.textContent?.trim();
-        // Fallback: Prevent setting country to the player's name
-        if (p.country && p.country.toLowerCase() === p.name?.toLowerCase()) p.country = null;
+        p.country = countryImg.getAttribute('alt') || countryImg.getAttribute('title');
     }
 
     const originLink = document.querySelector('a[href^="/Game/Map/SolarSystem/"]');
@@ -61,22 +65,26 @@ export async function scrapePlayer(playerId) {
         }
     }
 
-    p.biology = parseInt(getRowVal('Biology'), 10) || 0;
-    p.economy = parseInt(getRowVal('Economy'), 10) || 0;
-    p.energy = parseInt(getRowVal('Energy'), 10) || 0;
-    p.mathematics = parseInt(getRowVal('Mathematics'), 10) || 0;
-    p.physics = parseInt(getRowVal('Physics'), 10) || 0;
-    p.social = parseInt(getRowVal('Social'), 10) || 0;
+    p.biology = parseInt(getRowVal('Biology', true), 10) || 0;
+    p.economy = parseInt(getRowVal('Economy', true), 10) || 0;
+    p.energy = parseInt(getRowVal('Energy', true), 10) || 0;
+    p.mathematics = parseInt(getRowVal('Mathematics', true), 10) || 0;
+    p.physics = parseInt(getRowVal('Physics', true), 10) || 0;
+    p.social = parseInt(getRowVal('Social', true), 10) || 0;
+
+    const ecoBonusStr = getRowVal('Economy Bonus');
+    if (ecoBonusStr) p.eco_bonus = parseInt(ecoBonusStr.replace(/[^\d+-]/g, ''), 10) || 0;
 
     const tradeStr = getRowVal('Trade Revenue');
     if (tradeStr) p.trade_revenue = parseInt(tradeStr.replace(/[^\d]/g, ''), 10) || 0;
-
+    
     const artefactRows = document.querySelectorAll('.ir-summary tr');
     artefactRows.forEach(row => {
         const tds = row.querySelectorAll('td');
         if (tds.length >= 2 && tds[0]?.innerText.includes('Artefact')) {
             const rawText = tds[1].innerText.trim();
-            p.artefact = rawText.split(/\s+/)[0] || null;
+            // Handle the 'N/A' edge case cleanly
+            p.artefact = rawText === 'N/A' ? null : (rawText.split(/\s+/)[0] || null);
         }
     });
 
