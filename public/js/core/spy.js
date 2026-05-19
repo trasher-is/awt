@@ -4,20 +4,22 @@ export function initSpy() {
     let verifiedPlayerName = null;
     let knownSysIdsCache = null;
     let alliedSysIdsCache = null; 
-    let alliedPlayerNamesCache = new Set(); // NEW: Stores all app_users
+    let alliedPlayerNamesCache = new Set();
     let isFetchingSystems = false;
     let simulatedSystemId = null;
+    
+    // NEW: Tracker to prevent duplicate scraper executions on the same page
+    let lastScrapedUrl = null;
 
     async function injectMapIndicators() {
         if (knownSysIdsCache === null && !isFetchingSystems) {
             isFetchingSystems = true;
             try {
-                // Fetch systems, planets, fleets, AND your registered tool users
                 const [sysRes, plnRes, fltRes, memRes] = await Promise.all([
                     fetch('/hub-api/intel/systems_db'),
                     fetch('/hub-api/intel/planets_db'),
                     fetch('/hub-api/intel/fleets_db'),
-                    fetch('/hub-api/intel/members') // NEW ROUTE
+                    fetch('/hub-api/intel/members')
                 ]);
 
                 const sysData = await sysRes.json();
@@ -25,7 +27,6 @@ export function initSpy() {
                 const fltData = await fltRes.json();
                 const memData = await memRes.json();
 
-                // Save active members to memory (lowercase for safe matching)
                 if (memData.success) {
                     alliedPlayerNamesCache = new Set(memData.members.map(m => m.toLowerCase()));
                 }
@@ -34,7 +35,6 @@ export function initSpy() {
                     knownSysIdsCache = new Set(sysData.systems.map(s => String(s.id)));
                     alliedSysIdsCache = new Set();
 
-                    // Highlight system if an app_user owns a planet here
                     if (plnData.success) {
                         plnData.planets.forEach(p => {
                             if (p.owner_name && alliedPlayerNamesCache.has(p.owner_name.toLowerCase())) {
@@ -43,7 +43,6 @@ export function initSpy() {
                         });
                     }
 
-                    // Highlight system if an app_user parked a fleet here
                     if (fltData.success) {
                         fltData.fleets.forEach(f => {
                             if (f.owner_name && alliedPlayerNamesCache.has(f.owner_name.toLowerCase())) {
@@ -99,25 +98,20 @@ export function initSpy() {
                 }
             }, { capture: true }); 
 
-            // --- VISUAL INDICATOR LOGIC ---
             if (knownSysIdsCache.has(sysId)) {
                 const icon = node.querySelector('img') || node; 
                 
                 if (alliedSysIdsCache.has(sysId)) {
-                    // HIGH VISIBILITY: A registered app_user is in this system
                     icon.style.boxShadow = '0 0 15px 5px #22c55e, inset 0 0 10px #22c55e';
                     icon.style.borderRadius = '50%';
                     icon.style.border = '2px solid #22c55e';
                     icon.style.backgroundColor = 'rgba(34, 197, 94, 0.4)';
-                    
                     span.style.color = '#4ade80';
                     span.style.fontWeight = 'bold';
                 } else {
-                    // LOW VISIBILITY: Standard scanned system
                     icon.style.boxShadow = '0 0 4px 1px rgba(34, 197, 94, 0.3)';
                     icon.style.borderRadius = '50%';
                     icon.style.border = '1px solid rgba(34, 197, 94, 0.5)';
-                    
                     span.style.color = 'rgba(74, 222, 128, 0.7)'; 
                     span.style.fontWeight = 'normal';
                 }
@@ -207,30 +201,37 @@ export function initSpy() {
             playerName: verifiedPlayerName 
         };
         
+        // Always send UI context to the wrapper...
         window.parent.postMessage({ type: 'GAME_CONTEXT', payload: contextPayload }, window.location.origin);
 
-        if (isSystemView && sysId && !simulatedSystemId) {
-            import('../scrapers/system-parser.js')
-                .then(module => module.scrapeSystem(sysId))
-                .catch(err => console.error(err));
-        }
+        // ...But ONLY trigger scrapers if we actually navigated to a new URL
+        const currentFullUrl = window.location.href; 
+        if (currentFullUrl !== lastScrapedUrl) {
+            lastScrapedUrl = currentFullUrl;
 
-        if (isPlayerView && targetPlayerId) {
-            import('../scrapers/player-parser.js')
-                .then(module => module.scrapePlayer(targetPlayerId))
-                .catch(err => console.error(err));
-        }
+            if (isSystemView && sysId && !simulatedSystemId) {
+                import('../scrapers/system-parser.js')
+                    .then(module => module.scrapeSystem(sysId))
+                    .catch(err => console.error(err));
+            }
 
-        if (isAllianceView) {
-            import('../scrapers/alliance-parser.js')
-                .then(module => module.scrapeAlliance())
-                .catch(err => console.error(err));
-        }
+            if (isPlayerView && targetPlayerId) {
+                import('../scrapers/player-parser.js')
+                    .then(module => module.scrapePlayer(targetPlayerId))
+                    .catch(err => console.error(err));
+            }
 
-        if (isCalculatorView) {
-            import('../scrapers/galaxy-parser.js')
-                .then(module => module.scrapeGalaxy())
-                .catch(err => console.error(err));
+            if (isAllianceView) {
+                import('../scrapers/alliance-parser.js')
+                    .then(module => module.scrapeAlliance())
+                    .catch(err => console.error(err));
+            }
+
+            if (isCalculatorView) {
+                import('../scrapers/galaxy-parser.js')
+                    .then(module => module.scrapeGalaxy())
+                    .catch(err => console.error(err));
+            }
         }
     }
 
@@ -284,11 +285,9 @@ export function initSpy() {
                 const planetIndex = parseInt(firstCell.innerText.trim(), 10);
                 if (isNaN(planetIndex)) return;
 
-                // NEW: Target the Player Name link instead of the Alliance link
                 const ownerLink = row.querySelectorAll('td')[3]?.querySelector('a[href^="/Game/Players/Profile/"]');
                 const rowPlayerName = ownerLink ? ownerLink.innerText.trim().toLowerCase() : null;
                 
-                // NEW: Check if the player name matches one of your app_users
                 const isAlliedPlanet = rowPlayerName && alliedPlayerNamesCache.has(rowPlayerName);
 
                 const isSieged = row.classList.contains('siege');

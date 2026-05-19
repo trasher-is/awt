@@ -10,7 +10,6 @@ export async function scrapePlayer(playerId) {
         race_growth: 0, race_science: 0, race_culture: 0, race_production: 0, race_speed: 0, race_attack: 0, race_defense: 0
     };
 
-    // FIX: Explicitly target the profile link to avoid supporter medals
     const nameLink = document.querySelector('th[colspan="2"] a[href^="/Game/Players/Profile/"]');
     if (nameLink) p.name = nameLink.innerText.trim();
 
@@ -20,20 +19,28 @@ export async function scrapePlayer(playerId) {
         p.alliance_id = parseInt(allyLink.getAttribute('href').split('/').pop(), 10);
     }
 
+    // FIX 1: Look for both <th> and <td>. This stops the script from going blind on headers.
     const getRowVal = (labelMatch) => {
         const rows = document.querySelectorAll('table tbody tr');
         for (let row of rows) {
-            const tds = row.querySelectorAll('td');
-            if (tds.length >= 2 && tds[0].innerText.includes(labelMatch)) return tds[1].innerText.trim();
+            const cells = row.querySelectorAll('th, td');
+            if (cells.length >= 2 && cells[0].innerText.includes(labelMatch)) {
+                return cells[1].innerText.trim();
+            }
         }
         return null;
     };
 
     p.local_time = getRowVal('Local Time');
-    p.idle_time = getRowVal('Idle'); // NEW: Grabs "6m" or "Online"
+    p.idle_time = getRowVal('Idle');
     
-    const countrySpan = document.querySelector('img[src^="/img/country/"]')?.nextElementSibling;
-    if (countrySpan) p.country = countrySpan.innerText.trim();
+    // FIX 2: Better Country extraction. Try the image title/alt first, then text content.
+    const countryImg = document.querySelector('img[src^="/img/country/"]');
+    if (countryImg) {
+        p.country = countryImg.getAttribute('title') || countryImg.getAttribute('alt') || countryImg.nextSibling?.textContent?.trim();
+        // Fallback: Prevent setting country to the player's name
+        if (p.country && p.country.toLowerCase() === p.name?.toLowerCase()) p.country = null;
+    }
 
     const originLink = document.querySelector('a[href^="/Game/Map/SolarSystem/"]');
     if (originLink) p.origin_system = parseInt(originLink.getAttribute('href').split('/').pop(), 10);
@@ -46,10 +53,11 @@ export async function scrapePlayer(playerId) {
 
     const rankStr = getRowVal('Ranking');
     if (rankStr) {
-        const rMatch = rankStr.match(/#(\d+)\s*\(([\d,]+)\)/);
+        // FIX 3: Robust regex to handle points formatted with commas, dots, or spaces
+        const rMatch = rankStr.match(/#(\d+)\s*\(([\d,\.\s]+)\)/);
         if (rMatch) {
-            p.ranking = parseInt(rMatch[1].replace(/,/g, ''), 10);
-            p.points = parseInt(rMatch[2].replace(/,/g, ''), 10);
+            p.ranking = parseInt(rMatch[1].replace(/[^\d]/g, ''), 10);
+            p.points = parseInt(rMatch[2].replace(/[^\d]/g, ''), 10);
         }
     }
 
@@ -63,13 +71,11 @@ export async function scrapePlayer(playerId) {
     const tradeStr = getRowVal('Trade Revenue');
     if (tradeStr) p.trade_revenue = parseInt(tradeStr.replace(/[^\d]/g, ''), 10) || 0;
 
-    // FIX: Safely grab the first continuous string in the cell, ignoring badge icons
     const artefactRows = document.querySelectorAll('.ir-summary tr');
     artefactRows.forEach(row => {
         const tds = row.querySelectorAll('td');
-        if (tds[0]?.innerText.includes('Artefact')) {
+        if (tds.length >= 2 && tds[0]?.innerText.includes('Artefact')) {
             const rawText = tds[1].innerText.trim();
-            // Splitting by whitespace guarantees we only get "MJ3" or "OB1"
             p.artefact = rawText.split(/\s+/)[0] || null;
         }
     });
