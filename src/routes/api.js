@@ -831,44 +831,50 @@ router.get('/intel/members', requireAuth, (req, res) => {
     }
 });
 
-router.get('/intel/player/:id', async (req, res) => {
+router.get('/intel/player/:id', (req, res) => {
     try {
         const playerId = req.params.id;
 
-        // 1. Fetch current static player data
-        const playerInfo = await db.get(`
-            SELECT id, name, alliance_tag, points, planet_count, idle_time 
-            FROM players 
-            WHERE id = ?
-        `, [playerId]);
+        const playerInfo = db.prepare(`
+            SELECT p.id, p.name, p.points, p.culture_level, p.idle_time, p.logins,
+                   a.tag as alliance_tag,
+                   (SELECT COUNT(*) FROM planets WHERE owner_id = ?) as planet_count
+            FROM players p
+            LEFT JOIN alliances a ON p.alliance_id = a.id
+            WHERE p.id = ?
+        `).get(playerId, playerId);
 
         if (!playerInfo) {
             return res.json({ success: false, error: 'Player not found in database.' });
         }
 
-        // 2. Fetch historical activity for the Chart
-        // (Assumes you have a table capturing their points/rank periodically)
+        // Fetch historical logins for the Chart
         let formattedActivity = [];
         try {
-            const history = await db.all(`
-                SELECT timestamp, points 
-                FROM player_history 
+            const history = db.prepare(`
+                SELECT timestamp, total_logins 
+                FROM player_logins 
                 WHERE player_id = ? 
                 ORDER BY timestamp ASC 
                 LIMIT 30
-            `, [playerId]);
+            `).all(playerId);
 
             formattedActivity = history.map(row => ({
-                // Format nicely for the chart label
                 date: new Date(row.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-                points: row.points
+                points: row.total_logins // Mapped to 'points' so your existing Chart.js config doesn't crash
             }));
+            
+            // If they have no history yet, plot their current login count
+            if (formattedActivity.length === 0) {
+                 formattedActivity = [{
+                    date: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                    points: playerInfo.logins || 0
+                }];
+            }
         } catch (historyErr) {
-            console.log(`[API] No history table or data found for player ${playerId}`);
-            // Fallback if no history exists yet: just plot current points
             formattedActivity = [{
                 date: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-                points: playerInfo.points
+                points: playerInfo.logins || 0
             }];
         }
 

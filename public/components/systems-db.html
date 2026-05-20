@@ -1,0 +1,28 @@
+<div id="system-database-panel" class="absolute top-0 left-0 md:left-14 right-0 h-full bg-background/95 backdrop-blur-md border-l border-border z-40 transform translate-x-full transition-transform duration-300 flex flex-col shadow-2xl">
+    <div class="h-14 border-b border-border flex items-center justify-between px-6 bg-card shrink-0">
+        <div class="flex items-center gap-3 text-foreground font-semibold"><i class="fa-solid fa-meteor text-aw-warning text-xl"></i><span class="tracking-wider uppercase">Systems Archive</span></div>
+        <button onclick="closeSystemDatabasePanel()" class="text-muted-foreground hover:text-foreground transition-colors p-2 rounded hover:bg-accent"><i class="fa-solid fa-xmark text-xl"></i></button>
+    </div>
+    <div class="flex-1 overflow-hidden flex flex-col p-4 md:p-6 gap-4">
+        <div class="flex justify-between items-center gap-4">
+            <div class="relative w-full md:w-72"><input type="text" id="sys-db-search-input" placeholder="Filter by Name, ID, or Coordinates..." class="flex h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8" oninput="renderSystemTable()"><i class="fa-solid fa-filter absolute right-3 top-2.5 text-muted-foreground text-xs pointer-events-none"></i></div>
+            <div class="text-xs text-muted-foreground font-mono">Showing <span id="sys-db-result-count" class="text-foreground font-bold">0</span> records</div>
+        </div>
+        <div class="flex-1 overflow-auto border border-border rounded-lg bg-card relative shadow-sm">
+            <table class="w-full text-left text-xs whitespace-nowrap">
+                <thead class="sticky top-0 bg-secondary text-secondary-foreground shadow-sm z-10">
+                    <tr>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortSysDb('id')">ID <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortSysDb('name')">Name <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortSysDb('x')">X <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortSysDb('y')">Y <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-aw-ally border-l border-border" onclick="sortSysDb('planet_count')">Planets Captured <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-aw-enemy" onclick="sortSysDb('fleet_count')">Fleets Orbiting <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 border-l border-border" onclick="sortSysDb('updated_at')">Last Intel <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                    </tr>
+                </thead>
+                <tbody id="sys-db-table-body" class="divide-y divide-border"></tbody>
+            </table>
+        </div>
+    </div>
+</div>

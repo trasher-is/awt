@@ -100,6 +100,19 @@ export async function scrapePlayer(playerId) {
         if (text.includes('Defence') || text.includes('Defense')) p.race_defense = parseRace(text);
     });
 
+    // ==========================================
+    // ADD THIS BLOCK RIGHT HERE
+    // ==========================================
+    window.parent.postMessage({
+        type: 'GAME_CONTEXT',
+        payload: {
+            path: window.location.pathname,
+            isPlayerView: true,
+            playerId: p.id // We use the ID you parsed at the beginning of the script
+        }
+    }, window.location.origin);
+    // ==========================================
+
     try {
         const response = await fetch('/hub-api/sync/player', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
         if (response.ok) {
