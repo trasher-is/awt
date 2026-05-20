@@ -831,4 +831,57 @@ router.get('/intel/members', requireAuth, (req, res) => {
     }
 });
 
+router.get('/intel/player/:id', async (req, res) => {
+    try {
+        const playerId = req.params.id;
+
+        // 1. Fetch current static player data
+        const playerInfo = await db.get(`
+            SELECT id, name, alliance_tag, points, planet_count, idle_time 
+            FROM players 
+            WHERE id = ?
+        `, [playerId]);
+
+        if (!playerInfo) {
+            return res.json({ success: false, error: 'Player not found in database.' });
+        }
+
+        // 2. Fetch historical activity for the Chart
+        // (Assumes you have a table capturing their points/rank periodically)
+        let formattedActivity = [];
+        try {
+            const history = await db.all(`
+                SELECT timestamp, points 
+                FROM player_history 
+                WHERE player_id = ? 
+                ORDER BY timestamp ASC 
+                LIMIT 30
+            `, [playerId]);
+
+            formattedActivity = history.map(row => ({
+                // Format nicely for the chart label
+                date: new Date(row.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                points: row.points
+            }));
+        } catch (historyErr) {
+            console.log(`[API] No history table or data found for player ${playerId}`);
+            // Fallback if no history exists yet: just plot current points
+            formattedActivity = [{
+                date: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                points: playerInfo.points
+            }];
+        }
+
+        res.json({
+            success: true,
+            player: playerInfo,
+            activity: formattedActivity
+        });
+
+    } catch (error) {
+        console.error('[API] Error fetching player intel:', error);
+        res.status(500).json({ success: false, error: 'Server error' });
+    }
+});
+
 module.exports = router;

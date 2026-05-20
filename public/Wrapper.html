@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Alliance Hub - Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script>
         tailwind.config = {
@@ -25,8 +26,10 @@
         }
     </script>
     <style>
-        ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: hsl(240 10% 3.9%); }
-        ::-webkit-scrollbar-thumb { background: hsl(240 3.7% 15.9%); border-radius: 3px; } ::-webkit-scrollbar-thumb:hover { background: hsl(240 5% 64.9%); }
+        ::-webkit-scrollbar { width: 2px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: hsl(240 3.7% 20%); border-radius: 2px; }
+        ::-webkit-scrollbar-thumb:hover { background: hsl(240 5% 64.9%); }
         .toast-enter { transform: translateY(100%); opacity: 0; } .toast-active { transform: translateY(0); opacity: 1; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
         .sidebar-text { transition: opacity 0.2s ease-in-out; opacity: 0; white-space: nowrap; pointer-events: none; }
         @media (min-width: 768px) { #sidebar.expanded { width: 22rem; } #sidebar.expanded .sidebar-text { opacity: 1; pointer-events: auto; } #sidebar:not(.expanded) .hide-collapsed { display: none; } }
@@ -47,229 +50,134 @@
     <nav id="sidebar" class="absolute top-0 left-0 h-full w-14 md:w-14 transition-all duration-300 bg-background/95 backdrop-blur-md border-r border-border flex flex-col z-50 overflow-x-hidden shadow-2xl">
         <button onclick="toggleSidebar()" class="h-14 w-full flex items-center justify-start px-4 border-b border-border hover:bg-accent text-foreground shrink-0 transition-colors group">
             <i class="fa-solid fa-shuttle-space text-lg w-6 text-center group-hover:scale-110 transition-transform"></i>
-            <span class="ml-4 font-semibold tracking-wide sidebar-text">tool v2</span>
+            <span class="ml-4 font-semibold tracking-wide sidebar-text">Hub v2</span>
             <i class="fa-solid fa-xmark ml-auto md:hidden text-muted-foreground sidebar-text text-lg"></i>
         </button>
 
-        <div class="flex-1 overflow-y-auto overflow-x-hidden flex flex-col pt-2">
+        <div class="flex-1 flex flex-col pt-2">
             
             <div id="context-tools" class="flex flex-col pb-4 border-b border-border hidden">
-                <div class="px-4 py-2 text-[10px] text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed flex justify-between">
-                    <span>Active Intel</span><span id="ui-sys-id" class="text-foreground font-mono hidden">--</span>
+                <div class="px-4 py-2 text-xs text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed flex justify-between items-center">
+                    <span>System Intel</span><span id="ui-sys-id" class="text-foreground font-mono hidden">--</span>
                 </div>
-                <button onclick="toggleSystemIntelView()" class="mx-4 mb-3 bg-secondary text-secondary-foreground hover:bg-secondary/80 font-medium h-9 rounded-md transition-colors text-xs flex justify-center items-center gap-2 hide-collapsed shadow-sm">
-                    <i class="fa-solid fa-table-list"></i> Full System Intel
-                </button>
-                <div id="system-intel-container" class="px-4 py-2 hide-collapsed hidden flex-col gap-4 text-xs overflow-y-auto max-h-[50vh]">
-                    <div><div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Planets</div><div id="intel-planets-list" class="flex flex-col gap-1.5"></div></div>
-                    <div><div class="text-aw-enemy font-semibold border-b border-border pb-1 mb-2">Fleets in Orbit</div><div id="intel-fleets-list" class="flex flex-col gap-1.5"></div></div>
-                    <div><div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Recent History</div><div id="intel-history-list" class="flex flex-col gap-1.5"></div></div>
-                </div>
-                <div id="system-plans-container" class="px-4 hide-collapsed hidden flex-col gap-3">
-                    <div class="bg-card border border-border rounded-lg p-3 shadow-sm">
-                        <div class="flex gap-2 mb-3">
-                            <input type="number" id="plan-planet-idx" placeholder="Planet #" class="flex h-8 w-24 rounded-md border border-input bg-transparent px-3 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
-                            <input type="text" id="plan-note" placeholder="Instructions..." class="flex h-8 w-full rounded-md border border-input bg-transparent px-3 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
-                        </div>
-                        <button onclick="savePlan()" class="inline-flex items-center justify-center w-full h-8 rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90 text-xs gap-2 shadow-sm"><i class="fa-solid fa-plus"></i> Save Plan</button>
+                
+                <div id="system-intel-container" class="px-4 py-2 hide-collapsed flex flex-col gap-4 text-sm">
+                    <div>
+                        <div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Planets</div>
+                        <div id="intel-planets-list" class="flex flex-col gap-1.5"></div>
                     </div>
-                    <div id="plans-list" class="flex flex-col gap-2 empty:hidden"></div>
+                    
+                    <div id="system-plans-container" class="flex flex-col gap-3">
+                        <div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Tactical Plans</div>
+                        <div class="bg-card border border-border rounded-lg p-3 shadow-sm">
+                            <div class="flex gap-2 mb-3">
+                                <select id="plan-planet-idx" class="h-8 w-24 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-muted-foreground">
+                                    <option value="" disabled selected>Planet #</option>
+                                    <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                                    <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+                                    <option value="7">7</option><option value="8">8</option><option value="9">9</option>
+                                    <option value="10">10</option><option value="11">11</option><option value="12">12</option>
+                                </select>
+                                <input type="text" id="plan-note" placeholder="Instructions..." class="h-8 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+                                <button onclick="savePlan()" class="inline-flex items-center justify-center h-8 px-3 rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90 text-sm shadow-sm">Save</button>
+                            </div>
+                        </div>
+                        <div id="plans-list" class="flex flex-col gap-2 empty:hidden"></div>
+                    </div>
+
+                    <div>
+                        <div class="text-aw-enemy font-semibold border-b border-border pb-1 mb-2">Fleets in Orbit</div>
+                        <div id="intel-fleets-list" class="flex flex-col gap-1.5"></div>
+                    </div>
+
+                    <div>
+                        <div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Recent History</div>
+                        <div id="intel-history-list" class="flex flex-col gap-1.5"></div>
+                    </div>
                 </div>
                 <button id="btn-ctx-map" onclick="copyToDiscord('map')" class="h-10 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground hidden transition-colors mt-2">
-                    <i class="fa-solid fa-map w-6 text-center text-sm"></i><div class="ml-4 flex flex-col items-start sidebar-text"><span class="text-[10px] text-muted-foreground uppercase leading-tight">Coordinates</span><span id="ui-map-coords" class="font-mono font-medium text-foreground leading-tight">X: -- / Y: --</span></div>
+                    <i class="fa-solid fa-map w-6 text-center text-sm"></i>
+                    <div class="ml-4 flex flex-col items-start sidebar-text">
+                        <span class="text-xs text-muted-foreground uppercase leading-tight">Coordinates</span>
+                        <span id="ui-map-coords" class="font-mono font-medium text-foreground leading-tight">X: -- / Y: --</span>
+                    </div>
                 </button>
             </div>
 
+            <div id="player-context-tools" class="flex flex-col pb-4 border-b border-border hidden">
+                <div class="px-4 py-2 text-xs text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed flex justify-between items-center">
+                    <span>Player Intel</span><span id="ui-player-id" class="text-foreground font-mono hidden">--</span>
+                </div>
+                <div id="player-intel-container" class="px-4 py-2 hide-collapsed flex flex-col gap-4 text-sm">
+                    <div>
+                        <div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Overview</div>
+                        <div id="player-stats-list" class="flex flex-col gap-1.5 text-sm">
+                            <span class="text-muted-foreground italic text-center py-2"><i class="fa-solid fa-circle-notch fa-spin"></i> Analyzing...</span>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Activity Log</div>
+                        <div class="bg-card border border-border rounded p-2 shadow-sm h-40 w-full">
+                            <canvas id="playerActivityChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="flex flex-col py-4 border-b border-border hide-collapsed">
-                <div class="px-4 pb-2 text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Database Search</div>
+                <div class="px-4 pb-2 text-xs text-muted-foreground font-semibold uppercase tracking-wider">Database Search</div>
                 <div class="px-4 mb-3 relative">
-                    <input type="text" id="search-player-input" placeholder="Player Name or ID..." class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8" oninput="handleSearchInput('player')">
-                    <i class="fa-solid fa-magnifying-glass absolute right-7 top-2.5 text-muted-foreground text-xs pointer-events-none"></i>
+                    <input type="text" id="search-player-input" placeholder="Player Name or ID..." class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8" oninput="handleSearchInput('player')">
+                    <i class="fa-solid fa-magnifying-glass absolute right-7 top-2.5 text-muted-foreground text-sm pointer-events-none"></i>
                     <div id="search-player-results" class="mt-2 flex flex-col gap-1 max-h-40 overflow-y-auto empty:hidden"></div>
                 </div>
                 <div class="px-4 relative">
-                    <input type="text" id="search-system-input" placeholder="System Name or ID..." class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8" oninput="handleSearchInput('system')">
-                    <i class="fa-solid fa-magnifying-glass absolute right-7 top-2.5 text-muted-foreground text-xs pointer-events-none"></i>
+                    <input type="text" id="search-system-input" placeholder="System Name or ID..." class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8" oninput="handleSearchInput('system')">
+                    <i class="fa-solid fa-magnifying-glass absolute right-7 top-2.5 text-muted-foreground text-sm pointer-events-none"></i>
                     <div id="search-system-results" class="mt-2 flex flex-col gap-1 max-h-40 overflow-y-auto empty:hidden"></div>
                 </div>
             </div>
 
             <div class="flex flex-col py-2 border-b border-border">
-                <div class="px-4 py-2 text-[10px] text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed">Global Archives</div>
-                <button onclick="openDatabasePanel()" class="h-12 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
-                    <i class="fa-solid fa-hand-fist w-6 text-center text-lg"></i><span class="ml-4 sidebar-text">Players DB</span>
+                <div class="px-4 py-2 text-xs text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed">Archives</div>
+                <button onclick="openDatabasePanel()" class="h-8 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
+                    <i class="fa-solid fa-hand-fist w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-sm">Players</span>
                 </button>
-                <button onclick="openSystemDatabasePanel()" class="h-12 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
-                    <i class="fa-solid fa-meteor w-6 text-center text-lg"></i><span class="ml-4 sidebar-text">Systems DB</span>
+                <button onclick="openSystemDatabasePanel()" class="h-8 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
+                    <i class="fa-solid fa-meteor w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-sm">Systems</span>
                 </button>
-                <button onclick="openPlanetDatabasePanel()" class="h-12 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
-                    <i class="fa-solid fa-globe w-6 text-center text-lg"></i><span class="ml-4 sidebar-text">Planets DB</span>
+                <button onclick="openPlanetDatabasePanel()" class="h-8 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
+                    <i class="fa-solid fa-globe w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-sm">Planets</span>
                 </button>
-                <button onclick="openFleetDatabasePanel()" class="h-12 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
-                    <i class="fa-solid fa-crow w-6 text-center text-lg text-aw-enemy"></i><span class="ml-4 sidebar-text">Fleets DB</span>
+                <button onclick="openFleetDatabasePanel()" class="h-8 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
+                    <i class="fa-solid fa-crow w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-sm">Fleets</span>
                 </button>
             </div>
 
-            <div class="flex flex-col py-4 border-b border-border hide-collapsed">
-                <div class="px-4 pb-2 text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Scrape Tools</div>
+            <div class="flex flex-col py-4 hide-collapsed mt-auto">
+                <div class="px-4 pb-2 text-xs text-muted-foreground font-semibold uppercase tracking-wider">Scrapers</div>
                 <div class="px-4 flex flex-row gap-2">
-                    <button id="btn-mass-scan" class="inline-flex items-center justify-center w-1/2 h-9 rounded-md bg-secondary text-secondary-foreground font-medium hover:bg-secondary/80 transition-colors text-xs gap-2 shadow-sm" title="Scan Galaxy"><i class="fa-solid fa-satellite-dish text-sm"></i> Galaxy</button>
-                    <button id="btn-mass-scan-players" class="inline-flex items-center justify-center w-1/2 h-9 rounded-md bg-secondary text-secondary-foreground font-medium hover:bg-secondary/80 transition-colors text-xs gap-2 shadow-sm" title="Scan Players"><i class="fa-solid fa-user-astronaut text-sm"></i> Players</button>
+                    <button id="btn-mass-scan" class="inline-flex items-center justify-center w-1/2 h-9 rounded-md bg-secondary text-secondary-foreground font-medium hover:bg-secondary/80 transition-colors text-sm gap-2 shadow-sm" title="Scan Galaxy"><i class="fa-solid fa-satellite-dish"></i> Galaxy</button>
+                    <button id="btn-mass-scan-players" class="inline-flex items-center justify-center w-1/2 h-9 rounded-md bg-secondary text-secondary-foreground font-medium hover:bg-secondary/80 transition-colors text-sm gap-2 shadow-sm" title="Scan Players"><i class="fa-solid fa-user-astronaut"></i> Players</button>
                 </div>
                 <div id="scan-progress-container" class="px-4 mt-3 hidden flex-col gap-1.5">
-                    <div class="flex justify-between text-[10px] text-muted-foreground font-mono"><span id="scan-status-text">Initializing...</span><span id="scan-count-text">0/0</span></div>
+                    <div class="flex justify-between text-xs text-muted-foreground font-mono"><span id="scan-status-text">Initializing...</span><span id="scan-count-text">0/0</span></div>
                     <div class="w-full bg-secondary rounded-full h-1.5 overflow-hidden"><div id="scan-progress-bar" class="bg-primary h-1.5 rounded-full transition-all duration-200" style="width: 0%"></div></div>
                 </div>
             </div>
-
-            <div class="p-4 hide-collapsed mt-auto">
-                <div class="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider mb-3 flex justify-between items-center">
-                    <span>Storage Stats</span><button onclick="refreshDbStats()" class="hover:text-foreground transition-colors"><i class="fa-solid fa-rotate"></i></button>
-                </div>
-                <div class="grid grid-cols-2 gap-2">
-                    <div class="border border-border rounded-lg p-2.5 flex flex-col items-center bg-card shadow-sm"><span class="text-muted-foreground text-[10px] font-medium">Planets</span><span id="stat-planets" class="text-sm font-semibold text-foreground mt-0.5">0</span></div>
-                    <div class="border border-border rounded-lg p-2.5 flex flex-col items-center bg-card shadow-sm"><span class="text-muted-foreground text-[10px] font-medium">Players</span><span id="stat-players" class="text-sm font-semibold text-foreground mt-0.5">0</span></div>
-                    <div class="border border-border rounded-lg p-2.5 flex flex-col items-center bg-card shadow-sm"><span class="text-muted-foreground text-[10px] font-medium">Fleets</span><span id="stat-fleets" class="text-sm font-semibold text-foreground mt-0.5">0</span></div>
-                    <div class="border border-border rounded-lg p-2.5 flex flex-col items-center bg-card shadow-sm"><span class="text-muted-foreground text-[10px] font-medium">Alliances</span><span id="stat-alliances" class="text-sm font-semibold text-foreground mt-0.5">0</span></div>
-                </div>
-            </div>
         </div>
 
-        <div class="border-t border-border flex flex-col py-2 shrink-0">
-            <button id="admin-panel-btn" onclick="window.location.href='/admin'" class="hidden h-10 w-full items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"><i class="fa-solid fa-gear w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-xs">Admin Panel</span></button>
-            <button onclick="logout()" class="h-10 w-full flex items-center justify-start px-4 hover:bg-red-950/30 text-red-400 transition-colors"><i class="fa-solid fa-right-from-bracket w-6 text-center text-sm"></i><div class="ml-4 flex items-center gap-2 sidebar-text"><span class="text-xs font-medium">Logout</span><span id="auth-user-display" class="text-[10px] opacity-70 font-mono">(--)</span></div></button>
+        <div class="border-t border-border flex flex-row shrink-0 h-12 bg-background hide-collapsed mt-auto">
+            <button id="admin-panel-btn" onclick="window.location.href='/admin'" style="display: none;" class="flex-1 items-center justify-center hover:bg-accent text-muted-foreground hover:text-foreground transition-colors border-r border-border" title="Admin Settings">
+                <i class="fa-solid fa-gear text-lg"></i>
+            </button>
+            <button onclick="logout()" class="flex-1 flex items-center justify-center hover:bg-red-950/30 text-red-400 transition-colors" title="Logout">
+                <i class="fa-solid fa-right-from-bracket text-lg"></i>
+            </button>
         </div>
     </nav>
 
-    <div id="database-panel" class="absolute top-0 left-0 md:left-14 right-0 h-full bg-background/95 backdrop-blur-md border-l border-border z-40 transform translate-x-full transition-transform duration-300 flex flex-col shadow-2xl">
-        <div class="h-14 border-b border-border flex items-center justify-between px-6 bg-card shrink-0">
-            <div class="flex items-center gap-3 text-foreground font-semibold"><i class="fa-solid fa-hand-fist text-primary text-xl"></i><span class="tracking-wider uppercase">Player Archive</span></div>
-            <button onclick="closeDatabasePanel()" class="text-muted-foreground hover:text-foreground transition-colors p-2 rounded hover:bg-accent"><i class="fa-solid fa-xmark text-xl"></i></button>
-        </div>
-        <div class="flex-1 overflow-hidden flex flex-col p-4 md:p-6 gap-4">
-            <div class="flex justify-between items-center gap-4">
-                <div class="relative w-full md:w-72"><input type="text" id="db-search-input" placeholder="Filter by Name, ID, or [TAG]..." class="flex h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8" oninput="renderPlayerTable()"><i class="fa-solid fa-filter absolute right-3 top-2.5 text-muted-foreground text-xs pointer-events-none"></i></div>
-                <div class="text-xs text-muted-foreground font-mono">Showing <span id="db-result-count" class="text-foreground font-bold">0</span> records</div>
-            </div>
-            <div class="flex-1 overflow-auto border border-border rounded-lg bg-card relative shadow-sm">
-                <table class="w-full text-left text-xs whitespace-nowrap">
-                    <thead class="sticky top-0 bg-secondary text-secondary-foreground shadow-sm z-10">
-                        <tr>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('id')">ID <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('name')">Name <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('alliance_tag')">Ally <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('level')">Lvl <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('points')">Points <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 border-l border-border" onclick="sortDb('planet_count')">Planets <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('idle_time')">Idle <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 border-l border-border" onclick="sortDb('artefact')">Artefact <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('trade_revenue')">Trade <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 text-blue-400 border-l border-border" onclick="sortDb('physics')">Phys <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 text-green-400" onclick="sortDb('biology')">Bio <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 text-yellow-400" onclick="sortDb('economy')">Econ <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 text-purple-400" onclick="sortDb('energy')">Nrg <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 text-orange-400" onclick="sortDb('mathematics')">Math <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 text-pink-400 border-r border-border" onclick="sortDb('social')">Soc <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('updated_at')">Last Intel <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                        </tr>
-                    </thead>
-                    <tbody id="db-table-body" class="divide-y divide-border"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <div id="system-database-panel" class="absolute top-0 left-0 md:left-14 right-0 h-full bg-background/95 backdrop-blur-md border-l border-border z-40 transform translate-x-full transition-transform duration-300 flex flex-col shadow-2xl">
-        <div class="h-14 border-b border-border flex items-center justify-between px-6 bg-card shrink-0">
-            <div class="flex items-center gap-3 text-foreground font-semibold"><i class="fa-solid fa-meteor text-aw-warning text-xl"></i><span class="tracking-wider uppercase">Systems Archive</span></div>
-            <button onclick="closeSystemDatabasePanel()" class="text-muted-foreground hover:text-foreground transition-colors p-2 rounded hover:bg-accent"><i class="fa-solid fa-xmark text-xl"></i></button>
-        </div>
-        <div class="flex-1 overflow-hidden flex flex-col p-4 md:p-6 gap-4">
-            <div class="flex justify-between items-center gap-4">
-                <div class="relative w-full md:w-72"><input type="text" id="sys-db-search-input" placeholder="Filter by Name, ID, or Coordinates..." class="flex h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8" oninput="renderSystemTable()"><i class="fa-solid fa-filter absolute right-3 top-2.5 text-muted-foreground text-xs pointer-events-none"></i></div>
-                <div class="text-xs text-muted-foreground font-mono">Showing <span id="sys-db-result-count" class="text-foreground font-bold">0</span> records</div>
-            </div>
-            <div class="flex-1 overflow-auto border border-border rounded-lg bg-card relative shadow-sm">
-                <table class="w-full text-left text-xs whitespace-nowrap">
-                    <thead class="sticky top-0 bg-secondary text-secondary-foreground shadow-sm z-10">
-                        <tr>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortSysDb('id')">ID <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortSysDb('name')">Name <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortSysDb('x')">X <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortSysDb('y')">Y <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 text-aw-ally border-l border-border" onclick="sortSysDb('planet_count')">Planets Captured <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 text-aw-enemy" onclick="sortSysDb('fleet_count')">Fleets Orbiting <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 border-l border-border" onclick="sortSysDb('updated_at')">Last Intel <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                        </tr>
-                    </thead>
-                    <tbody id="sys-db-table-body" class="divide-y divide-border"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <div id="planet-database-panel" class="absolute top-0 left-0 md:left-14 right-0 h-full bg-background/95 backdrop-blur-md border-l border-border z-40 transform translate-x-full transition-transform duration-300 flex flex-col shadow-2xl">
-        <div class="h-14 border-b border-border flex items-center justify-between px-6 bg-card shrink-0">
-            <div class="flex items-center gap-3 text-foreground font-semibold"><i class="fa-solid fa-globe text-aw-ally text-xl"></i><span class="tracking-wider uppercase">Planets Archive</span></div>
-            <button onclick="closePlanetDatabasePanel()" class="text-muted-foreground hover:text-foreground transition-colors p-2 rounded hover:bg-accent"><i class="fa-solid fa-xmark text-xl"></i></button>
-        </div>
-        <div class="flex-1 overflow-hidden flex flex-col p-4 md:p-6 gap-4">
-            <div class="flex justify-between items-center gap-4">
-                <div class="relative w-full md:w-72"><input type="text" id="pln-db-search-input" placeholder="Filter by Name, Player, or [TAG]..." class="flex h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8" oninput="renderPlanetTable()"><i class="fa-solid fa-filter absolute right-3 top-2.5 text-muted-foreground text-xs pointer-events-none"></i></div>
-                <div class="text-xs text-muted-foreground font-mono">Showing <span id="pln-db-result-count" class="text-foreground font-bold">0</span> records</div>
-            </div>
-            <div class="flex-1 overflow-auto border border-border rounded-lg bg-card relative shadow-sm">
-                <table class="w-full text-left text-xs whitespace-nowrap">
-                    <thead class="sticky top-0 bg-secondary text-secondary-foreground shadow-sm z-10">
-                        <tr>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortPlnDb('system_id')">Sys ID <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortPlnDb('system_name')">System <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortPlnDb('planet_index')">Planet # <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 border-l border-border" onclick="sortPlnDb('owner_name')">Owner <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortPlnDb('alliance_tag')">Alliance <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 border-l border-border text-primary" onclick="sortPlnDb('population')">Population <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 text-aw-warning" onclick="sortPlnDb('starbase')">Starbase <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 border-l border-border" onclick="sortPlnDb('updated_at')">Last Intel <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                        </tr>
-                    </thead>
-                    <tbody id="pln-db-table-body" class="divide-y divide-border"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <div id="fleet-database-panel" class="absolute top-0 left-0 md:left-14 right-0 h-full bg-background/95 backdrop-blur-md border-l border-border z-40 transform translate-x-full transition-transform duration-300 flex flex-col shadow-2xl">
-        <div class="h-14 border-b border-border flex items-center justify-between px-6 bg-card shrink-0">
-            <div class="flex items-center gap-3 text-foreground font-semibold"><i class="fa-solid fa-crow text-aw-enemy text-xl"></i><span class="tracking-wider uppercase">Fleets Archive</span></div>
-            <button onclick="closeFleetDatabasePanel()" class="text-muted-foreground hover:text-foreground transition-colors p-2 rounded hover:bg-accent"><i class="fa-solid fa-xmark text-xl"></i></button>
-        </div>
-        <div class="flex-1 overflow-hidden flex flex-col p-4 md:p-6 gap-4">
-            <div class="flex justify-between items-center gap-4">
-                <div class="relative w-full md:w-72"><input type="text" id="flt-db-search-input" placeholder="Filter by Owner, System, or [TAG]..." class="flex h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8" oninput="renderFleetTable()"><i class="fa-solid fa-filter absolute right-3 top-2.5 text-muted-foreground text-xs pointer-events-none"></i></div>
-                <div class="text-xs text-muted-foreground font-mono">Showing <span id="flt-db-result-count" class="text-foreground font-bold">0</span> records</div>
-            </div>
-            <div class="flex-1 overflow-auto border border-border rounded-lg bg-card relative shadow-sm">
-                <table class="w-full text-left text-xs whitespace-nowrap">
-                    <thead class="sticky top-0 bg-secondary text-secondary-foreground shadow-sm z-10">
-                        <tr>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortFltDb('system_name')">System <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortFltDb('planet_index')">Planet # <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 border-l border-border" onclick="sortFltDb('owner_name')">Owner <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortFltDb('alliance_tag')">Alliance <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 border-l border-border text-gray-400" onclick="sortFltDb('transports')">TR <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 text-gray-400" onclick="sortFltDb('colony_ships')">CS <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 text-red-400 border-l border-border" onclick="sortFltDb('destroyers')">DS <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 text-red-400" onclick="sortFltDb('cruisers')">CR <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 text-red-400" onclick="sortFltDb('battleships')">BS <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 text-aw-warning border-l border-border" onclick="sortFltDb('cv')">CV <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                            <th class="p-3 cursor-pointer hover:bg-secondary/80 border-l border-border" onclick="sortFltDb('arrival_time')">Arrival <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                        </tr>
-                    </thead>
-                    <tbody id="flt-db-table-body" class="divide-y divide-border"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
+    <div id="dynamic-panels-container"></div>
 
     <div id="toast" class="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-secondary border border-border text-foreground text-xs font-semibold py-2.5 px-4 rounded-md shadow-lg flex items-center gap-2 pointer-events-none toast-enter z-50">
         <i class="fa-solid fa-circle-check text-green-500"></i> <span id="toast-msg">Copied</span>
@@ -380,6 +288,66 @@
             } catch (err) {}
         }
 
+        // --- CHART INITIALIZATION TRACKER ---
+    let playerActivityChartInstance = null;
+
+    async function loadPlayerIntel(playerId) {
+        if (!playerId) return;
+        try {
+            // NOTE: Make sure this endpoint exists in your backend to return player metrics and historical activity points
+            const res = await fetch(`/hub-api/intel/player/${playerId}`);
+            const data = await res.json();
+            
+            if (data.success && data.player) {
+                const p = data.player;
+                document.getElementById('player-stats-list').innerHTML = `
+                    <div class="flex justify-between items-center py-0.5"><span class="text-muted-foreground">Points</span><span class="font-medium text-primary">${(p.points || 0).toLocaleString()}</span></div>
+                    <div class="flex justify-between items-center py-0.5"><span class="text-muted-foreground">Planets</span><span class="font-medium">${p.planet_count || 0}</span></div>
+                    <div class="flex justify-between items-center py-0.5"><span class="text-muted-foreground">Alliance</span><span class="font-medium text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : 'None'}</span></div>
+                    <div class="flex justify-between items-center py-0.5"><span class="text-muted-foreground">Status</span><span class="font-mono text-sm ${p.idle_time && p.idle_time.includes('Online') ? 'text-green-400' : 'text-muted-foreground'}">${p.idle_time || 'Unknown'}</span></div>
+                `;
+
+                // Draw Chart.js Line Chart
+                if (data.activity && data.activity.length > 0) {
+                    const ctx = document.getElementById('playerActivityChart').getContext('2d');
+                    if (playerActivityChartInstance) playerActivityChartInstance.destroy();
+                    
+                    playerActivityChartInstance = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: data.activity.map(a => a.date), // e.g. dates or timestamps
+                            datasets: [{
+                                label: 'Points',
+                                data: data.activity.map(a => a.points),
+                                borderColor: '#ffffff',
+                                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                                borderWidth: 2,
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 2
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false } },
+                            scales: {
+                                x: { display: false },
+                                y: { 
+                                    ticks: { color: 'hsl(240 5% 64.9%)', font: { size: 10 } }, 
+                                    grid: { color: 'hsl(240 3.7% 15.9%)' } 
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+        } catch (err) {
+            console.error("Failed to load player intel", err);
+            document.getElementById('player-stats-list').innerHTML = '<span class="text-red-400">Failed to load data.</span>';
+        }
+    }
+
         window.addEventListener('message', async (event) => {
             if (event.origin !== window.location.origin) return;
             const data = event.data;
@@ -404,20 +372,35 @@
                 }
 
                 const ctxContainer = document.getElementById('context-tools');
-                const planContainer = document.getElementById('system-plans-container');
+                const playerCtxContainer = document.getElementById('player-context-tools');
                 const btnMap = document.getElementById('btn-ctx-map');
                 const sysLabel = document.getElementById('ui-sys-id');
+                const playerLabel = document.getElementById('ui-player-id');
                 
-                ctxContainer.classList.add('hidden'); planContainer.classList.add('hidden'); btnMap.classList.add('hidden'); sysLabel.classList.add('hidden');
+                // Hide all contextual blocks initially
+                ctxContainer.classList.add('hidden');
+                playerCtxContainer.classList.add('hidden');
+                btnMap.classList.add('hidden');
+                sysLabel.classList.add('hidden');
+                playerLabel.classList.add('hidden');
 
                 if (p.isSystemView && p.systemId) {
                     currentSystemId = p.systemId;
-                    ctxContainer.classList.remove('hidden'); planContainer.classList.remove('hidden'); sysLabel.classList.remove('hidden');
+                    ctxContainer.classList.remove('hidden'); 
+                    sysLabel.classList.remove('hidden');
                     sysLabel.innerText = `Sys #${p.systemId}`;
                     loadPlans(p.systemId);
                 } 
+                else if (p.isPlayerView && p.playerId) { // Make sure your scraper sends isPlayerView flag
+                    playerCtxContainer.classList.remove('hidden');
+                    playerLabel.classList.remove('hidden');
+                    playerLabel.innerText = `#${p.playerId}`;
+                    loadPlayerIntel(p.playerId);
+                }
+
                 if (p.isMap && p.mapX && p.mapY) {
-                    ctxContainer.classList.remove('hidden'); btnMap.classList.remove('hidden');
+                    ctxContainer.classList.remove('hidden'); 
+                    btnMap.classList.remove('hidden');
                     document.getElementById('ui-map-coords').innerText = `${p.mapX} / ${p.mapY}`;
                 }
             } else if (data.type === 'SHOW_TOAST') {
@@ -485,19 +468,44 @@
         let rawDbPlayers = []; let dbSortCol = 'points'; let dbSortDesc = true;
 
         async function openDatabasePanel() {
-            const panel = document.getElementById('database-panel');
+            // 1. Check if we already injected it
+            let panel = document.getElementById('database-panel');
+            
+            // 2. If it doesn't exist in the DOM, fetch it from the server
+            if (!panel) {
+                try {
+                    const res = await fetch('/components/players-db.html');
+                    const html = await res.text();
+                    document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', html);
+                    panel = document.getElementById('database-panel');
+                } catch (err) {
+                    console.error("Failed to load Player DB Component", err);
+                    return;
+                }
+            }
+
+            // 3. Execute normal open logic
             if (panel.classList.contains('translate-x-0')) return closeDatabasePanel();
             
-            closeSystemDatabasePanel(); closePlanetDatabasePanel(); closeFleetDatabasePanel();
+            closeSystemDatabasePanel(); 
+            closePlanetDatabasePanel(); 
+            closeFleetDatabasePanel();
 
             panel.classList.replace('translate-x-full', 'translate-x-0');
             if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
+            
             document.getElementById('db-table-body').innerHTML = '<tr><td colspan="16" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Intelligence...</td></tr>';
+            
             try {
                 const res = await fetch('/hub-api/intel/players');
                 const data = await res.json();
-                if (data.success) { rawDbPlayers = data.players; renderPlayerTable(); }
-            } catch (err) { document.getElementById('db-table-body').innerHTML = '<tr><td colspan="16" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
+                if (data.success) { 
+                    rawDbPlayers = data.players; 
+                    renderPlayerTable(); 
+                }
+            } catch (err) { 
+                document.getElementById('db-table-body').innerHTML = '<tr><td colspan="16" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; 
+            }
         }
         function closeDatabasePanel() { document.getElementById('database-panel').classList.replace('translate-x-0', 'translate-x-full'); }
         function sortDb(col) { if (dbSortCol === col) dbSortDesc = !dbSortDesc; else { dbSortCol = col; dbSortDesc = true; } renderPlayerTable(); }
