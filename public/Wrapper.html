@@ -308,57 +308,55 @@
                 if (data.success && data.player) {
                     const p = data.player;
                     
-                    // Helpers for clean row generation
-                    const row = (lbl, val, cls='') => `<div class="flex justify-between items-center py-0.5"><span class="text-muted-foreground">${lbl}</span><span class="font-medium ${cls}">${val}</span></div>`;
-                    const trait = (lbl, val) => `<div class="flex justify-between items-center py-0"><span class="text-muted-foreground">${lbl}</span><span class="font-medium ${val > 0 ? 'text-green-400' : (val < 0 ? 'text-red-400' : 'text-foreground')}">${val > 0 ? '+'+val : val}</span></div>`;
+                    // Helpers for clean row generation (Colors removed)
+                    const row = (lbl, val) => `<div class="flex justify-between items-center py-0.5"><span class="text-muted-foreground">${lbl}</span><span class="font-medium text-foreground">${val}</span></div>`;
+                    const trait = (lbl, val) => `<div class="flex justify-between items-center py-0"><span class="text-muted-foreground">${lbl}</span><span class="font-medium text-foreground">${val > 0 ? '+'+val : val}</span></div>`;
 
                     document.getElementById('player-stats-list').innerHTML = `
                         <div class="flex flex-col gap-2">
                             <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
-                                ${row('Points', (p.points || 0).toLocaleString(), 'text-primary font-bold')}
+                                ${row('Points', (p.points || 0).toLocaleString())}
                                 ${row('Rank', p.ranking ? `#${p.ranking}` : '-')}
-                                ${row('Level', p.level || '-')}
-                                ${row('Planets', p.planet_count || 0)}
-                                ${row('Alliance', p.alliance_tag ? `[${p.alliance_tag}]` : 'None', 'text-aw-warning')}
-                                ${row('Status', p.idle_time || 'Unknown', p.idle_time && p.idle_time.includes('Online') ? 'text-green-400' : 'text-muted-foreground')}
-                                ${row('Joined', p.joined ? p.joined.split(' ')[0] : '-')}
-                                ${row('Country', p.country || '-')}
+                                ${row('PL', p.level || '-')}
+                                ${row('Planets', `${p.planet_count || 0} of ${p.culture_level || 0}`)}
+                                ${row('Alliance', p.alliance_tag ? `[${p.alliance_tag}]` : 'None')}
+                                ${row('Status', p.idle_time || 'Unknown')}
+                                ${row('Origin Sys', p.origin_system ? `#${p.origin_system}` : '-')}
                             </div>
                             
                             <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
                                 <div class="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1">Economy</div>
-                                ${row('Trade Revenue', (p.trade_revenue || 0).toLocaleString(), 'text-primary')}
-                                ${row('Eco Bonus', `+${p.eco_bonus || 0}%`, 'text-green-400')}
-                                ${row('Artefact', p.artefact || 'None', 'text-purple-400')}
-                                ${row('Origin Sys', p.origin_system ? `#${p.origin_system}` : '-')}
+                                ${row('Trade Revenue', (p.trade_revenue || 0).toLocaleString())}
+                                ${row('Eco Bonus', `+${p.eco_bonus || 0}%`)}
+                                ${row('Artefact', p.artefact || 'None')}
                             </div>
 
                             <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
                                 <div class="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1">Sciences</div>
                                 <div class="grid grid-cols-2 gap-x-4">
-                                    ${row('Phys', p.physics || 0, 'text-blue-400')}
-                                    ${row('Bio', p.biology || 0, 'text-green-400')}
-                                    ${row('Econ', p.economy || 0, 'text-yellow-400')}
-                                    ${row('Nrg', p.energy || 0, 'text-purple-400')}
-                                    ${row('Math', p.mathematics || 0, 'text-orange-400')}
-                                    ${row('Soc', p.social || 0, 'text-pink-400')}
-                                </div>
-                                <div class="border-t border-border mt-1 pt-1 grid grid-cols-2 gap-x-4">
-                                    ${row('Sci Lvl', p.science_level || 0)}
-                                    ${row('Cul Lvl', p.culture_level || 0)}
+                                    ${row('Bio', p.biology || 0)}
+                                    ${row('Eco', p.economy || 0)}
+                                    ${row('E', p.energy || 0)}
+                                    ${row('Math', p.mathematics || 0)}
+                                    ${row('Phy', p.physics || 0)}
+                                    ${row('Soc', p.social || 0)}
                                 </div>
                             </div>
 
                             <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
                                 <div class="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1">Race Traits</div>
                                 <div class="grid grid-cols-2 gap-x-4">
-                                    ${trait('Grw', p.race_growth || 0)}
-                                    ${trait('Sci', p.race_science || 0)}
-                                    ${trait('Cul', p.race_culture || 0)}
-                                    ${trait('Prd', p.race_production || 0)}
-                                    ${trait('Spd', p.race_speed || 0)}
-                                    ${trait('Atk', p.race_attack || 0)}
-                                    <div class="col-span-2">${trait('Def', p.race_defense || 0)}</div>
+                                    <div class="flex flex-col">
+                                        ${trait('Grw', p.race_growth || 0)}
+                                        ${trait('Sci', p.race_science || 0)}
+                                        ${trait('Cul', p.race_culture || 0)}
+                                        ${trait('Prd', p.race_production || 0)}
+                                    </div>
+                                    <div class="flex flex-col">
+                                        ${trait('Spd', p.race_speed || 0)}
+                                        ${trait('Atk', p.race_attack || 0)}
+                                        ${trait('Def', p.race_defense || 0)}
+                                    </div>
                                 </div>
                             </div>
                         </div>

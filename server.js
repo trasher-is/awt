@@ -22,7 +22,13 @@ app.use(session({
     cookie: { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true } // Cookies last for 30 days
 }));
 
-// 🔴 FIX: Removed global express.json() from here so it doesn't eat the proxy's POST streams!
+app.use(express.static(path.join(__dirname, 'public'), {
+    setHeaders: (res, path) => {
+        if (path.endsWith('.js')) {
+            res.setHeader('Content-Type', 'application/javascript');
+        }
+    }
+}));
 
 app.use('/hub-assets', express.static(path.join(__dirname, 'public')));
 

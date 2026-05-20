@@ -1,3 +1,10 @@
+import { initPlanetPopTimers, initScienceCultureCalc } from './page-injections.js';
+
+window.addEventListener('load', () => {
+    if (window.location.pathname.includes('/Game/Planets')) initPlanetPopTimers();
+    if (window.location.pathname.includes('/Game/Science')) initScienceCultureCalc();
+});
+
 export function initSpy() {
     let currentMapX = null;
     let currentMapY = null;
