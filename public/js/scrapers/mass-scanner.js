@@ -146,7 +146,7 @@ export async function runMassScan(updateProgressCb) {
             }
 
             // The mandatory delay
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 200));
         }
 
         updateProgressCb("Scan Complete!", total, total);
@@ -158,15 +158,55 @@ export async function runMassScan(updateProgressCb) {
 }
 
 export async function runPlayerScan(updateProgressCb) {
-    console.log("[Mass Scan] Initiating player sequence...");
+    console.log("[Mass Scan] Initiating player sequence from Rankings...");
     try {
-        const resList = await fetch('/hub-api/players');
-        const dataList = await resList.json();
-        const playerIds = dataList.players;
+        // STEP 1: Compile the Master Index from Eco Bonus Rankings
+        updateProgressCb("Compiling Player Index from Rankings...", 0, 0);
+        
+        const playerIds = [];
+        let currentPage = 1;
+
+        while (true) {
+            updateProgressCb(`Fetching Ranking Page ${currentPage}...`, currentPage, currentPage + 2); 
+            
+            const rankRes = await fetch(`/Ranking/EcoBonus?pageNumber=${currentPage}`);
+            if (!rankRes.ok) break;
+            
+            const rankHtml = await rankRes.text();
+            const rankDoc = new DOMParser().parseFromString(rankHtml, 'text/html');
+            
+            const playerLinks = rankDoc.querySelectorAll('td a[href^="/Game/Players/Profile/"]');
+            
+            if (playerLinks.length === 0) break; 
+
+            let newIdsAdded = 0;
+            playerLinks.forEach(link => {
+                const id = parseInt(link.getAttribute('href').split('/').pop(), 10);
+                if (id && !playerIds.includes(id)) {
+                    playerIds.push(id);
+                    newIdsAdded++;
+                }
+            });
+
+            // THE FIX: If we didn't add any new IDs, it means the server is just 
+            // repeating the last page to us. Break the loop immediately.
+            if (newIdsAdded === 0) {
+                break;
+            }
+
+            currentPage++;
+            await new Promise(resolve => setTimeout(resolve, 150)); 
+        }
+
         const total = playerIds.length;
+        if (!total) { 
+            updateProgressCb("Error: No players found in Ranking", 0, 0); 
+            return; 
+        }
 
-        if (!total) { updateProgressCb("Error: No players in DB", 0, 0); return; }
+        console.log(`[Mass Scan] Index compiled. Deep scanning ${total} players...`);
 
+        // STEP 2: The Deep Profile Scan
         for (let i = 0; i < total; i++) {
             const playerId = playerIds[i];
             updateProgressCb(`Scanning Player #${playerId}...`, i + 1, total);
@@ -261,6 +301,7 @@ export async function runPlayerScan(updateProgressCb) {
             if (p.name) {
                 await fetch('/hub-api/sync/player', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
             }
+            
             await new Promise(resolve => setTimeout(resolve, 100));
         }
         updateProgressCb("Player Scan Complete!", total, total);
