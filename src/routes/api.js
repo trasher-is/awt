@@ -836,7 +836,7 @@ router.get('/intel/player/:id', (req, res) => {
         const playerId = req.params.id;
 
         const playerInfo = db.prepare(`
-            SELECT p.id, p.name, p.points, p.culture_level, p.idle_time, p.logins,
+            SELECT p.*, 
                    a.tag as alliance_tag,
                    (SELECT COUNT(*) FROM planets WHERE owner_id = ?) as planet_count
             FROM players p

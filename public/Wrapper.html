@@ -307,11 +307,61 @@
                 
                 if (data.success && data.player) {
                     const p = data.player;
+                    
+                    // Helpers for clean row generation
+                    const row = (lbl, val, cls='') => `<div class="flex justify-between items-center py-0.5"><span class="text-muted-foreground">${lbl}</span><span class="font-medium ${cls}">${val}</span></div>`;
+                    const trait = (lbl, val) => `<div class="flex justify-between items-center py-0"><span class="text-muted-foreground">${lbl}</span><span class="font-medium ${val > 0 ? 'text-green-400' : (val < 0 ? 'text-red-400' : 'text-foreground')}">${val > 0 ? '+'+val : val}</span></div>`;
+
                     document.getElementById('player-stats-list').innerHTML = `
-                        <div class="flex justify-between items-center py-0.5"><span class="text-muted-foreground">Points</span><span class="font-medium text-primary">${(p.points || 0).toLocaleString()}</span></div>
-                        <div class="flex justify-between items-center py-0.5"><span class="text-muted-foreground">Planets</span><span class="font-medium">${p.planet_count || 0}</span></div>
-                        <div class="flex justify-between items-center py-0.5"><span class="text-muted-foreground">Alliance</span><span class="font-medium text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : 'None'}</span></div>
-                        <div class="flex justify-between items-center py-0.5"><span class="text-muted-foreground">Status</span><span class="font-mono text-sm ${p.idle_time && p.idle_time.includes('Online') ? 'text-green-400' : 'text-muted-foreground'}">${p.idle_time || 'Unknown'}</span></div>
+                        <div class="flex flex-col gap-2">
+                            <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
+                                ${row('Points', (p.points || 0).toLocaleString(), 'text-primary font-bold')}
+                                ${row('Rank', p.ranking ? `#${p.ranking}` : '-')}
+                                ${row('Level', p.level || '-')}
+                                ${row('Planets', p.planet_count || 0)}
+                                ${row('Alliance', p.alliance_tag ? `[${p.alliance_tag}]` : 'None', 'text-aw-warning')}
+                                ${row('Status', p.idle_time || 'Unknown', p.idle_time && p.idle_time.includes('Online') ? 'text-green-400' : 'text-muted-foreground')}
+                                ${row('Joined', p.joined ? p.joined.split(' ')[0] : '-')}
+                                ${row('Country', p.country || '-')}
+                            </div>
+                            
+                            <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
+                                <div class="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1">Economy</div>
+                                ${row('Trade Revenue', (p.trade_revenue || 0).toLocaleString(), 'text-primary')}
+                                ${row('Eco Bonus', `+${p.eco_bonus || 0}%`, 'text-green-400')}
+                                ${row('Artefact', p.artefact || 'None', 'text-purple-400')}
+                                ${row('Origin Sys', p.origin_system ? `#${p.origin_system}` : '-')}
+                            </div>
+
+                            <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
+                                <div class="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1">Sciences</div>
+                                <div class="grid grid-cols-2 gap-x-4">
+                                    ${row('Phys', p.physics || 0, 'text-blue-400')}
+                                    ${row('Bio', p.biology || 0, 'text-green-400')}
+                                    ${row('Econ', p.economy || 0, 'text-yellow-400')}
+                                    ${row('Nrg', p.energy || 0, 'text-purple-400')}
+                                    ${row('Math', p.mathematics || 0, 'text-orange-400')}
+                                    ${row('Soc', p.social || 0, 'text-pink-400')}
+                                </div>
+                                <div class="border-t border-border mt-1 pt-1 grid grid-cols-2 gap-x-4">
+                                    ${row('Sci Lvl', p.science_level || 0)}
+                                    ${row('Cul Lvl', p.culture_level || 0)}
+                                </div>
+                            </div>
+
+                            <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
+                                <div class="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1">Race Traits</div>
+                                <div class="grid grid-cols-2 gap-x-4">
+                                    ${trait('Grw', p.race_growth || 0)}
+                                    ${trait('Sci', p.race_science || 0)}
+                                    ${trait('Cul', p.race_culture || 0)}
+                                    ${trait('Prd', p.race_production || 0)}
+                                    ${trait('Spd', p.race_speed || 0)}
+                                    ${trait('Atk', p.race_attack || 0)}
+                                    <div class="col-span-2">${trait('Def', p.race_defense || 0)}</div>
+                                </div>
+                            </div>
+                        </div>
                     `;
 
                     // Draw Heatmap Bar Chart
@@ -322,12 +372,11 @@
                         playerHeatmapChartInstance = new Chart(ctxH, {
                             type: 'bar',
                             data: {
-                                // Create labels 0h, 1h, 2h ... 23h
                                 labels: Array.from({length: 24}, (_, i) => `${i}h`),
                                 datasets: [{
                                     label: 'Login Events',
                                     data: data.heatmap,
-                                    backgroundColor: 'rgba(34, 197, 94, 0.6)', // Green matching your aw-ally color
+                                    backgroundColor: 'rgba(34, 197, 94, 0.6)',
                                     borderColor: '#22c55e',
                                     borderWidth: 1,
                                     borderRadius: 2
@@ -490,6 +539,124 @@ function closeOtherPanels(exceptId) {
         }
     });
 }
+
+// ==========================================
+// ARCHIVE TABLE STATE & RENDERING
+// ==========================================
+let rawDbPlayers = [], dbSortCol = 'points', dbSortAsc = false;
+let rawDbSystems = [], sysDbSortCol = 'id', sysDbSortAsc = true;
+let rawDbPlanets = [], plnDbSortCol = 'system_id', plnDbSortAsc = true;
+let rawDbFleets = [], fltDbSortCol = 'cv', fltDbSortAsc = false;
+
+// --- PLAYERS ---
+window.sortDb = function(col) {
+    if (dbSortCol === col) dbSortAsc = !dbSortAsc; else { dbSortCol = col; dbSortAsc = false; }
+    window.renderPlayerTable();
+};
+window.renderPlayerTable = function() {
+    const q = (document.getElementById('db-search-input')?.value || '').toLowerCase();
+    let f = rawDbPlayers.filter(p => (p.name && p.name.toLowerCase().includes(q)) || (p.id && p.id.toString().includes(q)) || (p.alliance_tag && p.alliance_tag.toLowerCase().includes(q)));
+    f.sort((a, b) => { let v1 = a[dbSortCol]||0, v2 = b[dbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (dbSortAsc?-1:1) : (v1>v2 ? (dbSortAsc?1:-1) : 0); });
+    document.getElementById('db-result-count').innerText = f.length;
+    const tbody = document.getElementById('db-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = f.map(p => `
+        <tr class="hover:bg-accent/50 transition-colors">
+            <td class="p-3 font-mono">${p.id}</td>
+            <td class="p-3 font-medium text-foreground">${p.name || 'Unknown'}</td>
+            <td class="p-3 text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : '-'}</td>
+            <td class="p-3">${p.level}</td>
+            <td class="p-3 text-primary font-medium">${(p.points || 0).toLocaleString()}</td>
+            <td class="p-3 border-l border-border">${p.planet_count || 0}</td>
+            <td class="p-3 ${p.idle_time && p.idle_time.includes('Online') ? 'text-green-400' : ''}">${p.idle_time || '-'}</td>
+            <td class="p-3 border-l border-border">${p.artefact || '-'}</td>
+            <td class="p-3 text-primary">${(p.trade_revenue || 0).toLocaleString()}</td>
+            <td class="p-3 text-blue-400 border-l border-border">${p.physics}</td>
+            <td class="p-3 text-green-400">${p.biology}</td>
+            <td class="p-3 text-yellow-400">${p.economy}</td>
+            <td class="p-3 text-purple-400">${p.energy}</td>
+            <td class="p-3 text-orange-400">${p.mathematics}</td>
+            <td class="p-3 text-pink-400 border-r border-border">${p.social}</td>
+            <td class="p-3 text-muted-foreground">${new Date(p.updated_at).toLocaleString()}</td>
+        </tr>`).join('');
+};
+
+// --- SYSTEMS ---
+window.sortSysDb = function(col) {
+    if (sysDbSortCol === col) sysDbSortAsc = !sysDbSortAsc; else { sysDbSortCol = col; sysDbSortAsc = true; }
+    window.renderSystemTable();
+};
+window.renderSystemTable = function() {
+    const q = (document.getElementById('sys-db-search-input')?.value || '').toLowerCase();
+    let f = rawDbSystems.filter(s => (s.name && s.name.toLowerCase().includes(q)) || (s.id && s.id.toString().includes(q)) || (s.x && s.x.toString().includes(q)) || (s.y && s.y.toString().includes(q)));
+    f.sort((a, b) => { let v1 = a[sysDbSortCol]||0, v2 = b[sysDbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (sysDbSortAsc?-1:1) : (v1>v2 ? (sysDbSortAsc?1:-1) : 0); });
+    document.getElementById('sys-db-result-count').innerText = f.length;
+    const tbody = document.getElementById('sys-db-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = f.map(s => `
+        <tr class="hover:bg-accent/50 transition-colors">
+            <td class="p-3 font-mono">${s.id}</td>
+            <td class="p-3 font-medium text-foreground">${s.name || 'Unknown'}</td>
+            <td class="p-3">${s.x}</td>
+            <td class="p-3">${s.y}</td>
+            <td class="p-3 border-l border-border text-aw-ally">${s.planet_count || 0}</td>
+            <td class="p-3 text-aw-enemy">${s.fleet_count || 0}</td>
+            <td class="p-3 border-l border-border text-muted-foreground">${new Date(s.updated_at).toLocaleString()}</td>
+        </tr>`).join('');
+};
+
+// --- PLANETS ---
+window.sortPlnDb = function(col) {
+    if (plnDbSortCol === col) plnDbSortAsc = !plnDbSortAsc; else { plnDbSortCol = col; plnDbSortAsc = true; }
+    window.renderPlanetTable();
+};
+window.renderPlanetTable = function() {
+    const q = (document.getElementById('pln-db-search-input')?.value || '').toLowerCase();
+    let f = rawDbPlanets.filter(p => (p.system_name && p.system_name.toLowerCase().includes(q)) || (p.owner_name && p.owner_name.toLowerCase().includes(q)) || (p.alliance_tag && p.alliance_tag.toLowerCase().includes(q)));
+    f.sort((a, b) => { let v1 = a[plnDbSortCol]||0, v2 = b[plnDbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (plnDbSortAsc?-1:1) : (v1>v2 ? (plnDbSortAsc?1:-1) : 0); });
+    document.getElementById('pln-db-result-count').innerText = f.length;
+    const tbody = document.getElementById('pln-db-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = f.map(p => `
+        <tr class="hover:bg-accent/50 transition-colors">
+            <td class="p-3 font-mono">${p.system_id}</td>
+            <td class="p-3">${p.system_name || 'Unknown'}</td>
+            <td class="p-3 font-medium text-foreground">#${p.planet_index}</td>
+            <td class="p-3 border-l border-border">${p.owner_name || 'Empty'}</td>
+            <td class="p-3 text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : '-'}</td>
+            <td class="p-3 border-l border-border text-primary">${(p.population || 0).toLocaleString()}</td>
+            <td class="p-3 text-aw-warning">${p.starbase || 0}</td>
+            <td class="p-3 border-l border-border text-muted-foreground">${new Date(p.updated_at).toLocaleString()}</td>
+        </tr>`).join('');
+};
+
+// --- FLEETS ---
+window.sortFltDb = function(col) {
+    if (fltDbSortCol === col) fltDbSortAsc = !fltDbSortAsc; else { fltDbSortCol = col; fltDbSortAsc = false; }
+    window.renderFleetTable();
+};
+window.renderFleetTable = function() {
+    const q = (document.getElementById('flt-db-search-input')?.value || '').toLowerCase();
+    let f = rawDbFleets.filter(f => (f.system_name && f.system_name.toLowerCase().includes(q)) || (f.owner_name && f.owner_name.toLowerCase().includes(q)) || (f.alliance_tag && f.alliance_tag.toLowerCase().includes(q)));
+    f.sort((a, b) => { let v1 = a[fltDbSortCol]||0, v2 = b[fltDbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (fltDbSortAsc?-1:1) : (v1>v2 ? (fltDbSortAsc?1:-1) : 0); });
+    document.getElementById('flt-db-result-count').innerText = f.length;
+    const tbody = document.getElementById('flt-db-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = f.map(f => `
+        <tr class="hover:bg-accent/50 transition-colors">
+            <td class="p-3">${f.system_name || 'Unknown'}</td>
+            <td class="p-3 font-medium text-foreground">#${f.planet_index}</td>
+            <td class="p-3 border-l border-border">${f.owner_name || 'Unknown'}</td>
+            <td class="p-3 text-aw-warning">${f.alliance_tag ? `[${f.alliance_tag}]` : '-'}</td>
+            <td class="p-3 border-l border-border text-gray-400">${f.transports || 0}</td>
+            <td class="p-3 text-gray-400">${f.colony_ships || 0}</td>
+            <td class="p-3 text-red-400 border-l border-border">${f.destroyers || 0}</td>
+            <td class="p-3 text-red-400">${f.cruisers || 0}</td>
+            <td class="p-3 text-red-400">${f.battleships || 0}</td>
+            <td class="p-3 text-aw-warning border-l border-border font-bold">${(f.cv || 0).toLocaleString()}</td>
+            <td class="p-3 border-l border-border ${f.arrival_time && f.arrival_time !== '-' ? 'text-red-400 font-bold' : 'text-muted-foreground'}">${f.arrival_time || 'Stationed'}</td>
+        </tr>`).join('');
+};
 
 // 1. PLAYERS
 async function openDatabasePanel() {
