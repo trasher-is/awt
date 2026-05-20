@@ -848,7 +848,7 @@ router.get('/intel/player/:id', (req, res) => {
             return res.json({ success: false, error: 'Player not found in database.' });
         }
 
-        // Fetch historical logins for the Chart
+        // 1. Fetch historical logins for the Line Chart
         let formattedActivity = [];
         try {
             const history = db.prepare(`
@@ -861,10 +861,9 @@ router.get('/intel/player/:id', (req, res) => {
 
             formattedActivity = history.map(row => ({
                 date: new Date(row.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-                points: row.total_logins // Mapped to 'points' so your existing Chart.js config doesn't crash
+                points: row.total_logins 
             }));
             
-            // If they have no history yet, plot their current login count
             if (formattedActivity.length === 0) {
                  formattedActivity = [{
                     date: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
@@ -878,10 +877,28 @@ router.get('/intel/player/:id', (req, res) => {
             }];
         }
 
+        // 2. Fetch the Online Probability Heatmap (Grouped by Hour)
+        let heatmap = Array(24).fill(0); // Initialize 24 hours with 0
+        try {
+            const heatmapData = db.prepare(`
+                SELECT strftime('%H', timestamp) as hour, COUNT(*) as count
+                FROM player_logins
+                WHERE player_id = ?
+                GROUP BY hour
+            `).all(playerId);
+
+            heatmapData.forEach(row => {
+                if (row.hour !== null) {
+                    heatmap[parseInt(row.hour, 10)] = row.count;
+                }
+            });
+        } catch (err) {}
+
         res.json({
             success: true,
             player: playerInfo,
-            activity: formattedActivity
+            activity: formattedActivity,
+            heatmap: heatmap // <--- New data payload
         });
 
     } catch (error) {
