@@ -224,12 +224,13 @@ router.post('/sync/player', requireAuth, (req, res) => {
         race_defense: p.race_defense || 0
     };
 
-    const oldPlayer = db.prepare(`SELECT joined, logins FROM players WHERE id = ?`).get(p.id);
+    const oldPlayer = db.prepare('SELECT logins, points FROM players WHERE id = ?').get(p.id);
 
     const syncTransaction = db.transaction((player) => {
         // 1. Rejoin / Account Reset check
-        if (oldPlayer && oldPlayer.joined && player.joined && oldPlayer.joined !== player.joined) {
-            console.log(`[API] Player ${player.id} rejoined/reset detected (Old: ${oldPlayer.joined} | New: ${player.joined}). Wiping old data.`);
+        // Check if oldPlayer exists FIRST, then use 'player' instead of 'incomingPlayer'
+        if (oldPlayer && player.logins < oldPlayer.logins) {
+            console.log(`[SYSTEM] Player ${player.id} restarted!`);
             
             // Strip ownership of old planets
             db.prepare(`

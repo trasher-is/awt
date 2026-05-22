@@ -5,19 +5,17 @@ export function initPlanetPopTimers() {
         const barContainer = row.querySelector('.progress-bar-timed');
         if (!barContainer) return;
 
-        // Extract "Duration: HH:MM:SS" from the title attribute
+        // FIX: Match numbers, letters, spaces, colons, and dots
         const title = barContainer.getAttribute('title') || "";
-        const durMatch = title.match(/Duration:\s*([\d:]+)/);
+        const durMatch = title.match(/Duration:\s*([a-zA-Z0-9\.\s:]+)/);
         if (!durMatch) return;
 
         const prog = barContainer.querySelector('.progress');
         
-        // Create the timer element
         const timerDiv = document.createElement('div');
         timerDiv.className = 'text-[9px] text-white font-mono font-bold absolute top-0 left-1 whitespace-nowrap';
-        timerDiv.innerText = durMatch[1]; // Just the time string
+        timerDiv.innerText = durMatch[1].trim(); 
         
-        // Ensure progress div is relative so absolute timer stays inside
         prog.style.position = 'relative';
         prog.appendChild(timerDiv);
     });
@@ -79,20 +77,31 @@ export async function initScienceCultureCalc() {
 
             for (let i = 1; i <= 3; i++) {
                 const targetLvl = currentLevel + i;
-                const points = getPointsForLevel(targetLvl);
-                if (points > 0) {
-                    cumulativeSeconds += (points / production) * 3600;
+                let secondsToReach = 0;
+
+                if (i === 1) {
+                    // The first target is the level currently researching. 
+                    // The game's native timer is the absolute source of truth.
+                    secondsToReach = currentSeconds;
+                } else {
+                    // For all subsequent levels, we calculate the time to complete them 
+                    // from scratch based on points / production, and add it to our running total.
+                    const points = getPointsForLevel(targetLvl);
+                    if (points > 0) {
+                        cumulativeSeconds += (points / production) * 3600;
+                    }
+                    secondsToReach = cumulativeSeconds;
+                }
+
+                if (secondsToReach > 0) {
+                    const finishDate = new Date(Date.now() + secondsToReach * 1000);
                     
-                    // Create target date object
-                    const finishDate = new Date(Date.now() + cumulativeSeconds * 1000);
-                    
-                    // Format for display: May 24 11:52
                     const dateStr = finishDate.toLocaleDateString(undefined, {month:'short', day:'numeric'}) + ' ' + 
                                     finishDate.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit', hour12: false});
 
                     nextLevels.push({
                         lvl: targetLvl,
-                        duration: formatDuration(cumulativeSeconds),
+                        duration: formatDuration(secondsToReach),
                         date: dateStr
                     });
                 }
