@@ -5,19 +5,29 @@ export function initPlanetPopTimers() {
         const barContainer = row.querySelector('.progress-bar-timed');
         if (!barContainer) return;
 
-        // FIX: Match numbers, letters, spaces, colons, and dots
+        // Match numbers, letters, spaces, colons, and dots
         const title = barContainer.getAttribute('title') || "";
         const durMatch = title.match(/Duration:\s*([a-zA-Z0-9\.\s:]+)/);
         if (!durMatch) return;
 
-        const prog = barContainer.querySelector('.progress');
-        
         const timerDiv = document.createElement('div');
-        timerDiv.className = 'text-[9px] text-white font-mono font-bold absolute top-0 left-1 whitespace-nowrap';
         timerDiv.innerText = durMatch[1].trim(); 
         
-        prog.style.position = 'relative';
-        prog.appendChild(timerDiv);
+        // Use standard vanilla CSS layout properties so it works on the game's page
+        timerDiv.style.position = 'absolute';
+        timerDiv.style.top = '50%';
+        timerDiv.style.transform = 'translateY(-50%)';
+        timerDiv.style.left = '6px';
+        timerDiv.style.zIndex = '10';
+        timerDiv.style.color = '#ffffff';
+        timerDiv.style.fontFamily = 'monospace';
+        timerDiv.style.fontSize = '12px';
+        timerDiv.style.fontWeight = 'bold';
+        timerDiv.style.whiteSpace = 'nowrap';
+        timerDiv.style.pointerEvents = 'none'; // Prevents the text from blocking mouse hovers on the bar
+        
+        barContainer.style.position = 'relative';
+        barContainer.appendChild(timerDiv);
     });
 }
 

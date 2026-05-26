@@ -330,11 +330,19 @@ export function initSpy() {
                     titleText = 'Allied Fleet Detected';
                 }
 
-                const plan = plans.find(p => p.planet_index === planetIndex);
-                if (plan && !indicatorHTML) { 
-                    indicatorHTML = `<span class="badge bg-light text-dark border ms-2">Plan</span>`;
+                const planetPlans = plans.filter(p => p.planet_index === planetIndex);
+                if (planetPlans.length > 0 && !indicatorHTML) { 
                     borderColor = '#f8f9fa';
-                    titleText = `Intel Note: ${plan.note} (${plan.author})`;
+                    if (planetPlans.length === 1) {
+                        indicatorHTML = `<span class="badge bg-light text-dark border ms-2">Plan</span>`;
+                        titleText = `Intel Note: ${planetPlans[0].note} (${planetPlans[0].author})`;
+                    } else {
+                        // Render ultra-compact individual micro-badges side-by-side to protect column space
+                        indicatorHTML = planetPlans.map((p, idx) => 
+                            `<span class="badge bg-light text-dark border ms-1" style="font-size: 8px; padding: 1px 3px; cursor: help;" title="[Plan ${idx + 1}] ${p.note} (${p.author})">P${idx + 1}</span>`
+                        ).join('');
+                        titleText = ''; // Clear parent wrapper title to let individual badge tooltips work
+                    }
                 }
 
                 if (indicatorHTML) {

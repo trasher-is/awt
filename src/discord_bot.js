@@ -21,6 +21,13 @@ client.on('messageCreate', async (message) => {
     const command = args.shift().toLowerCase();
 
     // ----------------------------------------------------
+    // !getid - DISPLAY CHANNEL ID
+    // ----------------------------------------------------
+    if (command === 'getid') {
+        return message.reply(`The ID of this channel is: **${message.channel.id}**`);
+    }
+
+    // ----------------------------------------------------
     // !sys <id> - DISPLAY SYSTEM INTEL
     // ----------------------------------------------------
     if (command === 'sys') {
@@ -46,7 +53,14 @@ client.on('messageCreate', async (message) => {
             WHERE pp.system_id = ?
         `).all(sysId);
 
-        const fleets = db.prepare(`SELECT * FROM fleets WHERE system_id = ?`).all(sysId);
+        // MODIFIED: Added table joins to grab the player name and alliance tag for fleet owners
+        const fleets = db.prepare(`
+            SELECT f.*, u.name as owner_name, a.tag as ally_tag
+            FROM fleets f
+            LEFT JOIN players u ON f.owner_id = u.id
+            LEFT JOIN alliances a ON u.alliance_id = a.id
+            WHERE f.system_id = ?
+        `).all(sysId);
 
         const embed = new EmbedBuilder()
             .setTitle(`📡 System Intel: ${sys.name || 'Unknown'} #${sysId} (${sys.x || '--'} / ${sys.y || '--'})`)
@@ -65,15 +79,28 @@ client.on('messageCreate', async (message) => {
 
         if (planetList) embed.addFields({ name: 'Planets', value: planetList });
 
-        let fleetList = '';
-        fleets.forEach(f => {
-            const cv = (f.destroyers * 3) + (f.cruisers * 24) + (f.battleships * 60);
-            fleetList += `Planet **${f.planet_index}**: CV **${cv.toLocaleString()}** (${f.arrival_time ? 'Moving: ' + f.arrival_time : 'Orbiting'})\n`;
-        });
+        // MODIFIED: Store embeds in an array to dynamically add a separate blue fleet block
+        const embeds = [embed];
 
-        if (fleetList) embed.addFields({ name: 'Enemy Fleets', value: fleetList });
+        if (fleets.length > 0) {
+            let fleetList = '';
+            fleets.forEach(f => {
+                const cv = (f.destroyers * 3) + (f.cruisers * 24) + (f.battleships * 60);
+                const owner = f.owner_name ? `[${f.ally_tag || '?'}] ${f.owner_name}` : '*Unknown*';
+                
+                fleetList += `Planet **${f.planet_index}**: ${owner} — CV **${cv.toLocaleString()}** (${f.arrival_time ? 'Moving: ' + f.arrival_time : 'Orbiting'})\n`;
+            });
 
-        return message.reply({ embeds: [embed] });
+            if (fleetList) {
+                const fleetEmbed = new EmbedBuilder()
+                    .setTitle(`🚀 Fleets`)
+                    .setColor('#3b82f6') // Blue block for fleet tracking
+                    .setDescription(fleetList);
+                embeds.push(fleetEmbed);
+            }
+        }
+
+        return message.reply({ embeds: embeds });
     }
 
     // ----------------------------------------------------
@@ -199,6 +226,174 @@ client.on('messageCreate', async (message) => {
             console.error(err);
             message.reply('❌ Database error while saving plan.');
         }
+    }
+
+    // ----------------------------------------------------
+    // !vision <system_id> [tag] - RADAR SCAN
+    // ----------------------------------------------------
+    if (command === 'vision') {
+        const sysId = args[0];
+        if (!sysId || isNaN(sysId)) return message.reply("❌ Usage: `!vision <system_id> [alliance_tag]`");
+
+        const targetSysId = parseInt(sysId, 10);
+        const tag = args[1] ? args[1].toUpperCase() : 'RAID';
+
+        const targetSys = db.prepare("SELECT name, x, y FROM systems WHERE id = ?").get(targetSysId);
+        if (!targetSys) return message.reply(`❌ System **[${targetSysId}]** not found in the database. Scan or fly near it first.`);
+
+        const players = db.prepare(`
+            SELECT p.name, p.biology, p.science_level, s.x, s.y
+            FROM players p
+            JOIN alliances a ON p.alliance_id = a.id
+            JOIN systems s ON p.origin_system = s.id
+            WHERE a.tag = ?
+            AND p.origin_system IS NOT NULL 
+            AND p.origin_system > 0
+        `).all(tag);
+
+        if (!players || players.length === 0) {
+            return message.reply(`❌ No players found for alliance [${tag}] with a recorded Origin System.`);
+        }
+
+        const inVision = [];
+        const outOfVision = [];
+        const tx = targetSys.x;
+        const ty = targetSys.y;
+
+        players.forEach(p => {
+            const distance = Math.sqrt(Math.pow(p.x - tx, 2) + Math.pow(p.y - ty, 2));
+            const requiredBio = Math.ceil(distance);
+            const visionRadius = (p.biology && p.biology > 0) ? p.biology : (p.science_level || 1);
+
+            if (visionRadius >= requiredBio) {
+                inVision.push(p.name);
+            } else {
+                outOfVision.push(p.name);
+            }
+        });
+
+        let inVisionStr = inVision.length > 0 ? inVision.join(', ') : "None";
+        let outOfVisionStr = outOfVision.length > 0 ? outOfVision.join(', ') : "None";
+
+        if (inVisionStr.length > 1024) inVisionStr = inVisionStr.substring(0, 1020) + "...";
+        if (outOfVisionStr.length > 1024) outOfVisionStr = outOfVisionStr.substring(0, 1020) + "...";
+
+        const embed = new EmbedBuilder()
+            .setTitle(`📡 Bio-Scan Radar: ${targetSys.name || 'Unknown'} [${targetSysId}]`)
+            .setColor('#00ffff')
+            .addFields(
+                { name: '✅ In Vision', value: inVisionStr },
+                { name: '❌ Out of Range', value: outOfVisionStr }
+            );
+
+        return message.reply({ embeds: [embed] });
+    }
+
+    // ----------------------------------------------------
+    // !holes [tag] - FIND EMPTY ALLIANCE SLOTS
+    // ----------------------------------------------------
+    if (command === 'holes') {
+        let tag = args[0] ? args[0].toUpperCase() : null;
+
+        // If no tag is explicitly provided, look up the caller's alliance tag
+        if (!tag) {
+            const discordName = message.author.username;
+            const userAlliance = db.prepare(`
+                SELECT a.tag 
+                FROM app_users u
+                JOIN players p ON u.game_name = p.name
+                JOIN alliances a ON p.alliance_id = a.id
+                WHERE LOWER(u.discord_name) = ? OR LOWER(u.discord_name) = ?
+            `).get(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
+
+            if (!userAlliance || !userAlliance.tag) {
+                return message.reply(`❌ Could not automatically detect your alliance. Provide it explicitly: \`!holes <tag>\``);
+            }
+            tag = userAlliance.tag.toUpperCase();
+        }
+
+        // Select planets from any system where at least one member of the target alliance owns a planet
+        const rows = db.prepare(`
+            SELECT p.system_id, s.name as sys_name, p.planet_index, u.name as owner_name
+            FROM planets p
+            JOIN systems s ON p.system_id = s.id
+            LEFT JOIN players u ON p.owner_id = u.id
+            WHERE p.system_id IN (
+                SELECT DISTINCT p2.system_id
+                FROM planets p2
+                JOIN players u2 ON p2.owner_id = u2.id
+                JOIN alliances a2 ON u2.alliance_id = a2.id
+                WHERE a2.tag = ?
+            )
+        `).all(tag);
+
+        const planRows = db.prepare(`SELECT system_id, planet_index FROM planet_plans`).all();
+
+        if (!rows || rows.length === 0) {
+            return message.reply(`❌ No scanned systems found with an active presence for alliance [${tag}].`);
+        }
+
+        const sysData = {};
+        rows.forEach(r => {
+            if (!sysData[r.system_id]) {
+                sysData[r.system_id] = { name: r.sys_name, planets: {} };
+            }
+            if (r.planet_index) {
+                sysData[r.system_id].planets[r.planet_index] = r.owner_name;
+            }
+        });
+
+        const planMap = {};
+        planRows.forEach(p => {
+            if (!planMap[p.system_id]) planMap[p.system_id] = [];
+            planMap[p.system_id].push(p.planet_index);
+        });
+
+        let report = "";
+        let systemsWithHoles = 0;
+
+        const sortedSysIds = Object.keys(sysData).map(Number).sort((a, b) => a - b);
+
+        for (const sysId of sortedSysIds) {
+            const data = sysData[sysId];
+            const holes = [];
+            let closedCount = 0;
+            const plannedForSys = planMap[sysId] || [];
+
+            for (let i = 1; i <= 12; i++) {
+                const owner = data.planets[i];
+                const isPlanned = plannedForSys.includes(i);
+                const isUnknown = !owner || owner === "Unknown";
+                const isFree = owner === "Free Planet" || owner === "Empty";
+
+                if (!isUnknown && !isFree) {
+                    closedCount++; 
+                } else if (!isPlanned) {
+                    holes.push(`P${i.toString().padStart(2, '0')}`); 
+                }
+            }
+
+            if (holes.length > 0) {
+                systemsWithHoles++;
+                report += `**[${sysId}]** ${data.name || "Unknown System"}: ${holes.join(', ')} | Planned - ${plannedForSys.length} | Closed - ${closedCount}\n`;
+            }
+        }
+
+        if (systemsWithHoles === 0) {
+            return message.reply(`🟢 No holes found! All slots in [${tag}] systems are filled or planned.`);
+        }
+
+        if (report.length > 4000) {
+            report = report.substring(0, 4000) + "\n\n... *(list truncated due to Discord length limits)*";
+        }
+
+        const embed = new EmbedBuilder()
+            .setTitle(`🕳️ System Holes for [${tag}]`)
+            .setDescription(report)
+            .setColor('#00ff00')
+            .setFooter({ text: `Found holes in ${systemsWithHoles} systems | Ignoring planets with active !plans` });
+
+        return message.reply({ embeds: [embed] });
     }
 });
 

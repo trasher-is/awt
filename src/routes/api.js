@@ -617,13 +617,10 @@ router.post('/plans', requireAuth, (req, res) => {
     }
 
     try {
+        // Removed the ON CONFLICT clause to stop overwriting old records
         db.prepare(`
             INSERT INTO planet_plans (system_id, planet_index, author_id, note) 
             VALUES (?, ?, ?, ?)
-            ON CONFLICT(system_id, planet_index) DO UPDATE SET 
-                note=excluded.note, 
-                author_id=excluded.author_id, 
-                updated_at=CURRENT_TIMESTAMP
         `).run(system_id, planet_index, author_id, note);
         
         res.json({ success: true });

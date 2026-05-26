@@ -167,14 +167,12 @@ function initDatabase() {
     // 4.5 Alliance Meta-Data (Planning)
     db.exec(`
         CREATE TABLE IF NOT EXISTS planet_plans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             system_id INTEGER,
             planet_index INTEGER,
-            author_id INTEGER, -- Links to the admin/user who wrote it
+            author_id INTEGER, 
             note TEXT NOT NULL,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            
-            -- The primary key ensures only ONE active note per planet
-            PRIMARY KEY (system_id, planet_index),
             FOREIGN KEY(system_id) REFERENCES systems(id) ON DELETE CASCADE,
             FOREIGN KEY(author_id) REFERENCES app_users(id) ON DELETE SET NULL
         )
