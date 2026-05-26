@@ -240,6 +240,18 @@ function initDatabase() {
         )
     `);
 
+    // Alliance Admin Broadcasts System (Updated for Custom Time Strings)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS alliance_broadcasts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT DEFAULT 'Attention!!!',
+            message TEXT NOT NULL,
+            author_name TEXT NOT NULL,
+            display_time TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

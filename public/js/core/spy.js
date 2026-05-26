@@ -1,5 +1,6 @@
-import { initPlanetPopTimers, initScienceCultureCalc } from './page-injections.js';
+import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts } from './page-injections.js';
 
+// DELETE THIS DEAD BLOCK ENTIRELY - IT IS MISSING THE WINDOW LOAD EVENT
 window.addEventListener('load', () => {
     if (window.location.pathname.includes('/Game/Planets')) initPlanetPopTimers();
     if (window.location.pathname.includes('/Game/Science')) initScienceCultureCalc();
@@ -268,8 +269,12 @@ export function initSpy() {
             sendContext();
         }
 
+        // Active UI Injector Loop (Fires reliably on hard loads and inner frame shifts)
         if (currentUrl.toLowerCase().includes('/game/map')) {
             injectMapIndicators();
+        }
+        if (currentUrl.includes('/Game/News')) {
+            initAllianceNewsAlerts();
         }
     }, 200);
 

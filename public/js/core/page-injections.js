@@ -146,3 +146,48 @@ function formatDuration(totalSeconds) {
     }
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
 }
+
+// --- NEWS PAGE: DYNAMIC BROADCAST INJECTIONS ---
+export async function initAllianceNewsAlerts() {
+    if (!window.location.pathname.startsWith('/Game/News')) return;
+
+    const newsTable = document.querySelector('.table.hover');
+    if (!newsTable || newsTable.getAttribute('data-broadcasts-injected') === 'true') return;
+    
+    newsTable.setAttribute('data-broadcasts-injected', 'true');
+
+    const newsTableBody = newsTable.querySelector('tbody');
+    if (!newsTableBody) return;
+
+    try {
+        const res = await fetch('/hub-api/broadcasts');
+        const data = await res.json();
+        if (!data.success || !data.broadcasts || data.broadcasts.length === 0) return;
+
+        const filterRow = newsTableBody.querySelector('tr.lowlight');
+
+        for (const b of [...data.broadcasts].reverse()) {
+            const rowHTML = `
+                <tr class="custom-alliance-broadcast-row" style="border-left: 3px solid #3b82f6; background-color: rgba(59, 130, 246, 0.04);">
+                    <td class="msg player-incoming unread" style="vertical-align: top; white-space: nowrap;">
+                        ${b.display_time}
+                        <br>
+                        <b>(<span>📣 ${b.author_name}</span>)</b>
+                    </td>
+                    <td class="black text-left" style="vertical-align: top; padding: 6px 12px;">
+                        <div><b>${b.title}</b> ${b.message}</div>
+                    </td>
+                </tr>
+            `;
+
+            if (filterRow) {
+                filterRow.insertAdjacentHTML('afterend', rowHTML);
+            } else {
+                newsTableBody.insertAdjacentHTML('afterbegin', rowHTML);
+            }
+        }
+    } catch (e) {
+        console.error("[AWT Extension] Broadcast Injection Failed:", e);
+        newsTable.removeAttribute('data-broadcasts-injected');
+    }
+}

@@ -96,6 +96,54 @@
 
         <section class="flex flex-col gap-4">
             <div>
+                <h2 class="text-xl font-bold tracking-tight border-b border-border pb-2">Alliance Broadcast Board</h2>
+            </div>
+            
+            <div class="bg-card border border-border rounded-lg shadow-sm p-4 flex flex-col gap-6">
+                <div class="flex flex-col md:flex-row gap-3 items-end">
+                <div class="w-full md:w-1/6">
+                    <label class="text-xs text-muted-foreground font-medium mb-1 block">Alert Title</label>
+                    <input type="text" id="bcTitle" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm" value="Attention!!!">
+                </div>
+                <div class="w-full md:w-2/5">
+                    <label class="text-xs text-muted-foreground font-medium mb-1 block">Broadcast Message (HTML Tags Supported)</label>
+                    <input type="text" id="bcMessage" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm" placeholder="We have evidence of an incoming fleet...">
+                </div>
+                <div class="w-full md:w-1/6">
+                    <label class="text-xs text-muted-foreground font-medium mb-1 block">Author Name</label>
+                    <input type="text" id="bcAuthor" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm">
+                </div>
+                <div class="w-full md:w-1/6">
+                    <label class="text-xs text-muted-foreground font-medium mb-1 block">Display Time Frame</label>
+                    <input type="text" id="bcTime" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm" placeholder="May 26 - 30">
+                </div>
+                <div class="w-full md:w-auto">
+                    <button onclick="publishBroadcast()" class="h-9 px-4 rounded-md bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 w-full whitespace-nowrap"><i class="fa-solid fa-bullhorn mr-1"></i> Send</button>
+                </div>
+            </div>
+
+                <div class="overflow-x-auto border-t border-border pt-4">
+                    <h3 class="text-xs text-muted-foreground font-bold uppercase tracking-wider mb-3">Active Transmissions</h3>
+                    <table class="w-full text-left text-sm whitespace-nowrap">
+                        <thead class="text-muted-foreground border-b border-border">
+                            <tr>
+                                <th class="pb-2 font-medium">Time Window</th>
+                                <th class="pb-2 font-medium">Author</th>
+                                <th class="pb-2 font-medium">Title</th>
+                                <th class="pb-2 font-medium">Message Markup</th>
+                                <th class="pb-2 font-medium text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="broadcastTableBody" class="divide-y divide-border font-sans">
+                            <tr><td colspan="5" class="text-center py-3 text-muted-foreground text-xs">No active broadcasts.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section class="flex flex-col gap-4">
+            <div>
                 <h2 class="text-xl font-bold tracking-tight border-b border-border pb-2">Tool Status & Metrics</h2>
             </div>
             
@@ -166,7 +214,96 @@
                 if (data.id && data.role === 'admin') {
                     currentAdminUser = data.gameName;
                     document.body.style.display = 'block';
+                    
+                    // Pre-fill author's name automatically inside the broadcast utility
+                    document.getElementById('bcAuthor').value = currentAdminUser;
+                    
                     loadUsers();
+                    loadStatus();
+                    loadBroadcasts();
+       
+                    // --- ALLIANCE BROADCAST UTILITIES (ROBUST REFACTOR) ---
+                    async function loadBroadcasts() {
+                        const res = await fetch('/hub-api/broadcasts');
+                        const data = await res.json();
+                        const tbody = document.getElementById('broadcastTableBody');
+                        
+                        if (!data.success || !data.broadcasts || data.broadcasts.length === 0) {
+                            tbody.innerHTML = `<tr><td colspan="5" class="text-center py-3 text-muted-foreground text-xs">No active broadcasts.</td></tr>`;
+                            return;
+                        }
+
+                        // Cache globally to secure handlers against quotation string errors
+                        window.currentBroadcasts = data.broadcasts;
+
+                        tbody.innerHTML = data.broadcasts.map(b => `
+                            <tr class="hover:bg-muted/20 transition-colors text-xs">
+                                <td class="py-2.5 font-mono text-muted-foreground">${b.display_time}</td>
+                                <td class="py-2.5 font-medium">${b.author_name}</td>
+                                <td class="py-2.5 font-semibold text-yellow-500">${b.title}</td>
+                                <td class="py-2.5 max-w-xs truncate text-muted-foreground" title="${b.message}">${b.message}</td>
+                                <td class="py-2.5 text-right flex gap-3 justify-end items-center">
+                                    <button onclick="editBroadcast(${b.id})" class="text-muted-foreground hover:text-foreground transition-colors" title="Edit Broadcast"><i class="fa-solid fa-pen"></i></button>
+                                    <button onclick="deleteBroadcast(${b.id})" class="text-destructive hover:text-destructive/80 transition-colors" title="Delete Broadcast"><i class="fa-solid fa-trash"></i></button>
+                                </td>
+                            </tr>
+                        `).join('');
+                    }
+
+                    async function publishBroadcast() {
+                        const title = document.getElementById('bcTitle').value;
+                        const message = document.getElementById('bcMessage').value;
+                        const author_name = document.getElementById('bcAuthor').value;
+                        const display_time = document.getElementById('bcTime').value;
+
+                        if (!message || !author_name || !display_time) return alert("Message, Author, and Custom Time string are required.");
+
+                        const res = await fetch('/hub-api/admin/broadcasts', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ title, message, author_name, display_time })
+                        });
+
+                        const data = await res.json();
+                        if (data.success) {
+                            document.getElementById('bcMessage').value = '';
+                            document.getElementById('bcTime').value = '';
+                            loadBroadcasts();
+                        } else {
+                            alert(data.error || "Server processing exception encountered.");
+                        }
+                    }
+
+                    async function deleteBroadcast(id) {
+                        if (!confirm("Permanently remove this announcement from all user news scrapers?")) return;
+                        const res = await fetch(`/hub-api/admin/broadcasts/${id}`, { method: 'DELETE' });
+                        const data = await res.json();
+                        if (data.success) loadBroadcasts();
+                    }
+
+                    async function editBroadcast(id) {
+                        if (!window.currentBroadcasts) return;
+                        const b = window.currentBroadcasts.find(item => item.id === id);
+                        if (!b) return;
+
+                        const title = prompt("Edit Alert Title:", b.title);
+                        if (title === null) return;
+                        const author_name = prompt("Edit Author Display Name:", b.author_name);
+                        if (author_name === null) return;
+                        const display_time = prompt("Edit Display Time Frame:", b.display_time);
+                        if (display_time === null) return;
+                        const message = prompt("Edit Broadcast Message Body:", b.message);
+                        if (!message) return;
+
+                        const res = await fetch(`/hub-api/admin/broadcasts/${id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ title, author_name, display_time, message })
+                        });
+                        const data = await res.json();
+                        if (data.success) loadBroadcasts();
+                        else alert(data.error);
+                    }
                     loadStatus();
                 } else {
                     window.location.href = '/dashboard';
@@ -312,6 +449,30 @@
             const data = await res.json();
             if(data.success) loadUsers();
             else alert(data.error);
+        }
+
+        // --- NEW: PUBLISH BROADCAST TO NEWS PAGE ---
+        async function publishBroadcast() {
+            const title = document.getElementById('bcTitle').value;
+            const message = document.getElementById('bcMessage').value;
+            const author_name = document.getElementById('bcAuthor').value;
+            const duration_hours = document.getElementById('bcTime').value;
+
+            if (!message || !author_name) return alert("Broadcast Message and Author Display Name are required.");
+
+            const res = await fetch('/hub-api/admin/broadcasts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, message, author_name, duration_hours })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                alert("Alliance announcement successfully transmitted to News Scrapers!");
+                document.getElementById('bcMessage').value = '';
+            } else {
+                alert(data.error);
+            }
         }
 
         // --- 3. STATUS & DATABASE CONTROLS ---

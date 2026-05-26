@@ -642,6 +642,67 @@ router.delete('/plans/:systemId/:planetIndex', requireAuth, (req, res) => {
     }
 });
 
+// --- ADMIN: PUBLISH BROADCAST ---
+router.post('/admin/broadcasts', requireAdmin, (req, res) => {
+    const { title, message, author_name, display_time } = req.body;
+    if (!message || !author_name || !display_time) return res.status(400).json({ error: 'Missing required parameters.' });
+
+    try {
+        db.prepare(`
+            INSERT INTO alliance_broadcasts (title, message, author_name, display_time)
+            VALUES (?, ?, ?, ?)
+        `).run(title || 'Attention!!!', message, author_name, display_time);
+        res.json({ success: true });
+    } catch (err) {
+        console.error("[DB Error] Failed to insert broadcast:", err);
+        res.status(500).json({ error: 'Failed to create broadcast' });
+    }
+});
+
+// --- USER & ADMIN: FETCH ALL BROADCASTS ---
+router.get('/broadcasts', requireAuth, (req, res) => {
+    try {
+        const activeAlerts = db.prepare(`
+            SELECT id, title, message, author_name, display_time
+            FROM alliance_broadcasts
+            ORDER BY id DESC
+        `).all();
+        res.json({ success: true, broadcasts: activeAlerts });
+    } catch (err) {
+        console.error("[DB Error] Failed to fetch broadcasts:", err);
+        res.status(500).json({ error: 'Failed to load broadcasts' });
+    }
+});
+
+// --- ADMIN: EDIT EXISTENT BROADCAST ---
+router.put('/admin/broadcasts/:id', requireAdmin, (req, res) => {
+    const { title, message, author_name, display_time } = req.body;
+    if (!message || !author_name || !display_time) return res.status(400).json({ error: 'Missing fields.' });
+
+    try {
+        db.prepare(`
+            UPDATE alliance_broadcasts 
+            SET title = ?, message = ?, author_name = ?, display_time = ?
+            WHERE id = ?
+        `).run(title || 'Attention!!!', message, author_name, display_time, req.params.id);
+        res.json({ success: true });
+    } catch (err) {
+        console.error("[DB Error] Failed to update broadcast:", err);
+        res.status(500).json({ error: 'Update execution failed.' });
+    }
+});
+
+// --- ADMIN: DELETE BROADCAST ---
+router.delete('/admin/broadcasts/:id', requireAdmin, (req, res) => {
+    try {
+        db.prepare(`DELETE FROM alliance_broadcasts WHERE id = ?`).run(req.params.id);
+        res.json({ success: true });
+    } catch (err) {
+        console.error("[DB Error] Failed to delete broadcast:", err);
+        res.status(500).json({ error: 'Delete execution failed.' });
+    }
+});
+
 // --- GET FULL SYSTEM INTEL (Planets, Fleets, History, Plans) ---
 router.get('/intel/system/:id', requireAuth, (req, res) => {
     try {
