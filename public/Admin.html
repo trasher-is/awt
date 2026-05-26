@@ -204,7 +204,7 @@
     </main>
 
     <script>
-        // --- 1. CORE AUTH & INIT ---
+        // --- 1. CORE AUTH & INITIALIZATION ---
         let currentAdminUser = null;
         
         async function initAdmin() {
@@ -215,96 +215,13 @@
                     currentAdminUser = data.gameName;
                     document.body.style.display = 'block';
                     
-                    // Pre-fill author's name automatically inside the broadcast utility
+                    // Pre-fill author's name automatically inside the broadcast input
                     document.getElementById('bcAuthor').value = currentAdminUser;
                     
+                    // Fire global data loaders smoothly on boot
                     loadUsers();
                     loadStatus();
                     loadBroadcasts();
-       
-                    // --- ALLIANCE BROADCAST UTILITIES (ROBUST REFACTOR) ---
-                    async function loadBroadcasts() {
-                        const res = await fetch('/hub-api/broadcasts');
-                        const data = await res.json();
-                        const tbody = document.getElementById('broadcastTableBody');
-                        
-                        if (!data.success || !data.broadcasts || data.broadcasts.length === 0) {
-                            tbody.innerHTML = `<tr><td colspan="5" class="text-center py-3 text-muted-foreground text-xs">No active broadcasts.</td></tr>`;
-                            return;
-                        }
-
-                        // Cache globally to secure handlers against quotation string errors
-                        window.currentBroadcasts = data.broadcasts;
-
-                        tbody.innerHTML = data.broadcasts.map(b => `
-                            <tr class="hover:bg-muted/20 transition-colors text-xs">
-                                <td class="py-2.5 font-mono text-muted-foreground">${b.display_time}</td>
-                                <td class="py-2.5 font-medium">${b.author_name}</td>
-                                <td class="py-2.5 font-semibold text-yellow-500">${b.title}</td>
-                                <td class="py-2.5 max-w-xs truncate text-muted-foreground" title="${b.message}">${b.message}</td>
-                                <td class="py-2.5 text-right flex gap-3 justify-end items-center">
-                                    <button onclick="editBroadcast(${b.id})" class="text-muted-foreground hover:text-foreground transition-colors" title="Edit Broadcast"><i class="fa-solid fa-pen"></i></button>
-                                    <button onclick="deleteBroadcast(${b.id})" class="text-destructive hover:text-destructive/80 transition-colors" title="Delete Broadcast"><i class="fa-solid fa-trash"></i></button>
-                                </td>
-                            </tr>
-                        `).join('');
-                    }
-
-                    async function publishBroadcast() {
-                        const title = document.getElementById('bcTitle').value;
-                        const message = document.getElementById('bcMessage').value;
-                        const author_name = document.getElementById('bcAuthor').value;
-                        const display_time = document.getElementById('bcTime').value;
-
-                        if (!message || !author_name || !display_time) return alert("Message, Author, and Custom Time string are required.");
-
-                        const res = await fetch('/hub-api/admin/broadcasts', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ title, message, author_name, display_time })
-                        });
-
-                        const data = await res.json();
-                        if (data.success) {
-                            document.getElementById('bcMessage').value = '';
-                            document.getElementById('bcTime').value = '';
-                            loadBroadcasts();
-                        } else {
-                            alert(data.error || "Server processing exception encountered.");
-                        }
-                    }
-
-                    async function deleteBroadcast(id) {
-                        if (!confirm("Permanently remove this announcement from all user news scrapers?")) return;
-                        const res = await fetch(`/hub-api/admin/broadcasts/${id}`, { method: 'DELETE' });
-                        const data = await res.json();
-                        if (data.success) loadBroadcasts();
-                    }
-
-                    async function editBroadcast(id) {
-                        if (!window.currentBroadcasts) return;
-                        const b = window.currentBroadcasts.find(item => item.id === id);
-                        if (!b) return;
-
-                        const title = prompt("Edit Alert Title:", b.title);
-                        if (title === null) return;
-                        const author_name = prompt("Edit Author Display Name:", b.author_name);
-                        if (author_name === null) return;
-                        const display_time = prompt("Edit Display Time Frame:", b.display_time);
-                        if (display_time === null) return;
-                        const message = prompt("Edit Broadcast Message Body:", b.message);
-                        if (!message) return;
-
-                        const res = await fetch(`/hub-api/admin/broadcasts/${id}`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ title, author_name, display_time, message })
-                        });
-                        const data = await res.json();
-                        if (data.success) loadBroadcasts();
-                        else alert(data.error);
-                    }
-                    loadStatus();
                 } else {
                     window.location.href = '/dashboard';
                 }
@@ -318,7 +235,90 @@
             fetch('/hub-api/logout', { method: 'POST' }).then(() => { window.location.href = '/hub-assets/login.html'; });
         }
 
-        // --- 2. USER MANAGEMENT ---
+        // --- 2. GLOBAL ALLIANCE BROADCAST UTILITIES ---
+        async function loadBroadcasts() {
+            const res = await fetch('/hub-api/broadcasts');
+            const data = await res.json();
+            const tbody = document.getElementById('broadcastTableBody');
+            
+            if (!data.success || !data.broadcasts || data.broadcasts.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="text-center py-3 text-muted-foreground text-xs">No active broadcasts.</td></tr>`;
+                return;
+            }
+
+            // Cache globally to secure handlers against quotation string execution bugs
+            window.currentBroadcasts = data.broadcasts;
+
+            tbody.innerHTML = data.broadcasts.map(b => `
+                <tr class="hover:bg-muted/20 transition-colors text-xs">
+                    <td class="py-2.5 font-mono text-muted-foreground">${b.display_time}</td>
+                    <td class="py-2.5 font-medium">${b.author_name}</td>
+                    <td class="py-2.5 font-semibold text-yellow-500">${b.title}</td>
+                    <td class="py-2.5 max-w-xs truncate text-muted-foreground" title="${b.message}">${b.message}</td>
+                    <td class="py-2.5 text-right flex gap-3 justify-end items-center">
+                        <button onclick="editBroadcast(${b.id})" class="text-muted-foreground hover:text-foreground transition-colors" title="Edit Broadcast"><i class="fa-solid fa-pen"></i></button>
+                        <button onclick="deleteBroadcast(${b.id})" class="text-destructive hover:text-destructive/80 transition-colors" title="Delete Broadcast"><i class="fa-solid fa-trash"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        async function publishBroadcast() {
+            const title = document.getElementById('bcTitle').value;
+            const message = document.getElementById('bcMessage').value;
+            const author_name = document.getElementById('bcAuthor').value;
+            const display_time = document.getElementById('bcTime').value;
+
+            if (!message || !author_name || !display_time) return alert("Message, Author, and Custom Time string are required.");
+
+            const res = await fetch('/hub-api/admin/broadcasts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, message, author_name, display_time })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                document.getElementById('bcMessage').value = '';
+                document.getElementById('bcTime').value = '';
+                loadBroadcasts();
+            } else {
+                alert(data.error || "Server processing exception encountered.");
+            }
+        }
+
+        async function deleteBroadcast(id) {
+            if (!confirm("Permanently remove this announcement from all user news scrapers?")) return;
+            const res = await fetch(`/hub-api/admin/broadcasts/${id}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.success) loadBroadcasts();
+        }
+
+        async function editBroadcast(id) {
+            if (!window.currentBroadcasts) return;
+            const b = window.currentBroadcasts.find(item => item.id === id);
+            if (!b) return;
+
+            const title = prompt("Edit Alert Title:", b.title);
+            if (title === null) return;
+            const author_name = prompt("Edit Author Display Name:", b.author_name);
+            if (author_name === null) return;
+            const display_time = prompt("Edit Display Time Frame:", b.display_time);
+            if (display_time === null) return;
+            const message = prompt("Edit Broadcast Message Body:", b.message);
+            if (!message) return;
+
+            const res = await fetch(`/hub-api/admin/broadcasts/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, author_name, display_time, message })
+            });
+            const data = await res.json();
+            if (data.success) loadBroadcasts();
+            else alert(data.error);
+        }
+
+        // --- 3. USER MANAGEMENT MANAGEMENT ---
         async function loadUsers() {
             const res = await fetch('/hub-api/admin/users');
             const data = await res.json();
@@ -330,7 +330,6 @@
                 const isMasterAdmin = u.game_name === 'admin';
                 const statusBadge = u.is_active ? '<span class="text-[10px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded uppercase font-bold tracking-wider">Active</span>' : '<span class="text-[10px] bg-red-500/20 text-red-500 px-2 py-0.5 rounded uppercase font-bold tracking-wider">Banned</span>';
                 
-                // Only render role dropdown if not master admin
                 const roleSelect = isMasterAdmin ? 
                     `<span class="text-xs text-muted-foreground uppercase tracking-widest font-bold">Admin</span>` : 
                     `<select onchange="changeRole(${u.id}, this.value)" class="text-xs bg-transparent border border-border rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-ring">
@@ -338,7 +337,6 @@
                         <option value="user"  ${u.role === 'user' ? 'selected' : ''}>User</option>
                     </select>`;
 
-                // Action Buttons
                 const editBtn = isMasterAdmin ? '' : `<button onclick="editName(${u.id}, '${u.game_name}')" class="text-xs text-muted-foreground hover:text-foreground transition-colors" title="Edit Name"><i class="fa-solid fa-pen"></i></button>`;
                 const passBtn = `<button onclick="changePassword(${u.id}, '${u.game_name}')" class="text-xs text-muted-foreground hover:text-foreground transition-colors" title="Change Password"><i class="fa-solid fa-key"></i></button>`;
                 const toggleBtn = isMasterAdmin ? `<button disabled class="text-xs opacity-30 cursor-not-allowed text-red-500"><i class="fa-solid fa-ban"></i></button>` : `<button onclick="toggleUser(${u.id})" class="text-xs hover:underline text-${u.is_active ? 'red-500' : 'green-500'}" title="${u.is_active ? 'Ban' : 'Unban'}"><i class="fa-solid fa-${u.is_active ? 'ban' : 'check'}"></i></button>`;
@@ -451,31 +449,7 @@
             else alert(data.error);
         }
 
-        // --- NEW: PUBLISH BROADCAST TO NEWS PAGE ---
-        async function publishBroadcast() {
-            const title = document.getElementById('bcTitle').value;
-            const message = document.getElementById('bcMessage').value;
-            const author_name = document.getElementById('bcAuthor').value;
-            const duration_hours = document.getElementById('bcTime').value;
-
-            if (!message || !author_name) return alert("Broadcast Message and Author Display Name are required.");
-
-            const res = await fetch('/hub-api/admin/broadcasts', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title, message, author_name, duration_hours })
-            });
-
-            const data = await res.json();
-            if (data.success) {
-                alert("Alliance announcement successfully transmitted to News Scrapers!");
-                document.getElementById('bcMessage').value = '';
-            } else {
-                alert(data.error);
-            }
-        }
-
-        // --- 3. STATUS & DATABASE CONTROLS ---
+        // --- 4. STATUS ENGINE & DATABASE CONTROLS ---
         function formatUptime(seconds) {
             const d = Math.floor(seconds / (3600*24));
             const h = Math.floor(seconds % (3600*24) / 3600);

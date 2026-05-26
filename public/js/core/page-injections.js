@@ -168,13 +168,13 @@ export async function initAllianceNewsAlerts() {
 
         for (const b of [...data.broadcasts].reverse()) {
             const rowHTML = `
-                <tr class="custom-alliance-broadcast-row" style="border-left: 3px solid #3b82f6; background-color: rgba(59, 130, 246, 0.04);">
-                    <td class="msg player-incoming unread" style="vertical-align: top; white-space: nowrap;">
+                <tr class="custom-alliance-broadcast-row" style="border-left: 3px solid #1e3a8a; background-color: rgba(121, 53, 14, 0.47);">
+                    <td class="msg player-incoming unread" style="vertical-align: top; white-space: nowrap; background-color: rgba(77, 41, 7, 0.85);!important;">
                         ${b.display_time}
                         <br>
-                        <b>(<span>📣 ${b.author_name}</span>)</b>
+                        <b>(<span>${b.author_name}</span>)</b>
                     </td>
-                    <td class="black text-left" style="vertical-align: top; padding: 6px 12px;">
+                    <td class="black text-left" style="vertical-align: top; padding: 6px 12px; background-color: transparent !important;">
                         <div><b>${b.title}</b> ${b.message}</div>
                     </td>
                 </tr>
