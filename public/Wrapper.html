@@ -57,7 +57,7 @@
         <div class="flex-1 flex flex-col pt-2">
             
             <div id="context-tools" class="flex flex-col pb-4 border-b border-border hidden">
-                <div class="px-4 py-2 text-xs text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed flex justify-between items-center">
+                <div class="px-4 py-2 text-s text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed flex justify-between items-center">
                     <span>System Intel</span><span id="ui-sys-id" class="text-foreground font-mono hidden">--</span>
                 </div>
                 
@@ -98,14 +98,14 @@
                 <button id="btn-ctx-map" onclick="copyToDiscord('map')" class="h-10 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground hidden transition-colors mt-2">
                     <i class="fa-solid fa-map w-6 text-center text-sm"></i>
                     <div class="ml-4 flex flex-col items-start sidebar-text">
-                        <span class="text-xs text-muted-foreground uppercase leading-tight">Coordinates</span>
+                        <span class="text-s text-muted-foreground uppercase leading-tight">Coordinates</span>
                         <span id="ui-map-coords" class="font-mono font-medium text-foreground leading-tight">X: -- / Y: --</span>
                     </div>
                 </button>
             </div>
 
             <div id="player-context-tools" class="flex flex-col pb-4 border-b border-border hidden">
-                <div class="px-4 py-2 text-xs text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed flex justify-between items-center">
+                <div class="px-4 py-2 text-s text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed flex justify-between items-center">
                     <span>Player Intel</span><span id="ui-player-id" class="text-foreground font-mono hidden">--</span>
                 </div>
                 <div id="player-intel-container" class="px-4 py-2 hide-collapsed flex flex-col gap-4 text-sm">
@@ -125,7 +125,7 @@
             </div>
 
             <div class="flex flex-col py-4 border-b border-border hide-collapsed">
-                <div class="px-4 pb-2 text-xs text-muted-foreground font-semibold uppercase tracking-wider">Database Search</div>
+                <div class="px-4 pb-2 text-s text-muted-foreground font-semibold uppercase tracking-wider">Database Search</div>
                 <div class="px-4 mb-3 relative">
                     <input type="text" id="search-player-input" placeholder="Player Name or ID..." class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8" oninput="handleSearchInput('player')">
                     <i class="fa-solid fa-magnifying-glass absolute right-7 top-2.5 text-muted-foreground text-sm pointer-events-none"></i>
@@ -139,7 +139,7 @@
             </div>
 
             <div class="flex flex-col py-2 border-b border-border">
-                <div class="px-4 py-2 text-xs text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed">Archives</div>
+                <div class="px-4 py-2 text-s text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed">Archives</div>
                 <button onclick="openDatabasePanel()" class="h-8 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
                     <i class="fa-solid fa-hand-fist w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-sm">Players</span>
                 </button>
@@ -155,13 +155,13 @@
             </div>
 
             <div class="flex flex-col py-4 hide-collapsed mt-auto">
-                <div class="px-4 pb-2 text-xs text-muted-foreground font-semibold uppercase tracking-wider">Scrapers</div>
+                <div class="px-4 pb-2 text-s text-muted-foreground font-semibold uppercase tracking-wider">Scrapers</div>
                 <div class="px-4 flex flex-row gap-2">
                     <button id="btn-mass-scan" class="inline-flex items-center justify-center w-1/2 h-9 rounded-md bg-secondary text-secondary-foreground font-medium hover:bg-secondary/80 transition-colors text-sm gap-2 shadow-sm" title="Scan Galaxy"><i class="fa-solid fa-satellite-dish"></i> Galaxy</button>
                     <button id="btn-mass-scan-players" class="inline-flex items-center justify-center w-1/2 h-9 rounded-md bg-secondary text-secondary-foreground font-medium hover:bg-secondary/80 transition-colors text-sm gap-2 shadow-sm" title="Scan Players"><i class="fa-solid fa-user-astronaut"></i> Players</button>
                 </div>
                 <div id="scan-progress-container" class="px-4 mt-3 hidden flex-col gap-1.5">
-                    <div class="flex justify-between text-xs text-muted-foreground font-mono"><span id="scan-status-text">Initializing...</span><span id="scan-count-text">0/0</span></div>
+                    <div class="flex justify-between text-s text-muted-foreground font-mono"><span id="scan-status-text">Initializing...</span><span id="scan-count-text">0/0</span></div>
                     <div class="w-full bg-secondary rounded-full h-1.5 overflow-hidden"><div id="scan-progress-bar" class="bg-primary h-1.5 rounded-full transition-all duration-200" style="width: 0%"></div></div>
                 </div>
             </div>
@@ -179,7 +179,7 @@
 
     <div id="dynamic-panels-container"></div>
 
-    <div id="toast" class="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-secondary border border-border text-foreground text-xs font-semibold py-2.5 px-4 rounded-md shadow-lg flex items-center gap-2 pointer-events-none toast-enter z-50">
+    <div id="toast" class="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-secondary border border-border text-foreground text-s font-semibold py-2.5 px-4 rounded-md shadow-lg flex items-center gap-2 pointer-events-none toast-enter z-50">
         <i class="fa-solid fa-circle-check text-green-500"></i> <span id="toast-msg">Copied</span>
     </div>
 
@@ -253,7 +253,7 @@
                 list.innerHTML = '';
                 if (data.plans.length > 0) {
                     data.plans.forEach(p => {
-                        list.innerHTML += `<div class="bg-card border border-border p-3 rounded-lg plan-card relative group shadow-sm"><div class="flex justify-between items-start mb-1.5"><span class="text-foreground font-semibold text-xs">Planet #${p.planet_index}</span><button onclick="deletePlan(${p.planet_index})" class="text-muted-foreground hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><i class="fa-solid fa-trash text-xs"></i></button></div><p class="text-muted-foreground text-xs mb-2">${p.note}</p><div class="text-[9px] text-muted-foreground opacity-70 text-right">by ${p.author || 'Unknown'}</div></div>`;
+                        list.innerHTML += `<div class="bg-card border border-border p-3 rounded-lg plan-card relative group shadow-sm"><div class="flex justify-between items-start mb-1.5"><span class="text-foreground font-semibold text-s">Planet #${p.planet_index}</span><button onclick="deletePlan(${p.planet_index})" class="text-muted-foreground hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><i class="fa-solid fa-trash text-s"></i></button></div><p class="text-muted-foreground text-s mb-2">${p.note}</p><div class="text-s text-muted-foreground opacity-70 text-right">by ${p.author || 'Unknown'}</div></div>`;
                     });
                 }
                 document.getElementById('intel-planets-list').innerHTML = data.planets.map(p => `<div class="flex justify-between items-center py-0.5"><span class="text-muted-foreground">#${p.planet_index}</span><span class="font-medium">${p.owner_name ? `[${p.alliance_tag || '?'}] ${p.owner_name}` : 'Empty'}</span></div>`).join('');
@@ -263,15 +263,15 @@
                     
                     // If arrival_time is present, it's in transit. Otherwise, it's stationed.
                     if(f.arrival_time && f.arrival_time !== '-') {
-                        statBadge = `<span class="text-[9px] bg-red-500/20 text-red-400 px-1 rounded ml-1">Transit: ${f.arrival_time}</span>`;
+                        statBadge = `<span class="text-s bg-red-500/20 text-red-400 px-1 rounded ml-1">Transit: ${f.arrival_time}</span>`;
                     }
                     
-                    return `<div class="flex justify-between items-center py-0.5 text-[10px]">
+                    return `<div class="flex justify-between items-center py-0.5 text-s">
                         <span class="text-muted-foreground">At #${f.planet_index} ${statBadge}</span>
                         <span class="text-red-400 font-medium">by [${f.alliance_tag || '?'}] ${f.owner_name || 'Unknown'} (CV: ${cv.toLocaleString()})</span>
                     </div>`;
                 }).join('') : '<span class="text-muted-foreground italic text-center py-2">No fleets detected.</span>';
-                document.getElementById('intel-history-list').innerHTML = data.history.length ? data.history.map(h => `<div class="text-[10px] leading-tight mb-2 border-l-2 border-border pl-2"><span class="text-muted-foreground">${new Date(h.timestamp).toLocaleTimeString()} (#${h.planet_index})</span><br>${h.event_type_id === 1 ? `<span class="text-foreground font-medium">${h.old_owner || 'None'} &rarr; ${h.new_owner || 'None'}</span>` : `<span class="text-red-400 font-medium">Population Drop</span>`}</div>`).join('') : '<span class="text-muted-foreground italic text-center py-2">No recent history.</span>';
+                document.getElementById('intel-history-list').innerHTML = data.history.length ? data.history.map(h => `<div class="text-s leading-tight mb-2 border-l-2 border-border pl-2"><span class="text-muted-foreground">${new Date(h.timestamp).toLocaleTimeString()} (#${h.planet_index})</span><br>${h.event_type_id === 1 ? `<span class="text-foreground font-medium">${h.old_owner || 'None'} &rarr; ${h.new_owner || 'None'}</span>` : `<span class="text-red-400 font-medium">Population Drop</span>`}</div>`).join('') : '<span class="text-muted-foreground italic text-center py-2">No recent history.</span>';
 
                 const iframe = document.getElementById('game-frame');
                 if (iframe.contentWindow) iframe.contentWindow.postMessage({ type: 'INJECT_TACTICAL_OVERLAYS', payload: { plans: data.plans, fleets: data.fleets, planets: data.planets } }, window.location.origin);
@@ -325,14 +325,14 @@
                             </div>
                             
                             <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
-                                <div class="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1">Economy</div>
+                                <div class="text-s text-muted-foreground font-bold uppercase tracking-wider mb-1">Economy</div>
                                 ${row('Trade Revenue', (p.trade_revenue || 0).toLocaleString())}
                                 ${row('Eco Bonus', `+${p.eco_bonus || 0}%`)}
                                 ${row('Artefact', p.artefact || 'None')}
                             </div>
 
                             <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
-                                <div class="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1">Sciences</div>
+                                <div class="text-s text-muted-foreground font-bold uppercase tracking-wider mb-1">Sciences</div>
                                 <div class="grid grid-cols-2 gap-x-4">
                                     ${row('Bio', p.biology || 0)}
                                     ${row('Eco', p.economy || 0)}
@@ -344,7 +344,7 @@
                             </div>
 
                             <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
-                                <div class="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1">Race Traits</div>
+                                <div class="text-s text-muted-foreground font-bold uppercase tracking-wider mb-1">Race Traits</div>
                                 <div class="grid grid-cols-2 gap-x-4">
                                     <div class="flex flex-col">
                                         ${trait('Grw', p.race_growth || 0)}
@@ -500,22 +500,22 @@
             const q = input.value.trim();
             if (!q) { resultsContainer.innerHTML = ''; return; }
 
-            resultsContainer.innerHTML = '<div class="text-[10px] text-muted-foreground text-center py-2"><i class="fa-solid fa-circle-notch fa-spin"></i> Searching...</div>';
+            resultsContainer.innerHTML = '<div class="text-s text-muted-foreground text-center py-2"><i class="fa-solid fa-circle-notch fa-spin"></i> Searching...</div>';
             try {
                 const res = await fetch(`/hub-api/search/${type}?q=${encodeURIComponent(q)}`);
                 const data = await res.json();
 
                 if (!data.success || data.results.length === 0) {
-                    resultsContainer.innerHTML = '<div class="text-[10px] text-muted-foreground text-center py-2 bg-card rounded border border-border">No records found.</div>';
+                    resultsContainer.innerHTML = '<div class="text-s text-muted-foreground text-center py-2 bg-card rounded border border-border">No records found.</div>';
                     return;
                 }
 
                 if (type === 'player') {
-                    resultsContainer.innerHTML = data.results.map(p => `<button onclick="navToIframe('/Game/Players/Profile/${p.id}')" class="text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-xs transition-colors flex justify-between items-center group shadow-sm"><span class="truncate font-medium">${p.alliance_tag ? `<span class="text-muted-foreground font-normal">[${p.alliance_tag}]</span> ` : ''}${p.name}</span><span class="text-[9px] text-muted-foreground font-mono">#${p.id}</span></button>`).join('');
+                    resultsContainer.innerHTML = data.results.map(p => `<button onclick="navToIframe('/Game/Players/Profile/${p.id}')" class="text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-s transition-colors flex justify-between items-center group shadow-sm"><span class="truncate font-medium">${p.alliance_tag ? `<span class="text-muted-foreground font-normal">[${p.alliance_tag}]</span> ` : ''}${p.name}</span><span class="text-s text-muted-foreground font-mono">#${p.id}</span></button>`).join('');
                 } else if (type === 'system') {
-                    resultsContainer.innerHTML = data.results.map(s => `<button onclick="navToIframe('/Game/Map/SolarSystem/${s.id}')" class="text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-xs transition-colors flex justify-between items-center group shadow-sm"><span class="truncate font-medium">${s.name}</span><span class="text-[9px] text-muted-foreground font-mono">#${s.id} (${s.x}/${s.y})</span></button>`).join('');
+                    resultsContainer.innerHTML = data.results.map(s => `<button onclick="navToIframe('/Game/Map/SolarSystem/${s.id}')" class="text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-s transition-colors flex justify-between items-center group shadow-sm"><span class="truncate font-medium">${s.name}</span><span class="text-s text-muted-foreground font-mono">#${s.id} (${s.x}/${s.y})</span></button>`).join('');
                 }
-            } catch (err) { resultsContainer.innerHTML = '<div class="text-[10px] text-red-500 text-center py-2">Search failed.</div>'; }
+            } catch (err) { resultsContainer.innerHTML = '<div class="text-s text-red-500 text-center py-2">Search failed.</div>'; }
         }
 
         function navToIframe(path) {
