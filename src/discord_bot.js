@@ -211,13 +211,10 @@ client.on('messageCreate', async (message) => {
         }
 
         try {
+            // FIX: Stripped out the dead ON CONFLICT clause to support multiple concurrent plans per planet
             db.prepare(`
                 INSERT INTO planet_plans (system_id, planet_index, author_id, note) 
                 VALUES (?, ?, ?, ?)
-                ON CONFLICT(system_id, planet_index) DO UPDATE SET 
-                    note=excluded.note, 
-                    author_id=excluded.author_id, 
-                    updated_at=CURRENT_TIMESTAMP
             `).run(sysId, pIdx, user.id, note);
             
             message.react('✅');
