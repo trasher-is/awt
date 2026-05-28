@@ -807,13 +807,19 @@ window.renderAllyStatsTable = function() {
         return `${hrs}h ${mins}m ${secs}s`;
     };
 
-    // Calculate most recent overall data timestamp from rows
+    /// Calculate most recent overall data timestamp from rows (Timezone Fixed)
     const lastUpdatedLabel = document.getElementById('alliance-stats-last-updated');
     if (lastUpdatedLabel) {
         if (filtered.length === 0) {
             lastUpdatedLabel.innerText = "Last updated: Never";
         } else {
-            const timestamps = filtered.map(s => new Date(s.updated_at).getTime()).filter(t => !isNaN(t));
+            // Force browser to parse SQLite's raw string output explicitly as UTC
+            const timestamps = filtered.map(s => {
+                if (!s.updated_at) return 0;
+                const standardIso = s.updated_at.replace(' ', 'T') + 'Z';
+                return new Date(standardIso).getTime();
+            }).filter(t => !isNaN(t) && t > 0);
+
             if (timestamps.length > 0) {
                 const maxTime = Math.max(...timestamps);
                 const diffMins = Math.floor((Date.now() - maxTime) / 60000);
