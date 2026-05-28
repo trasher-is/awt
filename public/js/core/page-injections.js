@@ -1,17 +1,38 @@
 export function initPlanetPopTimers() {
     if (!window.location.pathname.includes('/Game/Planets')) return;
 
-    document.querySelectorAll('tr[data-planet-id]').forEach(row => {
-        const barContainer = row.querySelector('.progress-bar-timed');
-        if (!barContainer) return;
+    // Inject responsive style rules once if not already present
+    if (!document.getElementById('custom-pop-timer-styles')) {
+        const style = document.createElement('style');
+        style.id = 'custom-pop-timer-styles';
+        style.textContent = `
+            @media (max-width: 767.98px) {
+                .custom-pop-timer {
+                    font-size: 8pt !important;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
 
+    // Direct selection ensures this runs on both the overview table and individual planet views
+    document.querySelectorAll('.progress-bar-timed').forEach(barContainer => {
         // Match numbers, letters, spaces, colons, and dots
         const title = barContainer.getAttribute('title') || "";
         const durMatch = title.match(/Duration:\s*([a-zA-Z0-9\.\s:]+)/);
         if (!durMatch) return;
 
+        // Prevent duplicate injections
+        if (barContainer.querySelector('.custom-pop-timer')) return;
+
+        let durationText = durMatch[1].trim();
+        
+        // Convert "X.XX:XX:XX" format to "Xd XX:XX:XX"
+        durationText = durationText.replace(/^(\d+)\./, '$1d ');
+
         const timerDiv = document.createElement('div');
-        timerDiv.innerText = durMatch[1].trim(); 
+        timerDiv.className = 'custom-pop-timer';
+        timerDiv.innerText = durationText; 
         
         // Use standard vanilla CSS layout properties so it works on the game's page
         timerDiv.style.position = 'absolute';
@@ -21,17 +42,22 @@ export function initPlanetPopTimers() {
         timerDiv.style.zIndex = '10';
         timerDiv.style.color = '#ffffff';
         timerDiv.style.fontFamily = 'monospace';
-        timerDiv.style.fontSize = '12px';
+        timerDiv.style.fontSize = '9pt'; // Base desktop size (~12px)
         timerDiv.style.fontWeight = 'bold';
         timerDiv.style.whiteSpace = 'nowrap';
         timerDiv.style.pointerEvents = 'none'; // Prevents the text from blocking mouse hovers on the bar
         
         barContainer.style.position = 'relative';
         barContainer.appendChild(timerDiv);
+
+        // Hide progress text (e.g. "125/813") on mobile, show on medium screens and up
+        const progressText = barContainer.querySelector('.progress-text');
+        if (progressText) {
+            progressText.classList.add('d-none', 'd-md-block');
+        }
     });
 }
 
-// --- SCIENCE PAGE: Fixed ReferenceError ---
 export async function initScienceCultureCalc() {
     if (!window.location.pathname.includes('/Game/Science')) return;
 
@@ -90,12 +116,8 @@ export async function initScienceCultureCalc() {
                 let secondsToReach = 0;
 
                 if (i === 1) {
-                    // The first target is the level currently researching. 
-                    // The game's native timer is the absolute source of truth.
                     secondsToReach = currentSeconds;
                 } else {
-                    // For all subsequent levels, we calculate the time to complete them 
-                    // from scratch based on points / production, and add it to our running total.
                     const points = getPointsForLevel(targetLvl);
                     if (points > 0) {
                         cumulativeSeconds += (points / production) * 3600;
@@ -140,14 +162,12 @@ function formatDuration(totalSeconds) {
     const hours = Math.floor((totalSeconds % 86400) / 3600);
     const mins = Math.floor((totalSeconds % 3600) / 60);
     
-    // Logic: if > 24h, show 'Xd Yh'. Else 'HH:MM'
     if (days > 0) {
         return `${days}d ${hours}h`;
     }
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
 }
 
-// --- NEWS PAGE: DYNAMIC BROADCAST INJECTIONS ---
 export async function initAllianceNewsAlerts() {
     if (!window.location.pathname.startsWith('/Game/News')) return;
 
@@ -190,4 +210,71 @@ export async function initAllianceNewsAlerts() {
         console.error("[AWT Extension] Broadcast Injection Failed:", e);
         newsTable.removeAttribute('data-broadcasts-injected');
     }
+}
+
+// --- PLANET VIEW: STARBASE AUTOGROWTH TIMER ---
+export function initStarbaseTimer() {
+    // Check if we are on an individual planet page
+    if (!window.location.pathname.toLowerCase().includes('/game/planets/planet/')) return;
+
+    // Locate the Starbase row
+    const starbaseRow = document.querySelector('tr[data-spend-to="Starbase"]');
+    if (!starbaseRow) return;
+
+    // Locate the progress bar container inside the row
+    const barContainer = starbaseRow.querySelector('.progress-bar');
+    if (!barContainer) return;
+
+    // Prevent duplicate styling/injections if run multiple times
+    if (barContainer.querySelector('.custom-starbase-timer')) return;
+
+    // Extract values safely from the DOM cells
+    const lvlCell = starbaseRow.querySelector('.building-lvl-up') || starbaseRow.cells[1];
+    const remainCell = starbaseRow.cells[3];
+    if (!lvlCell || !remainCell) return;
+
+    const level = parseInt(lvlCell.innerText.trim(), 10);
+    const remain = parseInt(remainCell.innerText.trim(), 10);
+
+    // If level is invalid or remaining points is 0, calculation isn't needed
+    if (isNaN(level) || isNaN(remain) || level <= 0 || remain <= 0) return;
+
+    // Formula: growth = level / 5 points per hour
+    const growthPerHour = level / 5;
+    const hoursNeeded = remain / growthPerHour;
+
+    // Convert to distinct days, hours, and minutes strings
+    const totalMinutes = Math.round(hoursNeeded * 60);
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const mins = totalMinutes % 60;
+
+    let timerText = '±';
+    if (days > 0) {
+        timerText += `${days}d ${hours}h`;
+    } else if (hours > 0) {
+        timerText += `${hours}h ${mins}m`;
+    } else {
+        timerText += `${mins}m`;
+    }
+
+    // Build the visual div overlay with identical styling to population bar
+    const timerDiv = document.createElement('div');
+    timerDiv.className = 'custom-starbase-timer';
+    timerDiv.innerText = timerText;
+
+    timerDiv.style.position = 'absolute';
+    timerDiv.style.top = '50%';
+    timerDiv.style.transform = 'translateY(-50%)';
+    timerDiv.style.left = '6px';
+    timerDiv.style.zIndex = '10';
+    timerDiv.style.color = '#ffffff';
+    timerDiv.style.fontFamily = 'monospace';
+    timerDiv.style.fontSize = '12px';
+    timerDiv.style.fontWeight = 'bold';
+    timerDiv.style.whiteSpace = 'nowrap';
+    timerDiv.style.pointerEvents = 'none';
+
+    barContainer.style.position = 'relative';
+    barContainer.appendChild(timerDiv);
 }

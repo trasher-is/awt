@@ -1,9 +1,10 @@
-import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts } from './page-injections.js';
+import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer } from './page-injections.js';
 
 // DELETE THIS DEAD BLOCK ENTIRELY - IT IS MISSING THE WINDOW LOAD EVENT
 window.addEventListener('load', () => {
     if (window.location.pathname.includes('/Game/Planets')) initPlanetPopTimers();
     if (window.location.pathname.includes('/Game/Science')) initScienceCultureCalc();
+    if (window.location.pathname.includes('Game/Planets/Planet/')) initStarbaseTimer();
 });
 
 export function initSpy() {
