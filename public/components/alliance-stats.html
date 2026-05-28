@@ -8,7 +8,7 @@
             </div>
             <div>
                 <h2 class="font-bold text-foreground tracking-wide">Alliance Stats Dashboard</h2>
-                <p class="text-xs text-muted-foreground">Detailed performance metrics compiled across alliance personnel sheets</p>
+                <p class="text-sm text-muted-foreground">Detailed performance metrics compiled across alliance personnel sheets</p>
             </div>
         </div>
         <button onclick="closeAllianceStatsPanel()" class="w-8 h-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
@@ -21,7 +21,7 @@
         <button id="btn-update-alliance-stats" onclick="window.triggerAllianceStatsUpdate()" class="inline-flex items-center justify-center h-9 px-4 rounded-md bg-white text-black font-medium hover:bg-white/90 transition-colors text-sm gap-2 shadow-sm disabled:opacity-50 disabled:pointer-events-none">
             <i id="icon-update-alliance-stats" class="fa-solid fa-rotate"></i> Update all
         </button>
-        <span id="alliance-stats-last-updated" class="text-xs text-muted-foreground font-mono bg-zinc-900 px-2.5 py-1.5 rounded border border-border/40">
+        <span id="alliance-stats-last-updated" class="text-sm text-muted-foreground font-mono bg-zinc-900 px-2.5 py-1.5 rounded border border-border/40">
             Last updated: Calculating...
         </span>
     </div>
@@ -50,7 +50,7 @@
                     <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('population')">Population <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
                 </tr>
             </thead>
-            <tbody id="ally-stats-table-body" class="divide-y divide-border/40 bg-black text-xs font-mono">
+            <tbody id="ally-stats-table-body" class="divide-y divide-border/40 bg-black text-sm font-mono">
                 <!-- Data Row Injection Destination -->
             </tbody>
         </table>
