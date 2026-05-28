@@ -140,6 +140,9 @@
 
             <div class="flex flex-col py-2 border-b border-border">
                 <div class="px-4 py-2 text-s text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed">Archives</div>
+                <button onclick="openAllianceStatsPanel()" class="h-8 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
+                    <i class="fa-solid fa-chess w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-sm">Alliance Stats</span>
+                </button>
                 <button onclick="openDatabasePanel()" class="h-8 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
                     <i class="fa-solid fa-hand-fist w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-sm">Players</span>
                 </button>
@@ -530,7 +533,7 @@
         // ==========================================
         // A safe helper to close any other open panels
 function closeOtherPanels(exceptId) {
-    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel'].forEach(id => {
+    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel'].forEach(id => {
         if (id !== exceptId) {
             const p = document.getElementById(id);
             if (p) p.classList.replace('translate-x-0', 'translate-x-full');
@@ -766,6 +769,256 @@ async function openFleetDatabasePanel() {
     } catch (err) { document.getElementById('flt-db-table-body').innerHTML = '<tr><td colspan="11" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
 }
 function closeFleetDatabasePanel() { const p = document.getElementById('fleet-database-panel'); if (p) p.classList.replace('translate-x-0', 'translate-x-full'); }
+
+let rawDbAllyStats = [], allyStatsSortCol = 'player_id', allyStatsSortAsc = true;
+
+window.sortAllyStats = function(col) {
+    if (allyStatsSortCol === col) allyStatsSortAsc = !allyStatsSortAsc; 
+    else { allyStatsSortCol = col; allyStatsSortAsc = true; }
+    window.renderAllyStatsTable();
+};
+
+window.renderAllyStatsTable = function() {
+    let filtered = [...rawDbAllyStats];
+
+    filtered.sort((a, b) => {
+        let v1 = a[allyStatsSortCol] ?? 0;
+        let v2 = b[allyStatsSortCol] ?? 0;
+
+        if (['science_rate', 'culture_rate', 'production_rate', 'astro_dollars', 'production_points'].includes(allyStatsSortCol)) {
+            v1 = parseInt(v1.toString().replace(/[^\d-]/g, ''), 10) || 0;
+            v2 = parseInt(v2.toString().replace(/[^\d-]/g, ''), 10) || 0;
+        } else if (typeof v1 === 'string') {
+            v1 = v1.toLowerCase();
+            v2 = v2.toLowerCase();
+        }
+
+        return v1 < v2 ? (allyStatsSortAsc ? -1 : 1) : (v1 > v2 ? (allyStatsSortAsc ? 1 : -1) : 0);
+    });
+
+    const formatCultureCountdown = (isoStr) => {
+        if (!isoStr) return '-';
+        const msLeft = new Date(isoStr) - Date.now();
+        if (msLeft <= 0) return 'Ready';
+        const totalSecs = Math.floor(msLeft / 1000);
+        const hrs = Math.floor(totalSecs / 3600);
+        const mins = Math.floor((totalSecs % 3600) / 60);
+        const secs = totalSecs % 60;
+        return `${hrs}h ${mins}m ${secs}s`;
+    };
+
+    // Calculate most recent overall data timestamp from rows
+    const lastUpdatedLabel = document.getElementById('alliance-stats-last-updated');
+    if (lastUpdatedLabel) {
+        if (filtered.length === 0) {
+            lastUpdatedLabel.innerText = "Last updated: Never";
+        } else {
+            const timestamps = filtered.map(s => new Date(s.updated_at).getTime()).filter(t => !isNaN(t));
+            if (timestamps.length > 0) {
+                const maxTime = Math.max(...timestamps);
+                const diffMins = Math.floor((Date.now() - maxTime) / 60000);
+                
+                let relativeStr = "";
+                if (diffMins < 1) {
+                    relativeStr = "Just now";
+                } else {
+                    const hrs = Math.floor(diffMins / 60);
+                    const mins = diffMins % 60;
+                    if (hrs > 0) {
+                        relativeStr = `${hrs}h ${mins}m ago`;
+                    } else {
+                        relativeStr = `${mins}m ago`;
+                    }
+                }
+                lastUpdatedLabel.innerText = `Last updated: ${relativeStr}`;
+            } else {
+                lastUpdatedLabel.innerText = "Last updated: --";
+            }
+        }
+    }
+
+    const tbody = document.getElementById('ally-stats-table-body');
+    if (!tbody) return;
+
+    tbody.innerHTML = filtered.map(s => `
+        <tr class="hover:bg-accent/50 transition-colors border-b border-border/60">
+            <td class="p-3 text-muted-foreground font-mono">${s.player_id}</td>
+            <td class="p-3 font-medium text-foreground">${s.player_name || 'Unknown'}</td>
+            <td class="p-3 text-aw-ally font-semibold">${s.planets_text || '-'}</td>
+            <td class="p-3 font-semibold text-yellow-500">${formatCultureCountdown(s.next_culture_at)}</td>
+            <td class="p-3 text-blue-400 font-semibold">${s.science_rate || '-'}</td>
+            <td class="p-3 text-purple-400 font-semibold">${s.culture_rate || '-'}</td>
+            <td class="p-3 text-orange-400 font-semibold">${s.production_rate || '-'}</td>
+            <td class="p-3 text-emerald-400">${s.astro_dollars || '-'}</td>
+            <td class="p-3 text-slate-300">${s.production_points || '-'}</td>
+            <td class="p-3 text-pink-400 font-semibold">${s.artefact || 'None'}</td>
+            <td class="p-3 text-sky-400">${s.level_text || '-'}</td>
+            <td class="p-3 text-red-400">${s.cv_limit_text || '-'}</td>
+            <td class="p-3 text-amber-500 font-bold">${s.economy}</td>
+            <td class="p-3 text-cyan-400 font-bold">${s.energy}</td>
+            <td class="p-3 text-indigo-400 font-bold">${s.mathematics}</td>
+            <td class="p-3 text-violet-400 font-bold">${s.physics}</td>
+            <td class="p-3 text-foreground font-bold bg-white/5">${s.population}</td>
+        </tr>
+    `).join('');
+};
+
+async function openAllianceStatsPanel() {
+    let panel = document.getElementById('alliance-stats-panel');
+    if (!panel) {
+        try {
+            const res = await fetch('/hub-assets/components/alliance-stats.html');
+            const html = await res.text();
+            document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', html);
+            panel = document.getElementById('alliance-stats-panel');
+        } catch (err) { return console.error("Failed to load layout:", err); }
+    }
+    
+    if (panel.classList.contains('translate-x-0')) return closeAllianceStatsPanel();
+    closeOtherPanels('alliance-stats-panel');
+
+    panel.classList.replace('translate-x-full', 'translate-x-0');
+    if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
+    
+    document.getElementById('ally-stats-table-body').innerHTML = '<tr><td colspan="17" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Reading Alliance Records...</td></tr>';
+    await window.refreshAllianceStatsData();
+}
+
+window.refreshAllianceStatsData = async function() {
+    try {
+        const res = await fetch('/hub-api/intel/alliance-stats');
+        const data = await res.json();
+        if (data.success) { 
+            rawDbAllyStats = data.stats; 
+            window.renderAllyStatsTable(); 
+        }
+    } catch (err) { 
+        const tbody = document.getElementById('ally-stats-table-body');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="17" class="text-center py-8 text-red-500">Failed to load content.</td></tr>'; 
+    }
+};
+
+window.triggerAllianceStatsUpdate = async function() {
+    const btn = document.getElementById('btn-update-alliance-stats');
+    const icon = document.getElementById('icon-update-alliance-stats');
+    
+    if (btn) btn.disabled = true;
+    if (icon) icon.className = 'fa-solid fa-circle-notch fa-spin';
+    
+    showToast('Parsing alliance roster links...');
+
+    try {
+        // Step 1: Query the Alliance profile directory view
+        const res = await fetch('/Game/Alliance');
+        const html = await res.text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        
+        const memberLinks = Array.from(doc.querySelectorAll('a[href*="/Game/Alliance/Member/"]'));
+        if (memberLinks.length === 0) {
+            showToast('No member listings discovered');
+            if (btn) btn.disabled = false;
+            if (icon) icon.className = 'fa-solid fa-rotate';
+            return;
+        }
+
+        showToast(`Updating stats for ${memberLinks.length} personnel rows...`);
+
+        // Step 2: Loop fetching member page configurations
+        for (const link of memberLinks) {
+            try {
+                const targetUrl = link.href;
+                const idMatch = targetUrl.match(/\/Member\/(\d+)/);
+                if (!idMatch) continue;
+                const playerId = parseInt(idMatch[1], 10);
+
+                const mRes = await fetch(targetUrl);
+                const mHtml = await mRes.text();
+                const mDoc = new DOMParser().parseFromString(mHtml, 'text/html');
+                const tds = Array.from(mDoc.querySelectorAll('td'));
+
+                const profileLink = mDoc.querySelector('a[href*="/Game/Players/Profile/"]');
+                if (!profileLink) continue;
+                const name = profileLink.innerText.trim();
+
+                const planetTd = tds.find(td => td.innerHTML.includes('Planets<br>(Next Culture)'));
+                let planetsText = '';
+                let nextCultureSeconds = null;
+                if (planetTd && planetTd.nextElementSibling) {
+                    const valTd = planetTd.nextElementSibling;
+                    planetsText = valTd.innerText.split('(')[0].trim();
+                    const timerSpan = valTd.querySelector('#nextCulture');
+                    if (timerSpan) nextCultureSeconds = parseInt(timerSpan.getAttribute('data-value'), 10);
+                }
+
+                const getRate = (label) => {
+                    const td = tds.find(t => t.innerText.trim() === label);
+                    return (td && td.nextElementSibling) ? td.nextElementSibling.innerText.trim().split(' ')[0] : '';
+                };
+
+                const getSimpleVal = (label) => {
+                    const td = tds.find(t => t.innerText.trim() === label);
+                    return (td && td.nextElementSibling) ? td.nextElementSibling.innerText.trim() : '';
+                };
+
+                const getIntelVal = (label) => {
+                    const td = tds.find(t => t.innerText.trim() === label);
+                    if (td && td.nextElementSibling) {
+                        const parsed = parseInt(td.nextElementSibling.innerText.trim(), 10);
+                        return isNaN(parsed) ? 0 : parsed;
+                    }
+                    return 0;
+                };
+
+                const pLevelTd = tds.find(t => t.innerText.includes('Player Level') && t.querySelector('a[data-href*="PlayerLevelTable"]'));
+                const cvLimitTd = tds.find(t => t.innerText.includes('CV Limit'));
+
+                const payload = {
+                    player_id: playerId,
+                    name,
+                    planets_text: planetsText,
+                    next_culture_seconds: nextCultureSeconds,
+                    science_rate: getRate('Science'),
+                    culture_rate: getRate('Culture'),
+                    production_rate: getRate('Production'),
+                    astro_dollars: getSimpleVal('Astro Dollars'),
+                    production_points: getSimpleVal('Production Points'),
+                    artefact: getSimpleVal('Artefact'),
+                    level_text: pLevelTd && pLevelTd.nextElementSibling ? pLevelTd.nextElementSibling.innerText.trim().replace(/\s+/g, ' ') : '',
+                    cv_limit_text: cvLimitTd && cvLimitTd.nextElementSibling ? cvLimitTd.nextElementSibling.innerText.trim().replace(/\s+/g, ' ') : '',
+                    economy: getIntelVal('Economy'),
+                    energy: getIntelVal('Energy'),
+                    mathematics: getIntelVal('Mathematics'),
+                    physics: getIntelVal('Physics'),
+                    population: getIntelVal('Population')
+                };
+
+                await fetch('/hub-api/sync/alliance-stats', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+            } catch (memberErr) {
+                console.error('[Update Error] Member parsing exception:', memberErr);
+            }
+        }
+
+        showToast('Roster data synchronization complete');
+        await window.refreshAllianceStatsData();
+
+    } catch (err) {
+        console.error('[Update Failure] Main roster download error:', err);
+        showToast('Sync pipeline run aborted');
+    } finally {
+        if (btn) btn.disabled = false;
+        if (icon) icon.className = 'fa-solid fa-rotate';
+    }
+};
+
+function closeAllianceStatsPanel() { 
+    const p = document.getElementById('alliance-stats-panel'); 
+    if (p) p.classList.replace('translate-x-0', 'translate-x-full'); 
+}
     </script>
 
     <script type="module">

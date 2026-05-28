@@ -966,4 +966,71 @@ router.get('/intel/player/:id', (req, res) => {
     }
 });
 
+// --- ALLIANCE STATS RECEIVER & SYNC ---
+router.post('/sync/alliance-stats', requireAuth, (req, res) => {
+    const s = req.body;
+    if (!s.player_id) return res.status(400).json({ error: 'Missing Player ID' });
+
+    let nextCultureAt = null;
+    if (s.next_culture_seconds !== null && !isNaN(s.next_culture_seconds)) {
+        nextCultureAt = new Date(Date.now() + s.next_culture_seconds * 1000).toISOString();
+    }
+
+    try {
+        db.prepare(`
+            INSERT INTO alliance_member_stats (
+                player_id, planets_text, next_culture_at, science_rate, culture_rate, production_rate,
+                astro_dollars, production_points, artefact, level_text, cv_limit_text,
+                economy, energy, mathematics, physics, population, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(player_id) DO UPDATE SET
+                planets_text=excluded.planets_text,
+                next_culture_at=excluded.next_culture_at,
+                science_rate=excluded.science_rate,
+                culture_rate=excluded.culture_rate,
+                production_rate=excluded.production_rate,
+                astro_dollars=excluded.astro_dollars,
+                production_points=excluded.production_points,
+                artefact=excluded.artefact,
+                level_text=excluded.level_text,
+                cv_limit_text=excluded.cv_limit_text,
+                economy=excluded.economy,
+                energy=excluded.energy,
+                mathematics=excluded.mathematics,
+                physics=excluded.physics,
+                population=excluded.population,
+                updated_at=CURRENT_TIMESTAMP
+        `).run(
+            s.player_id, s.planets_text, nextCultureAt, s.science_rate, s.culture_rate, s.production_rate,
+            s.astro_dollars, s.production_points, s.artefact, s.level_text, s.cv_limit_text,
+            s.economy, s.energy, s.mathematics, s.physics, s.population
+        );
+
+        db.prepare(`
+            INSERT INTO players (id, name, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(id) DO UPDATE SET name=excluded.name, updated_at=CURRENT_TIMESTAMP
+        `).run(s.player_id, s.name);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error("[DB Error] Alliance member stats sync failed:", err);
+        res.status(500).json({ error: 'Database transaction failed' });
+    }
+});
+
+// --- ALLIANCE STATS FETCH FOR THE ARCHIVE PANEL ---
+router.get('/intel/alliance-stats', requireAuth, (req, res) => {
+    try {
+        const stats = db.prepare(`
+            SELECT s.*, p.name as player_name
+            FROM alliance_member_stats s
+            LEFT JOIN players p ON s.player_id = p.id
+            ORDER BY s.player_id ASC
+        `).all();
+        res.json({ success: true, stats });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to retrieve alliance metrics' });
+    }
+});
+
 module.exports = router;

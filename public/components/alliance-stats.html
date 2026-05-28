@@ -1,0 +1,58 @@
+<div id="alliance-stats-panel" class="fixed top-0 right-0 h-full w-full md:w-[calc(100%-3.5rem)] bg-black border-l border-border transform translate-x-full transition-transform duration-300 z-40 flex flex-col shadow-2xl">
+    
+    <!-- Top Bar Header (Solid Background) -->
+    <div class="h-14 border-b border-border flex items-center justify-between px-6 bg-zinc-900 shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-md bg-white/5 flex items-center justify-center text-primary">
+                <i class="fa-solid fa-chess text-base"></i>
+            </div>
+            <div>
+                <h2 class="font-bold text-foreground tracking-wide">Alliance Stats Dashboard</h2>
+                <p class="text-xs text-muted-foreground">Detailed performance metrics compiled across alliance personnel sheets</p>
+            </div>
+        </div>
+        <button onclick="closeAllianceStatsPanel()" class="w-8 h-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
+            <i class="fa-solid fa-xmark text-base"></i>
+        </button>
+    </div>
+
+    <!-- Controls Toolbar (Solid Background) -->
+    <div class="p-4 border-b border-border bg-zinc-950 flex items-center gap-4 shrink-0">
+        <button id="btn-update-alliance-stats" onclick="window.triggerAllianceStatsUpdate()" class="inline-flex items-center justify-center h-9 px-4 rounded-md bg-white text-black font-medium hover:bg-white/90 transition-colors text-sm gap-2 shadow-sm disabled:opacity-50 disabled:pointer-events-none">
+            <i id="icon-update-alliance-stats" class="fa-solid fa-rotate"></i> Update all
+        </button>
+        <span id="alliance-stats-last-updated" class="text-xs text-muted-foreground font-mono bg-zinc-900 px-2.5 py-1.5 rounded border border-border/40">
+            Last updated: Calculating...
+        </span>
+    </div>
+
+    <!-- Scraped Data Table Container (Solid Background) -->
+    <div class="flex-1 overflow-auto bg-black">
+        <table class="w-full text-left border-collapse min-w-[1300px]">
+            <thead>
+                <tr class="border-b border-border bg-zinc-900 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10">
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('player_id')">ID <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('player_name')">Member <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('planets_text')">Planets <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('next_culture_at')">Next Culture <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('science_rate')">Sci Rate <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('culture_rate')">Cul Rate <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('production_rate')">Prd Rate <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('astro_dollars')">Astro Dollars <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('production_points')">PP <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('artefact')">Artefact <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('level_text')">Player Level <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('cv_limit_text')">CV Limit <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('economy')">Eco <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('energy')">Ene <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('mathematics')">Math <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('physics')">Phy <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('population')">Population <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                </tr>
+            </thead>
+            <tbody id="ally-stats-table-body" class="divide-y divide-border/40 bg-black text-xs font-mono">
+                <!-- Data Row Injection Destination -->
+            </tbody>
+        </table>
+    </div>
+</div>

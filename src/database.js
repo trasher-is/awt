@@ -252,6 +252,29 @@ function initDatabase() {
         )
     `);
 
+    // --- NEW TABLE: ALLIANCE MEMBER DETAILED METRICS ---
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS alliance_member_stats (
+            player_id INTEGER PRIMARY KEY,
+            planets_text TEXT,
+            next_culture_at DATETIME,
+            science_rate TEXT,
+            culture_rate TEXT,
+            production_rate TEXT,
+            astro_dollars TEXT,
+            production_points TEXT,
+            artefact TEXT,
+            level_text TEXT,
+            cv_limit_text TEXT,
+            economy INTEGER,
+            energy INTEGER,
+            mathematics INTEGER,
+            physics INTEGER,
+            population INTEGER,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

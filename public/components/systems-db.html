@@ -5,11 +5,11 @@
     </div>
     <div class="flex-1 overflow-hidden flex flex-col p-4 md:p-6 gap-4">
         <div class="flex justify-between items-center gap-4">
-            <div class="relative w-full md:w-72"><input type="text" id="sys-db-search-input" placeholder="Filter by Name, ID, or Coordinates..." class="flex h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8" oninput="renderSystemTable()"><i class="fa-solid fa-filter absolute right-3 top-2.5 text-muted-foreground text-xs pointer-events-none"></i></div>
-            <div class="text-xs text-muted-foreground font-mono">Showing <span id="sys-db-result-count" class="text-foreground font-bold">0</span> records</div>
+            <div class="relative w-full md:w-72"><input type="text" id="sys-db-search-input" placeholder="Filter by Name, ID, or Coordinates..." class="flex h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8" oninput="renderSystemTable()"><i class="fa-solid fa-filter absolute right-3 top-2.5 text-muted-foreground text-sm pointer-events-none"></i></div>
+            <div class="text-sm text-muted-foreground font-mono">Showing <span id="sys-db-result-count" class="text-foreground font-bold">0</span> records</div>
         </div>
         <div class="flex-1 overflow-auto border border-border rounded-lg bg-card relative shadow-sm">
-            <table class="w-full text-left text-xs whitespace-nowrap">
+            <table class="w-full text-left text-sm whitespace-nowrap">
                 <thead class="sticky top-0 bg-secondary text-secondary-foreground shadow-sm z-10">
                     <tr>
                         <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortSysDb('id')">ID <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
