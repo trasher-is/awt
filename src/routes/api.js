@@ -890,7 +890,8 @@ router.get('/intel/members', requireAuth, (req, res) => {
     }
 });
 
-router.get('/intel/player/:id', (req, res) => {
+// --- GET PLAYER DETAIL WITH INTEL MAP COORDINATES ---
+router.get('/intel/player/:id', requireAuth, (req, res) => {
     try {
         const playerId = req.params.id;
 
@@ -907,7 +908,15 @@ router.get('/intel/player/:id', (req, res) => {
             return res.json({ success: false, error: 'Player not found in database.' });
         }
 
-        // 1. Fetch historical logins for the Line Chart
+        // NEW: Fetch all distinct coordinates where this player owns assets
+        const systems = db.prepare(`
+            SELECT DISTINCT s.id, s.name, s.x, s.y
+            FROM planets p
+            JOIN systems s ON p.system_id = s.id
+            WHERE p.owner_id = ?
+        `).all(playerId);
+
+        // --- Fetch historical logins for the Line Chart ---
         let formattedActivity = [];
         try {
             const history = db.prepare(`
@@ -936,8 +945,8 @@ router.get('/intel/player/:id', (req, res) => {
             }];
         }
 
-        // 2. Fetch the Online Probability Heatmap (Grouped by Hour)
-        let heatmap = Array(24).fill(0); // Initialize 24 hours with 0
+        // --- Fetch the Online Probability Heatmap ---
+        let heatmap = Array(24).fill(0);
         try {
             const heatmapData = db.prepare(`
                 SELECT strftime('%H', timestamp) as hour, COUNT(*) as count
@@ -957,7 +966,8 @@ router.get('/intel/player/:id', (req, res) => {
             success: true,
             player: playerInfo,
             activity: formattedActivity,
-            heatmap: heatmap // <--- New data payload
+            heatmap: heatmap,
+            systems: systems // <-- Injected payload
         });
 
     } catch (error) {

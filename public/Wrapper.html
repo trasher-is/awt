@@ -187,6 +187,201 @@
     </div>
 
     <script>
+
+        async function handlePlayerSearchClick(playerId) {
+            showToast('Calculating tactical vision grid...');
+            
+            // FIX 1: Manually force visibility state on the sidebar context panels
+            const ctxContainer = document.getElementById('context-tools');
+            const playerCtxContainer = document.getElementById('player-context-tools');
+            const playerLabel = document.getElementById('ui-player-id');
+            
+            if (ctxContainer) ctxContainer.classList.add('hidden');
+            if (playerCtxContainer) playerCtxContainer.classList.remove('hidden');
+            if (playerLabel) {
+                playerLabel.classList.remove('hidden');
+                playerLabel.innerText = `#${playerId}`;
+            }
+
+            // Process standard view layout updates
+            loadPlayerIntel(playerId);
+            
+            try {
+                const res = await fetch(`/hub-api/intel/player/${playerId}`);
+                const data = await res.json();
+                if (data.success && data.player) {
+                    const p = data.player;
+                    const range = p.biology > 0 ? p.biology : (p.science_level || 0);
+                    const systems = data.systems || [];
+                    
+                    const iframe = document.getElementById('game-frame');
+                    if (iframe && iframe.contentWindow) {
+                        iframe.contentWindow.postMessage({
+                            type: 'HIGHLIGHT_PLAYER_VISION',
+                            payload: { playerId, range, systems }
+                        }, window.location.origin);
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to load map vision baseline:", err);
+            }
+
+            // Perform the background parsing task to maintain tracking integrity
+            try {
+                const response = await fetch(`/Game/Players/Profile/${playerId}`);
+                if (!response.ok) return;
+                
+                const html = await response.text();
+                const doc = new DOMParser().parseFromString(html, 'text/html');
+                
+                const p = {
+                    id: parseInt(playerId, 10), name: null, alliance_id: null, alliance_tag: null,
+                    country: null, local_time: null, idle_time: null, origin_system: null,
+                    joined: null, logins: 0, level: 0, ranking: null, points: 0, 
+                    science_level: 0, culture_level: 0, biology: 0, economy: 0, 
+                    energy: 0, mathematics: 0, physics: 0, social: 0, trade_revenue: 0, 
+                    artefact: null, eco_bonus: 0, race_growth: 0, race_science: 0, 
+                    race_culture: 0, race_production: 0, race_speed: 0, race_attack: 0, race_defense: 0
+                };
+
+                const nameLink = doc.querySelector('th[colspan="2"] a[href^="/Game/Players/Profile/"]');
+                if (nameLink) p.name = nameLink.innerText.trim();
+
+                const allyLink = doc.querySelector('th[colspan="2"] a[href^="/Game/Alliance/Profile/"]');
+                if (allyLink) {
+                    p.alliance_tag = allyLink.innerText.trim();
+                    p.alliance_id = parseInt(allyLink.getAttribute('href').split('/').pop(), 10);
+                }
+
+                const getRowVal = (labelMatch, exact = false) => {
+                    const rows = doc.querySelectorAll('table tbody tr');
+                    for (let row of rows) {
+                        const cells = row.querySelectorAll('th, td');
+                        if (cells.length >= 2) {
+                            const labelText = cells[0].innerText.trim();
+                            if (exact ? labelText === labelMatch : labelText.includes(labelMatch)) {
+                                return cells[1].innerText.trim();
+                            }
+                        }
+                    }
+                    return null;
+                };
+
+                p.local_time = getRowVal('Local Time');
+                p.idle_time = getRowVal('Idle');
+                p.joined = getRowVal('Joined');
+                p.logins = parseInt(getRowVal('Logins'), 10) || 0;
+                
+                const countryImg = doc.querySelector('img[src^="/img/country/"]');
+                if (countryImg) {
+                    p.country = countryImg.getAttribute('alt') || countryImg.getAttribute('title');
+                }
+
+                const originLink = doc.querySelector('a[href^="/Game/Map/SolarSystem/"]');
+                if (originLink) p.origin_system = parseInt(originLink.getAttribute('href').split('/').pop(), 10);
+
+                const lvlStr = getRowVal('Player Level');
+                if (lvlStr) p.level = parseInt(lvlStr.split('-')[0].trim(), 10) || 0;
+
+                p.science_level = parseInt(getRowVal('Science Level'), 10) || 0;
+                p.culture_level = parseInt(getRowVal('Culture Level'), 10) || 0;
+
+                p.biology = parseInt(getRowVal('Biology', true), 10) || 0;
+                p.economy = parseInt(getRowVal('Economy', true), 10) || 0;
+                p.energy = parseInt(getRowVal('Energy', true), 10) || 0;
+                p.mathematics = parseInt(getRowVal('Mathematics', true), 10) || 0;
+                p.physics = parseInt(getRowVal('Physics', true), 10) || 0;
+                p.social = parseInt(getRowVal('Social', true), 10) || 0;
+
+                const ecoBonusStr = getRowVal('Economy Bonus');
+                if (ecoBonusStr) p.eco_bonus = parseInt(ecoBonusStr.replace(/[^\d+-]/g, ''), 10) || 0;
+
+                const tradeStr = getRowVal('Trade Revenue');
+                if (tradeStr) p.trade_revenue = parseInt(tradeStr.replace(/[^\d]/g, ''), 10) || 0;
+
+                const artefactRows = doc.querySelectorAll('.ir-summary tr');
+                artefactRows.forEach(row => {
+                    const tds = row.querySelectorAll('td');
+                    if (tds.length >= 2 && tds[0]?.innerText.includes('Artefact')) {
+                        const rawText = tds[1].innerText.trim();
+                        p.artefact = rawText === 'N/A' ? null : (rawText.split(/\s+/)[0] || null);
+                    }
+                });
+
+                const parseRace = (text) => parseInt(text.match(/([+-]\d+)$/)?.[1] || "0", 10);
+                doc.querySelectorAll('.race-summary tbody td').forEach(td => {
+                    const text = td.innerText.trim();
+                    if (text.includes('Growth')) p.race_growth = parseRace(text);
+                    if (text.includes('Science')) p.race_science = parseRace(text);
+                    if (text.includes('Culture')) p.race_culture = parseRace(text);
+                    if (text.includes('Production')) p.race_production = parseRace(text);
+                    if (text.includes('Speed')) p.race_speed = parseRace(text);
+                    if (text.includes('Attack')) p.race_attack = parseRace(text);
+                    if (text.includes('Defence') || text.includes('Defense')) p.race_defense = parseRace(text);
+                });
+
+                const syncRes = await fetch('/hub-api/sync/player', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(p)
+                });
+
+                if (syncRes.ok) {
+                    const updatedRange = p.biology > 0 ? p.biology : (p.science_level || 0);
+                    const freshRes = await fetch(`/hub-api/intel/player/${playerId}`);
+                    const freshData = await freshRes.json();
+                    
+                    if (freshData.success) {
+                        loadPlayerIntel(playerId);
+                        const iframe = document.getElementById('game-frame');
+                        if (iframe && iframe.contentWindow) {
+                            iframe.contentWindow.postMessage({
+                                type: 'HIGHLIGHT_PLAYER_VISION',
+                                payload: { playerId, range: updatedRange, systems: freshData.systems || [] }
+                            }, window.location.origin);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Background tactical indexing failure:", err);
+            }
+        }
+
+        async function executeSearch(type) {
+            const input = document.getElementById(`search-${type}-input`);
+            const resultsContainer = document.getElementById(`search-${type}-results`);
+            const q = input.value.trim();
+            
+            // FIX 2: Handle search clearing to clean up stale vision vectors across maps
+            if (!q) { 
+                resultsContainer.innerHTML = ''; 
+                if (type === 'player') {
+                    const iframe = document.getElementById('game-frame');
+                    if (iframe && iframe.contentWindow) {
+                        iframe.contentWindow.postMessage({ type: 'CLEAR_PLAYER_VISION' }, window.location.origin);
+                    }
+                }
+                return; 
+            }
+
+            resultsContainer.innerHTML = '<div class="text-s text-muted-foreground text-center py-2"><i class="fa-solid fa-circle-notch fa-spin"></i> Searching...</div>';
+            try {
+                const res = await fetch(`/hub-api/search/${type}?q=${encodeURIComponent(q)}`);
+                const data = await res.json();
+
+                if (!data.success || data.results.length === 0) {
+                    resultsContainer.innerHTML = '<div class="text-s text-muted-foreground text-center py-2 bg-card rounded border border-border">No records found.</div>';
+                    return;
+                }
+
+                if (type === 'player') {
+                    resultsContainer.innerHTML = data.results.map(p => `<button onclick="handlePlayerSearchClick(${p.id})" class="text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-s transition-colors flex justify-between items-center group shadow-sm"><span class="truncate font-medium">${p.alliance_tag ? `<span class="text-muted-foreground font-normal">[${p.alliance_tag}]</span> ` : ''}${p.name}</span><span class="text-s text-muted-foreground font-mono">#${p.id}</span></button>`).join('');
+                } else if (type === 'system') {
+                    resultsContainer.innerHTML = data.results.map(s => `<button onclick="navToIframe('/Game/Map/SolarSystem/${s.id}')" class="text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-s transition-colors flex justify-between items-center group shadow-sm"><span class="truncate font-medium">${s.name}</span><span class="text-s text-muted-foreground font-mono">#${s.id} (${s.x}/${s.y})</span></button>`).join('');
+                }
+            } catch (err) { resultsContainer.innerHTML = '<div class="text-s text-red-500 text-center py-2">Search failed.</div>'; }
+        }
+
         let toolUser = null; let currentSystemId = null; 
 
         window.addEventListener('DOMContentLoaded', () => {
@@ -514,7 +709,7 @@
                 }
 
                 if (type === 'player') {
-                    resultsContainer.innerHTML = data.results.map(p => `<button onclick="navToIframe('/Game/Players/Profile/${p.id}')" class="text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-s transition-colors flex justify-between items-center group shadow-sm"><span class="truncate font-medium">${p.alliance_tag ? `<span class="text-muted-foreground font-normal">[${p.alliance_tag}]</span> ` : ''}${p.name}</span><span class="text-s text-muted-foreground font-mono">#${p.id}</span></button>`).join('');
+                    resultsContainer.innerHTML = data.results.map(p => `<button onclick="handlePlayerSearchClick(${p.id})" class="text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-s transition-colors flex justify-between items-center group shadow-sm"><span class="truncate font-medium">${p.alliance_tag ? `<span class="text-muted-foreground font-normal">[${p.alliance_tag}]</span> ` : ''}${p.name}</span><span class="text-s text-muted-foreground font-mono">#${p.id}</span></button>`).join('');
                 } else if (type === 'system') {
                     resultsContainer.innerHTML = data.results.map(s => `<button onclick="navToIframe('/Game/Map/SolarSystem/${s.id}')" class="text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-s transition-colors flex justify-between items-center group shadow-sm"><span class="truncate font-medium">${s.name}</span><span class="text-s text-muted-foreground font-mono">#${s.id} (${s.x}/${s.y})</span></button>`).join('');
                 }
