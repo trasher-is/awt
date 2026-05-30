@@ -140,11 +140,18 @@ router.post('/sync/system', requireAuth, (req, res) => {
             
             // Check for history events BEFORE upserting
             const oldP = getOldPlanet.get(system_id, p.planet_index);
+            
+            let finalOwnerId = p.owner ? p.owner.id : null;
+            
+            // CRITICAL FOG OF WAR GUARD: If scan reports "Unknown", fall back to our existing data
+            if (p.is_unknown && oldP) {
+                finalOwnerId = oldP.owner_id;
+            }
+
             if (oldP) {
-                const newOwnerId = p.owner ? p.owner.id : null;
-                // Owner Change
-                if (oldP.owner_id !== newOwnerId) {
-                    logEvent.run(system_id, p.planet_index, 1, oldP.owner_id, newOwnerId); // 1 = OWNER_CHANGE
+                // Owner Change: Skip event creation if this is an obscured shadow scan
+                if (!p.is_unknown && oldP.owner_id !== finalOwnerId) {
+                    logEvent.run(system_id, p.planet_index, 1, oldP.owner_id, finalOwnerId); // 1 = OWNER_CHANGE
                 }
                 // Significant Population Drop (possible bombardment)
                 if (oldP.population > 0 && p.population < oldP.population - 5) {
@@ -157,7 +164,9 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 if (p.owner.alliance_id) upsertAlliance.run(p.owner.alliance_id, p.owner.alliance_tag, p.owner.alliance_tag); 
                 upsertPlayer.run(p.owner.id, p.owner.name, p.owner.alliance_id || null);
             }
-            upsertPlanet.run(p.game_planet_id, system_id, p.planet_index, p.owner ? p.owner.id : null, p.population, p.starbase, p.has_fleet);
+            
+            // Pass the calculated finalOwnerId down to the update command
+            upsertPlanet.run(p.game_planet_id, system_id, p.planet_index, finalOwnerId, p.population, p.starbase, p.has_fleet);
         }
 
         // 2. Wipe & Replace Fleets
@@ -185,11 +194,13 @@ router.post('/sync/system', requireAuth, (req, res) => {
 router.post('/sync/player', requireAuth, (req, res) => {
     const p = req.body;
     
-    if (!p || !p.id) return res.status(400).json({ error: 'Invalid player payload' });
+    // CRITICAL: Reject the payload entirely if the scrape was broken and didn't capture a name
+    if (!p || !p.id || !p.name) {
+        return res.status(400).json({ error: 'Invalid player payload: Missing ID or Name' });
+    }
     
     console.log(`\n[API] Incoming profile sync for Player ID: ${p.id} (${p.name})`);
 
-    // Bulletproof sanitization: Ensure no properties are 'undefined'
     const safePlayer = {
         id: p.id,
         name: p.name || null,
@@ -221,16 +232,17 @@ router.post('/sync/player', requireAuth, (req, res) => {
         race_production: p.race_production || 0,
         race_speed: p.race_speed || 0,
         race_attack: p.race_attack || 0,
-        race_defense: p.race_defense || 0
+        race_defense: p.race_defense || 0,
+        race_trader: p.race_trader || 0, // <-- KEEP TRADER DATA
+        race_sul: p.race_sul || 0        // <-- KEEP SUL DATA
     };
 
     const oldPlayer = db.prepare('SELECT logins, points FROM players WHERE id = ?').get(p.id);
 
     const syncTransaction = db.transaction((player) => {
-        // 1. Rejoin / Account Reset check
-        // Check if oldPlayer exists FIRST, then use 'player' instead of 'incomingPlayer'
-        if (oldPlayer && player.logins < oldPlayer.logins) {
-            console.log(`[SYSTEM] Player ${player.id} restarted!`);
+        // FIXED: Ensure player.logins is greater than 0 to guarantee it isn't an invalid/failed scrape
+        if (oldPlayer && player.logins > 0 && player.logins < oldPlayer.logins) {
+            console.log(`[SYSTEM] Verified Player ${player.id} restarted! Clearing old entities.`);
             
             // Strip ownership of old planets
             db.prepare(`
@@ -241,6 +253,16 @@ router.post('/sync/player', requireAuth, (req, res) => {
             
             // Delete old fleets
             db.prepare(`DELETE FROM fleets WHERE owner_id = ?`).run(player.id);
+
+            // Force clear database skills so the conditional logic below doesn't preserve pre-restart values
+            db.prepare(`
+                UPDATE players SET 
+                    level=0, points=0, ranking=NULL, science_level=0, culture_level=0,
+                    biology=0, economy=0, energy=0, mathematics=0, physics=0, social=0,
+                    trade_revenue=0, artefact=NULL, eco_bonus=0,
+                    race_growth=0, race_science=0, race_culture=0, race_production=0, race_speed=0, race_attack=0, race_defense=0
+                WHERE id = ?
+            `).run(player.id);
         }
 
         // 2. Alliance mapping
@@ -256,6 +278,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 biology, economy, energy, mathematics, physics, social, 
                 trade_revenue, artefact, eco_bonus,
                 race_growth, race_science, race_culture, race_production, race_speed, race_attack, race_defense,
+                race_trader, race_sul,
                 joined, logins
             ) VALUES (
                 @id, @name, @alliance_id, @country, @local_time, @idle_time, @origin_system, 
@@ -263,6 +286,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 @biology, @economy, @energy, @mathematics, @physics, @social, 
                 @trade_revenue, @artefact, @eco_bonus,
                 @race_growth, @race_science, @race_culture, @race_production, @race_speed, @race_attack, @race_defense,
+                @race_trader, @race_sul,
                 @joined, @logins
             ) ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name, alliance_id=excluded.alliance_id, country=excluded.country, 
@@ -274,12 +298,13 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 trade_revenue=excluded.trade_revenue, artefact=excluded.artefact, eco_bonus=excluded.eco_bonus,
                 race_growth=excluded.race_growth, race_science=excluded.race_science, race_culture=excluded.race_culture,
                 race_production=excluded.race_production, race_speed=excluded.race_speed, race_attack=excluded.race_attack, race_defense=excluded.race_defense,
+                race_trader=excluded.race_trader, race_sul=excluded.race_sul,
                 joined=excluded.joined, logins=excluded.logins,
                 updated_at=CURRENT_TIMESTAMP
         `).run(player);
 
         // 4. Logins Timeseries Tracker
-        if (!oldPlayer || oldPlayer.logins !== player.logins) {
+        if (player.logins > 0 && (!oldPlayer || oldPlayer.logins !== player.logins)) {
             db.prepare(`INSERT INTO player_logins (player_id, total_logins) VALUES (?, ?)`).run(player.id, player.logins);
         }
     });

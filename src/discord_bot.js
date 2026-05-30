@@ -28,6 +28,197 @@ client.on('messageCreate', async (message) => {
     }
 
     // ----------------------------------------------------
+    // !intels - TEXT-BASED INTERACTIVE DRILLDOWN
+    // ----------------------------------------------------
+    if (command === 'intels') {
+        // Query alliances containing players with at least one active science level
+        const alliancesWithIntel = db.prepare(`
+            SELECT DISTINCT a.id, a.tag
+            FROM alliances a
+            JOIN players p ON p.alliance_id = a.id
+            WHERE p.biology > 0 OR p.economy > 0 OR p.energy > 0 OR p.mathematics > 0 OR p.physics > 0 OR p.social > 0
+            ORDER BY a.tag ASC
+        `).all();
+
+        // Check if there are unallied players with active sciences
+        const solosCount = db.prepare(`
+            SELECT COUNT(*) as count FROM players
+            WHERE alliance_id IS NULL
+            AND (biology > 0 OR economy > 0 OR energy > 0 OR mathematics > 0 OR physics > 0 OR social > 0)
+        `).get().count;
+
+        if (alliancesWithIntel.length === 0 && solosCount === 0) {
+            return message.reply('📭 No intelligence records found with active sciences in the database.');
+        }
+
+        // Build array of choice groups
+        const groups = alliancesWithIntel.map(a => ({ id: a.id, name: a.tag || `Alliance #${a.id}`, type: 'alliance' }));
+        if (solosCount > 0) {
+            groups.push({ id: 'solos', name: 'Solos (No Alliance)', type: 'solos' });
+        }
+
+        let directoryStr = "";
+        groups.forEach((g, idx) => {
+            directoryStr += `**[${idx + 1}]** ${g.name}\n`;
+        });
+
+        const embed = new EmbedBuilder()
+            .setTitle('📂 Intelligence Directory')
+            .setDescription(`Type the number of the alliance/group you want to inspect:\n\n${directoryStr}`)
+            .setColor('#3b82f6')
+            .setFooter({ text: 'Session expires in 30 seconds of inactivity.' });
+
+        const menuMessage = await message.reply({ embeds: [embed] });
+
+        // Initialize state engine variables
+        let currentStep = 1; 
+        let chosenGroup = null;
+        let groupPlayers = [];
+
+        const filter = m => m.author.id === message.author.id;
+        const collector = message.channel.createMessageCollector({ filter, time: 30000 });
+
+        collector.on('collect', async (m) => {
+            const input = m.content.trim();
+            
+            // Delete the user's setup text entry to keep the room entirely clean
+            await m.delete().catch(() => {});
+
+            if (currentStep === 1) {
+                const idx = parseInt(input, 10) - 1;
+                if (isNaN(idx) || idx < 0 || idx >= groups.length) {
+                    const warningEmbed = new EmbedBuilder()
+                        .setTitle('📂 Intelligence Directory')
+                        .setDescription(`⚠️ **Invalid selection.** Please type a number between 1 and ${groups.length}.\n\n${directoryStr}`)
+                        .setColor('#ef4444')
+                        .setFooter({ text: 'Session expires in 30 seconds of inactivity.' });
+                    await menuMessage.edit({ embeds: [warningEmbed] });
+                    return;
+                }
+
+                chosenGroup = groups[idx];
+                
+                // Pull filtered players for target index mapping
+                if (chosenGroup.type === 'solos') {
+                    groupPlayers = db.prepare(`
+                        SELECT id, name FROM players
+                        WHERE alliance_id IS NULL
+                        AND (biology > 0 OR economy > 0 OR energy > 0 OR mathematics > 0 OR physics > 0 OR social > 0)
+                        ORDER BY name ASC
+                    `).all();
+                } else {
+                    groupPlayers = db.prepare(`
+                        SELECT id, name FROM players
+                        WHERE alliance_id = ?
+                        AND (biology > 0 OR economy > 0 OR energy > 0 OR mathematics > 0 OR physics > 0 OR social > 0)
+                        ORDER BY name ASC
+                    `).all(chosenGroup.id);
+                }
+
+                if (groupPlayers.length === 0) {
+                    await menuMessage.edit({ content: '❌ No profile records located for this segment inside index files.', embeds: [] });
+                    return collector.stop();
+                }
+
+                let playerStr = "";
+                groupPlayers.forEach((p, pIdx) => {
+                    playerStr += `**[${pIdx + 1}]** ${p.name}\n`;
+                });
+
+                const playerEmbed = new EmbedBuilder()
+                    .setTitle(`👥 Tracked Profiles: ${chosenGroup.name}`)
+                    .setDescription(`Type the number of the player you want to inspect:\n\n${playerStr}`)
+                    .setColor('#22c55e')
+                    .setFooter({ text: 'Session expires in 30 seconds of inactivity.' });
+
+                await menuMessage.edit({ embeds: [playerEmbed] });
+                currentStep = 2;
+                collector.resetTimer({ time: 30000 });
+            } 
+            else if (currentStep === 2) {
+                const pIdx = parseInt(input, 10) - 1;
+                if (isNaN(pIdx) || pIdx < 0 || pIdx >= groupPlayers.length) {
+                    let playerStr = "";
+                    groupPlayers.forEach((p, idx) => {
+                        playerStr += `**[${idx + 1}]** ${p.name}\n`;
+                    });
+                    const warningEmbed = new EmbedBuilder()
+                        .setTitle(`👥 Tracked Profiles: ${chosenGroup.name}`)
+                        .setDescription(`⚠️ **Invalid selection.** Choose a number between 1 and ${groupPlayers.length}.\n\n${playerStr}`)
+                        .setColor('#ef4444')
+                        .setFooter({ text: 'Session expires in 30 seconds of inactivity.' });
+                    await menuMessage.edit({ embeds: [warningEmbed] });
+                    return;
+                }
+
+                const targetPlayer = groupPlayers[pIdx];
+                
+                // Gather explicit target infrastructure data footprint directly from map logs
+                const player = db.prepare(`
+                    SELECT p.*, a.tag as ally_tag,
+                           (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as actual_planets,
+                           (SELECT SUM(population) FROM planets WHERE owner_id = p.id) as actual_pop
+                    FROM players p 
+                    LEFT JOIN alliances a ON p.alliance_id = a.id 
+                    WHERE p.id = ?
+                `).get(targetPlayer.id);
+
+                if (!player) {
+                    await menuMessage.edit({ content: '❌ Selected target file no longer matches raw database hashes.', embeds: [] });
+                    return collector.stop();
+                }
+
+                let countryDisplay = '--';
+                if (player.country) {
+                    let cleanCountry = player.country.replace('Players from ', '').trim();
+                    if (cleanCountry === 'Lithuania') countryDisplay = 'LT';
+                    else if (cleanCountry === 'United States' || cleanCountry === 'USA') countryDisplay = 'US';
+                    else if (cleanCountry === 'United Kingdom' || cleanCountry === 'UK') countryDisplay = 'UK';
+                    else countryDisplay = cleanCountry.substring(0, 3).toUpperCase();
+                }
+
+                // FIX 1: DYNAMIC TRAIT BUILDING STRIPPER FOR DRILLDOWN INTERACTIVE CARD
+                let raceStatsVal = `Gro: **${player.race_growth}** | Sci: **${player.race_science}**\nCul: **${player.race_culture}** | Pro: **${player.race_production}**\nSpd: **${player.race_speed}** | Atk: **${player.race_attack}**\nDef: **${player.race_defense}**`;
+                let extraTraits = [];
+                if (player.race_trader) extraTraits.push(`Tra: **${player.race_trader > 0 ? '+' : ''}${player.race_trader}**`);
+                if (player.race_sul) extraTraits.push(`SUL: **${player.race_sul > 0 ? '+' : ''}${player.race_sul}**`);
+                if (extraTraits.length > 0) raceStatsVal += `\n${extraTraits.join(' | ')}`;
+                raceStatsVal += `\n\n**Sciences**\nBio: **${player.biology}** | Eco: **${player.economy}**\nEne: **${player.energy}** | Mat: **${player.mathematics}**\nPhy: **${player.physics}** | Soc: **${player.social}**`;
+
+                const finalEmbed = new EmbedBuilder()
+                    .setTitle(`👤 Intel: ${player.name} ${player.ally_tag ? `[${player.ally_tag}]` : ''}`)
+                    .setColor('#3b82f6')
+                    .addFields(
+                        { 
+                            name: '📊 Core & Status', 
+                            value: `PL: **${player.level}**\nPoints: **${player.points}**\nRank: **${player.ranking}**\nOrigin: **#${player.origin_system}**\nLocal Time: **${player.local_time || '--'}**\nIdle Time: **${player.idle_time || '--'}**\nCountry: **${countryDisplay}**`, 
+                            inline: true 
+                        },
+                        { 
+                            name: '🏗️ Infrastructure', 
+                            value: `Planets: **${player.actual_planets || 0} / ${player.culture_level}**\nTotal Pop: **${player.actual_pop || 0}**\nTrade Rev: **${player.trade_revenue}**\nProd: **${player.production_rate}/h**\nSci: **${player.science_rate}/h**\nCult: **${player.culture_rate}/h**\nArtefact: **${player.artefact && player.artefact !== 'N/A' ? player.artefact : '--'}**`, 
+                            inline: true 
+                        },
+                        { 
+                            name: '**Race Stats**', 
+                            value: raceStatsVal, 
+                            inline: true 
+                        }
+                    );
+
+                await menuMessage.edit({ embeds: [finalEmbed] });
+                collector.stop('completed');
+            }
+        });
+
+        collector.on('end', (collected, reason) => {
+            if (reason === 'time') {
+                menuMessage.edit({ content: '⏱️ Intel directory interactive session expired.', embeds: [] }).catch(() => {});
+            }
+        });
+    }
+
+    // ----------------------------------------------------
     // !sys <id> - DISPLAY SYSTEM INTEL
     // ----------------------------------------------------
     if (command === 'sys') {
@@ -45,7 +236,6 @@ client.on('messageCreate', async (message) => {
             WHERE p.system_id = ? ORDER BY p.planet_index ASC
         `).all(sysId);
 
-        // Fetch plans and join with app_users to get the author's game_name
         const plans = db.prepare(`
             SELECT pp.*, u.game_name as author_name 
             FROM planet_plans pp
@@ -53,12 +243,11 @@ client.on('messageCreate', async (message) => {
             WHERE pp.system_id = ?
         `).all(sysId);
 
-        // MODIFIED: Added table joins to grab the player name and alliance tag for fleet owners
         const fleets = db.prepare(`
             SELECT f.*, u.name as owner_name, a.tag as ally_tag
             FROM fleets f
             LEFT JOIN players u ON f.owner_id = u.id
-            LEFT JOIN alliances a ON u.alliance_id = a.id
+            LEFT JOIN alliances a ON f.owner_id = a.id
             WHERE f.system_id = ?
         `).all(sysId);
 
@@ -79,7 +268,6 @@ client.on('messageCreate', async (message) => {
 
         if (planetList) embed.addFields({ name: 'Planets', value: planetList });
 
-        // MODIFIED: Store embeds in an array to dynamically add a separate blue fleet block
         const embeds = [embed];
 
         if (fleets.length > 0) {
@@ -94,7 +282,7 @@ client.on('messageCreate', async (message) => {
             if (fleetList) {
                 const fleetEmbed = new EmbedBuilder()
                     .setTitle(`🚀 Fleets`)
-                    .setColor('#3b82f6') // Blue block for fleet tracking
+                    .setColor('#3b82f6') 
                     .setDescription(fleetList);
                 embeds.push(fleetEmbed);
             }
@@ -110,7 +298,6 @@ client.on('messageCreate', async (message) => {
         const playerName = args.join(' ');
         if (!playerName) return message.reply('❌ Usage: `!intel <player_name>`');
 
-        // Dynamically calculate actual planets and population from the Hub's map data
         const player = db.prepare(`
             SELECT p.*, a.tag as ally_tag,
                    (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as actual_planets,
@@ -122,7 +309,6 @@ client.on('messageCreate', async (message) => {
 
         if (!player) return message.reply(`❌ Player **${playerName}** not found in the database.`);
 
-        // Parse country string to a short format
         let countryDisplay = '--';
         if (player.country) {
             let cleanCountry = player.country.replace('Players from ', '').trim();
@@ -131,6 +317,14 @@ client.on('messageCreate', async (message) => {
             else if (cleanCountry === 'United Kingdom' || cleanCountry === 'UK') countryDisplay = 'UK';
             else countryDisplay = cleanCountry.substring(0, 3).toUpperCase();
         }
+
+        // FIX 2: DYNAMIC TRAIT BUILDING STRIPPER FOR MANUAL SEARCH OVERVIEW
+        let raceStatsVal = `Gro: **${player.race_growth}** | Sci: **${player.race_science}**\nCul: **${player.race_culture}** | Pro: **${player.race_production}**\nSpd: **${player.race_speed}** | Atk: **${player.race_attack}**\nDef: **${player.race_defense}**`;
+        let extraTraits = [];
+        if (player.race_trader) extraTraits.push(`Tra: **${player.race_trader > 0 ? '+' : ''}${player.race_trader}**`);
+        if (player.race_sul) extraTraits.push(`SUL: **${player.race_sul > 0 ? '+' : ''}${player.race_sul}**`);
+        if (extraTraits.length > 0) raceStatsVal += `\n${extraTraits.join(' | ')}`;
+        raceStatsVal += `\n\n**Sciences**\nBio: **${player.biology}** | Eco: **${player.economy}**\nEne: **${player.energy}** | Mat: **${player.mathematics}**\nPhy: **${player.physics}** | Soc: **${player.social}**`;
 
         const embed = new EmbedBuilder()
             .setTitle(`👤 Intel: ${player.name} ${player.ally_tag ? `[${player.ally_tag}]` : ''}`)
@@ -148,7 +342,7 @@ client.on('messageCreate', async (message) => {
                 },
                 { 
                     name: '**Race Stats**', 
-                    value: `Gro: **${player.race_growth}** | Sci: **${player.race_science}**\nCul: **${player.race_culture}** | Pro: **${player.race_production}**\nSpd: **${player.race_speed}** | Atk: **${player.race_attack}**\nDef: **${player.race_defense}**\n\n**Sciences**\nBio: **${player.biology}** | Eco: **${player.economy}**\nEne: **${player.energy}** | Mat: **${player.mathematics}**\nPhy: **${player.physics}** | Soc: **${player.social}**`, 
+                    value: raceStatsVal, 
                     inline: true 
                 }
             );
@@ -211,7 +405,6 @@ client.on('messageCreate', async (message) => {
         }
 
         try {
-            // FIX: Stripped out the dead ON CONFLICT clause to support multiple concurrent plans per planet
             db.prepare(`
                 INSERT INTO planet_plans (system_id, planet_index, author_id, note) 
                 VALUES (?, ?, ?, ?)
@@ -292,7 +485,6 @@ client.on('messageCreate', async (message) => {
     if (command === 'holes') {
         let tag = args[0] ? args[0].toUpperCase() : null;
 
-        // If no tag is explicitly provided, look up the caller's alliance tag
         if (!tag) {
             const discordName = message.author.username;
             const userAlliance = db.prepare(`
@@ -309,7 +501,6 @@ client.on('messageCreate', async (message) => {
             tag = userAlliance.tag.toUpperCase();
         }
 
-        // Select planets from any system where at least one member of the target alliance owns a planet
         const rows = db.prepare(`
             SELECT p.system_id, s.name as sys_name, p.planet_index, u.name as owner_name
             FROM planets p

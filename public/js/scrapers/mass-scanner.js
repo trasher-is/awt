@@ -53,7 +53,6 @@ export async function runMassScan(updateProgressCb) {
             const sysId = sysIds[i];
             updateProgressCb(`Scanning System #${sysId}...`, i + 1, total);
 
-            // Fetch the system HTML silently
             const mapRes = await fetch(`/Game/Map/SolarSystem/${sysId}`);
             const mapHtml = await mapRes.text();
             const doc = new DOMParser().parseFromString(mapHtml, 'text/html');
@@ -62,7 +61,6 @@ export async function runMassScan(updateProgressCb) {
             const planets = [];
             const fleets = [];
 
-            // Execute the standard system parser logic on the hidden DOM
             rows.forEach(row => {
                 try {
                     const gamePlanetId = parseInt(row.getAttribute('data-planet-id'), 10);
@@ -90,7 +88,8 @@ export async function runMassScan(updateProgressCb) {
                     }
 
                     const hasFleet = !!row.querySelector('.bi-rocket-fill, .bi-rocket-takeoff-fill');
-                    planets.push({ game_planet_id: gamePlanetId, planet_index: planetIndex, population, starbase, owner, has_fleet: hasFleet ? 1 : 0 });
+                    const isUnknown = tds[3].innerText.includes('Unknown');
+                    planets.push({ game_planet_id: gamePlanetId, planet_index: planetIndex, population, starbase, owner, has_fleet: hasFleet ? 1 : 0, is_unknown: isUnknown });
 
                     const nextRow = row.nextElementSibling;
                     if (nextRow && nextRow.classList.contains(`fleetsPlanet${gamePlanetId}`)) {
@@ -122,7 +121,6 @@ export async function runMassScan(updateProgressCb) {
                                         game_fleet_id: gameFleetId,
                                         owner_id: fleetOwnerId,
                                         planet_index: planetIndex,
-                                        // The aggressive regex strips everything that isn't a digit
                                         transports: parseInt(fTds[1].innerText.replace(/[^\d]/g, ''), 10) || 0,
                                         colony_ships: parseInt(fTds[2].innerText.replace(/[^\d]/g, ''), 10) || 0,
                                         destroyers: parseInt(fTds[3].innerText.replace(/[^\d]/g, ''), 10) || 0,
@@ -145,7 +143,6 @@ export async function runMassScan(updateProgressCb) {
                 });
             }
 
-            // The mandatory delay
             await new Promise(resolve => setTimeout(resolve, 200));
         }
 
@@ -188,11 +185,7 @@ export async function runPlayerScan(updateProgressCb) {
                 }
             });
 
-            // THE FIX: If we didn't add any new IDs, it means the server is just 
-            // repeating the last page to us. Break the loop immediately.
-            if (newIdsAdded === 0) {
-                break;
-            }
+            if (newIdsAdded === 0) break;
 
             currentPage++;
             await new Promise(resolve => setTimeout(resolve, 150)); 
@@ -220,9 +213,10 @@ export async function runPlayerScan(updateProgressCb) {
             const p = {
                 id: parseInt(playerId, 10), name: null, alliance_id: null, alliance_tag: null,
                 country: null, local_time: null, idle_time: null, origin_system: null,
+                joined: null, logins: 0,
                 level: 0, ranking: null, points: 0, science_level: 0, culture_level: 0,
                 biology: 0, economy: 0, energy: 0, mathematics: 0, physics: 0, social: 0,
-                trade_revenue: 0, artefact: null,
+                trade_revenue: 0, artefact: null, eco_bonus: 0,
                 race_growth: 0, race_science: 0, race_culture: 0, race_production: 0, race_speed: 0, race_attack: 0, race_defense: 0
             };
 
@@ -235,19 +229,30 @@ export async function runPlayerScan(updateProgressCb) {
                 p.alliance_id = parseInt(allyLink.getAttribute('href').split('/').pop(), 10);
             }
 
-            const getRowVal = (labelMatch) => {
+            // Fixed: Scrape both th and td tags to support the modified profile tables
+            const getRowVal = (labelMatch, exact = false) => {
                 const rows = doc.querySelectorAll('table tbody tr');
                 for (let row of rows) {
-                    const tds = row.querySelectorAll('td');
-                    if (tds.length >= 2 && tds[0].innerText.includes(labelMatch)) return tds[1].innerText.trim();
+                    const cells = row.querySelectorAll('th, td');
+                    if (cells.length >= 2) {
+                        const labelText = cells[0].innerText.trim();
+                        if (exact ? labelText === labelMatch : labelText.includes(labelMatch)) {
+                            return cells[1].innerText.trim();
+                        }
+                    }
                 }
                 return null;
             };
 
             p.local_time = getRowVal('Local Time');
             p.idle_time = getRowVal('Idle');
-            const countrySpan = doc.querySelector('img[src^="/img/country/"]')?.nextElementSibling;
-            if (countrySpan) p.country = countrySpan.innerText.trim();
+            p.joined = getRowVal('Joined'); 
+            p.logins = parseInt(getRowVal('Logins'), 10) || 0; 
+            
+            const countryImg = doc.querySelector('img[src^="/img/country/"]');
+            if (countryImg) {
+                p.country = countryImg.getAttribute('alt') || countryImg.getAttribute('title');
+            }
 
             const originLink = doc.querySelector('a[href^="/Game/Map/SolarSystem/"]');
             if (originLink) p.origin_system = parseInt(originLink.getAttribute('href').split('/').pop(), 10);
@@ -260,19 +265,23 @@ export async function runPlayerScan(updateProgressCb) {
 
             const rankStr = getRowVal('Ranking');
             if (rankStr) {
-                const rMatch = rankStr.match(/#(\d+)\s*\(([\d,]+)\)/);
+                // Fixed: Enhanced regex matches dots, commas, and formatting spaces
+                const rMatch = rankStr.match(/#(\d+)\s*\(([\d,\.\s]+)\)/);
                 if (rMatch) {
-                    p.ranking = parseInt(rMatch[1].replace(/,/g, ''), 10);
-                    p.points = parseInt(rMatch[2].replace(/,/g, ''), 10);
+                    p.ranking = parseInt(rMatch[1].replace(/[^\d]/g, ''), 10);
+                    p.points = parseInt(rMatch[2].replace(/[^\d]/g, ''), 10);
                 }
             }
 
-            p.biology = parseInt(getRowVal('Biology'), 10) || 0;
-            p.economy = parseInt(getRowVal('Economy'), 10) || 0;
-            p.energy = parseInt(getRowVal('Energy'), 10) || 0;
-            p.mathematics = parseInt(getRowVal('Mathematics'), 10) || 0;
-            p.physics = parseInt(getRowVal('Physics'), 10) || 0;
-            p.social = parseInt(getRowVal('Social'), 10) || 0;
+            p.biology = parseInt(getRowVal('Biology', true), 10) || 0;
+            p.economy = parseInt(getRowVal('Economy', true), 10) || 0;
+            p.energy = parseInt(getRowVal('Energy', true), 10) || 0;
+            p.mathematics = parseInt(getRowVal('Mathematics', true), 10) || 0;
+            p.physics = parseInt(getRowVal('Physics', true), 10) || 0;
+            p.social = parseInt(getRowVal('Social', true), 10) || 0;
+
+            const ecoBonusStr = getRowVal('Economy Bonus');
+            if (ecoBonusStr) p.eco_bonus = parseInt(ecoBonusStr.replace(/[^\d+-]/g, ''), 10) || 0;
 
             const tradeStr = getRowVal('Trade Revenue');
             if (tradeStr) p.trade_revenue = parseInt(tradeStr.replace(/[^\d]/g, ''), 10) || 0;
@@ -280,9 +289,9 @@ export async function runPlayerScan(updateProgressCb) {
             const artefactRows = doc.querySelectorAll('.ir-summary tr');
             artefactRows.forEach(row => {
                 const tds = row.querySelectorAll('td');
-                if (tds[0]?.innerText.includes('Artefact')) {
+                if (tds.length >= 2 && tds[0]?.innerText.includes('Artefact')) {
                     const rawText = tds[1].innerText.trim();
-                    p.artefact = rawText.split(/\s+/)[0] || null;
+                    p.artefact = rawText === 'N/A' ? null : (rawText.split(/\s+/)[0] || null);
                 }
             });
 

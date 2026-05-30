@@ -31,6 +31,7 @@ export async function scrapeSystem(systemId) {
             }
 
             const hasFleet = !!row.querySelector('.bi-rocket-fill, .bi-rocket-takeoff-fill');
+            const isUnknown = tds[3].innerText.includes('Unknown'); // <-- ADD THIS
 
             planets.push({
                 game_planet_id: gamePlanetId,
@@ -38,7 +39,8 @@ export async function scrapeSystem(systemId) {
                 population,
                 starbase,
                 owner,
-                has_fleet: hasFleet ? 1 : 0
+                has_fleet: hasFleet ? 1 : 0,
+                is_unknown: isUnknown // <-- ADD THIS
             });
 
             // --- FLEET EXTRACTION ---

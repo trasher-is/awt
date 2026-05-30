@@ -7,8 +7,9 @@ export async function scrapePlayer(playerId) {
         joined: null, logins: 0,
         level: 0, ranking: null, points: 0, science_level: 0, culture_level: 0,
         biology: 0, economy: 0, energy: 0, mathematics: 0, physics: 0, social: 0,
-        trade_revenue: 0, artefact: null, eco_bonus: 0, // <--- Added here
-        race_growth: 0, race_science: 0, race_culture: 0, race_production: 0, race_speed: 0, race_attack: 0, race_defense: 0
+        trade_revenue: 0, artefact: null, eco_bonus: 0,
+        race_growth: 0, race_science: 0, race_culture: 0, race_production: 0, race_speed: 0, race_attack: 0, race_defense: 0,
+        race_trader: 0, race_sul: 0
     };
 
     const nameLink = document.querySelector('th[colspan="2"] a[href^="/Game/Players/Profile/"]');
@@ -28,7 +29,15 @@ export async function scrapePlayer(playerId) {
             if (cells.length >= 2) {
                 const labelText = cells[0].innerText.trim();
                 if (exact ? labelText === labelMatch : labelText.includes(labelMatch)) {
-                    return cells[1].innerText.trim();
+                    const valText = cells[1].innerText.trim();
+                    
+                    // SAFEGUARD: If looking for the exact "Economy" science level, 
+                    // skip rows where the value is a percentage modifier.
+                    if (labelMatch === 'Economy' && exact && valText.includes('%')) {
+                        continue;
+                    }
+                    
+                    return valText;
                 }
             }
         }
@@ -88,7 +97,7 @@ export async function scrapePlayer(playerId) {
         }
     });
 
-    const parseRace = (text) => parseInt(text.match(/([+-]\d+)$/)?.[1] || "0", 10);
+    const parseRace = (text) => parseInt(text.match(/([+-]\d+)\s*$/)?.[1] || "0", 10);
     document.querySelectorAll('.race-summary tbody td').forEach(td => {
         const text = td.innerText.trim();
         if (text.includes('Growth')) p.race_growth = parseRace(text);
@@ -98,6 +107,8 @@ export async function scrapePlayer(playerId) {
         if (text.includes('Speed')) p.race_speed = parseRace(text);
         if (text.includes('Attack')) p.race_attack = parseRace(text);
         if (text.includes('Defence') || text.includes('Defense')) p.race_defense = parseRace(text);
+        if (text.includes('Trader')) p.race_trader = parseRace(text);
+        if (text.includes('Startup') || text.includes('SUL')) p.race_sul = parseRace(text);
     });
 
     // ==========================================
