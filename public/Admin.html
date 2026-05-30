@@ -461,11 +461,11 @@
             const logContainer = document.getElementById('admin-error-logs');
             if (!logContainer) return;
 
-            fetch('/api/admin/logs')
+            // Fixed path target: added /hub-api prefix
+            fetch('/hub-api/admin/logs')
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        // If logs are empty, print a clean status message
                         logContainer.innerText = data.logs || "No recent errors found. Server running clean.";
                         logContainer.style.color = data.logs ? "#ff5555" : "#00ff00"; 
                     } else {
@@ -480,7 +480,7 @@
         }
 
         loadErrorLogs();
-
+ 
         async function loadStatus() {
             const res = await fetch('/hub-api/admin/status');
             const data = await res.json();
