@@ -172,8 +172,8 @@
                     <span id="stat-uptime" class="text-sm font-mono text-green-400">--</span>
                 </div>
                 <div class="flex justify-between items-center">
-                    <span class="text-sm font-medium">Error Logs</span>
-                    <span class="text-xs text-muted-foreground italic">Backend logging not configured. Native console logs only.</span>
+                    <h3>Error Logs</h3>
+                    <pre id="admin-error-logs" style="background: #111; color: #ff5555; padding: 10px; max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 11px;">Loading error logs...</pre>
                 </div>
             </div>
         </section>
@@ -456,6 +456,30 @@
             const m = Math.floor(seconds % 3600 / 60);
             return `${d}d ${h}h ${m}m`;
         }
+
+        function loadErrorLogs() {
+            const logContainer = document.getElementById('admin-error-logs');
+            if (!logContainer) return;
+
+            fetch('/api/admin/logs')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // If logs are empty, print a clean status message
+                        logContainer.innerText = data.logs || "No recent errors found. Server running clean.";
+                        logContainer.style.color = data.logs ? "#ff5555" : "#00ff00"; 
+                    } else {
+                        logContainer.innerText = "Error: " + data.logs;
+                        logContainer.style.color = "#ffaa00";
+                    }
+                })
+                .catch(err => {
+                    logContainer.innerText = "Failed to fetch error logs from backend API.";
+                    logContainer.style.color = "#ff5555";
+                });
+        }
+
+        loadErrorLogs();
 
         async function loadStatus() {
             const res = await fetch('/hub-api/admin/status');

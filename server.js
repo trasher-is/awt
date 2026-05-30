@@ -13,6 +13,41 @@ const PORT = process.env.PORT || 3000;
 
 const { initDiscordBot } = require('./src/discord_bot');
 
+const fs = require('fs');
+const path = require('path');
+
+app.get('/api/admin/logs', (req, res) => {
+    // 1. Set a default fallback path
+    let logPath = '/root/.pm2/logs/awt-error.log';
+
+    // 2. Try to load the local config file if it exists
+    try {
+        const configPath = path.join(__dirname, 'config.json');
+        if (fs.existsSync(configPath)) {
+            const localConfig = require(configPath);
+            if (localConfig.logPath) {
+                logPath = localConfig.logPath;
+            }
+        }
+    } catch (err) {
+        console.error("Error reading local config.json:", err);
+    }
+
+    // 3. Process the log file normally
+    if (!fs.existsSync(logPath)) {
+        return res.json({ success: false, logs: `Log file not found at: ${logPath}` });
+    }
+
+    fs.readFile(logPath, 'utf8', (err, data) => {
+        if (err) {
+            return res.json({ success: false, logs: "Permission denied or unable to read log file." });
+        }
+        const lines = data.trim().split('\n');
+        const latestLines = lines.slice(-20).join('\n');
+        res.json({ success: true, logs: latestLines });
+    });
+});
+
 // --- 1. SESSIONS & SECURITY ---
 app.use(session({
     store: new SQLiteStore({ db: 'awt.db', dir: '.' }), // Saves sessions into your existing database file
