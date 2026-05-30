@@ -1,6 +1,5 @@
-export async function scrapePlayer(playerId) {
-    console.log(`[Spy] Initiating deep scrape for Player ID: ${playerId}`);
-    
+// Pure data collection logic that can target any window, iframe, or virtual DOM element
+export function extractPlayerData(playerId, doc = document) {
     const p = {
         id: parseInt(playerId, 10), name: null, alliance_id: null, alliance_tag: null,
         country: null, local_time: null, idle_time: null, origin_system: null,
@@ -12,31 +11,29 @@ export async function scrapePlayer(playerId) {
         race_trader: 0, race_sul: 0
     };
 
-    const nameLink = document.querySelector('th[colspan="2"] a[href^="/Game/Players/Profile/"]');
-    if (nameLink) p.name = nameLink.innerText.trim();
+    const nameHeader = doc.querySelector('th[colspan="2"]');
+    if (nameHeader) {
+        const nameLink = nameHeader.querySelector('a[href^="/Game/Players/Profile/"]');
+        p.name = nameLink ? nameLink.innerText.trim() : nameHeader.innerText.replace(/Hub Synced/i, '').trim();
+    }
 
-    const allyLink = document.querySelector('th[colspan="2"] a[href^="/Game/Alliance/Profile/"]');
+    const allyLink = doc.querySelector('th[colspan="2"] a[href^="/Game/Alliance/Profile/"]');
     if (allyLink) {
         p.alliance_tag = allyLink.innerText.trim();
         p.alliance_id = parseInt(allyLink.getAttribute('href').split('/').pop(), 10);
     }
 
-    // FIX 1: Look for both <th> and <td>. This stops the script from going blind on headers.
     const getRowVal = (labelMatch, exact = false) => {
-        const rows = document.querySelectorAll('table tbody tr');
+        const rows = doc.querySelectorAll('table tbody tr');
         for (let row of rows) {
             const cells = row.querySelectorAll('th, td');
             if (cells.length >= 2) {
                 const labelText = cells[0].innerText.trim();
                 if (exact ? labelText === labelMatch : labelText.includes(labelMatch)) {
                     const valText = cells[1].innerText.trim();
-                    
-                    // SAFEGUARD: If looking for the exact "Economy" science level, 
-                    // skip rows where the value is a percentage modifier.
                     if (labelMatch === 'Economy' && exact && valText.includes('%')) {
                         continue;
                     }
-                    
                     return valText;
                 }
             }
@@ -46,17 +43,24 @@ export async function scrapePlayer(playerId) {
 
     p.local_time = getRowVal('Local Time');
     p.idle_time = getRowVal('Idle');
-    p.joined = getRowVal('Joined'); // <--- Extract Joined Date
-    p.logins = parseInt(getRowVal('Logins'), 10) || 0; // <--- Extract Logins
+    p.joined = getRowVal('Joined'); 
+    p.logins = parseInt(getRowVal('Logins'), 10) || 0; 
     
-    // FIX 2: Better Country extraction. Try the image alt first, then title.
-    const countryImg = document.querySelector('img[src^="/img/country/"]');
+    const countryImg = doc.querySelector('img[src^="/img/country/"]');
     if (countryImg) {
         p.country = countryImg.getAttribute('alt') || countryImg.getAttribute('title');
     }
 
-    const originLink = document.querySelector('a[href^="/Game/Map/SolarSystem/"]');
-    if (originLink) p.origin_system = parseInt(originLink.getAttribute('href').split('/').pop(), 10);
+    // FIXED: Find the exact row labeled "Origin" to stop pulling global nav links
+    const originRow = Array.from(doc.querySelectorAll('table tbody tr')).find(row => {
+        const cells = row.querySelectorAll('th, td');
+        return cells.length > 0 && cells[0].innerText.trim() === 'Origin';
+    });
+
+    if (originRow) {
+        const originLink = originRow.querySelector('a[href^="/Game/Map/SolarSystem/"]');
+        p.origin_system = originLink ? parseInt(originLink.getAttribute('href').split('/').pop(), 10) : null;
+    }
 
     const lvlStr = getRowVal('Player Level');
     if (lvlStr) p.level = parseInt(lvlStr.split('-')[0].trim(), 10) || 0;
@@ -66,7 +70,6 @@ export async function scrapePlayer(playerId) {
 
     const rankStr = getRowVal('Ranking');
     if (rankStr) {
-        // FIX 3: Robust regex to handle points formatted with commas, dots, or spaces
         const rMatch = rankStr.match(/#(\d+)\s*\(([\d,\.\s]+)\)/);
         if (rMatch) {
             p.ranking = parseInt(rMatch[1].replace(/[^\d]/g, ''), 10);
@@ -87,18 +90,17 @@ export async function scrapePlayer(playerId) {
     const tradeStr = getRowVal('Trade Revenue');
     if (tradeStr) p.trade_revenue = parseInt(tradeStr.replace(/[^\d]/g, ''), 10) || 0;
     
-    const artefactRows = document.querySelectorAll('.ir-summary tr');
+    const artefactRows = doc.querySelectorAll('.ir-summary tr');
     artefactRows.forEach(row => {
         const tds = row.querySelectorAll('td');
         if (tds.length >= 2 && tds[0]?.innerText.includes('Artefact')) {
             const rawText = tds[1].innerText.trim();
-            // Handle the 'N/A' edge case cleanly
             p.artefact = rawText === 'N/A' ? null : (rawText.split(/\s+/)[0] || null);
         }
     });
 
     const parseRace = (text) => parseInt(text.match(/([+-]\d+)\s*$/)?.[1] || "0", 10);
-    document.querySelectorAll('.race-summary tbody td').forEach(td => {
+    doc.querySelectorAll('.race-summary tbody td').forEach(td => {
         const text = td.innerText.trim();
         if (text.includes('Growth')) p.race_growth = parseRace(text);
         if (text.includes('Science')) p.race_science = parseRace(text);
@@ -111,18 +113,22 @@ export async function scrapePlayer(playerId) {
         if (text.includes('Startup') || text.includes('SUL')) p.race_sul = parseRace(text);
     });
 
-    // ==========================================
-    // ADD THIS BLOCK RIGHT HERE
-    // ==========================================
+    return p;
+}
+
+export async function scrapePlayer(playerId) {
+    console.log(`[Spy] Initiating deep scrape for Player ID: ${playerId}`);
+    
+    const p = extractPlayerData(playerId, document);
+
     window.parent.postMessage({
         type: 'GAME_CONTEXT',
         payload: {
             path: window.location.pathname,
             isPlayerView: true,
-            playerId: p.id // We use the ID you parsed at the beginning of the script
+            playerId: p.id
         }
     }, window.location.origin);
-    // ==========================================
 
     try {
         const response = await fetch('/hub-api/sync/player', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });

@@ -11,6 +11,41 @@ export function initSpy() {
     let simulatedSystemId = null;
     let lastScrapedUrl = null;
 
+    function calculateMapScaleFromOffset() {
+        const nodes = Array.from(document.querySelectorAll('.map-planet'));
+        if (nodes.length < 2) return null;
+        
+        for (let i = 0; i < nodes.length; i++) {
+            const spanA = nodes[i].querySelector('span');
+            if (!spanA) continue;
+            const matchA = spanA.innerText.match(/\[(\d+)\]/);
+            if (!matchA) continue;
+            const coordsA = window.allSystemsCoordsCacheMap?.[matchA[1]];
+            if (!coordsA || coordsA.x === null || coordsA.y === null) continue;
+            
+            for (let j = i + 1; j < nodes.length; j++) {
+                const spanB = nodes[j].querySelector('span');
+                if (!spanB) continue;
+                const matchB = spanB.innerText.match(/\[(\d+)\]/);
+                if (!matchB) continue;
+                const coordsB = window.allSystemsCoordsCacheMap?.[matchB[1]];
+                if (!coordsB || coordsB.x === null || coordsB.y === null) continue;
+                
+                const dxCoords = Math.abs(coordsA.x - coordsB.x);
+                const dyCoords = Math.abs(coordsA.y - coordsB.y);
+                
+                if (dxCoords > 0 || dyCoords > 0) {
+                    const dxPixels = Math.abs(nodes[i].offsetLeft - nodes[j].offsetLeft);
+                    const dyPixels = Math.abs(nodes[i].offsetTop - nodes[j].offsetTop);
+                    
+                    if (dxCoords > 0 && dxPixels > 0) return dxPixels / dxCoords;
+                    if (dyCoords > 0 && dyPixels > 0) return dyPixels / dyCoords;
+                }
+            }
+        }
+        return null;
+    }
+
     async function injectMapIndicators() {
         if (knownSysIdsCache === null && !isFetchingSystems) {
             isFetchingSystems = true;
@@ -68,6 +103,72 @@ export function initSpy() {
 
         if (!knownSysIdsCache) return;
 
+        // --- GEOMETRIC RADAR CIRCLE INJECTION ENGINE ---
+        if (window.activeSearchedPlayerVision) {
+            const { range, originSystemId } = window.activeSearchedPlayerVision;
+            if (originSystemId && range > 0) {
+                const existingCircle = document.querySelector('.custom-vision-circle');
+                let shouldDraw = true;
+
+                if (existingCircle) {
+                    if (existingCircle.getAttribute('data-origin-id') === String(originSystemId) && 
+                        existingCircle.getAttribute('data-range') === String(range)) {
+                        shouldDraw = false; 
+                    } else {
+                        existingCircle.remove();
+                    }
+                }
+
+                if (shouldDraw) {
+                    let originNode = null;
+                    const allNodes = document.querySelectorAll('.map-planet');
+                    for (let node of allNodes) {
+                        const span = node.querySelector('span');
+                        const m = span?.innerText.match(/\[(\d+)\]/);
+                        if (m && String(m[1]) === String(originSystemId)) {
+                            originNode = node;
+                            break;
+                        }
+                    }
+
+                    if (originNode) {
+                        const scale = calculateMapScaleFromOffset();
+                        if (scale) {
+                            const radiusPx = range * scale;
+                            const diameterPx = radiusPx * 2;
+                            const circle = document.createElement('div');
+                            
+                            circle.className = 'custom-vision-circle';
+                            circle.setAttribute('data-origin-id', String(originSystemId));
+                            circle.setAttribute('data-range', String(range));
+                            
+                            circle.style.position = 'absolute';
+                            circle.style.width = `${diameterPx}px`;
+                            circle.style.height = `${diameterPx}px`;
+                            circle.style.backgroundColor = 'rgba(255, 255, 255, 0.10)';
+                            circle.style.border = '1px dashed rgba(255, 255, 255, 0.3)';
+                            circle.style.borderRadius = '50%';
+                            circle.style.pointerEvents = 'none';
+                            circle.style.zIndex = '1';
+                            
+                            // FIXED: Shifted horizontal midpoint center to 8px inside the leftmost square box boundary
+                            const h = originNode.offsetHeight || 0;
+                            const centerX = originNode.offsetLeft + 8;
+                            const centerY = originNode.offsetTop + (h / 2);
+                            
+                            circle.style.left = `${centerX - radiusPx}px`;
+                            circle.style.top = `${centerY - radiusPx}px`;
+                            
+                            originNode.parentElement.appendChild(circle);
+                        }
+                    }
+                }
+            }
+        } else {
+            document.querySelector('.custom-vision-circle')?.remove();
+        }
+
+        // --- MAP NODE ASSET INDICATOR INJECTION BLOCK ---
         const systemNodes = document.querySelectorAll('.map-planet:not([data-hub-tagged="true"])');
 
         systemNodes.forEach(node => {
@@ -102,56 +203,38 @@ export function initSpy() {
                         if (typeof window.parent.closeFleetDatabasePanel === 'function') window.parent.closeFleetDatabasePanel();
                         if (typeof window.parent.closeDatabasePanel === 'function') window.parent.closeDatabasePanel();
                     }
-                } catch (err) { /* Cross-origin parent safety guard */ }
+                } catch (err) { /* Cross-origin frame safety fallback */ }
             }, { capture: true }); 
 
             if (knownSysIdsCache.has(sysId)) {
                 const icon = node.querySelector('img') || node; 
                 let isBaseSystemForTarget = false;
-                let isInsideTargetVisionField = false;
 
-                if (window.activeSearchedPlayerVision && window.allSystemsCoordsCacheMap) {
-                    const currentSystemLocation = window.allSystemsCoordsCacheMap[sysId];
-                    if (currentSystemLocation && currentSystemLocation.x !== null && currentSystemLocation.y !== null) {
-                        const { range, targetSystems } = window.activeSearchedPlayerVision;
-                        isBaseSystemForTarget = targetSystems.some(ts => String(ts.id) === String(sysId));
-                        isInsideTargetVisionField = targetSystems.some(ts => {
-                            if (ts.x === null || ts.y === null) return false;
-                            const horizontalDelta = currentSystemLocation.x - ts.x;
-                            const verticalDelta = currentSystemLocation.y - ts.y;
-                            const mathematicalDistance = Math.sqrt(horizontalDelta * horizontalDelta + verticalDelta * verticalDelta);
-                            return mathematicalDistance <= range;
-                        });
-                    }
+                if (window.activeSearchedPlayerVision && window.activeSearchedPlayerVision.targetSystems) {
+                    isBaseSystemForTarget = window.activeSearchedPlayerVision.targetSystems.some(ts => String(ts.id) === String(sysId));
                 }
 
                 if (isBaseSystemForTarget) {
-                    icon.style.boxShadow = '0 0 18px 6px #f59e0b, inset 0 0 10px #f59e0b';
-                    icon.style.borderRadius = '50%';
-                    icon.style.border = '2px solid #f59e0b';
-                    icon.style.backgroundColor = 'rgba(245, 158, 11, 0.4)';
-                    span.style.color = '#fbbf24';
-                    span.style.fontWeight = 'bold';
-                } else if (isInsideTargetVisionField) {
-                    icon.style.boxShadow = '0 0 12px 4px #ffffff, inset 0 0 8px #ffffff';
-                    icon.style.borderRadius = '50%';
-                    icon.style.border = '2px dashed #ffffff';
-                    icon.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
+                    // FIXED: Removed box-glow modifications entirely
+                    icon.style.boxShadow = '';
+                    icon.style.borderRadius = '';
+                    icon.style.border = '';
+                    icon.style.backgroundColor = '';
+                    
+                    // FIXED: System name text label configuration transformed to white and scaled up +2px
                     span.style.color = '#ffffff';
-                    span.style.fontWeight = '500';
-                } else if (alliedSysIdsCache.has(sysId)) {
-                    icon.style.boxShadow = '0 0 15px 5px #22c55e, inset 0 0 10px #22c55e';
-                    icon.style.borderRadius = '50%';
-                    icon.style.border = '2px solid #22c55e';
-                    icon.style.backgroundColor = 'rgba(34, 197, 94, 0.4)';
-                    span.style.color = '#4ade80';
+                    span.style.fontSize = '14px'; 
                     span.style.fontWeight = 'bold';
+                    span.style.textShadow = '0 0 6px rgba(0, 0, 0, 1), 0 0 2px rgba(0, 0, 0, 1)';
                 } else {
+                    // FIXED: Green alliance highlights removed entirely. Default tracking profiles applied here.
                     icon.style.boxShadow = '0 0 4px 1px rgba(34, 197, 94, 0.3)';
                     icon.style.borderRadius = '50%';
                     icon.style.border = '1px solid rgba(34, 197, 94, 0.5)';
                     span.style.color = 'rgba(74, 222, 128, 0.7)'; 
                     span.style.fontWeight = 'normal';
+                    span.style.fontSize = ''; 
+                    span.style.textShadow = '';
                 }
             }
         });
@@ -361,7 +444,6 @@ export function initSpy() {
 
             if (document.title !== title) document.title = title;
             
-            // Protected Cross-Origin Execution Guard Block
             if (window.parent && window.parent !== window) {
                 try {
                     if (window.parent.document && window.parent.document.title !== title) {
@@ -384,7 +466,6 @@ export function initSpy() {
             sendContext();
         }
 
-        // Active UI Injector Loop (Fires on hard reloads & layout navigation shifts)
         if (pathLower.includes('/game/map')) {
             injectMapIndicators();
         }
@@ -409,14 +490,15 @@ export function initSpy() {
         const data = event.data;
 
         if (data.type === 'HIGHLIGHT_PLAYER_VISION') {
-            const { range, systems } = data.payload;
-            window.activeSearchedPlayerVision = { range, targetSystems: systems };
+            const { range, systems, originSystemId } = data.payload;
+            window.activeSearchedPlayerVision = { range, targetSystems: systems, originSystemId };
             document.querySelectorAll('.map-planet').forEach(el => el.removeAttribute('data-hub-tagged'));
             injectMapIndicators();
         } 
         else if (data.type === 'CLEAR_PLAYER_VISION') {
             window.activeSearchedPlayerVision = null;
             document.querySelectorAll('.map-planet').forEach(el => el.removeAttribute('data-hub-tagged'));
+            document.querySelector('.custom-vision-circle')?.remove();
             injectMapIndicators();
         }
 

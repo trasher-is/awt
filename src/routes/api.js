@@ -194,7 +194,6 @@ router.post('/sync/system', requireAuth, (req, res) => {
 router.post('/sync/player', requireAuth, (req, res) => {
     const p = req.body;
     
-    // CRITICAL: Reject the payload entirely if the scrape was broken and didn't capture a name
     if (!p || !p.id || !p.name) {
         return res.status(400).json({ error: 'Invalid player payload: Missing ID or Name' });
     }
@@ -233,44 +232,50 @@ router.post('/sync/player', requireAuth, (req, res) => {
         race_speed: p.race_speed || 0,
         race_attack: p.race_attack || 0,
         race_defense: p.race_defense || 0,
-        race_trader: p.race_trader || 0, // <-- KEEP TRADER DATA
-        race_sul: p.race_sul || 0        // <-- KEEP SUL DATA
+        race_trader: p.race_trader || 0,
+        race_sul: p.race_sul || 0
     };
 
-    const oldPlayer = db.prepare('SELECT logins, points FROM players WHERE id = ?').get(p.id);
+    // FIXED: Select origin_system to compare against incoming changes
+    const oldPlayer = db.prepare('SELECT logins, points, origin_system FROM players WHERE id = ?').get(p.id);
 
     const syncTransaction = db.transaction((player) => {
-        // FIXED: Ensure player.logins is greater than 0 to guarantee it isn't an invalid/failed scrape
-        if (oldPlayer && player.logins > 0 && player.logins < oldPlayer.logins) {
-            console.log(`[SYSTEM] Verified Player ${player.id} restarted! Clearing old entities.`);
+        const loginsDropped = oldPlayer && player.logins > 0 && player.logins < oldPlayer.logins;
+        
+        // FIXED: Verifies if a system drops to N/A (null) OR directly hops to a brand new system coordinate
+        const originChanged = oldPlayer && oldPlayer.origin_system !== null && player.origin_system !== oldPlayer.origin_system;
+        
+        const pointsNuked = oldPlayer && oldPlayer.points > 2000 && player.points < 100;
+
+        if (loginsDropped || originChanged || pointsNuked) {
+            console.log(`[SYSTEM] Verified Player ${player.id} restarted or moved origin! Purging ghost assets.`);
             
-            // Strip ownership of old planets
+            // Strip ownership of old planetary holdings
             db.prepare(`
                 UPDATE planets 
                 SET owner_id = NULL, population = 0, starbase = 0, has_fleet = 0, is_sieged = 0 
                 WHERE owner_id = ?
             `).run(player.id);
             
-            // Delete old fleets
+            // Purge historical fleet records
             db.prepare(`DELETE FROM fleets WHERE owner_id = ?`).run(player.id);
 
-            // Force clear database skills so the conditional logic below doesn't preserve pre-restart values
+            // Wipe database progression matrices to avoid data ghost pollution
             db.prepare(`
                 UPDATE players SET 
                     level=0, points=0, ranking=NULL, science_level=0, culture_level=0,
                     biology=0, economy=0, energy=0, mathematics=0, physics=0, social=0,
                     trade_revenue=0, artefact=NULL, eco_bonus=0,
-                    race_growth=0, race_science=0, race_culture=0, race_production=0, race_speed=0, race_attack=0, race_defense=0
+                    race_growth=0, race_science=0, race_culture=0, race_production=0, race_speed=0, race_attack=0, race_defense=0,
+                    race_trader=0, race_sul=0, origin_system=NULL
                 WHERE id = ?
             `).run(player.id);
         }
 
-        // 2. Alliance mapping
         if (player.alliance_id) {
             db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET tag=excluded.tag`).run(player.alliance_id, player.alliance_tag, player.alliance_tag);
         }
 
-        // 3. Upsert Player Profile
         db.prepare(`
             INSERT INTO players (
                 id, name, alliance_id, country, local_time, idle_time, origin_system, 
@@ -303,7 +308,6 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 updated_at=CURRENT_TIMESTAMP
         `).run(player);
 
-        // 4. Logins Timeseries Tracker
         if (player.logins > 0 && (!oldPlayer || oldPlayer.logins !== player.logins)) {
             db.prepare(`INSERT INTO player_logins (player_id, total_logins) VALUES (?, ?)`).run(player.id, player.logins);
         }

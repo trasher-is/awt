@@ -191,7 +191,6 @@
         async function handlePlayerSearchClick(playerId) {
             showToast('Calculating tactical vision grid...');
             
-            // FIX 1: Manually force visibility state on the sidebar context panels
             const ctxContainer = document.getElementById('context-tools');
             const playerCtxContainer = document.getElementById('player-context-tools');
             const playerLabel = document.getElementById('ui-player-id');
@@ -203,7 +202,6 @@
                 playerLabel.innerText = `#${playerId}`;
             }
 
-            // Process standard view layout updates
             loadPlayerIntel(playerId);
             
             try {
@@ -213,12 +211,13 @@
                     const p = data.player;
                     const range = p.biology > 0 ? p.biology : (p.science_level || 0);
                     const systems = data.systems || [];
+                    const originSystemId = p.origin_system;
                     
                     const iframe = document.getElementById('game-frame');
                     if (iframe && iframe.contentWindow) {
                         iframe.contentWindow.postMessage({
                             type: 'HIGHLIGHT_PLAYER_VISION',
-                            payload: { playerId, range, systems }
+                            payload: { playerId, range, systems, originSystemId }
                         }, window.location.origin);
                     }
                 }
@@ -226,64 +225,46 @@
                 console.error("Failed to load map vision baseline:", err);
             }
 
-            // Perform the background parsing task to maintain tracking integrity
+            // Background parsing task with explicit network fetch & DOM parser instantiation
             try {
                 const response = await fetch(`/Game/Players/Profile/${playerId}`);
-                if (!response.ok) return;
-                
-                const html = await response.text();
-                const doc = new DOMParser().parseFromString(html, 'text/html');
-                
-                const p = {
-                    id: parseInt(playerId, 10), name: null, alliance_id: null, alliance_tag: null,
-                    country: null, local_time: null, idle_time: null, origin_system: null,
-                    joined: null, logins: 0, level: 0, ranking: null, points: 0, 
-                    science_level: 0, culture_level: 0, biology: 0, economy: 0, 
-                    energy: 0, mathematics: 0, physics: 0, social: 0, trade_revenue: 0, 
-                    artefact: null, eco_bonus: 0, race_growth: 0, race_science: 0, 
-                    race_culture: 0, race_production: 0, race_speed: 0, race_attack: 0, race_defense: 0,
-                    race_trader: 0, race_sul: 0 // <-- FIX: Initialize fields to prevent 0-overwrite leakage
-                };
-
-                const nameLink = doc.querySelector('th[colspan="2"] a[href^="/Game/Players/Profile/"]');
-                if (nameLink) p.name = nameLink.innerText.trim();
-
-                // ... [Keep middle data rows extraction exactly the same] ...
-
-                // FIX: Added \s* to handle trailing spaces or line breaks safely
-                const parseRace = (text) => parseInt(text.match(/([+-]\d+)\s*$/)?.[1] || "0", 10);
-                doc.querySelectorAll('.race-summary tbody td').forEach(td => {
-                    const text = td.innerText.trim();
-                    if (text.includes('Growth')) p.race_growth = parseRace(text);
-                    if (text.includes('Science')) p.race_science = parseRace(text);
-                    if (text.includes('Culture')) p.race_culture = parseRace(text);
-                    if (text.includes('Production')) p.race_production = parseRace(text);
-                    if (text.includes('Speed')) p.race_speed = parseRace(text);
-                    if (text.includes('Attack')) p.race_attack = parseRace(text);
-                    if (text.includes('Defence') || text.includes('Defense')) p.race_defense = parseRace(text);
-                    if (text.includes('Trader')) p.race_trader = parseRace(text); // <-- Added data parsing row
-                    if (text.includes('Startup') || text.includes('SUL')) p.race_sul = parseRace(text); // <-- Added data parsing row
-                });
-
-                const syncRes = await fetch('/hub-api/sync/player', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(p)
-                });
-
-                if (syncRes.ok) {
-                    const updatedRange = p.biology > 0 ? p.biology : (p.science_level || 0);
-                    const freshRes = await fetch(`/hub-api/intel/player/${playerId}`);
-                    const freshData = await freshRes.json();
+                if (response.ok) {
+                    const html = await response.text();
+                    const doc = new DOMParser().parseFromString(html, 'text/html');
                     
-                    if (freshData.success) {
-                        loadPlayerIntel(playerId);
-                        const iframe = document.getElementById('game-frame');
-                        if (iframe && iframe.contentWindow) {
-                            iframe.contentWindow.postMessage({
-                                type: 'HIGHLIGHT_PLAYER_VISION',
-                                payload: { playerId, range: updatedRange, systems: freshData.systems || [] }
-                            }, window.location.origin);
+                    // Import the central parser and run it on the fetched virtual document context
+                    const playerParser = await import('/js/scrapers/player-parser.js');
+                    const p = playerParser.extractPlayerData(playerId, doc);
+                    
+                    if (p.name) {
+                        const syncRes = await fetch('/hub-api/sync/player', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(p)
+                        });
+
+                        if (syncRes.ok) {
+                            loadPlayerIntel(playerId);
+                            
+                            const freshRes = await fetch(`/hub-api/intel/player/${playerId}`);
+                            const freshData = await freshRes.json();
+                            
+                            if (freshData.success && freshData.player) {
+                                const freshP = freshData.player;
+                                const updatedRange = freshP.biology > 0 ? freshP.biology : (freshP.science_level || 0);
+                                const iframe = document.getElementById('game-frame');
+                                if (iframe && iframe.contentWindow) {
+                                    iframe.contentWindow.postMessage({
+                                        type: 'HIGHLIGHT_PLAYER_VISION',
+                                        payload: { 
+                                            playerId, 
+                                            range: updatedRange, 
+                                            systems: freshData.systems || [],
+                                            originSystemId: freshP.origin_system
+                                        }
+                                    }, window.location.origin);
+                                }
+                            }
                         }
                     }
                 }

@@ -1,8 +1,9 @@
+import { extractPlayerData } from './player-parser.js';
+
 export async function runMassScan(updateProgressCb) {
     console.log("[Mass Scan] Initiating sequence...");
 
     try {
-        // STEP 1: Fetch the Calculator to update the Master Index silently
         updateProgressCb("Updating Galaxy Index...", 0, 0);
         const calcRes = await fetch('/About/TravelTimeCalculator');
         const calcHtml = await calcRes.text();
@@ -37,7 +38,6 @@ export async function runMassScan(updateProgressCb) {
             }
         }
 
-        // STEP 2: Ask the backend for the list of IDs to scan
         const sysRes = await fetch('/hub-api/systems');
         const sysData = await sysRes.json();
         const sysIds = sysData.systems;
@@ -48,7 +48,6 @@ export async function runMassScan(updateProgressCb) {
             return;
         }
 
-        // STEP 3: The 200ms Loop
         for (let i = 0; i < total; i++) {
             const sysId = sysIds[i];
             updateProgressCb(`Scanning System #${sysId}...`, i + 1, total);
@@ -146,6 +145,7 @@ export async function runMassScan(updateProgressCb) {
             await new Promise(resolve => setTimeout(resolve, 200));
         }
 
+        document.getElementById('scan-progress-bar').style.width = '100%';
         updateProgressCb("Scan Complete!", total, total);
 
     } catch (err) {
@@ -157,7 +157,6 @@ export async function runMassScan(updateProgressCb) {
 export async function runPlayerScan(updateProgressCb) {
     console.log("[Mass Scan] Initiating player sequence from Rankings...");
     try {
-        // STEP 1: Compile the Master Index from Eco Bonus Rankings
         updateProgressCb("Compiling Player Index from Rankings...", 0, 0);
         
         const playerIds = [];
@@ -173,7 +172,6 @@ export async function runPlayerScan(updateProgressCb) {
             const rankDoc = new DOMParser().parseFromString(rankHtml, 'text/html');
             
             const playerLinks = rankDoc.querySelectorAll('td a[href^="/Game/Players/Profile/"]');
-            
             if (playerLinks.length === 0) break; 
 
             let newIdsAdded = 0;
@@ -199,7 +197,6 @@ export async function runPlayerScan(updateProgressCb) {
 
         console.log(`[Mass Scan] Index compiled. Deep scanning ${total} players...`);
 
-        // STEP 2: The Deep Profile Scan
         for (let i = 0; i < total; i++) {
             const playerId = playerIds[i];
             updateProgressCb(`Scanning Player #${playerId}...`, i + 1, total);
@@ -210,102 +207,8 @@ export async function runPlayerScan(updateProgressCb) {
             const html = await res.text();
             const doc = new DOMParser().parseFromString(html, 'text/html');
 
-            const p = {
-                id: parseInt(playerId, 10), name: null, alliance_id: null, alliance_tag: null,
-                country: null, local_time: null, idle_time: null, origin_system: null,
-                joined: null, logins: 0,
-                level: 0, ranking: null, points: 0, science_level: 0, culture_level: 0,
-                biology: 0, economy: 0, energy: 0, mathematics: 0, physics: 0, social: 0,
-                trade_revenue: 0, artefact: null, eco_bonus: 0,
-                race_growth: 0, race_science: 0, race_culture: 0, race_production: 0, race_speed: 0, race_attack: 0, race_defense: 0
-            };
-
-            const nameLink = doc.querySelector('th[colspan="2"] a[href^="/Game/Players/Profile/"]');
-            if (nameLink) p.name = nameLink.innerText.trim();
-
-            const allyLink = doc.querySelector('th[colspan="2"] a[href^="/Game/Alliance/Profile/"]');
-            if (allyLink) {
-                p.alliance_tag = allyLink.innerText.trim();
-                p.alliance_id = parseInt(allyLink.getAttribute('href').split('/').pop(), 10);
-            }
-
-            // Fixed: Scrape both th and td tags to support the modified profile tables
-            const getRowVal = (labelMatch, exact = false) => {
-                const rows = doc.querySelectorAll('table tbody tr');
-                for (let row of rows) {
-                    const cells = row.querySelectorAll('th, td');
-                    if (cells.length >= 2) {
-                        const labelText = cells[0].innerText.trim();
-                        if (exact ? labelText === labelMatch : labelText.includes(labelMatch)) {
-                            return cells[1].innerText.trim();
-                        }
-                    }
-                }
-                return null;
-            };
-
-            p.local_time = getRowVal('Local Time');
-            p.idle_time = getRowVal('Idle');
-            p.joined = getRowVal('Joined'); 
-            p.logins = parseInt(getRowVal('Logins'), 10) || 0; 
-            
-            const countryImg = doc.querySelector('img[src^="/img/country/"]');
-            if (countryImg) {
-                p.country = countryImg.getAttribute('alt') || countryImg.getAttribute('title');
-            }
-
-            const originLink = doc.querySelector('a[href^="/Game/Map/SolarSystem/"]');
-            if (originLink) p.origin_system = parseInt(originLink.getAttribute('href').split('/').pop(), 10);
-
-            const lvlStr = getRowVal('Player Level');
-            if (lvlStr) p.level = parseInt(lvlStr.split('-')[0].trim(), 10) || 0;
-
-            p.science_level = parseInt(getRowVal('Science Level'), 10) || 0;
-            p.culture_level = parseInt(getRowVal('Culture Level'), 10) || 0;
-
-            const rankStr = getRowVal('Ranking');
-            if (rankStr) {
-                // Fixed: Enhanced regex matches dots, commas, and formatting spaces
-                const rMatch = rankStr.match(/#(\d+)\s*\(([\d,\.\s]+)\)/);
-                if (rMatch) {
-                    p.ranking = parseInt(rMatch[1].replace(/[^\d]/g, ''), 10);
-                    p.points = parseInt(rMatch[2].replace(/[^\d]/g, ''), 10);
-                }
-            }
-
-            p.biology = parseInt(getRowVal('Biology', true), 10) || 0;
-            p.economy = parseInt(getRowVal('Economy', true), 10) || 0;
-            p.energy = parseInt(getRowVal('Energy', true), 10) || 0;
-            p.mathematics = parseInt(getRowVal('Mathematics', true), 10) || 0;
-            p.physics = parseInt(getRowVal('Physics', true), 10) || 0;
-            p.social = parseInt(getRowVal('Social', true), 10) || 0;
-
-            const ecoBonusStr = getRowVal('Economy Bonus');
-            if (ecoBonusStr) p.eco_bonus = parseInt(ecoBonusStr.replace(/[^\d+-]/g, ''), 10) || 0;
-
-            const tradeStr = getRowVal('Trade Revenue');
-            if (tradeStr) p.trade_revenue = parseInt(tradeStr.replace(/[^\d]/g, ''), 10) || 0;
-
-            const artefactRows = doc.querySelectorAll('.ir-summary tr');
-            artefactRows.forEach(row => {
-                const tds = row.querySelectorAll('td');
-                if (tds.length >= 2 && tds[0]?.innerText.includes('Artefact')) {
-                    const rawText = tds[1].innerText.trim();
-                    p.artefact = rawText === 'N/A' ? null : (rawText.split(/\s+/)[0] || null);
-                }
-            });
-
-            const parseRace = (text) => parseInt(text.match(/([+-]\d+)$/)?.[1] || "0", 10);
-            doc.querySelectorAll('.race-summary tbody td').forEach(td => {
-                const text = td.innerText.trim();
-                if (text.includes('Growth')) p.race_growth = parseRace(text);
-                if (text.includes('Science')) p.race_science = parseRace(text);
-                if (text.includes('Culture')) p.race_culture = parseRace(text);
-                if (text.includes('Production')) p.race_production = parseRace(text);
-                if (text.includes('Speed')) p.race_speed = parseRace(text);
-                if (text.includes('Attack')) p.race_attack = parseRace(text);
-                if (text.includes('Defence') || text.includes('Defense')) p.race_defense = parseRace(text);
-            });
+            // FIXED: Reuses shared selector configuration context from central helper function quietly
+            const p = extractPlayerData(playerId, doc);
 
             if (p.name) {
                 await fetch('/hub-api/sync/player', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
