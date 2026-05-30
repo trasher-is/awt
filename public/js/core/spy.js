@@ -1,12 +1,5 @@
 import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer } from './page-injections.js';
 
-// DELETE THIS DEAD BLOCK ENTIRELY - IT IS MISSING THE WINDOW LOAD EVENT
-window.addEventListener('load', () => {
-    if (window.location.pathname.includes('/Game/Planets')) initPlanetPopTimers();
-    if (window.location.pathname.includes('/Game/Science')) initScienceCultureCalc();
-    if (window.location.pathname.includes('Game/Planets/Planet/')) initStarbaseTimer();
-});
-
 export function initSpy() {
     let currentMapX = null;
     let currentMapY = null;
@@ -16,8 +9,6 @@ export function initSpy() {
     let alliedPlayerNamesCache = new Set();
     let isFetchingSystems = false;
     let simulatedSystemId = null;
-    
-    // NEW: Tracker to prevent duplicate scraper executions on the same page
     let lastScrapedUrl = null;
 
     async function injectMapIndicators() {
@@ -101,73 +92,68 @@ export function initSpy() {
                 simulatedSystemId = sysId;
                 sendContext();
 
-                if (typeof window.parent.toggleSidebar === 'function') {
-                    const sidebar = window.parent.document.getElementById('sidebar');
-                    if (sidebar && !sidebar.classList.contains('expanded')) window.parent.toggleSidebar();
-                    
-                    if (typeof window.parent.closeSystemDatabasePanel === 'function') window.parent.closeSystemDatabasePanel();
-                    if (typeof window.parent.closePlanetDatabasePanel === 'function') window.parent.closePlanetDatabasePanel();
-                    if (typeof window.parent.closeFleetDatabasePanel === 'function') window.parent.closeFleetDatabasePanel();
-                    if (typeof window.parent.closeDatabasePanel === 'function') window.parent.closeDatabasePanel();
-                }
+                try {
+                    if (typeof window.parent.toggleSidebar === 'function') {
+                        const sidebar = window.parent.document.getElementById('sidebar');
+                        if (sidebar && !sidebar.classList.contains('expanded')) window.parent.toggleSidebar();
+                        
+                        if (typeof window.parent.closeSystemDatabasePanel === 'function') window.parent.closeSystemDatabasePanel();
+                        if (typeof window.parent.closePlanetDatabasePanel === 'function') window.parent.closePlanetDatabasePanel();
+                        if (typeof window.parent.closeFleetDatabasePanel === 'function') window.parent.closeFleetDatabasePanel();
+                        if (typeof window.parent.closeDatabasePanel === 'function') window.parent.closeDatabasePanel();
+                    }
+                } catch (err) { /* Cross-origin parent safety guard */ }
             }, { capture: true }); 
 
             if (knownSysIdsCache.has(sysId)) {
-    const icon = node.querySelector('img') || node; 
-    
-    let isBaseSystemForTarget = false;
-    let isInsideTargetVisionField = false;
+                const icon = node.querySelector('img') || node; 
+                let isBaseSystemForTarget = false;
+                let isInsideTargetVisionField = false;
 
-    if (window.activeSearchedPlayerVision && window.allSystemsCoordsCacheMap) {
-        const currentSystemLocation = window.allSystemsCoordsCacheMap[sysId];
-        
-        // FIX 2: Strict sanitation checking on coordinate types to ensure neither is null
-        if (currentSystemLocation && currentSystemLocation.x !== null && currentSystemLocation.y !== null) {
-            const { range, targetSystems } = window.activeSearchedPlayerVision;
+                if (window.activeSearchedPlayerVision && window.allSystemsCoordsCacheMap) {
+                    const currentSystemLocation = window.allSystemsCoordsCacheMap[sysId];
+                    if (currentSystemLocation && currentSystemLocation.x !== null && currentSystemLocation.y !== null) {
+                        const { range, targetSystems } = window.activeSearchedPlayerVision;
+                        isBaseSystemForTarget = targetSystems.some(ts => String(ts.id) === String(sysId));
+                        isInsideTargetVisionField = targetSystems.some(ts => {
+                            if (ts.x === null || ts.y === null) return false;
+                            const horizontalDelta = currentSystemLocation.x - ts.x;
+                            const verticalDelta = currentSystemLocation.y - ts.y;
+                            const mathematicalDistance = Math.sqrt(horizontalDelta * horizontalDelta + verticalDelta * verticalDelta);
+                            return mathematicalDistance <= range;
+                        });
+                    }
+                }
 
-            isBaseSystemForTarget = targetSystems.some(ts => String(ts.id) === String(sysId));
-
-            isInsideTargetVisionField = targetSystems.some(ts => {
-                if (ts.x === null || ts.y === null) return false; // Fail-safe
-                const horizontalDelta = currentSystemLocation.x - ts.x;
-                const verticalDelta = currentSystemLocation.y - ts.y;
-                const mathematicalDistance = Math.sqrt(horizontalDelta * horizontalDelta + verticalDelta * verticalDelta);
-                return mathematicalDistance <= range;
-            });
-        }
-    }
-
-    if (isBaseSystemForTarget) {
-        icon.style.boxShadow = '0 0 18px 6px #f59e0b, inset 0 0 10px #f59e0b';
-        icon.style.borderRadius = '50%';
-        icon.style.border = '2px solid #f59e0b';
-        icon.style.backgroundColor = 'rgba(245, 158, 11, 0.4)';
-        span.style.color = '#fbbf24';
-        span.style.fontWeight = 'bold';
-    } else if (isInsideTargetVisionField) {
-        // FIX 3: Clean, high-contrast white dashed tracking boundary ring for the vision field
-        icon.style.boxShadow = '0 0 12px 4px #ffffff, inset 0 0 8px #ffffff';
-        icon.style.borderRadius = '50%';
-        icon.style.border = '2px dashed #ffffff';
-        icon.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
-        span.style.color = '#ffffff';
-        span.style.fontWeight = '500';
-    } else if (alliedSysIdsCache.has(sysId)) {
-        icon.style.boxShadow = '0 0 15px 5px #22c55e, inset 0 0 10px #22c55e';
-        icon.style.borderRadius = '50%';
-        icon.style.border = '2px solid #22c55e';
-        icon.style.backgroundColor = 'rgba(34, 197, 94, 0.4)';
-        span.style.color = '#4ade80';
-        span.style.fontWeight = 'bold';
-    } else {
-        // Explicit layout fallback states resets
-        icon.style.boxShadow = '0 0 4px 1px rgba(34, 197, 94, 0.3)';
-        icon.style.borderRadius = '50%';
-        icon.style.border = '1px solid rgba(34, 197, 94, 0.5)';
-        span.style.color = 'rgba(74, 222, 128, 0.7)'; 
-        span.style.fontWeight = 'normal';
-    }
-}
+                if (isBaseSystemForTarget) {
+                    icon.style.boxShadow = '0 0 18px 6px #f59e0b, inset 0 0 10px #f59e0b';
+                    icon.style.borderRadius = '50%';
+                    icon.style.border = '2px solid #f59e0b';
+                    icon.style.backgroundColor = 'rgba(245, 158, 11, 0.4)';
+                    span.style.color = '#fbbf24';
+                    span.style.fontWeight = 'bold';
+                } else if (isInsideTargetVisionField) {
+                    icon.style.boxShadow = '0 0 12px 4px #ffffff, inset 0 0 8px #ffffff';
+                    icon.style.borderRadius = '50%';
+                    icon.style.border = '2px dashed #ffffff';
+                    icon.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
+                    span.style.color = '#ffffff';
+                    span.style.fontWeight = '500';
+                } else if (alliedSysIdsCache.has(sysId)) {
+                    icon.style.boxShadow = '0 0 15px 5px #22c55e, inset 0 0 10px #22c55e';
+                    icon.style.borderRadius = '50%';
+                    icon.style.border = '2px solid #22c55e';
+                    icon.style.backgroundColor = 'rgba(34, 197, 94, 0.4)';
+                    span.style.color = '#4ade80';
+                    span.style.fontWeight = 'bold';
+                } else {
+                    icon.style.boxShadow = '0 0 4px 1px rgba(34, 197, 94, 0.3)';
+                    icon.style.borderRadius = '50%';
+                    icon.style.border = '1px solid rgba(34, 197, 94, 0.5)';
+                    span.style.color = 'rgba(74, 222, 128, 0.7)'; 
+                    span.style.fontWeight = 'normal';
+                }
+            }
         });
     }
 
@@ -179,7 +165,6 @@ export function initSpy() {
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
             const nameNode = doc.querySelector('th span a[href^="/Game/Players/Profile/"]');
-            
             if (nameNode) {
                 verifiedPlayerName = nameNode.innerText.trim();
                 sendContext(); 
@@ -253,10 +238,10 @@ export function initSpy() {
             playerName: verifiedPlayerName 
         };
         
-        // Always send UI context to the wrapper...
-        window.parent.postMessage({ type: 'GAME_CONTEXT', payload: contextPayload }, window.location.origin);
+        try {
+            window.parent.postMessage({ type: 'GAME_CONTEXT', payload: contextPayload }, window.location.origin);
+        } catch (e) {}
 
-        // ...But ONLY trigger scrapers if we actually navigated to a new URL
         const currentFullUrl = window.location.href; 
         if (currentFullUrl !== lastScrapedUrl) {
             lastScrapedUrl = currentFullUrl;
@@ -312,7 +297,6 @@ export function initSpy() {
             let title = 'Alliance Hub';
 
             if (pathLower.includes('/game/map/solarsystem') || pathLower.includes('/game/system')) {
-                // System View: Extract name and coords safely, stripping "Planets at"
                 const header = document.querySelector('h5, h4, h3');
                 if (header) {
                     const clone = header.cloneNode(true);
@@ -320,7 +304,7 @@ export function initSpy() {
                     const sysName = clone.innerText
                         .replace(/Solar System/i, '')
                         .replace(/System View/i, '')
-                        .replace(/Planets at/i, '') // Strips out the annoying prefix text
+                        .replace(/Planets at/i, '') 
                         .trim();
                     title = `AW - ${sysName}`;
                 } else {
@@ -328,7 +312,6 @@ export function initSpy() {
                     title = match ? `AW System #${match[1]}` : 'AW System';
                 }
             } else if (pathLower.includes('/game/news/privatemessages')) {
-                // Private Messages specific override
                 title = 'AW Messages';
             } else if (
                 pathLower.includes('/game/planets/planet/') || 
@@ -336,7 +319,6 @@ export function initSpy() {
                 pathLower.includes('/game/planets/spendmultiplepoints/') || 
                 pathLower.includes('/game/planets/changeautoproduce/')
             ) {
-                // Individual Planet Focus & Action views
                 const header = document.querySelector('h3, h4, h5');
                 if (header) {
                     const clone = header.cloneNode(true);
@@ -346,7 +328,7 @@ export function initSpy() {
                         .replace(/Spend Points on/i, '')
                         .replace(/Spend Multiple Points on/i, '')
                         .replace(/Change Auto Produce/i, '')
-                        .replace(/Planet/i, '') // Clean up extra game title padding text
+                        .replace(/Planet/i, '') 
                         .trim();
                     title = `AW ${planetDetails}`;
                 } else {
@@ -377,12 +359,15 @@ export function initSpy() {
                 title = 'AW Players';
             }
 
-            // Sync frame document title
             if (document.title !== title) document.title = title;
             
-            // Sync parent extension wrapper tab title
-            if (window.parent && window.parent.document && window.parent.document.title !== title) {
-                window.parent.document.title = title;
+            // Protected Cross-Origin Execution Guard Block
+            if (window.parent && window.parent !== window) {
+                try {
+                    if (window.parent.document && window.parent.document.title !== title) {
+                        window.parent.document.title = title;
+                    }
+                } catch (securityErr) { /* Safely swallow cross-origin blocks */ }
             }
         } catch (err) {
             console.error('[Spy] Title synchronization error:', err);
@@ -392,17 +377,28 @@ export function initSpy() {
     let lastUrl = window.location.pathname + window.location.search;
     setInterval(() => {
         const currentUrl = window.location.pathname + window.location.search;
+        const pathLower = currentUrl.toLowerCase();
+
         if (currentUrl !== lastUrl) {
             lastUrl = currentUrl;
             sendContext();
         }
 
-        // Active UI Injector Loop (Fires reliably on hard loads and inner frame shifts)
-        if (currentUrl.toLowerCase().includes('/game/map')) {
+        // Active UI Injector Loop (Fires on hard reloads & layout navigation shifts)
+        if (pathLower.includes('/game/map')) {
             injectMapIndicators();
         }
-        if (currentUrl.includes('/Game/News')) {
+        if (pathLower.includes('/game/news')) {
             initAllianceNewsAlerts();
+        }
+        if (pathLower.includes('/game/planets')) {
+            initPlanetPopTimers();
+        }
+        if (pathLower.includes('/game/science')) {
+            initScienceCultureCalc();
+        }
+        if (pathLower.includes('/game/planets/planet/')) {
+            initStarbaseTimer();
         }
 
         updateTabTitle();
@@ -415,11 +411,9 @@ export function initSpy() {
         if (data.type === 'HIGHLIGHT_PLAYER_VISION') {
             const { range, systems } = data.payload;
             window.activeSearchedPlayerVision = { range, targetSystems: systems };
-            
             document.querySelectorAll('.map-planet').forEach(el => el.removeAttribute('data-hub-tagged'));
             injectMapIndicators();
         } 
-        // Clear lifecycle execution loop
         else if (data.type === 'CLEAR_PLAYER_VISION') {
             window.activeSearchedPlayerVision = null;
             document.querySelectorAll('.map-planet').forEach(el => el.removeAttribute('data-hub-tagged'));
@@ -428,12 +422,10 @@ export function initSpy() {
 
         if (data.type === 'INJECT_TACTICAL_OVERLAYS') {
             const { plans } = data.payload; 
-            
             document.querySelectorAll('.aw-hub-indicator').forEach(el => el.remove());
             document.querySelectorAll('#solarSystem tr').forEach(row => { row.style.borderLeft = ''; });
 
             const rows = document.querySelectorAll('#solarSystem > tbody > tr[data-planet-id]');
-            
             rows.forEach(row => {
                 const firstCell = row.querySelector('td');
                 if (!firstCell) return;
@@ -444,10 +436,8 @@ export function initSpy() {
 
                 const ownerLink = row.querySelectorAll('td')[3]?.querySelector('a[href^="/Game/Players/Profile/"]');
                 const rowPlayerName = ownerLink ? ownerLink.innerText.trim().toLowerCase() : null;
-                
                 const isAlliedPlanet = rowPlayerName && alliedPlayerNamesCache.has(rowPlayerName);
 
-                // Correctly capture both types of sieges from the row classes
                 const isSieged = row.classList.contains('siege');
                 const isFriendlySiege = row.classList.contains('friendly-siege');
                 
@@ -456,8 +446,6 @@ export function initSpy() {
                 
                 const incomingAttack = actionHtml.includes('Incoming hostile fleet') || actionHtml.includes('Hostile fleet incoming');
                 const hostileOrbit = actionHtml.includes('Hostile fleet in orbit');
-                
-                // Fixed: Added specific checks for 'Incoming friendly fleet' and the takeoff icon class
                 const alliedTransit = actionHtml.includes('Incoming allied') || 
                                       actionHtml.includes('Allied fleet') || 
                                       actionHtml.includes('Incoming friendly fleet') ||
@@ -467,17 +455,14 @@ export function initSpy() {
                 let borderColor = '';
                 let titleText = '';
 
-                // Evaluate status indicators by technical priority
                 if (isSieged) {
                     indicatorHTML = '<span class="badge bg-purple ms-2" style="background-color: #b17608; color: white;">Siege</span>';
                     borderColor = '#b17608';
                     titleText = 'Enemy Siege Detected';
                 } else if (isFriendlySiege) {
-                    // Scrape the sieging player's name out of the linked collapsed panel row
                     const collapseRow = document.querySelector(`.fleetsPlanet${planetId}`);
                     const siegerLink = collapseRow?.querySelector('a[href^="/Game/Players/Profile/"]');
                     const siegerName = siegerLink ? siegerLink.innerText.trim() : 'Ally';
-
                     indicatorHTML = `<span class="badge ms-2" style="background-color: #07832c; color: white;">${siegerName} sieging</span>`;
                     borderColor = '#07832c'; 
                     titleText = `Allied Siege by ${siegerName}`;

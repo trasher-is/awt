@@ -1,7 +1,6 @@
 export function initPlanetPopTimers() {
-    if (!window.location.pathname.includes('/Game/Planets')) return;
+    if (!window.location.pathname.toLowerCase().includes('/game/planets')) return;
 
-    // Inject responsive style rules once if not already present
     if (!document.getElementById('custom-pop-timer-styles')) {
         const style = document.createElement('style');
         style.id = 'custom-pop-timer-styles';
@@ -15,26 +14,19 @@ export function initPlanetPopTimers() {
         document.head.appendChild(style);
     }
 
-    // Direct selection ensures this runs on both the overview table and individual planet views
     document.querySelectorAll('.progress-bar-timed').forEach(barContainer => {
-        // Match numbers, letters, spaces, colons, and dots
         const title = barContainer.getAttribute('title') || "";
         const durMatch = title.match(/Duration:\s*([a-zA-Z0-9\.\s:]+)/);
         if (!durMatch) return;
-
-        // Prevent duplicate injections
         if (barContainer.querySelector('.custom-pop-timer')) return;
 
         let durationText = durMatch[1].trim();
-        
-        // Convert "X.XX:XX:XX" format to "Xd XX:XX:XX"
         durationText = durationText.replace(/^(\d+)\./, '$1d ');
 
         const timerDiv = document.createElement('div');
         timerDiv.className = 'custom-pop-timer';
         timerDiv.innerText = durationText; 
         
-        // Use standard vanilla CSS layout properties so it works on the game's page
         timerDiv.style.position = 'absolute';
         timerDiv.style.top = '50%';
         timerDiv.style.transform = 'translateY(-50%)';
@@ -42,15 +34,14 @@ export function initPlanetPopTimers() {
         timerDiv.style.zIndex = '10';
         timerDiv.style.color = '#ffffff';
         timerDiv.style.fontFamily = 'monospace';
-        timerDiv.style.fontSize = '9pt'; // Base desktop size (~12px)
+        timerDiv.style.fontSize = '9pt';
         timerDiv.style.fontWeight = 'bold';
         timerDiv.style.whiteSpace = 'nowrap';
-        timerDiv.style.pointerEvents = 'none'; // Prevents the text from blocking mouse hovers on the bar
+        timerDiv.style.pointerEvents = 'none';
         
         barContainer.style.position = 'relative';
         barContainer.appendChild(timerDiv);
 
-        // Hide progress text (e.g. "125/813") on mobile, show on medium screens and up
         const progressText = barContainer.querySelector('.progress-text');
         if (progressText) {
             progressText.classList.add('d-none', 'd-md-block');
@@ -59,14 +50,22 @@ export function initPlanetPopTimers() {
 }
 
 export async function initScienceCultureCalc() {
-    if (!window.location.pathname.includes('/Game/Science')) return;
+    if (!window.location.pathname.toLowerCase().includes('/game/science')) return;
 
     const headers = document.querySelectorAll('th');
     let production = 0;
     headers.forEach(th => {
         if (th.innerText.includes('Culture')) {
-            const match = th.innerText.match(/\+([\d,]+)\/h/);
-            if (match) production = parseFloat(match[1].replace(',', '.'));
+            const matchText = th.innerText.match(/\+([^/]+)\/h/);
+            if (matchText) {
+                let cleanStr = matchText[1].trim().replace(/\s/g, '');
+                if ((/\d+[\.,]\d{1,2}$/).test(cleanStr)) {
+                    cleanStr = cleanStr.replace(/[\.,]/g, m => m === cleanStr.charAt(cleanStr.length - 2) || m === cleanStr.charAt(cleanStr.length - 3) ? '.' : '');
+                } else {
+                    cleanStr = cleanStr.replace(/[\.,]/g, '');
+                }
+                production = parseFloat(cleanStr) || 0;
+            }
         }
     });
 
@@ -79,7 +78,7 @@ export async function initScienceCultureCalc() {
         if ((text.includes('Culture') || text.includes('Cul')) && !text.includes('Science')) {
             const lvlCell = row.cells[1];
             if (lvlCell) {
-                const lvl = parseInt(lvlCell.innerText.trim());
+                const lvl = parseInt(lvlCell.innerText.trim(), 10);
                 if (!isNaN(lvl)) {
                     currentLevel = lvl;
                     targetRow = row;
@@ -89,6 +88,10 @@ export async function initScienceCultureCalc() {
     });
 
     if (targetRow && production > 0) {
+        if (targetRow.getAttribute('data-calc-injected') === 'true' || targetRow.querySelector('.custom-culture-calc-container')) return;
+        
+        targetRow.setAttribute('data-calc-injected', 'true');
+
         const timer = targetRow.querySelector('.timer-active');
         const currentSeconds = timer ? parseInt(timer.getAttribute('data-value'), 10) : 0;
 
@@ -101,8 +104,8 @@ export async function initScienceCultureCalc() {
             const getPointsForLevel = (lvl) => {
                 for (const r of infoRows) {
                     const cells = r.querySelectorAll('td');
-                    if (cells.length >= 2 && parseInt(cells[0].innerText) === lvl) {
-                        return parseInt(cells[1].innerText.replace(/\s/g, '').replace('.', '')) || 0;
+                    if (cells.length >= 2 && parseInt(cells[0].innerText, 10) === lvl) {
+                        return parseInt(cells[1].innerText.replace(/\s/g, '').replace(/[\.,]/g, ''), 10) || 0;
                     }
                 }
                 return 0;
@@ -127,7 +130,6 @@ export async function initScienceCultureCalc() {
 
                 if (secondsToReach > 0) {
                     const finishDate = new Date(Date.now() + secondsToReach * 1000);
-                    
                     const dateStr = finishDate.toLocaleDateString(undefined, {month:'short', day:'numeric'}) + ' ' + 
                                     finishDate.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit', hour12: false});
 
@@ -141,19 +143,26 @@ export async function initScienceCultureCalc() {
 
             if (nextLevels.length > 0) {
                 const container = document.createElement('div');
+                container.className = 'custom-culture-calc-container';
                 container.style.marginTop = "4px";
-                container.style.fontSize = "10px";
+                container.style.fontSize = "11px"; // Set to 11px size
                 container.style.color = "#aaa";
                 
                 nextLevels.forEach(item => {
                     const line = document.createElement('div');
-                    line.innerHTML = `<span style="color:#fff; font-weight:bold">Lvl ${item.lvl}:</span> ${item.duration} <span style="color:#888;">(${item.date})</span>`;
+                    // Label styling flipped to normal grey; duration wrapped in bold white span
+                    line.innerHTML = `<span style="color:#aaa; font-weight:normal;">Lvl ${item.lvl}:</span> <span style="color:#fff; font-weight:bold;">${item.duration}</span> <span style="color:#888;">(${item.date})</span>`;
                     container.appendChild(line);
                 });
 
-                targetRow.cells[2].appendChild(container);
+                if (targetRow.cells[2]) {
+                    targetRow.cells[2].appendChild(container);
+                }
             }
-        } catch (e) { console.error("Calc Error", e); }
+        } catch (e) { 
+            console.error("Calc Error", e);
+            targetRow.removeAttribute('data-calc-injected');
+        }
     }
 }
 
@@ -169,11 +178,10 @@ function formatDuration(totalSeconds) {
 }
 
 export async function initAllianceNewsAlerts() {
-    if (!window.location.pathname.startsWith('/Game/News')) return;
+    if (!window.location.pathname.toLowerCase().startsWith('/game/news')) return;
 
     const newsTable = document.querySelector('.table.hover');
     if (!newsTable || newsTable.getAttribute('data-broadcasts-injected') === 'true') return;
-    
     newsTable.setAttribute('data-broadcasts-injected', 'true');
 
     const newsTableBody = newsTable.querySelector('tbody');
@@ -189,7 +197,7 @@ export async function initAllianceNewsAlerts() {
         for (const b of [...data.broadcasts].reverse()) {
             const rowHTML = `
                 <tr class="custom-alliance-broadcast-row" style="border-left: 3px solid #1e3a8a; background-color: rgba(121, 53, 14, 0.47);">
-                    <td class="msg player-incoming unread" style="vertical-align: top; white-space: nowrap; background-color: rgba(77, 41, 7, 0.85);!important;">
+                    <td class="msg player-incoming unread" style="vertical-align: top; white-space: nowrap; background-color: rgba(77, 41, 7, 0.85) !important;">
                         ${b.display_time}
                         <br>
                         <b>(<span>${b.author_name}</span>)</b>
@@ -212,23 +220,16 @@ export async function initAllianceNewsAlerts() {
     }
 }
 
-// --- PLANET VIEW: STARBASE AUTOGROWTH TIMER ---
 export function initStarbaseTimer() {
-    // Check if we are on an individual planet page
     if (!window.location.pathname.toLowerCase().includes('/game/planets/planet/')) return;
 
-    // Locate the Starbase row
     const starbaseRow = document.querySelector('tr[data-spend-to="Starbase"]');
     if (!starbaseRow) return;
 
-    // Locate the progress bar container inside the row
     const barContainer = starbaseRow.querySelector('.progress-bar');
     if (!barContainer) return;
-
-    // Prevent duplicate styling/injections if run multiple times
     if (barContainer.querySelector('.custom-starbase-timer')) return;
 
-    // Extract values safely from the DOM cells
     const lvlCell = starbaseRow.querySelector('.building-lvl-up') || starbaseRow.cells[1];
     const remainCell = starbaseRow.cells[3];
     if (!lvlCell || !remainCell) return;
@@ -236,14 +237,11 @@ export function initStarbaseTimer() {
     const level = parseInt(lvlCell.innerText.trim(), 10);
     const remain = parseInt(remainCell.innerText.trim(), 10);
 
-    // If level is invalid or remaining points is 0, calculation isn't needed
     if (isNaN(level) || isNaN(remain) || level <= 0 || remain <= 0) return;
 
-    // Formula: growth = level / 5 points per hour
     const growthPerHour = level / 5;
     const hoursNeeded = remain / growthPerHour;
 
-    // Convert to distinct days, hours, and minutes strings
     const totalMinutes = Math.round(hoursNeeded * 60);
     const days = Math.floor(totalMinutes / 1440);
     const hours = Math.floor((totalMinutes % 1440) / 60);
@@ -258,7 +256,6 @@ export function initStarbaseTimer() {
         timerText += `${mins}m`;
     }
 
-    // Build the visual div overlay with identical styling to population bar
     const timerDiv = document.createElement('div');
     timerDiv.className = 'custom-starbase-timer';
     timerDiv.innerText = timerText;
