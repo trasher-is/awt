@@ -14,7 +14,6 @@ const PORT = process.env.PORT || 3000;
 const { initDiscordBot } = require('./src/discord_bot');
 
 const fs = require('fs');
-const path = require('path');
 
 app.get('/api/admin/logs', (req, res) => {
     // 1. Set a default fallback path
