@@ -153,7 +153,7 @@ export function initSpy() {
                             
                             // FIXED: Shifted horizontal midpoint center to 8px inside the leftmost square box boundary
                             const h = originNode.offsetHeight || 0;
-                            const centerX = originNode.offsetLeft + 8;
+                            const centerX = originNode.offsetLeft + 14;
                             const centerY = originNode.offsetTop + (h / 2);
                             
                             circle.style.left = `${centerX - radiusPx}px`;
@@ -166,6 +166,65 @@ export function initSpy() {
             }
         } else {
             document.querySelector('.custom-vision-circle')?.remove();
+        }
+
+        // --- ALLIANCE COLLECTIVE VISION CIRCLES ENGINE ---
+        if (window.activeAllianceVision && window.activeAllianceVision.length > 0) {
+            const scale = calculateMapScaleFromOffset();
+            
+            const unTaggedNodes = document.querySelectorAll('.map-planet:not([data-hub-tagged="true"])');
+            if (unTaggedNodes.length > 0) {
+                document.querySelectorAll('.custom-alliance-vision-circle').forEach(el => el.remove());
+            }
+
+            if (scale) {
+                window.activeAllianceVision.forEach(vis => {
+                    const existingCircle = document.querySelector(`.custom-alliance-vision-circle[data-player-id="${vis.playerId}"]`);
+                    if (existingCircle) return;
+
+                    let originNode = null;
+                    const allNodes = document.querySelectorAll('.map-planet');
+                    for (let node of allNodes) {
+                        const span = node.querySelector('span');
+                        const m = span?.innerText.match(/\[(\d+)\]/);
+                        if (m && String(m[1]) === String(vis.originSystemId)) {
+                            originNode = node;
+                            break;
+                        }
+                    }
+
+                    if (originNode) {
+                        // FIX: Add 1 extra square scale to the radius calculation
+                        const radiusPx = vis.range * scale;
+                        const diameterPx = radiusPx * 2;
+                        const circle = document.createElement('div');
+                        
+                        circle.className = 'custom-alliance-vision-circle';
+                        circle.setAttribute('data-player-id', String(vis.playerId));
+                        
+                        circle.style.position = 'absolute';
+                        circle.style.width = `${diameterPx}px`;
+                        circle.style.height = `${diameterPx}px`;
+                        circle.style.backgroundColor = 'transparent'; 
+                        circle.style.border = '1px dashed rgb(255, 255, 255)'; 
+                        circle.style.borderRadius = '50%';
+                        circle.style.pointerEvents = 'none';
+                        circle.style.zIndex = '1';
+                        
+                        const h = originNode.offsetHeight || 0;
+                        // FIX: Changed from +8 to +13 to nudge the center 5px to the right
+                        const centerX = originNode.offsetLeft + 14;
+                        const centerY = originNode.offsetTop + (h / 2);
+                        
+                        circle.style.left = `${centerX - radiusPx}px`;
+                        circle.style.top = `${centerY - radiusPx}px`;
+                        
+                        originNode.parentElement.appendChild(circle);
+                    }
+                });
+            }
+        } else {
+            document.querySelectorAll('.custom-alliance-vision-circle').forEach(el => el.remove());
         }
 
         // --- MAP NODE ASSET INDICATOR INJECTION BLOCK ---
@@ -488,6 +547,17 @@ export function initSpy() {
     window.addEventListener('message', (event) => {
         if (event.origin !== window.location.origin) return;
         const data = event.data;
+
+        if (data.type === 'SHOW_ALLIANCE_VISION') {
+            window.activeAllianceVision = data.payload.visions;
+            document.querySelectorAll('.custom-alliance-vision-circle').forEach(el => el.remove());
+            injectMapIndicators();
+        } 
+        else if (data.type === 'CLEAR_ALLIANCE_VISION') {
+            window.activeAllianceVision = null;
+            document.querySelectorAll('.custom-alliance-vision-circle').forEach(el => el.remove());
+            injectMapIndicators();
+        }
 
         if (data.type === 'HIGHLIGHT_PLAYER_VISION') {
             const { range, systems, originSystemId } = data.payload;

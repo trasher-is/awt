@@ -275,3 +275,99 @@ export function initStarbaseTimer() {
     barContainer.style.position = 'relative';
     barContainer.appendChild(timerDiv);
 }
+
+let currentObservedTable = null;
+let systemTableObserver = null;
+
+export async function initPersistentPlanPills() {
+    const systemTable = document.getElementById("solarSystem");
+    if (!systemTable) return;
+
+    // Strict Guard: If we are already attached to this exact table element instance, exit.
+    if (currentObservedTable === systemTable) return;
+
+    // Disconnect old targets to prevent cross-view instance stacking leaks
+    if (systemTableObserver) {
+        systemTableObserver.disconnect();
+    }
+
+    currentObservedTable = systemTable;
+
+    const urlMatch = window.location.href.match(/(?:SolarSystem\/|solarSystemId=)(\d+)/i);
+    const targetLink = document.querySelector('a[href*="solarSystemId="]');
+    const fallbackMatch = targetLink ? targetLink.getAttribute('href').match(/solarSystemId=(\d+)/i) : null;
+    
+    const systemId = urlMatch ? urlMatch[1] : (fallbackMatch ? fallbackMatch[1] : null);
+    if (!systemId) return;
+
+    try {
+        const res = await fetch(`/hub-api/plans/${systemId}`);
+        const data = await res.json();
+        if (!data.success || !data.plans) return;
+
+        const applyPills = () => {
+            const rows = systemTable.querySelectorAll("tbody > tr:not(.collapse)");
+            rows.forEach(row => {
+                const firstCell = row.querySelector("td:first-child");
+                if (!firstCell) return;
+
+                const planetIndex = parseInt(firstCell.innerText.trim(), 10);
+                if (isNaN(planetIndex)) return;
+
+                const planetPlans = data.plans.filter(p => p.planet_index === planetIndex);
+                const existingPills = row.querySelectorAll(".awt-persistent-pill");
+
+                // Idempotence Check: If the layout reflects the data state perfectly, skip execution 
+                if (existingPills.length === planetPlans.length) return;
+
+                // Clear out mismatched allocations cleanly
+                existingPills.forEach(p => p.remove());
+
+                // Build out fresh plan identifiers safely
+                planetPlans.forEach(plan => {
+                    const pillNode = document.createElement('span');
+                    pillNode.className = "badge bg-white text-dark awt-persistent-pill ms-2";
+                    pillNode.style.cssText = "background-color: #ffffff !important; color: #000000 !important; font-weight: bold; font-size: 0.75em; border: 1px solid #ccc; display: inline-block; vertical-align: middle;";
+                    pillNode.innerText = "PLAN";
+                    pillNode.setAttribute("data-bs-toggle", "tooltip");
+                    pillNode.setAttribute("title", `${plan.author}: ${plan.note}`);
+
+                    firstCell.appendChild(pillNode);
+
+                    if (window.bootstrap && window.bootstrap.Tooltip) {
+                        new window.bootstrap.Tooltip(pillNode);
+                    }
+                });
+            });
+        };
+
+        // Render initial view layers
+        applyPills();
+
+        // Bind localized table content tracker to preserve layout values during live fleet adjustments
+        const tbody = systemTable.querySelector("tbody");
+        if (tbody) {
+            systemTableObserver = new MutationObserver((mutations) => {
+                let structuralChangeDetected = false;
+                for (const mutation of mutations) {
+                    if (mutation.type === "childList") {
+                        const isSelfGenerated = Array.from(mutation.addedNodes).some(n => 
+                            n.classList && n.classList.contains("awt-persistent-pill")
+                        );
+                        if (!isSelfGenerated) {
+                            structuralChangeDetected = true;
+                            break;
+                        }
+                    }
+                }
+                if (structuralChangeDetected) {
+                    applyPills();
+                }
+            });
+            systemTableObserver.observe(tbody, { childList: true, subtree: true });
+        }
+
+    } catch (err) {
+        console.error("[AWT Tools] Pill generation processing fault:", err);
+    }
+}

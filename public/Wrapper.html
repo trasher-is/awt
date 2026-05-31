@@ -116,7 +116,7 @@
                         </div>
                     </div>
                     <div>
-                        <div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Activity Log</div>
+                        <div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Activity Log (GMT +0)</div>
                         <div class="bg-card border border-border rounded p-2 shadow-sm h-28 w-full">
                             <canvas id="playerHeatmapChart"></canvas>
                         </div>
@@ -135,6 +135,14 @@
                     <input type="text" id="search-system-input" placeholder="System Name or ID..." class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8" oninput="handleSearchInput('system')">
                     <i class="fa-solid fa-magnifying-glass absolute right-7 top-2.5 text-muted-foreground text-sm pointer-events-none"></i>
                     <div id="search-system-results" class="mt-2 flex flex-col gap-1 max-h-40 overflow-y-auto empty:hidden"></div>
+                </div>
+            </div>
+
+            <div class="flex flex-col py-3 border-b border-border hide-collapsed">
+                <div class="px-4 pb-2 text-s text-muted-foreground font-semibold uppercase tracking-wider">Map Overlays</div>
+                <div class="px-4 flex items-center justify-between">
+                    <span class="text-sm text-muted-foreground">Alliance Map Vision</span>
+                    <input type="checkbox" id="toggle-alliance-vision" onchange="handleAllianceVisionToggle()" class="w-4 h-4 rounded border-border bg-transparent text-primary focus:ring-0 focus:ring-offset-0 cursor-pointer">
                 </div>
             </div>
 
@@ -187,6 +195,63 @@
     </div>
 
     <script>
+
+        async function handleAllianceVisionToggle() {
+    const isChecked = document.getElementById('toggle-alliance-vision').checked;
+    const iframe = document.getElementById('game-frame');
+    if (!iframe || !iframe.contentWindow) return;
+
+    if (!isChecked) {
+        iframe.contentWindow.postMessage({ type: 'CLEAR_ALLIANCE_VISION' }, window.location.origin);
+        return;
+    }
+
+    showToast('Assembling collective alliance vision maps...');
+
+    try {
+        // Query the correct API endpoints matching your backend registry schemas
+        const [statsRes, playersRes] = await Promise.all([
+            fetch('/hub-api/intel/alliance-stats'),
+            fetch('/hub-api/intel/players')
+        ]);
+        
+        const statsData = await statsRes.json();
+        const playersData = await playersRes.json();
+
+        if (statsData.success && playersData.success) {
+            const memberIds = new Set();
+            
+            // Map member IDs directly out of the metrics payload array rows
+            statsData.stats.forEach(row => {
+                if (row.player_id) {
+                    memberIds.add(Number(row.player_id));
+                }
+            });
+
+            // Isolate matching target indices possessing valid origin systems and positive biology range parameters
+            const allianceVisionData = playersData.players
+                .filter(p => memberIds.has(Number(p.id)) && p.origin_system && p.biology > 0)
+                .map(p => ({
+                    playerId: p.id,
+                    playerName: p.name,
+                    originSystemId: p.origin_system,
+                    range: p.biology
+                }));
+
+            iframe.contentWindow.postMessage({
+                type: 'SHOW_ALLIANCE_VISION',
+                payload: { visions: allianceVisionData }
+            }, window.location.origin);
+        } else {
+            showToast('Failed to compile alliance telemetry arrays');
+            document.getElementById('toggle-alliance-vision').checked = false;
+        }
+    } catch (err) {
+        console.error("[AWT Hub] Critical vision compiler fault:", err);
+        showToast('Vision mapping pipelines failed');
+        document.getElementById('toggle-alliance-vision').checked = false;
+    }
+}
 
         async function handlePlayerSearchClick(playerId) {
             showToast('Calculating tactical vision grid...');
