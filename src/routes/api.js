@@ -198,7 +198,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
         return res.status(400).json({ error: 'Invalid player payload: Missing ID or Name' });
     }
     
-    console.log(`\n[API] Incoming profile sync for Player ID: ${p.id} (${p.name})`);
+    console.log(`\n[API] Incoming profile sync for Player ID: ${p.id} (${p.name}) [Has Intel: ${p.has_intel || 0}]`);
 
     const safePlayer = {
         id: p.id,
@@ -233,41 +233,35 @@ router.post('/sync/player', requireAuth, (req, res) => {
         race_attack: p.race_attack || 0,
         race_defense: p.race_defense || 0,
         race_trader: p.race_trader || 0,
-        race_sul: p.race_sul || 0
+        race_sul: p.race_sul || 0,
+        has_intel: p.has_intel || 0
     };
 
-    // FIXED: Select origin_system to compare against incoming changes
     const oldPlayer = db.prepare('SELECT logins, points, origin_system FROM players WHERE id = ?').get(p.id);
 
     const syncTransaction = db.transaction((player) => {
         const loginsDropped = oldPlayer && player.logins > 0 && player.logins < oldPlayer.logins;
-        
-        // FIXED: Verifies if a system drops to N/A (null) OR directly hops to a brand new system coordinate
         const originChanged = oldPlayer && oldPlayer.origin_system !== null && player.origin_system !== oldPlayer.origin_system;
-        
         const pointsNuked = oldPlayer && oldPlayer.points > 2000 && player.points < 100;
 
         if (loginsDropped || originChanged || pointsNuked) {
             console.log(`[SYSTEM] Verified Player ${player.id} restarted or moved origin! Purging ghost assets.`);
             
-            // Strip ownership of old planetary holdings
             db.prepare(`
                 UPDATE planets 
                 SET owner_id = NULL, population = 0, starbase = 0, has_fleet = 0, is_sieged = 0 
                 WHERE owner_id = ?
             `).run(player.id);
             
-            // Purge historical fleet records
             db.prepare(`DELETE FROM fleets WHERE owner_id = ?`).run(player.id);
 
-            // Wipe database progression matrices to avoid data ghost pollution
             db.prepare(`
                 UPDATE players SET 
                     level=0, points=0, ranking=NULL, science_level=0, culture_level=0,
                     biology=0, economy=0, energy=0, mathematics=0, physics=0, social=0,
                     trade_revenue=0, artefact=NULL, eco_bonus=0,
                     race_growth=0, race_science=0, race_culture=0, race_production=0, race_speed=0, race_attack=0, race_defense=0,
-                    race_trader=0, race_sul=0, origin_system=NULL
+                    race_trader=0, race_sul=0, origin_system=NULL, has_intel=0
                 WHERE id = ?
             `).run(player.id);
         }
@@ -284,7 +278,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 trade_revenue, artefact, eco_bonus,
                 race_growth, race_science, race_culture, race_production, race_speed, race_attack, race_defense,
                 race_trader, race_sul,
-                joined, logins
+                joined, logins, has_intel
             ) VALUES (
                 @id, @name, @alliance_id, @country, @local_time, @idle_time, @origin_system, 
                 @level, @ranking, @points, @science_level, @culture_level, 
@@ -292,7 +286,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 @trade_revenue, @artefact, @eco_bonus,
                 @race_growth, @race_science, @race_culture, @race_production, @race_speed, @race_attack, @race_defense,
                 @race_trader, @race_sul,
-                @joined, @logins
+                @joined, @logins, @has_intel
             ) ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name, alliance_id=excluded.alliance_id, country=excluded.country, 
                 local_time=excluded.local_time, idle_time=excluded.idle_time, origin_system=excluded.origin_system,
@@ -304,7 +298,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 race_growth=excluded.race_growth, race_science=excluded.race_science, race_culture=excluded.race_culture,
                 race_production=excluded.race_production, race_speed=excluded.race_speed, race_attack=excluded.race_attack, race_defense=excluded.race_defense,
                 race_trader=excluded.race_trader, race_sul=excluded.race_sul,
-                joined=excluded.joined, logins=excluded.logins,
+                joined=excluded.joined, logins=excluded.logins, has_intel=excluded.has_intel,
                 updated_at=CURRENT_TIMESTAMP
         `).run(player);
 

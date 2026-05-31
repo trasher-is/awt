@@ -225,14 +225,12 @@
                 console.error("Failed to load map vision baseline:", err);
             }
 
-            // Background parsing task with explicit network fetch & DOM parser instantiation
             try {
                 const response = await fetch(`/Game/Players/Profile/${playerId}`);
                 if (response.ok) {
                     const html = await response.text();
                     const doc = new DOMParser().parseFromString(html, 'text/html');
                     
-                    // Import the central parser and run it on the fetched virtual document context
                     const playerParser = await import('/js/scrapers/player-parser.js');
                     const p = playerParser.extractPlayerData(playerId, doc);
                     
@@ -273,54 +271,17 @@
             }
         }
 
-        async function executeSearch(type) {
-            const input = document.getElementById(`search-${type}-input`);
-            const resultsContainer = document.getElementById(`search-${type}-results`);
-            const q = input.value.trim();
-            
-            // FIX 2: Handle search clearing to clean up stale vision vectors across maps
-            if (!q) { 
-                resultsContainer.innerHTML = ''; 
-                if (type === 'player') {
-                    const iframe = document.getElementById('game-frame');
-                    if (iframe && iframe.contentWindow) {
-                        iframe.contentWindow.postMessage({ type: 'CLEAR_PLAYER_VISION' }, window.location.origin);
-                    }
-                }
-                return; 
-            }
-
-            resultsContainer.innerHTML = '<div class="text-s text-muted-foreground text-center py-2"><i class="fa-solid fa-circle-notch fa-spin"></i> Searching...</div>';
-            try {
-                const res = await fetch(`/hub-api/search/${type}?q=${encodeURIComponent(q)}`);
-                const data = await res.json();
-
-                if (!data.success || data.results.length === 0) {
-                    resultsContainer.innerHTML = '<div class="text-s text-muted-foreground text-center py-2 bg-card rounded border border-border">No records found.</div>';
-                    return;
-                }
-
-                if (type === 'player') {
-                    resultsContainer.innerHTML = data.results.map(p => `<button onclick="handlePlayerSearchClick(${p.id})" class="text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-s transition-colors flex justify-between items-center group shadow-sm"><span class="truncate font-medium">${p.alliance_tag ? `<span class="text-muted-foreground font-normal">[${p.alliance_tag}]</span> ` : ''}${p.name}</span><span class="text-s text-muted-foreground font-mono">#${p.id}</span></button>`).join('');
-                } else if (type === 'system') {
-                    resultsContainer.innerHTML = data.results.map(s => `<button onclick="navToIframe('/Game/Map/SolarSystem/${s.id}')" class="text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-s transition-colors flex justify-between items-center group shadow-sm"><span class="truncate font-medium">${s.name}</span><span class="text-s text-muted-foreground font-mono">#${s.id} (${s.x}/${s.y})</span></button>`).join('');
-                }
-            } catch (err) { resultsContainer.innerHTML = '<div class="text-s text-red-500 text-center py-2">Search failed.</div>'; }
-        }
-
         let toolUser = null; let currentSystemId = null; 
 
         window.addEventListener('DOMContentLoaded', () => {
             const urlParams = new URLSearchParams(window.location.search);
             document.getElementById('game-frame').src = urlParams.get('p') || '/';
             
-            // Only auto-expand the sidebar if it was saved as open AND the user is on desktop
             if (localStorage.getItem('sidebarOpen') === 'true' && window.innerWidth >= 768) {
                 document.getElementById('sidebar').classList.add('expanded');
                 document.getElementById('mobile-trigger').classList.add('hidden');
                 refreshDbStats(); 
             } else {
-                // If it's mobile or saved as closed, make sure the hamburger menu button is visible on mobile
                 if (window.innerWidth < 768) {
                     document.getElementById('mobile-trigger').classList.remove('hidden');
                 }
@@ -347,9 +308,6 @@
                 const res = await fetch('/hub-api/me');
                 if (res.ok) {
                     toolUser = await res.json();
-                    // We removed the auth-user-display HTML, so we don't try to update it here anymore.
-                    
-                    // If admin, show the gear icon
                     if (toolUser.role === 'admin') {
                         document.getElementById('admin-panel-btn').style.display = 'flex';
                     }
@@ -392,7 +350,6 @@
                     const cv = (f.destroyers * 3) + (f.cruisers * 24) + (f.battleships * 60);
                     let statBadge = '';
                     
-                    // If arrival_time is present, it's in transit. Otherwise, it's stationed.
                     if(f.arrival_time && f.arrival_time !== '-') {
                         statBadge = `<span class="text-s bg-red-500/20 text-red-400 px-1 rounded ml-1">Transit: ${f.arrival_time}</span>`;
                     }
@@ -427,9 +384,9 @@
             } catch (err) {}
         }
 
-        // --- CHART INITIALIZATION TRACKER ---
         let playerHeatmapChartInstance = null;
 
+        // FIXED: Intercepts when has_intel flag is inactive to display an explicit warning placeholder sequence instead of zeroes
         async function loadPlayerIntel(playerId) {
             if (!playerId) return;
             try {
@@ -439,22 +396,20 @@
                 if (data.success && data.player) {
                     const p = data.player;
                     
-                    // Helpers for clean row generation (Colors removed)
                     const row = (lbl, val) => `<div class="flex justify-between items-center py-0.5"><span class="text-muted-foreground">${lbl}</span><span class="font-medium text-foreground">${val}</span></div>`;
                     const trait = (lbl, val) => `<div class="flex justify-between items-center py-0"><span class="text-muted-foreground">${lbl}</span><span class="font-medium text-foreground">${val > 0 ? '+'+val : val}</span></div>`;
 
-                    document.getElementById('player-stats-list').innerHTML = `
-                        <div class="flex flex-col gap-2">
-                            <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
-                                ${row('Points', (p.points || 0).toLocaleString())}
-                                ${row('Rank', p.ranking ? `#${p.ranking}` : '-')}
-                                ${row('PL', p.level || '-')}
-                                ${row('Planets', `${p.planet_count || 0} of ${p.culture_level || 0}`)}
-                                ${row('Alliance', p.alliance_tag ? `[${p.alliance_tag}]` : 'None')}
-                                ${row('Status', p.idle_time || 'Unknown')}
-                                ${row('Origin Sys', p.origin_system ? `#${p.origin_system}` : '-')}
+                    let intelBlocks = '';
+                    if (!p.has_intel) {
+                        intelBlocks = `
+                            <div class="bg-card border border-border p-3 rounded shadow-sm text-center text-muted-foreground text-xs">
+                                <i class="fa-solid fa-triangle-exclamation text-aw-warning mb-1 text-sm"></i><br>
+                                <span class="text-foreground font-semibold block mb-0.5">Intel Not Available</span>
+                                Scan profile in-game to sync stats.
                             </div>
-                            
+                        `;
+                    } else {
+                        intelBlocks = `
                             <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
                                 <div class="text-s text-muted-foreground font-bold uppercase tracking-wider mb-1">Economy</div>
                                 ${row('Trade Revenue', (p.trade_revenue || 0).toLocaleString())}
@@ -492,10 +447,24 @@
                                     </div>
                                 </div>
                             </div>
+                        `;
+                    }
+
+                    document.getElementById('player-stats-list').innerHTML = `
+                        <div class="flex flex-col gap-2">
+                            <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
+                                ${row('Points', (p.points || 0).toLocaleString())}
+                                ${row('Rank', p.ranking ? `#${p.ranking}` : '-')}
+                                ${row('PL', p.level || '-')}
+                                ${row('Planets', `${p.planet_count || 0} of ${p.has_intel ? p.culture_level : '--'}`)}
+                                ${row('Alliance', p.alliance_tag ? `[${p.alliance_tag}]` : 'None')}
+                                ${row('Status', p.idle_time || 'Unknown')}
+                                ${row('Origin Sys', p.origin_system ? `#${p.origin_system}` : '-')}
+                            </div>
+                            ${intelBlocks}
                         </div>
                     `;
 
-                    // Draw Heatmap Bar Chart
                     if (data.heatmap) {
                         const ctxH = document.getElementById('playerHeatmapChart').getContext('2d');
                         if (playerHeatmapChartInstance) playerHeatmapChartInstance.destroy();
@@ -566,7 +535,6 @@
                 const isIntel = p.isSystemView || p.isPlayerView || p.isMap;
                 
                 if (isIntel) {
-                    // Wipe clean only when switching to a known intel view
                     ctxContainer.classList.add('hidden');
                     playerCtxContainer.classList.add('hidden');
                     btnMap.classList.add('hidden');
@@ -592,7 +560,6 @@
                         document.getElementById('ui-map-coords').innerText = `${p.mapX} / ${p.mapY}`;
                     }
                 } else if (p.path) {
-                    // If the user navigates away from the profile/system, hide the sidebar blocks
                     if (!p.path.includes('/Profile/') && !p.path.includes('/SolarSystem/')) {
                         ctxContainer.classList.add('hidden');
                         playerCtxContainer.classList.add('hidden');
@@ -621,9 +588,6 @@
 
         async function logout() { await fetch('/hub-api/logout', { method: 'POST' }); window.location.href = '/hub-assets/login.html'; }
 
-        // ==========================================
-        // DATABASE SEARCH LOGIC (SIDEBAR)
-        // ==========================================
         let searchTimeout;
         function handleSearchInput(type) { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { executeSearch(type); }, 300); }
 
@@ -631,7 +595,16 @@
             const input = document.getElementById(`search-${type}-input`);
             const resultsContainer = document.getElementById(`search-${type}-results`);
             const q = input.value.trim();
-            if (!q) { resultsContainer.innerHTML = ''; return; }
+            if (!q) { 
+                resultsContainer.innerHTML = ''; 
+                if (type === 'player') {
+                    const iframe = document.getElementById('game-frame');
+                    if (iframe && iframe.contentWindow) {
+                        iframe.contentWindow.postMessage({ type: 'CLEAR_PLAYER_VISION' }, window.location.origin);
+                    }
+                }
+                return; 
+            }
 
             resultsContainer.innerHTML = '<div class="text-s text-muted-foreground text-center py-2"><i class="fa-solid fa-circle-notch fa-spin"></i> Searching...</div>';
             try {
@@ -658,503 +631,484 @@
             if (window.innerWidth < 768) toggleSidebar();
         }
 
-        // ==========================================
-        // PLAYER DATABASE FULL-SCREEN PANEL
-        // ==========================================
-        // A safe helper to close any other open panels
-function closeOtherPanels(exceptId) {
-    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel'].forEach(id => {
-        if (id !== exceptId) {
-            const p = document.getElementById(id);
-            if (p) p.classList.replace('translate-x-0', 'translate-x-full');
-        }
-    });
-}
-
-// ==========================================
-// ARCHIVE TABLE STATE & RENDERING
-// ==========================================
-let rawDbPlayers = [], dbSortCol = 'points', dbSortAsc = false;
-let rawDbSystems = [], sysDbSortCol = 'id', sysDbSortAsc = true;
-let rawDbPlanets = [], plnDbSortCol = 'system_id', plnDbSortAsc = true;
-let rawDbFleets = [], fltDbSortCol = 'cv', fltDbSortAsc = false;
-
-// --- PLAYERS ---
-window.sortDb = function(col) {
-    if (dbSortCol === col) dbSortAsc = !dbSortAsc; else { dbSortCol = col; dbSortAsc = false; }
-    window.renderPlayerTable();
-};
-window.renderPlayerTable = function() {
-    const q = (document.getElementById('db-search-input')?.value || '').toLowerCase();
-    let f = rawDbPlayers.filter(p => (p.name && p.name.toLowerCase().includes(q)) || (p.id && p.id.toString().includes(q)) || (p.alliance_tag && p.alliance_tag.toLowerCase().includes(q)));
-    f.sort((a, b) => { let v1 = a[dbSortCol]||0, v2 = b[dbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (dbSortAsc?-1:1) : (v1>v2 ? (dbSortAsc?1:-1) : 0); });
-    document.getElementById('db-result-count').innerText = f.length;
-    const tbody = document.getElementById('db-table-body');
-    if (!tbody) return;
-    tbody.innerHTML = f.map(p => `
-        <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3 font-mono">${p.id}</td>
-            <td class="p-3 font-medium text-foreground">${p.name || 'Unknown'}</td>
-            <td class="p-3 text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : '-'}</td>
-            <td class="p-3">${p.level}</td>
-            <td class="p-3 text-primary font-medium">${(p.points || 0).toLocaleString()}</td>
-            <td class="p-3 border-l border-border">${p.planet_count || 0}</td>
-            <td class="p-3 ${p.idle_time && p.idle_time.includes('Online') ? 'text-green-400' : ''}">${p.idle_time || '-'}</td>
-            <td class="p-3 border-l border-border">${p.artefact || '-'}</td>
-            <td class="p-3 text-primary">${(p.trade_revenue || 0).toLocaleString()}</td>
-            <td class="p-3 text-blue-400 border-l border-border">${p.physics}</td>
-            <td class="p-3 text-green-400">${p.biology}</td>
-            <td class="p-3 text-yellow-400">${p.economy}</td>
-            <td class="p-3 text-purple-400">${p.energy}</td>
-            <td class="p-3 text-orange-400">${p.mathematics}</td>
-            <td class="p-3 text-pink-400 border-r border-border">${p.social}</td>
-            <td class="p-3 text-muted-foreground">${new Date(p.updated_at).toLocaleString()}</td>
-        </tr>`).join('');
-};
-
-// --- SYSTEMS ---
-window.sortSysDb = function(col) {
-    if (sysDbSortCol === col) sysDbSortAsc = !sysDbSortAsc; else { sysDbSortCol = col; sysDbSortAsc = true; }
-    window.renderSystemTable();
-};
-window.renderSystemTable = function() {
-    const q = (document.getElementById('sys-db-search-input')?.value || '').toLowerCase();
-    let f = rawDbSystems.filter(s => (s.name && s.name.toLowerCase().includes(q)) || (s.id && s.id.toString().includes(q)) || (s.x && s.x.toString().includes(q)) || (s.y && s.y.toString().includes(q)));
-    f.sort((a, b) => { let v1 = a[sysDbSortCol]||0, v2 = b[sysDbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (sysDbSortAsc?-1:1) : (v1>v2 ? (sysDbSortAsc?1:-1) : 0); });
-    document.getElementById('sys-db-result-count').innerText = f.length;
-    const tbody = document.getElementById('sys-db-table-body');
-    if (!tbody) return;
-    tbody.innerHTML = f.map(s => `
-        <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3 font-mono">${s.id}</td>
-            <td class="p-3 font-medium text-foreground">${s.name || 'Unknown'}</td>
-            <td class="p-3">${s.x}</td>
-            <td class="p-3">${s.y}</td>
-            <td class="p-3 border-l border-border text-aw-ally">${s.planet_count || 0}</td>
-            <td class="p-3 text-aw-enemy">${s.fleet_count || 0}</td>
-            <td class="p-3 border-l border-border text-muted-foreground">${new Date(s.updated_at).toLocaleString()}</td>
-        </tr>`).join('');
-};
-
-// --- PLANETS ---
-window.sortPlnDb = function(col) {
-    if (plnDbSortCol === col) plnDbSortAsc = !plnDbSortAsc; else { plnDbSortCol = col; plnDbSortAsc = true; }
-    window.renderPlanetTable();
-};
-window.renderPlanetTable = function() {
-    const q = (document.getElementById('pln-db-search-input')?.value || '').toLowerCase();
-    let f = rawDbPlanets.filter(p => (p.system_name && p.system_name.toLowerCase().includes(q)) || (p.owner_name && p.owner_name.toLowerCase().includes(q)) || (p.alliance_tag && p.alliance_tag.toLowerCase().includes(q)));
-    f.sort((a, b) => { let v1 = a[plnDbSortCol]||0, v2 = b[plnDbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (plnDbSortAsc?-1:1) : (v1>v2 ? (plnDbSortAsc?1:-1) : 0); });
-    document.getElementById('pln-db-result-count').innerText = f.length;
-    const tbody = document.getElementById('pln-db-table-body');
-    if (!tbody) return;
-    tbody.innerHTML = f.map(p => `
-        <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3 font-mono">${p.system_id}</td>
-            <td class="p-3">${p.system_name || 'Unknown'}</td>
-            <td class="p-3 font-medium text-foreground">#${p.planet_index}</td>
-            <td class="p-3 border-l border-border">${p.owner_name || 'Empty'}</td>
-            <td class="p-3 text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : '-'}</td>
-            <td class="p-3 border-l border-border text-primary">${(p.population || 0).toLocaleString()}</td>
-            <td class="p-3 text-aw-warning">${p.starbase || 0}</td>
-            <td class="p-3 border-l border-border text-muted-foreground">${new Date(p.updated_at).toLocaleString()}</td>
-        </tr>`).join('');
-};
-
-// --- FLEETS ---
-window.sortFltDb = function(col) {
-    if (fltDbSortCol === col) fltDbSortAsc = !fltDbSortAsc; else { fltDbSortCol = col; fltDbSortAsc = false; }
-    window.renderFleetTable();
-};
-window.renderFleetTable = function() {
-    const q = (document.getElementById('flt-db-search-input')?.value || '').toLowerCase();
-    let f = rawDbFleets.filter(f => (f.system_name && f.system_name.toLowerCase().includes(q)) || (f.owner_name && f.owner_name.toLowerCase().includes(q)) || (f.alliance_tag && f.alliance_tag.toLowerCase().includes(q)));
-    f.sort((a, b) => { let v1 = a[fltDbSortCol]||0, v2 = b[fltDbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (fltDbSortAsc?-1:1) : (v1>v2 ? (fltDbSortAsc?1:-1) : 0); });
-    document.getElementById('flt-db-result-count').innerText = f.length;
-    const tbody = document.getElementById('flt-db-table-body');
-    if (!tbody) return;
-    tbody.innerHTML = f.map(f => `
-        <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3">${f.system_name || 'Unknown'}</td>
-            <td class="p-3 font-medium text-foreground">#${f.planet_index}</td>
-            <td class="p-3 border-l border-border">${f.owner_name || 'Unknown'}</td>
-            <td class="p-3 text-aw-warning">${f.alliance_tag ? `[${f.alliance_tag}]` : '-'}</td>
-            <td class="p-3 border-l border-border text-gray-400">${f.transports || 0}</td>
-            <td class="p-3 text-gray-400">${f.colony_ships || 0}</td>
-            <td class="p-3 text-red-400 border-l border-border">${f.destroyers || 0}</td>
-            <td class="p-3 text-red-400">${f.cruisers || 0}</td>
-            <td class="p-3 text-red-400">${f.battleships || 0}</td>
-            <td class="p-3 text-aw-warning border-l border-border font-bold">${(f.cv || 0).toLocaleString()}</td>
-            <td class="p-3 border-l border-border ${f.arrival_time && f.arrival_time !== '-' ? 'text-red-400 font-bold' : 'text-muted-foreground'}">${f.arrival_time || 'Stationed'}</td>
-        </tr>`).join('');
-};
-
-// 1. PLAYERS
-async function openDatabasePanel() {
-    let panel = document.getElementById('database-panel');
-    if (!panel) {
-        try {
-            const res = await fetch('/hub-assets/components/players-db.html');
-            const html = await res.text();
-            document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', html);
-            panel = document.getElementById('database-panel');
-        } catch (err) { return console.error("Failed to load component", err); }
-    }
-    
-    if (panel.classList.contains('translate-x-0')) return closeDatabasePanel();
-    closeOtherPanels('database-panel');
-
-    panel.classList.replace('translate-x-full', 'translate-x-0');
-    if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
-    
-    document.getElementById('db-table-body').innerHTML = '<tr><td colspan="16" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Intelligence...</td></tr>';
-    try {
-        const res = await fetch('/hub-api/intel/players');
-        const data = await res.json();
-        if (data.success) { rawDbPlayers = data.players; renderPlayerTable(); }
-    } catch (err) { document.getElementById('db-table-body').innerHTML = '<tr><td colspan="16" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
-}
-function closeDatabasePanel() { const p = document.getElementById('database-panel'); if (p) p.classList.replace('translate-x-0', 'translate-x-full'); }
-
-// 2. SYSTEMS
-async function openSystemDatabasePanel() {
-    let panel = document.getElementById('system-database-panel');
-    if (!panel) {
-        try {
-            const res = await fetch('/hub-assets/components/systems-db.html');
-            const html = await res.text();
-            document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', html);
-            panel = document.getElementById('system-database-panel');
-        } catch (err) { return console.error("Failed to load component", err); }
-    }
-    
-    if (panel.classList.contains('translate-x-0')) return closeSystemDatabasePanel();
-    closeOtherPanels('system-database-panel');
-
-    panel.classList.replace('translate-x-full', 'translate-x-0');
-    if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
-    
-    document.getElementById('sys-db-table-body').innerHTML = '<tr><td colspan="7" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Archive...</td></tr>';
-    try {
-        const res = await fetch('/hub-api/intel/systems_db');
-        const data = await res.json();
-        if (data.success) { rawDbSystems = data.systems; renderSystemTable(); }
-    } catch (err) { document.getElementById('sys-db-table-body').innerHTML = '<tr><td colspan="7" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
-}
-function closeSystemDatabasePanel() { const p = document.getElementById('system-database-panel'); if (p) p.classList.replace('translate-x-0', 'translate-x-full'); }
-
-// 3. PLANETS
-async function openPlanetDatabasePanel() {
-    let panel = document.getElementById('planet-database-panel');
-    if (!panel) {
-        try {
-            const res = await fetch('/hub-assets/components/planets-db.html');
-            const html = await res.text();
-            document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', html);
-            panel = document.getElementById('planet-database-panel');
-        } catch (err) { return console.error("Failed to load component", err); }
-    }
-    
-    if (panel.classList.contains('translate-x-0')) return closePlanetDatabasePanel();
-    closeOtherPanels('planet-database-panel');
-
-    panel.classList.replace('translate-x-full', 'translate-x-0');
-    if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
-    
-    document.getElementById('pln-db-table-body').innerHTML = '<tr><td colspan="8" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Archive...</td></tr>';
-    try {
-        const res = await fetch('/hub-api/intel/planets_db');
-        const data = await res.json();
-        if (data.success) { rawDbPlanets = data.planets; renderPlanetTable(); }
-    } catch (err) { document.getElementById('pln-db-table-body').innerHTML = '<tr><td colspan="8" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
-}
-function closePlanetDatabasePanel() { const p = document.getElementById('planet-database-panel'); if (p) p.classList.replace('translate-x-0', 'translate-x-full'); }
-
-// 4. FLEETS
-async function openFleetDatabasePanel() {
-    let panel = document.getElementById('fleet-database-panel');
-    if (!panel) {
-        try {
-            const res = await fetch('/hub-assets/components/fleets-db.html');
-            const html = await res.text();
-            document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', html);
-            panel = document.getElementById('fleet-database-panel');
-        } catch (err) { return console.error("Failed to load component", err); }
-    }
-    
-    if (panel.classList.contains('translate-x-0')) return closeFleetDatabasePanel();
-    closeOtherPanels('fleet-database-panel');
-
-    panel.classList.replace('translate-x-full', 'translate-x-0');
-    if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
-    
-    document.getElementById('flt-db-table-body').innerHTML = '<tr><td colspan="11" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Archive...</td></tr>';
-    try {
-        const res = await fetch('/hub-api/intel/fleets_db');
-        const data = await res.json();
-        if (data.success) { 
-            rawDbFleets = data.fleets.map(f => ({...f, cv: (f.destroyers * 3) + (f.cruisers * 24) + (f.battleships * 60)})); 
-            renderFleetTable(); 
-        }
-    } catch (err) { document.getElementById('flt-db-table-body').innerHTML = '<tr><td colspan="11" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
-}
-function closeFleetDatabasePanel() { const p = document.getElementById('fleet-database-panel'); if (p) p.classList.replace('translate-x-0', 'translate-x-full'); }
-
-let rawDbAllyStats = [], allyStatsSortCol = 'player_id', allyStatsSortAsc = true;
-
-window.sortAllyStats = function(col) {
-    if (allyStatsSortCol === col) allyStatsSortAsc = !allyStatsSortAsc; 
-    else { allyStatsSortCol = col; allyStatsSortAsc = true; }
-    window.renderAllyStatsTable();
-};
-
-window.renderAllyStatsTable = function() {
-    let filtered = [...rawDbAllyStats];
-
-    filtered.sort((a, b) => {
-        let v1 = a[allyStatsSortCol] ?? 0;
-        let v2 = b[allyStatsSortCol] ?? 0;
-
-        if (['science_rate', 'culture_rate', 'production_rate', 'astro_dollars', 'production_points'].includes(allyStatsSortCol)) {
-            v1 = parseInt(v1.toString().replace(/[^\d-]/g, ''), 10) || 0;
-            v2 = parseInt(v2.toString().replace(/[^\d-]/g, ''), 10) || 0;
-        } else if (typeof v1 === 'string') {
-            v1 = v1.toLowerCase();
-            v2 = v2.toLowerCase();
-        }
-
-        return v1 < v2 ? (allyStatsSortAsc ? -1 : 1) : (v1 > v2 ? (allyStatsSortAsc ? 1 : -1) : 0);
-    });
-
-    const formatCultureCountdown = (isoStr) => {
-        if (!isoStr) return '-';
-        const msLeft = new Date(isoStr) - Date.now();
-        if (msLeft <= 0) return 'Ready';
-        const totalSecs = Math.floor(msLeft / 1000);
-        const hrs = Math.floor(totalSecs / 3600);
-        const mins = Math.floor((totalSecs % 3600) / 60);
-        const secs = totalSecs % 60;
-        return `${hrs}h ${mins}m ${secs}s`;
-    };
-
-    /// Calculate most recent overall data timestamp from rows (Timezone Fixed)
-    const lastUpdatedLabel = document.getElementById('alliance-stats-last-updated');
-    if (lastUpdatedLabel) {
-        if (filtered.length === 0) {
-            lastUpdatedLabel.innerText = "Last updated: Never";
-        } else {
-            // Force browser to parse SQLite's raw string output explicitly as UTC
-            const timestamps = filtered.map(s => {
-                if (!s.updated_at) return 0;
-                const standardIso = s.updated_at.replace(' ', 'T') + 'Z';
-                return new Date(standardIso).getTime();
-            }).filter(t => !isNaN(t) && t > 0);
-
-            if (timestamps.length > 0) {
-                const maxTime = Math.max(...timestamps);
-                const diffMins = Math.floor((Date.now() - maxTime) / 60000);
-                
-                let relativeStr = "";
-                if (diffMins < 1) {
-                    relativeStr = "Just now";
-                } else {
-                    const hrs = Math.floor(diffMins / 60);
-                    const mins = diffMins % 60;
-                    if (hrs > 0) {
-                        relativeStr = `${hrs}h ${mins}m ago`;
-                    } else {
-                        relativeStr = `${mins}m ago`;
-                    }
+        function closeOtherPanels(exceptId) {
+            ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel'].forEach(id => {
+                if (id !== exceptId) {
+                    const p = document.getElementById(id);
+                    if (p) p.classList.replace('translate-x-0', 'translate-x-full');
                 }
-                lastUpdatedLabel.innerText = `Last updated: ${relativeStr}`;
-            } else {
-                lastUpdatedLabel.innerText = "Last updated: --";
+            });
+        }
+
+        let rawDbPlayers = [], dbSortCol = 'points', dbSortAsc = false;
+        let rawDbSystems = [], sysDbSortCol = 'id', sysDbSortAsc = true;
+        let rawDbPlanets = [], plnDbSortCol = 'system_id', plnDbSortAsc = true;
+        let rawDbFleets = [], fltDbSortCol = 'cv', fltDbSortAsc = false;
+
+        window.sortDb = function(col) {
+            if (dbSortCol === col) dbSortAsc = !dbSortAsc; else { dbSortCol = col; dbSortAsc = false; }
+            window.renderPlayerTable();
+        };
+        window.renderPlayerTable = function() {
+            const q = (document.getElementById('db-search-input')?.value || '').toLowerCase();
+            let f = rawDbPlayers.filter(p => (p.name && p.name.toLowerCase().includes(q)) || (p.id && p.id.toString().includes(q)) || (p.alliance_tag && p.alliance_tag.toLowerCase().includes(q)));
+            f.sort((a, b) => { let v1 = a[dbSortCol]||0, v2 = b[dbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (dbSortAsc?-1:1) : (v1>v2 ? (dbSortAsc?1:-1) : 0); });
+            document.getElementById('db-result-count').innerText = f.length;
+            const tbody = document.getElementById('db-table-body');
+            if (!tbody) return;
+            tbody.innerHTML = f.map(p => `
+                <tr class="hover:bg-accent/50 transition-colors">
+                    <td class="p-3 font-mono">${p.id}</td>
+                    <td class="p-3 font-medium text-foreground">${p.name || 'Unknown'}</td>
+                    <td class="p-3 text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : '-'}</td>
+                    <td class="p-3">${p.level}</td>
+                    <td class="p-3 text-primary font-medium">${(p.points || 0).toLocaleString()}</td>
+                    <td class="p-3 border-l border-border">${p.planet_count || 0}</td>
+                    <td class="p-3 ${p.idle_time && p.idle_time.includes('Online') ? 'text-green-400' : ''}">${p.idle_time || '-'}</td>
+                    <td class="p-3 border-l border-border">${p.artefact || '-'}</td>
+                    <td class="p-3 text-primary">${(p.trade_revenue || 0).toLocaleString()}</td>
+                    <td class="p-3 text-blue-400 border-l border-border">${p.physics}</td>
+                    <td class="p-3 text-green-400">${p.biology}</td>
+                    <td class="p-3 text-yellow-400">${p.economy}</td>
+                    <td class="p-3 text-purple-400">${p.energy}</td>
+                    <td class="p-3 text-orange-400">${p.mathematics}</td>
+                    <td class="p-3 text-pink-400 border-r border-border">${p.social}</td>
+                    <td class="p-3 text-muted-foreground">${new Date(p.updated_at).toLocaleString()}</td>
+                </tr>`).join('');
+        };
+
+        window.sortSysDb = function(col) {
+            if (sysDbSortCol === col) sysDbSortAsc = !sysDbSortAsc; else { sysDbSortCol = col; sysDbSortAsc = true; }
+            window.renderSystemTable();
+        };
+        window.renderSystemTable = function() {
+            const q = (document.getElementById('sys-db-search-input')?.value || '').toLowerCase();
+            let f = rawDbSystems.filter(s => (s.name && s.name.toLowerCase().includes(q)) || (s.id && s.id.toString().includes(q)) || (s.x && s.x.toString().includes(q)) || (s.y && s.y.toString().includes(q)));
+            f.sort((a, b) => { let v1 = a[sysDbSortCol]||0, v2 = b[sysDbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (sysDbSortAsc?-1:1) : (v1>v2 ? (sysDbSortAsc?1:-1) : 0); });
+            document.getElementById('sys-db-result-count').innerText = f.length;
+            const tbody = document.getElementById('sys-db-table-body');
+            if (!tbody) return;
+            tbody.innerHTML = f.map(s => `
+                <tr class="hover:bg-accent/50 transition-colors">
+                    <td class="p-3 font-mono">${s.id}</td>
+                    <td class="p-3 font-medium text-foreground">${s.name || 'Unknown'}</td>
+                    <td class="p-3">${s.x}</td>
+                    <td class="p-3">${s.y}</td>
+                    <td class="p-3 border-l border-border text-aw-ally">${s.planet_count || 0}</td>
+                    <td class="p-3 text-aw-enemy">${s.fleet_count || 0}</td>
+                    <td class="p-3 border-l border-border text-muted-foreground">${new Date(s.updated_at).toLocaleString()}</td>
+                </tr>`).join('');
+        };
+
+        window.sortPlnDb = function(col) {
+            if (plnDbSortCol === col) plnDbSortAsc = !plnDbSortAsc; else { plnDbSortCol = col; plnDbSortAsc = true; }
+            window.renderPlanetTable();
+        };
+        window.renderPlanetTable = function() {
+            const q = (document.getElementById('pln-db-search-input')?.value || '').toLowerCase();
+            let f = rawDbPlanets.filter(p => (p.system_name && p.system_name.toLowerCase().includes(q)) || (p.owner_name && p.owner_name.toLowerCase().includes(q)) || (p.alliance_tag && p.alliance_tag.toLowerCase().includes(q)));
+            f.sort((a, b) => { let v1 = a[plnDbSortCol]||0, v2 = b[plnDbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (plnDbSortAsc?-1:1) : (v1>v2 ? (plnDbSortAsc?1:-1) : 0); });
+            document.getElementById('pln-db-result-count').innerText = f.length;
+            const tbody = document.getElementById('pln-db-table-body');
+            if (!tbody) return;
+            tbody.innerHTML = f.map(p => `
+                <tr class="hover:bg-accent/50 transition-colors">
+                    <td class="p-3 font-mono">${p.system_id}</td>
+                    <td class="p-3">${p.system_name || 'Unknown'}</td>
+                    <td class="p-3 font-medium text-foreground">#${p.planet_index}</td>
+                    <td class="p-3 border-l border-border">${p.owner_name || 'Empty'}</td>
+                    <td class="p-3 text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : '-'}</td>
+                    <td class="p-3 border-l border-border text-primary">${(p.population || 0).toLocaleString()}</td>
+                    <td class="p-3 text-aw-warning">${p.starbase || 0}</td>
+                    <td class="p-3 border-l border-border text-muted-foreground">${new Date(p.updated_at).toLocaleString()}</td>
+                </tr>`).join('');
+        };
+
+        window.sortFltDb = function(col) {
+            if (fltDbSortCol === col) fltDbSortAsc = !fltDbSortAsc; else { fltDbSortCol = col; fltDbSortAsc = false; }
+            window.renderFleetTable();
+        };
+        window.renderFleetTable = function() {
+            const q = (document.getElementById('flt-db-search-input')?.value || '').toLowerCase();
+            let f = rawDbFleets.filter(f => (f.system_name && f.system_name.toLowerCase().includes(q)) || (f.owner_name && f.owner_name.toLowerCase().includes(q)) || (f.alliance_tag && f.alliance_tag.toLowerCase().includes(q)));
+            f.sort((a, b) => { let v1 = a[fltDbSortCol]||0, v2 = b[fltDbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (fltDbSortAsc?-1:1) : (v1>v2 ? (fltDbSortAsc?1:-1) : 0); });
+            document.getElementById('flt-db-result-count').innerText = f.length;
+            const tbody = document.getElementById('flt-db-table-body');
+            if (!tbody) return;
+            tbody.innerHTML = f.map(f => `
+                <tr class="hover:bg-accent/50 transition-colors">
+                    <td class="p-3">${f.system_name || 'Unknown'}</td>
+                    <td class="p-3 font-medium text-foreground">#${f.planet_index}</td>
+                    <td class="p-3 border-l border-border">${f.owner_name || 'Unknown'}</td>
+                    <td class="p-3 text-aw-warning">${f.alliance_tag ? `[${f.alliance_tag}]` : '-'}</td>
+                    <td class="p-3 border-l border-border text-gray-400">${f.transports || 0}</td>
+                    <td class="p-3 text-gray-400">${f.colony_ships || 0}</td>
+                    <td class="p-3 text-red-400 border-l border-border">${f.destroyers || 0}</td>
+                    <td class="p-3 text-red-400">${f.cruisers || 0}</td>
+                    <td class="p-3 text-red-400">${f.battleships || 0}</td>
+                    <td class="p-3 text-aw-warning border-l border-border font-bold">${(f.cv || 0).toLocaleString()}</td>
+                    <td class="p-3 border-l border-border ${f.arrival_time && f.arrival_time !== '-' ? 'text-red-400 font-bold' : 'text-muted-foreground'}">${f.arrival_time || 'Stationed'}</td>
+                </tr>`).join('');
+        };
+
+        async function openDatabasePanel() {
+            let panel = document.getElementById('database-panel');
+            if (!panel) {
+                try {
+                    const res = await fetch('/hub-assets/components/players-db.html');
+                    const html = await res.text();
+                    document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', html);
+                    panel = document.getElementById('database-panel');
+                } catch (err) { return console.error("Failed to load component", err); }
             }
-        }
-    }
+            
+            if (panel.classList.contains('translate-x-0')) return closeDatabasePanel();
+            closeOtherPanels('database-panel');
 
-    const tbody = document.getElementById('ally-stats-table-body');
-    if (!tbody) return;
-
-    tbody.innerHTML = filtered.map(s => `
-        <tr class="hover:bg-accent/50 transition-colors border-b border-border/60">
-            <td class="p-3 text-muted-foreground font-mono">${s.player_id}</td>
-            <td class="p-3 font-medium text-foreground">${s.player_name || 'Unknown'}</td>
-            <td class="p-3 text-aw-ally font-semibold">${s.planets_text || '-'}</td>
-            <td class="p-3 font-semibold text-yellow-500">${formatCultureCountdown(s.next_culture_at)}</td>
-            <td class="p-3 text-blue-400 font-semibold">${s.science_rate || '-'}</td>
-            <td class="p-3 text-purple-400 font-semibold">${s.culture_rate || '-'}</td>
-            <td class="p-3 text-orange-400 font-semibold">${s.production_rate || '-'}</td>
-            <td class="p-3 text-emerald-400">${s.astro_dollars || '-'}</td>
-            <td class="p-3 text-slate-300">${s.production_points || '-'}</td>
-            <td class="p-3 text-pink-400 font-semibold">${s.artefact || 'None'}</td>
-            <td class="p-3 text-sky-400">${s.level_text || '-'}</td>
-            <td class="p-3 text-red-400">${s.cv_limit_text || '-'}</td>
-            <td class="p-3 text-amber-500 font-bold">${s.economy}</td>
-            <td class="p-3 text-cyan-400 font-bold">${s.energy}</td>
-            <td class="p-3 text-indigo-400 font-bold">${s.mathematics}</td>
-            <td class="p-3 text-violet-400 font-bold">${s.physics}</td>
-            <td class="p-3 text-foreground font-bold bg-white/5">${s.population}</td>
-        </tr>
-    `).join('');
-};
-
-async function openAllianceStatsPanel() {
-    let panel = document.getElementById('alliance-stats-panel');
-    if (!panel) {
-        try {
-            const res = await fetch('/hub-assets/components/alliance-stats.html');
-            const html = await res.text();
-            document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', html);
-            panel = document.getElementById('alliance-stats-panel');
-        } catch (err) { return console.error("Failed to load layout:", err); }
-    }
-    
-    if (panel.classList.contains('translate-x-0')) return closeAllianceStatsPanel();
-    closeOtherPanels('alliance-stats-panel');
-
-    panel.classList.replace('translate-x-full', 'translate-x-0');
-    if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
-    
-    document.getElementById('ally-stats-table-body').innerHTML = '<tr><td colspan="17" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Reading Alliance Records...</td></tr>';
-    await window.refreshAllianceStatsData();
-}
-
-window.refreshAllianceStatsData = async function() {
-    try {
-        const res = await fetch('/hub-api/intel/alliance-stats');
-        const data = await res.json();
-        if (data.success) { 
-            rawDbAllyStats = data.stats; 
-            window.renderAllyStatsTable(); 
-        }
-    } catch (err) { 
-        const tbody = document.getElementById('ally-stats-table-body');
-        if (tbody) tbody.innerHTML = '<tr><td colspan="17" class="text-center py-8 text-red-500">Failed to load content.</td></tr>'; 
-    }
-};
-
-window.triggerAllianceStatsUpdate = async function() {
-    const btn = document.getElementById('btn-update-alliance-stats');
-    const icon = document.getElementById('icon-update-alliance-stats');
-    
-    if (btn) btn.disabled = true;
-    if (icon) icon.className = 'fa-solid fa-circle-notch fa-spin';
-    
-    showToast('Parsing alliance roster links...');
-
-    try {
-        // Step 1: Query the Alliance profile directory view
-        const res = await fetch('/Game/Alliance');
-        const html = await res.text();
-        const doc = new DOMParser().parseFromString(html, 'text/html');
-        
-        const memberLinks = Array.from(doc.querySelectorAll('a[href*="/Game/Alliance/Member/"]'));
-        if (memberLinks.length === 0) {
-            showToast('No member listings discovered');
-            if (btn) btn.disabled = false;
-            if (icon) icon.className = 'fa-solid fa-rotate';
-            return;
-        }
-
-        showToast(`Updating stats for ${memberLinks.length} personnel rows...`);
-
-        // Step 2: Loop fetching member page configurations
-        for (const link of memberLinks) {
+            panel.classList.replace('translate-x-full', 'translate-x-0');
+            if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
+            
+            document.getElementById('db-table-body').innerHTML = '<tr><td colspan="16" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Intelligence...</td></tr>';
             try {
-                const targetUrl = link.href;
-                const idMatch = targetUrl.match(/\/Member\/(\d+)/);
-                if (!idMatch) continue;
-                const playerId = parseInt(idMatch[1], 10);
+                const res = await fetch('/hub-api/intel/players');
+                const data = await res.json();
+                if (data.success) { rawDbPlayers = data.players; renderPlayerTable(); }
+            } catch (err) { document.getElementById('db-table-body').innerHTML = '<tr><td colspan="16" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
+        }
+        function closeDatabasePanel() { const p = document.getElementById('database-panel'); if (p) p.classList.replace('translate-x-0', 'translate-x-full'); }
 
-                const mRes = await fetch(targetUrl);
-                const mHtml = await mRes.text();
-                const mDoc = new DOMParser().parseFromString(mHtml, 'text/html');
-                const tds = Array.from(mDoc.querySelectorAll('td'));
+        async function openSystemDatabasePanel() {
+            let panel = document.getElementById('system-database-panel');
+            if (!panel) {
+                try {
+                    const res = await fetch('/hub-assets/components/systems-db.html');
+                    const html = await res.text();
+                    document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', html);
+                    panel = document.getElementById('system-database-panel');
+                } catch (err) { return console.error("Failed to load component", err); }
+            }
+            
+            if (panel.classList.contains('translate-x-0')) return closeSystemDatabasePanel();
+            closeOtherPanels('system-database-panel');
 
-                const profileLink = mDoc.querySelector('a[href*="/Game/Players/Profile/"]');
-                if (!profileLink) continue;
-                const name = profileLink.innerText.trim();
+            panel.classList.replace('translate-x-full', 'translate-x-0');
+            if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
+            
+            document.getElementById('sys-db-table-body').innerHTML = '<tr><td colspan="7" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Archive...</td></tr>';
+            try {
+                const res = await fetch('/hub-api/intel/systems_db');
+                const data = await res.json();
+                if (data.success) { rawDbSystems = data.systems; renderSystemTable(); }
+            } catch (err) { document.getElementById('sys-db-table-body').innerHTML = '<tr><td colspan="7" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
+        }
+        function closeSystemDatabasePanel() { const p = document.getElementById('system-database-panel'); if (p) p.classList.replace('translate-x-0', 'translate-x-full'); }
 
-                const planetTd = tds.find(td => td.innerHTML.includes('Planets<br>(Next Culture)'));
-                let planetsText = '';
-                let nextCultureSeconds = null;
-                if (planetTd && planetTd.nextElementSibling) {
-                    const valTd = planetTd.nextElementSibling;
-                    planetsText = valTd.innerText.split('(')[0].trim();
-                    const timerSpan = valTd.querySelector('#nextCulture');
-                    if (timerSpan) nextCultureSeconds = parseInt(timerSpan.getAttribute('data-value'), 10);
+        async function openPlanetDatabasePanel() {
+            let panel = document.getElementById('planet-database-panel');
+            if (!panel) {
+                try {
+                    const res = await fetch('/hub-assets/components/planets-db.html');
+                    const html = await res.text();
+                    document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', html);
+                    panel = document.getElementById('planet-database-panel');
+                } catch (err) { return console.error("Failed to load component", err); }
+            }
+            
+            if (panel.classList.contains('translate-x-0')) return closePlanetDatabasePanel();
+            closeOtherPanels('planet-database-panel');
+
+            panel.classList.replace('translate-x-full', 'translate-x-0');
+            if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
+            
+            document.getElementById('pln-db-table-body').innerHTML = '<tr><td colspan="8" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Archive...</td></tr>';
+            try {
+                const res = await fetch('/hub-api/intel/planets_db');
+                const data = await res.json();
+                if (data.success) { rawDbPlanets = data.planets; renderPlanetTable(); }
+            } catch (err) { document.getElementById('pln-db-table-body').innerHTML = '<tr><td colspan="8" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
+        }
+        function closePlanetDatabasePanel() { const p = document.getElementById('planet-database-panel'); if (p) p.classList.replace('translate-x-0', 'translate-x-full'); }
+
+        async function openFleetDatabasePanel() {
+            let panel = document.getElementById('fleet-database-panel');
+            if (!panel) {
+                try {
+                    const res = await fetch('/hub-assets/components/fleets-db.html');
+                    const html = await res.text();
+                    document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', html);
+                    panel = document.getElementById('fleet-database-panel');
+                } catch (err) { return console.error("Failed to load component", err); }
+            }
+            
+            if (panel.classList.contains('translate-x-0')) return closeFleetDatabasePanel();
+            closeOtherPanels('fleet-database-panel');
+
+            panel.classList.replace('translate-x-full', 'translate-x-0');
+            if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
+            
+            document.getElementById('flt-db-table-body').innerHTML = '<tr><td colspan="11" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Archive...</td></tr>';
+            try {
+                const res = await fetch('/hub-api/intel/fleets_db');
+                const data = await res.json();
+                if (data.success) { 
+                    rawDbFleets = data.fleets.map(f => ({...f, cv: (f.destroyers * 3) + (f.cruisers * 24) + (f.battleships * 60)})); 
+                    renderFleetTable(); 
+                }
+            } catch (err) { document.getElementById('flt-db-table-body').innerHTML = '<tr><td colspan="11" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
+        }
+        function closeFleetDatabasePanel() { const p = document.getElementById('fleet-database-panel'); if (p) p.classList.replace('translate-x-0', 'translate-x-full'); }
+
+        let rawDbAllyStats = [], allyStatsSortCol = 'player_id', allyStatsSortAsc = true;
+
+        window.sortAllyStats = function(col) {
+            if (allyStatsSortCol === col) allyStatsSortAsc = !allyStatsSortAsc; 
+            else { allyStatsSortCol = col; allyStatsSortAsc = true; }
+            window.renderAllyStatsTable();
+        };
+
+        window.renderAllyStatsTable = function() {
+            let filtered = [...rawDbAllyStats];
+
+            filtered.sort((a, b) => {
+                let v1 = a[allyStatsSortCol] ?? 0;
+                let v2 = b[allyStatsSortCol] ?? 0;
+
+                if (['science_rate', 'culture_rate', 'production_rate', 'astro_dollars', 'production_points'].includes(allyStatsSortCol)) {
+                    v1 = parseInt(v1.toString().replace(/[^\d-]/g, ''), 10) || 0;
+                    v2 = parseInt(v2.toString().replace(/[^\d-]/g, ''), 10) || 0;
+                } else if (typeof v1 === 'string') {
+                    v1 = v1.toLowerCase();
+                    v2 = v2.toLowerCase();
                 }
 
-                const getRate = (label) => {
-                    const td = tds.find(t => t.innerText.trim() === label);
-                    return (td && td.nextElementSibling) ? td.nextElementSibling.innerText.trim().split(' ')[0] : '';
-                };
+                return v1 < v2 ? (allyStatsSortAsc ? -1 : 1) : (v1 > v2 ? (allyStatsSortAsc ? 1 : -1) : 0);
+            });
 
-                const getSimpleVal = (label) => {
-                    const td = tds.find(t => t.innerText.trim() === label);
-                    return (td && td.nextElementSibling) ? td.nextElementSibling.innerText.trim() : '';
-                };
+            const formatCultureCountdown = (isoStr) => {
+                if (!isoStr) return '-';
+                const msLeft = new Date(isoStr) - Date.now();
+                if (msLeft <= 0) return 'Ready';
+                const totalSecs = Math.floor(msLeft / 1000);
+                const hrs = Math.floor(totalSecs / 3600);
+                const mins = Math.floor((totalSecs % 3600) / 60);
+                const secs = totalSecs % 60;
+                return `${hrs}h ${mins}m ${secs}s`;
+            };
 
-                const getIntelVal = (label) => {
-                    const td = tds.find(t => t.innerText.trim() === label);
-                    if (td && td.nextElementSibling) {
-                        const parsed = parseInt(td.nextElementSibling.innerText.trim(), 10);
-                        return isNaN(parsed) ? 0 : parsed;
+            const lastUpdatedLabel = document.getElementById('alliance-stats-last-updated');
+            if (lastUpdatedLabel) {
+                if (filtered.length === 0) {
+                    lastUpdatedLabel.innerText = "Last updated: Never";
+                } else {
+                    const timestamps = filtered.map(s => {
+                        if (!s.updated_at) return 0;
+                        const standardIso = s.updated_at.replace(' ', 'T') + 'Z';
+                        return new Date(standardIso).getTime();
+                    }).filter(t => !isNaN(t) && t > 0);
+
+                    if (timestamps.length > 0) {
+                        const maxTime = Math.max(...timestamps);
+                        const diffMins = Math.floor((Date.now() - maxTime) / 60000);
+                        
+                        let relativeStr = "";
+                        if (diffMins < 1) {
+                            relativeStr = "Just now";
+                        } else {
+                            const hrs = Math.floor(diffMins / 60);
+                            const mins = diffMins % 60;
+                            if (hrs > 0) {
+                                relativeStr = `${hrs}h ${mins}m ago`;
+                            } else {
+                                relativeStr = `${mins}m ago`;
+                            }
+                        }
+                        lastUpdatedLabel.innerText = `Last updated: ${relativeStr}`;
+                    } else {
+                        lastUpdatedLabel.innerText = "Last updated: --";
                     }
-                    return 0;
-                };
-
-                const pLevelTd = tds.find(t => t.innerText.includes('Player Level') && t.querySelector('a[data-href*="PlayerLevelTable"]'));
-                const cvLimitTd = tds.find(t => t.innerText.includes('CV Limit'));
-
-                const payload = {
-                    player_id: playerId,
-                    name,
-                    planets_text: planetsText,
-                    next_culture_seconds: nextCultureSeconds,
-                    science_rate: getRate('Science'),
-                    culture_rate: getRate('Culture'),
-                    production_rate: getRate('Production'),
-                    astro_dollars: getSimpleVal('Astro Dollars'),
-                    production_points: getSimpleVal('Production Points'),
-                    artefact: getSimpleVal('Artefact'),
-                    level_text: pLevelTd && pLevelTd.nextElementSibling ? pLevelTd.nextElementSibling.innerText.trim().replace(/\s+/g, ' ') : '',
-                    cv_limit_text: cvLimitTd && cvLimitTd.nextElementSibling ? cvLimitTd.nextElementSibling.innerText.trim().replace(/\s+/g, ' ') : '',
-                    economy: getIntelVal('Economy'),
-                    energy: getIntelVal('Energy'),
-                    mathematics: getIntelVal('Mathematics'),
-                    physics: getIntelVal('Physics'),
-                    population: getIntelVal('Population')
-                };
-
-                await fetch('/hub-api/sync/alliance-stats', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-            } catch (memberErr) {
-                console.error('[Update Error] Member parsing exception:', memberErr);
+                }
             }
+
+            const tbody = document.getElementById('ally-stats-table-body');
+            if (!tbody) return;
+
+            tbody.innerHTML = filtered.map(s => `
+                <tr class="hover:bg-accent/50 transition-colors border-b border-border/60">
+                    <td class="p-3 text-muted-foreground font-mono">${s.player_id}</td>
+                    <td class="p-3 font-medium text-foreground">${s.player_name || 'Unknown'}</td>
+                    <td class="p-3 text-aw-ally font-semibold">${s.planets_text || '-'}</td>
+                    <td class="p-3 font-semibold text-yellow-500">${formatCultureCountdown(s.next_culture_at)}</td>
+                    <td class="p-3 text-blue-400 font-semibold">${s.science_rate || '-'}</td>
+                    <td class="p-3 text-purple-400 font-semibold">${s.culture_rate || '-'}</td>
+                    <td class="p-3 text-orange-400 font-semibold">${s.production_rate || '-'}</td>
+                    <td class="p-3 text-emerald-400">${s.astro_dollars || '-'}</td>
+                    <td class="p-3 text-slate-300">${s.production_points || '-'}</td>
+                    <td class="p-3 text-pink-400 font-semibold">${s.artefact || 'None'}</td>
+                    <td class="p-3 text-sky-400">${s.level_text || '-'}</td>
+                    <td class="p-3 text-red-400">${s.cv_limit_text || '-'}</td>
+                    <td class="p-3 text-amber-500 font-bold">${s.economy}</td>
+                    <td class="p-3 text-cyan-400 font-bold">${s.energy}</td>
+                    <td class="p-3 text-indigo-400 font-bold">${s.mathematics}</td>
+                    <td class="p-3 text-violet-400 font-bold">${s.physics}</td>
+                    <td class="p-3 text-foreground font-bold bg-white/5">${s.population}</td>
+                </tr>
+            `).join('');
+        };
+
+        async function openAllianceStatsPanel() {
+            let panel = document.getElementById('alliance-stats-panel');
+            if (!panel) {
+                try {
+                    const res = await fetch('/hub-assets/components/alliance-stats.html');
+                    const html = await res.text();
+                    document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', html);
+                    panel = document.getElementById('alliance-stats-panel');
+                } catch (err) { return console.error("Failed to load layout:", err); }
+            }
+            
+            if (panel.classList.contains('translate-x-0')) return closeAllianceStatsPanel();
+            closeOtherPanels('alliance-stats-panel');
+
+            panel.classList.replace('translate-x-full', 'translate-x-0');
+            if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
+            
+            document.getElementById('ally-stats-table-body').innerHTML = '<tr><td colspan="17" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Reading Alliance Records...</td></tr>';
+            await window.refreshAllianceStatsData();
         }
 
-        showToast('Roster data synchronization complete');
-        await window.refreshAllianceStatsData();
+        window.refreshAllianceStatsData = async function() {
+            try {
+                const res = await fetch('/hub-api/intel/alliance-stats');
+                const data = await res.json();
+                if (data.success) { 
+                    rawDbAllyStats = data.stats; 
+                    window.renderAllyStatsTable(); 
+                }
+            } catch (err) { 
+                const tbody = document.getElementById('ally-stats-table-body');
+                if (tbody) tbody.innerHTML = '<tr><td colspan="17" class="text-center py-8 text-red-500">Failed to load content.</td></tr>'; 
+            }
+        };
 
-    } catch (err) {
-        console.error('[Update Failure] Main roster download error:', err);
-        showToast('Sync pipeline run aborted');
-    } finally {
-        if (btn) btn.disabled = false;
-        if (icon) icon.className = 'fa-solid fa-rotate';
-    }
-};
+        window.triggerAllianceStatsUpdate = async function() {
+            const btn = document.getElementById('btn-update-alliance-stats');
+            const icon = document.getElementById('icon-update-alliance-stats');
+            
+            if (btn) btn.disabled = true;
+            if (icon) icon.className = 'fa-solid fa-circle-notch fa-spin';
+            
+            showToast('Parsing alliance roster links...');
 
-function closeAllianceStatsPanel() { 
-    const p = document.getElementById('alliance-stats-panel'); 
-    if (p) p.classList.replace('translate-x-0', 'translate-x-full'); 
-}
+            try {
+                const res = await fetch('/Game/Alliance');
+                const html = await res.text();
+                const doc = new DOMParser().parseFromString(html, 'text/html');
+                
+                const memberLinks = Array.from(doc.querySelectorAll('a[href*="/Game/Alliance/Member/"]'));
+                if (memberLinks.length === 0) {
+                    showToast('No member listings discovered');
+                    if (btn) btn.disabled = false;
+                    if (icon) icon.className = 'fa-solid fa-rotate';
+                    return;
+                }
+
+                showToast(`Updating stats for ${memberLinks.length} personnel rows...`);
+
+                for (const link of memberLinks) {
+                    try {
+                        const targetUrl = link.href;
+                        const idMatch = targetUrl.match(/\/Member\/(\d+)/);
+                        if (!idMatch) continue;
+                        const playerId = parseInt(idMatch[1], 10);
+
+                        const mRes = await fetch(targetUrl);
+                        const mHtml = await mRes.text();
+                        const mDoc = new DOMParser().parseFromString(mHtml, 'text/html');
+                        const tds = Array.from(mDoc.querySelectorAll('td'));
+
+                        const profileLink = mDoc.querySelector('a[href*="/Game/Players/Profile/"]');
+                        if (!profileLink) continue;
+                        const name = profileLink.innerText.trim();
+
+                        const planetTd = tds.find(td => td.innerHTML.includes('Planets<br>(Next Culture)'));
+                        let planetsText = '';
+                        let nextCultureSeconds = null;
+                        if (planetTd && planetTd.nextElementSibling) {
+                            const valTd = planetTd.nextElementSibling;
+                            planetsText = valTd.innerText.split('(')[0].trim();
+                            const timerSpan = valTd.querySelector('#nextCulture');
+                            if (timerSpan) nextCultureSeconds = parseInt(timerSpan.getAttribute('data-value'), 10);
+                        }
+
+                        const getRate = (label) => {
+                            const td = tds.find(t => t.innerText.trim() === label);
+                            return (td && td.nextElementSibling) ? td.nextElementSibling.innerText.trim().split(' ')[0] : '';
+                        };
+
+                        const getSimpleVal = (label) => {
+                            const td = tds.find(t => t.innerText.trim() === label);
+                            return (td && td.nextElementSibling) ? td.nextElementSibling.innerText.trim() : '';
+                        };
+
+                        const getSimpleValInt = (label) => {
+                            const td = tds.find(t => t.innerText.trim() === label);
+                            if (td && td.nextElementSibling) {
+                                const parsed = parseInt(td.nextElementSibling.innerText.trim(), 10);
+                                return isNaN(parsed) ? 0 : parsed;
+                            }
+                            return 0;
+                        };
+
+                        const pLevelTd = tds.find(t => t.innerText.includes('Player Level') && t.querySelector('a[data-href*="PlayerLevelTable"]'));
+                        const cvLimitTd = tds.find(t => t.innerText.includes('CV Limit'));
+
+                        const payload = {
+                            player_id: playerId,
+                            name,
+                            planets_text: planetsText,
+                            next_culture_seconds: nextCultureSeconds,
+                            science_rate: getRate('Science'),
+                            culture_rate: getRate('Culture'),
+                            production_rate: getRate('Production'),
+                            astro_dollars: getSimpleVal('Astro Dollars'),
+                            production_points: getSimpleVal('Production Points'),
+                            artefact: getSimpleVal('Artefact'),
+                            level_text: pLevelTd && pLevelTd.nextElementSibling ? pLevelTd.nextElementSibling.innerText.trim().replace(/\s+/g, ' ') : '',
+                            cv_limit_text: cvLimitTd && cvLimitTd.nextElementSibling ? cvLimitTd.nextElementSibling.innerText.trim().replace(/\s+/g, ' ') : '',
+                            economy: getSimpleValInt('Economy'),
+                            energy: getSimpleValInt('Energy'),
+                            mathematics: getSimpleValInt('Mathematics'),
+                            physics: getSimpleValInt('Physics'),
+                            population: getSimpleValInt('Population')
+                        };
+
+                        await fetch('/hub-api/sync/alliance-stats', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                    } catch (memberErr) {
+                        console.error('[Update Error] Member parsing exception:', memberErr);
+                    }
+                }
+
+                showToast('Roster data synchronization complete');
+                await window.refreshAllianceStatsData();
+
+            } catch (err) {
+                console.error('[Update Failure] Main roster download error:', err);
+                showToast('Sync pipeline run aborted');
+            } finally {
+                if (btn) btn.disabled = false;
+                if (icon) icon.className = 'fa-solid fa-rotate';
+            }
+        };
+
+        function closeAllianceStatsPanel() { 
+            const p = document.getElementById('alliance-stats-panel'); 
+            if (p) p.classList.replace('translate-x-0', 'translate-x-full'); 
+        }
     </script>
 
     <script type="module">

@@ -31,7 +31,6 @@ client.on('messageCreate', async (message) => {
     // !intels - TEXT-BASED INTERACTIVE DRILLDOWN
     // ----------------------------------------------------
     if (command === 'intels') {
-        // Query alliances containing players with at least one active science level
         const alliancesWithIntel = db.prepare(`
             SELECT DISTINCT a.id, a.tag
             FROM alliances a
@@ -40,7 +39,6 @@ client.on('messageCreate', async (message) => {
             ORDER BY a.tag ASC
         `).all();
 
-        // Check if there are unallied players with active sciences
         const solosCount = db.prepare(`
             SELECT COUNT(*) as count FROM players
             WHERE alliance_id IS NULL
@@ -51,7 +49,6 @@ client.on('messageCreate', async (message) => {
             return message.reply('📭 No intelligence records found with active sciences in the database.');
         }
 
-        // Build array of choice groups
         const groups = alliancesWithIntel.map(a => ({ id: a.id, name: a.tag || `Alliance #${a.id}`, type: 'alliance' }));
         if (solosCount > 0) {
             groups.push({ id: 'solos', name: 'Solos (No Alliance)', type: 'solos' });
@@ -70,7 +67,6 @@ client.on('messageCreate', async (message) => {
 
         const menuMessage = await message.reply({ embeds: [embed] });
 
-        // Initialize state engine variables
         let currentStep = 1; 
         let chosenGroup = null;
         let groupPlayers = [];
@@ -80,8 +76,6 @@ client.on('messageCreate', async (message) => {
 
         collector.on('collect', async (m) => {
             const input = m.content.trim();
-            
-            // Delete the user's setup text entry to keep the room entirely clean
             await m.delete().catch(() => {});
 
             if (currentStep === 1) {
@@ -98,19 +92,16 @@ client.on('messageCreate', async (message) => {
 
                 chosenGroup = groups[idx];
                 
-                // Pull filtered players for target index mapping
                 if (chosenGroup.type === 'solos') {
                     groupPlayers = db.prepare(`
                         SELECT id, name FROM players
                         WHERE alliance_id IS NULL
-                        AND (biology > 0 OR economy > 0 OR energy > 0 OR mathematics > 0 OR physics > 0 OR social > 0)
                         ORDER BY name ASC
                     `).all();
                 } else {
                     groupPlayers = db.prepare(`
                         SELECT id, name FROM players
                         WHERE alliance_id = ?
-                        AND (biology > 0 OR economy > 0 OR energy > 0 OR mathematics > 0 OR physics > 0 OR social > 0)
                         ORDER BY name ASC
                     `).all(chosenGroup.id);
                 }
@@ -153,7 +144,6 @@ client.on('messageCreate', async (message) => {
 
                 const targetPlayer = groupPlayers[pIdx];
                 
-                // Gather explicit target infrastructure data footprint directly from map logs
                 const player = db.prepare(`
                     SELECT p.*, a.tag as ally_tag,
                            (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as actual_planets,
@@ -177,13 +167,18 @@ client.on('messageCreate', async (message) => {
                     else countryDisplay = cleanCountry.substring(0, 3).toUpperCase();
                 }
 
-                // FIX 1: DYNAMIC TRAIT BUILDING STRIPPER FOR DRILLDOWN INTERACTIVE CARD
-                let raceStatsVal = `Gro: **${player.race_growth}** | Sci: **${player.race_science}**\nCul: **${player.race_culture}** | Pro: **${player.race_production}**\nSpd: **${player.race_speed}** | Atk: **${player.race_attack}**\nDef: **${player.race_defense}**`;
-                let extraTraits = [];
-                if (player.race_trader) extraTraits.push(`Tra: **${player.race_trader > 0 ? '+' : ''}${player.race_trader}**`);
-                if (player.race_sul) extraTraits.push(`SUL: **${player.race_sul > 0 ? '+' : ''}${player.race_sul}**`);
-                if (extraTraits.length > 0) raceStatsVal += `\n${extraTraits.join(' | ')}`;
-                raceStatsVal += `\n\n**Sciences**\nBio: **${player.biology}** | Eco: **${player.economy}**\nEne: **${player.energy}** | Mat: **${player.mathematics}**\nPhy: **${player.physics}** | Soc: **${player.social}**`;
+                // FIXED: Direct conditional intercept when tracking flag displays an inactive footprint
+                let raceStatsVal = '';
+                if (!player.has_intel) {
+                    raceStatsVal = '⚠️ **Intel Not Available**\n*Scan player profile in-game to sync stats.*';
+                } else {
+                    raceStatsVal = `Gro: **${player.race_growth}** | Sci: **${player.race_science}**\nCul: **${player.race_culture}** | Pro: **${player.race_production}**\nSpd: **${player.race_speed}** | Atk: **${player.race_attack}**\nDef: **${player.race_defense}**`;
+                    let extraTraits = [];
+                    if (player.race_trader) extraTraits.push(`Tra: **${player.race_trader > 0 ? '+' : ''}${player.race_trader}**`);
+                    if (player.race_sul) extraTraits.push(`SUL: **${player.race_sul > 0 ? '+' : ''}${player.race_sul}**`);
+                    if (extraTraits.length > 0) raceStatsVal += `\n${extraTraits.join(' | ')}`;
+                    raceStatsVal += `\n\n**Sciences**\nBio: **${player.biology}** | Eco: **${player.economy}**\nEne: **${player.energy}** | Mat: **${player.mathematics}**\nPhy: **${player.physics}** | Soc: **${player.social}**`;
+                }
 
                 const finalEmbed = new EmbedBuilder()
                     .setTitle(`👤 Intel: ${player.name} ${player.ally_tag ? `[${player.ally_tag}]` : ''}`)
@@ -191,16 +186,16 @@ client.on('messageCreate', async (message) => {
                     .addFields(
                         { 
                             name: '📊 Core & Status', 
-                            value: `PL: **${player.level}**\nPoints: **${player.points}**\nRank: **${player.ranking}**\nOrigin: **#${player.origin_system}**\nLocal Time: **${player.local_time || '--'}**\nIdle Time: **${player.idle_time || '--'}**\nCountry: **${countryDisplay}**`, 
+                            value: `PL: **${player.level}**\nPoints: **${player.points}**\nRank: **${player.ranking}**\nOrigin: **#${player.origin_system || '--'}**\nLocal Time: **${player.local_time || '--'}**\nIdle Time: **${player.idle_time || '--'}**\nCountry: **${countryDisplay}**`, 
                             inline: true 
                         },
                         { 
                             name: '🏗️ Infrastructure', 
-                            value: `Planets: **${player.actual_planets || 0} / ${player.culture_level}**\nTotal Pop: **${player.actual_pop || 0}**\nTrade Rev: **${player.trade_revenue}**\nProd: **${player.production_rate}/h**\nSci: **${player.science_rate}/h**\nCult: **${player.culture_rate}/h**\nArtefact: **${player.artefact && player.artefact !== 'N/A' ? player.artefact : '--'}**`, 
+                            value: `Planets: **${player.actual_planets || 0} / ${player.has_intel ? player.culture_level : '--'}**\nTotal Pop: **${player.actual_pop || 0}**\nTrade Rev: **${player.has_intel ? player.trade_revenue.toLocaleString() : '--'}**\nProd: **${player.has_intel ? player.production_rate + '/h' : '--'}**\nSci: **${player.has_intel ? player.science_rate + '/h' : '--'}**\nCult: **${player.has_intel ? player.culture_rate + '/h' : '--'}**\nArtefact: **${player.artefact && player.artefact !== 'N/A' ? player.artefact : '--'}**`, 
                             inline: true 
                         },
                         { 
-                            name: '**Race Stats**', 
+                            name: '**Race & Science Intel**', 
                             value: raceStatsVal, 
                             inline: true 
                         }
@@ -247,7 +242,7 @@ client.on('messageCreate', async (message) => {
             SELECT f.*, u.name as owner_name, a.tag as ally_tag
             FROM fleets f
             LEFT JOIN players u ON f.owner_id = u.id
-            LEFT JOIN alliances a ON f.owner_id = a.id
+            LEFT JOIN alliances a ON u.alliance_id = a.id
             WHERE f.system_id = ?
         `).all(sysId);
 
@@ -318,13 +313,18 @@ client.on('messageCreate', async (message) => {
             else countryDisplay = cleanCountry.substring(0, 3).toUpperCase();
         }
 
-        // FIX 2: DYNAMIC TRAIT BUILDING STRIPPER FOR MANUAL SEARCH OVERVIEW
-        let raceStatsVal = `Gro: **${player.race_growth}** | Sci: **${player.race_science}**\nCul: **${player.race_culture}** | Pro: **${player.race_production}**\nSpd: **${player.race_speed}** | Atk: **${player.race_attack}**\nDef: **${player.race_defense}**`;
-        let extraTraits = [];
-        if (player.race_trader) extraTraits.push(`Tra: **${player.race_trader > 0 ? '+' : ''}${player.race_trader}**`);
-        if (player.race_sul) extraTraits.push(`SUL: **${player.race_sul > 0 ? '+' : ''}${player.race_sul}**`);
-        if (extraTraits.length > 0) raceStatsVal += `\n${extraTraits.join(' | ')}`;
-        raceStatsVal += `\n\n**Sciences**\nBio: **${player.biology}** | Eco: **${player.economy}**\nEne: **${player.energy}** | Mat: **${player.mathematics}**\nPhy: **${player.physics}** | Soc: **${player.social}**`;
+        // FIXED: Direct conditional intercept when tracking flag displays an inactive footprint
+        let raceStatsVal = '';
+        if (!player.has_intel) {
+            raceStatsVal = '⚠️ **Intel Not Available**\n*Scan player profile in-game to sync stats.*';
+        } else {
+            raceStatsVal = `Gro: **${player.race_growth}** | Sci: **${player.race_science}**\nCul: **${player.race_culture}** | Pro: **${player.race_production}**\nSpd: **${player.race_speed}** | Atk: **${player.race_attack}**\nDef: **${player.race_defense}**`;
+            let extraTraits = [];
+            if (player.race_trader) extraTraits.push(`Tra: **${player.race_trader > 0 ? '+' : ''}${player.race_trader}**`);
+            if (player.race_sul) extraTraits.push(`SUL: **${player.race_sul > 0 ? '+' : ''}${player.race_sul}**`);
+            if (extraTraits.length > 0) raceStatsVal += `\n${extraTraits.join(' | ')}`;
+            raceStatsVal += `\n\n**Sciences**\nBio: **${player.biology}** | Eco: **${player.economy}**\nEne: **${player.energy}** | Mat: **${player.mathematics}**\nPhy: **${player.physics}** | Soc: **${player.social}**`;
+        }
 
         const embed = new EmbedBuilder()
             .setTitle(`👤 Intel: ${player.name} ${player.ally_tag ? `[${player.ally_tag}]` : ''}`)
@@ -332,16 +332,16 @@ client.on('messageCreate', async (message) => {
             .addFields(
                 { 
                     name: '📊 Core & Status', 
-                    value: `PL: **${player.level}**\nPoints: **${player.points}**\nRank: **${player.ranking}**\nOrigin: **#${player.origin_system}**\nLocal Time: **${player.local_time || '--'}**\nIdle Time: **${player.idle_time || '--'}**\nCountry: **${countryDisplay}**`, 
+                    value: `PL: **${player.level}**\nPoints: **${player.points}**\nRank: **${player.ranking}**\nOrigin: **#${player.origin_system || '--'}**\nLocal Time: **${player.local_time || '--'}**\nIdle Time: **${player.idle_time || '--'}**\nCountry: **${countryDisplay}**`, 
                     inline: true 
                 },
                 { 
                     name: '🏗️ Infrastructure', 
-                    value: `Planets: **${player.actual_planets || 0} / ${player.culture_level}**\nTotal Pop: **${player.actual_pop || 0}**\nTrade Rev: **${player.trade_revenue}**\nProd: **${player.production_rate}/h**\nSci: **${player.science_rate}/h**\nCult: **${player.culture_rate}/h**\nArtefact: **${player.artefact && player.artefact !== 'N/A' ? player.artefact : '--'}**`, 
+                    value: `Planets: **${player.actual_planets || 0} / ${player.has_intel ? player.culture_level : '--'}**\nTotal Pop: **${player.actual_pop || 0}**\nTrade Rev: **${player.has_intel ? player.trade_revenue.toLocaleString() : '--'}**\nProd: **${player.has_intel ? player.production_rate + '/h' : '--'}**\nSci: **${player.has_intel ? player.science_rate + '/h' : '--'}**\nCult: **${player.has_intel ? player.culture_rate + '/h' : '--'}**\nArtefact: **${player.artefact && player.artefact !== 'N/A' ? player.artefact : '--'}**`, 
                     inline: true 
                 },
                 { 
-                    name: '**Race Stats**', 
+                    name: '**Race & Science Intel**', 
                     value: raceStatsVal, 
                     inline: true 
                 }

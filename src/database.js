@@ -132,6 +132,18 @@ function initDatabase() {
         // Ignored
     }
 
+    try {
+        db.exec(`ALTER TABLE players ADD COLUMN has_intel INTEGER DEFAULT 0`);
+        console.log("[DB] Added has_intel column to players table.");
+    } catch (e) {
+        // Ignored: Column already exists
+    }
+
+    try {
+        db.exec(`ALTER TABLE players ADD COLUMN intel_updated_at TEXT`);
+        console.log("[DB] Added intel_updated_at column to players table.");
+    } catch (e) {}
+
     // 4. Map & Systems
     db.exec(`
         CREATE TABLE IF NOT EXISTS systems (

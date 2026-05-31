@@ -8,8 +8,13 @@ export function extractPlayerData(playerId, doc = document) {
         biology: 0, economy: 0, energy: 0, mathematics: 0, physics: 0, social: 0,
         trade_revenue: 0, artefact: null, eco_bonus: 0,
         race_growth: 0, race_science: 0, race_culture: 0, race_production: 0, race_speed: 0, race_attack: 0, race_defense: 0,
-        race_trader: 0, race_sul: 0
+        race_trader: 0, race_sul: 0,
+        has_intel: 0 // <--- Initialize default tracking byte
     };
+
+    // Verify presence of specialized alliance intelligence blocks
+    const hasIrTable = !!doc.querySelector('table.ir-summary');
+    p.has_intel = hasIrTable ? 1 : 0;
 
     const nameHeader = doc.querySelector('th[colspan="2"]');
     if (nameHeader) {
@@ -51,7 +56,6 @@ export function extractPlayerData(playerId, doc = document) {
         p.country = countryImg.getAttribute('alt') || countryImg.getAttribute('title');
     }
 
-    // FIXED: Find the exact row labeled "Origin" to stop pulling global nav links
     const originRow = Array.from(doc.querySelectorAll('table tbody tr')).find(row => {
         const cells = row.querySelectorAll('th, td');
         return cells.length > 0 && cells[0].innerText.trim() === 'Origin';
@@ -77,41 +81,44 @@ export function extractPlayerData(playerId, doc = document) {
         }
     }
 
-    p.biology = parseInt(getRowVal('Biology', true), 10) || 0;
-    p.economy = parseInt(getRowVal('Economy', true), 10) || 0;
-    p.energy = parseInt(getRowVal('Energy', true), 10) || 0;
-    p.mathematics = parseInt(getRowVal('Mathematics', true), 10) || 0;
-    p.physics = parseInt(getRowVal('Physics', true), 10) || 0;
-    p.social = parseInt(getRowVal('Social', true), 10) || 0;
+    // Only scrape these values if the Intelligence Report is visible
+    if (p.has_intel === 1) {
+        p.biology = parseInt(getRowVal('Biology', true), 10) || 0;
+        p.economy = parseInt(getRowVal('Economy', true), 10) || 0;
+        p.energy = parseInt(getRowVal('Energy', true), 10) || 0;
+        p.mathematics = parseInt(getRowVal('Mathematics', true), 10) || 0;
+        p.physics = parseInt(getRowVal('Physics', true), 10) || 0;
+        p.social = parseInt(getRowVal('Social', true), 10) || 0;
 
-    const ecoBonusStr = getRowVal('Economy Bonus');
-    if (ecoBonusStr) p.eco_bonus = parseInt(ecoBonusStr.replace(/[^\d+-]/g, ''), 10) || 0;
+        const ecoBonusStr = getRowVal('Economy Bonus');
+        if (ecoBonusStr) p.eco_bonus = parseInt(ecoBonusStr.replace(/[^\d+-]/g, ''), 10) || 0;
 
-    const tradeStr = getRowVal('Trade Revenue');
-    if (tradeStr) p.trade_revenue = parseInt(tradeStr.replace(/[^\d]/g, ''), 10) || 0;
-    
-    const artefactRows = doc.querySelectorAll('.ir-summary tr');
-    artefactRows.forEach(row => {
-        const tds = row.querySelectorAll('td');
-        if (tds.length >= 2 && tds[0]?.innerText.includes('Artefact')) {
-            const rawText = tds[1].innerText.trim();
-            p.artefact = rawText === 'N/A' ? null : (rawText.split(/\s+/)[0] || null);
-        }
-    });
+        const tradeStr = getRowVal('Trade Revenue');
+        if (tradeStr) p.trade_revenue = parseInt(tradeStr.replace(/[^\d]/g, ''), 10) || 0;
+        
+        const artefactRows = doc.querySelectorAll('.ir-summary tr');
+        artefactRows.forEach(row => {
+            const tds = row.querySelectorAll('td');
+            if (tds.length >= 2 && tds[0]?.innerText.includes('Artefact')) {
+                const rawText = tds[1].innerText.trim();
+                p.artefact = rawText === 'N/A' ? null : (rawText.split(/\s+/)[0] || null);
+            }
+        });
 
-    const parseRace = (text) => parseInt(text.match(/([+-]\d+)\s*$/)?.[1] || "0", 10);
-    doc.querySelectorAll('.race-summary tbody td').forEach(td => {
-        const text = td.innerText.trim();
-        if (text.includes('Growth')) p.race_growth = parseRace(text);
-        if (text.includes('Science')) p.race_science = parseRace(text);
-        if (text.includes('Culture')) p.race_culture = parseRace(text);
-        if (text.includes('Production')) p.race_production = parseRace(text);
-        if (text.includes('Speed')) p.race_speed = parseRace(text);
-        if (text.includes('Attack')) p.race_attack = parseRace(text);
-        if (text.includes('Defence') || text.includes('Defense')) p.race_defense = parseRace(text);
-        if (text.includes('Trader')) p.race_trader = parseRace(text);
-        if (text.includes('Startup') || text.includes('SUL')) p.race_sul = parseRace(text);
-    });
+        const parseRace = (text) => parseInt(text.match(/([+-]\d+)\s*$/)?.[1] || "0", 10);
+        doc.querySelectorAll('.race-summary tbody td').forEach(td => {
+            const text = td.innerText.trim();
+            if (text.includes('Growth')) p.race_growth = parseRace(text);
+            if (text.includes('Science')) p.race_science = parseRace(text);
+            if (text.includes('Culture')) p.race_culture = parseRace(text);
+            if (text.includes('Production')) p.race_production = parseRace(text);
+            if (text.includes('Speed')) p.race_speed = parseRace(text);
+            if (text.includes('Attack')) p.race_attack = parseRace(text);
+            if (text.includes('Defence') || text.includes('Defense')) p.race_defense = parseRace(text);
+            if (text.includes('Trader')) p.race_trader = parseRace(text);
+            if (text.includes('Start Up') || text.includes('Start Up Lab')) p.race_sul = parseRace(text);
+        });
+    }
 
     return p;
 }
