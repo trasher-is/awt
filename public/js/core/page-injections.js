@@ -371,3 +371,80 @@ export async function initPersistentPlanPills() {
         console.error("[AWT Tools] Pill generation processing fault:", err);
     }
 }
+
+(function() {
+    console.log("[Hub Debug] page-injections.js has loaded on this page.");
+
+    // Look at both the local path and the dashboard query param to support all proxy/iframe layouts
+    const urlParams = new URLSearchParams(window.location.search);
+    const combinedPath = window.location.pathname + (urlParams.get('p') || '');
+    
+    console.log(`[Hub Debug] Evaluating current execution path: "${combinedPath}"`);
+
+    const allianceMatch = combinedPath.match(/\/Game\/Alliance\/Profile\/(\d+)/);
+    
+    if (allianceMatch) {
+        const allianceId = allianceMatch[1];
+        console.log(`[Hub Debug] Target Alliance detected. ID parsed: ${allianceId}`);
+        
+        // Execute targeting modification once DOM structures are parsed
+        const injectIntelBadges = () => {
+            // FIXED: Path changed to /hub-api to match mounting layout in server.js
+            fetch(`/hub-api/alliance-intel/${allianceId}`)
+                .then(res => {
+                    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+                    return res.json();
+                })
+                .then(trackedPlayerIds => {
+                    console.log("[Hub Debug] Server returned tracked IDs:", trackedPlayerIds);
+
+                    if (!Array.isArray(trackedPlayerIds) || trackedPlayerIds.length === 0) {
+                        console.log("[Hub Debug] No intelligence dossiers found for this alliance in the DB.");
+                        return;
+                    }
+
+                    const playerLinks = document.querySelectorAll('a[href^="/Game/Players/Profile/"]');
+                    console.log(`[Hub Debug] Found ${playerLinks.length} player profile links on the page.`);
+
+                    playerLinks.forEach(link => {
+                        const href = link.getAttribute('href');
+                        const playerMatch = href.match(/\/Game\/Players\/Profile\/(\d+)/);
+                        
+                        if (playerMatch) {
+                            const playerId = playerMatch[1];
+                            
+                            // Loose comparison (String matching) to protect against SQLite type discrepancies
+                            const isTracked = trackedPlayerIds.some(id => String(id) === String(playerId));
+                            
+                            if (isTracked) {
+                                console.log(`[Hub Debug] Injecting tracker icon for player ID: ${playerId}`);
+                                
+                                // Prevent duplicating icons if script executes multiple times
+                                if (link.nextSibling && link.nextSibling.classList && link.nextSibling.classList.contains('aw-intel-badge')) {
+                                    return; 
+                                }
+
+                                const intelIcon = document.createElement('i');
+                                intelIcon.className = 'bi bi-eye-fill text-success ms-1 aw-intel-badge';
+                                intelIcon.style.fontSize = '0.85em';
+                                intelIcon.style.verticalAlign = 'middle';
+                                intelIcon.title = 'Tactical Intel Synced';
+                                
+                                link.parentNode.insertBefore(intelIcon, link.nextSibling);
+                            }
+                        }
+                    });
+                })
+                .catch(err => console.error('[Hub Error] Failed to parse player intel mappings:', err));
+        };
+
+        // Run immediately if DOM is ready, otherwise wait for load
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', injectIntelBadges);
+        } else {
+            injectIntelBadges();
+        }
+    } else {
+        console.log("[Hub Debug] Path did not match alliance profile criteria. Injections skipped.");
+    }
+})();

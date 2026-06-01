@@ -513,6 +513,23 @@ router.post('/admin/users/:id/password', requireAdmin, (req, res) => {
     res.json({ success: true });
 });
 
+// --- GET PLAYER INTEL STATUS FOR ALLIANCE PROFILE INJECTION ---
+router.get('/alliance-intel/:allianceId', requireAuth, (req, res) => {
+    try {
+        const allianceId = req.params.allianceId;
+        const rows = db.prepare(`
+            SELECT id FROM players 
+            WHERE alliance_id = ? AND has_intel = 1
+        `).all(allianceId);
+
+        const intelIds = rows.map(row => row.id);
+        res.json(intelIds);
+    } catch (err) {
+        console.error('Failed to fetch alliance intel flags:', err);
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
 // --- DATABASE CONTROLS ---
 
 // Get DB Status
