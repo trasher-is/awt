@@ -500,11 +500,13 @@ client.on('messageCreate', async (message) => {
             tag = userAlliance.tag.toUpperCase();
         }
 
+        // FETCHES BOTH OWNER NAME AND OWNER ALLIANCE TAG FOR COMPREHENSIVE SECTOR SCANNING
         const rows = db.prepare(`
-            SELECT p.system_id, s.name as sys_name, p.planet_index, u.name as owner_name
+            SELECT p.system_id, s.name as sys_name, p.planet_index, u.name as owner_name, a.tag as owner_alliance_tag
             FROM planets p
             JOIN systems s ON p.system_id = s.id
             LEFT JOIN players u ON p.owner_id = u.id
+            LEFT JOIN alliances a ON u.alliance_id = a.id
             WHERE p.system_id IN (
                 SELECT DISTINCT p2.system_id
                 FROM planets p2
@@ -526,7 +528,10 @@ client.on('messageCreate', async (message) => {
                 sysData[r.system_id] = { name: r.sys_name, planets: {} };
             }
             if (r.planet_index) {
-                sysData[r.system_id].planets[r.planet_index] = r.owner_name;
+                sysData[r.system_id].planets[r.planet_index] = {
+                    owner_name: r.owner_name,
+                    owner_alliance_tag: r.owner_alliance_tag
+                };
             }
         });
 
@@ -543,31 +548,46 @@ client.on('messageCreate', async (message) => {
 
         for (const sysId of sortedSysIds) {
             const data = sysData[sysId];
-            const holes = [];
-            let closedCount = 0;
+            const freeSlots = [];
+            const plannedSlots = [];
+            const enemySlots = [];
             const plannedForSys = planMap[sysId] || [];
 
             for (let i = 1; i <= 12; i++) {
-                const owner = data.planets[i];
+                const planetData = data.planets[i];
+                const owner = planetData ? planetData.owner_name : null;
+                const ownerTag = planetData ? planetData.owner_alliance_tag : null;
+                
                 const isPlanned = plannedForSys.includes(i);
-                const isUnknown = !owner || owner === "Unknown";
-                const isFree = owner === "Free Planet" || owner === "Empty";
+                const isFree = !owner || owner === "Free Planet" || owner === "Empty" || owner === "Unknown";
 
-                if (!isUnknown && !isFree) {
-                    closedCount++; 
-                } else if (!isPlanned) {
-                    holes.push(`P${i.toString().padStart(2, '0')}`); 
+                if (isPlanned) {
+                    plannedSlots.push(`P${i.toString().padStart(2, '0')}`);
+                } else if (isFree) {
+                    freeSlots.push(`P${i.toString().padStart(2, '0')}`);
+                } else {
+                    const isFriendly = ownerTag && ownerTag.toUpperCase() === tag;
+                    if (!isFriendly) {
+                        enemySlots.push(`P${i.toString().padStart(2, '0')}`);
+                    }
                 }
             }
 
-            if (holes.length > 0) {
+            // Only appends the system line if there are open holes, targets planned, or enemy threats inside it
+            if (freeSlots.length > 0 || plannedSlots.length > 0 || enemySlots.length > 0) {
                 systemsWithHoles++;
-                report += `**[${sysId}]** ${data.name || "Unknown System"}: ${holes.join(', ')} | Planned - ${plannedForSys.length} | Closed - ${closedCount}\n`;
+                
+                let segments = [];
+                if (freeSlots.length > 0) segments.push(`Free - ${freeSlots.join(', ')}`);
+                if (plannedSlots.length > 0) segments.push(`Planned - *${plannedSlots.join(', ')}*`);
+                if (enemySlots.length > 0) segments.push(`Enemy - **${enemySlots.join(', ')}**`);
+                
+                report += `**[${sysId}]** ${data.name || "Unknown System"}: ${segments.join(' | ')}\n`;
             }
         }
 
         if (systemsWithHoles === 0) {
-            return message.reply(`🟢 No holes found! All slots in [${tag}] systems are filled or planned.`);
+            return message.reply(`🟢 No vulnerabilities located. All slots in [${tag}] territory are securely held by your alliance.`);
         }
 
         if (report.length > 4000) {
@@ -575,10 +595,10 @@ client.on('messageCreate', async (message) => {
         }
 
         const embed = new EmbedBuilder()
-            .setTitle(`🕳️ System Holes for [${tag}]`)
+            .setTitle(`🕳️ Sector Vulnerability Matrix: [${tag}]`)
             .setDescription(report)
-            .setColor('#00ff00')
-            .setFooter({ text: `Found holes in ${systemsWithHoles} systems | Ignoring planets with active !plans` });
+            .setColor('#f97316')
+            .setFooter({ text: `Monitored systems: ${systemsWithHoles} | *Italics* = Spoken for (!plan) | **Bold** = Hostile Presence` });
 
         return message.reply({ embeds: [embed] });
     }
