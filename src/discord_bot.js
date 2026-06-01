@@ -35,18 +35,19 @@ client.on('messageCreate', async (message) => {
             SELECT DISTINCT a.id, a.tag
             FROM alliances a
             JOIN players p ON p.alliance_id = a.id
-            WHERE p.biology > 0 OR p.economy > 0 OR p.energy > 0 OR p.mathematics > 0 OR p.physics > 0 OR p.social > 0
+            WHERE p.has_intel = 1
             ORDER BY a.tag ASC
         `).all();
 
+        // FIXED: Added missing 'p' alias to prevent SQLITE_ERROR
         const solosCount = db.prepare(`
-            SELECT COUNT(*) as count FROM players
-            WHERE alliance_id IS NULL
-            AND (biology > 0 OR economy > 0 OR energy > 0 OR mathematics > 0 OR physics > 0 OR social > 0)
+            SELECT COUNT(*) as count FROM players p
+            WHERE p.alliance_id IS NULL
+            AND p.has_intel = 1
         `).get().count;
 
         if (alliancesWithIntel.length === 0 && solosCount === 0) {
-            return message.reply('📭 No intelligence records found with active sciences in the database.');
+            return message.reply('📭 No intelligence records found with active intel in the database.');
         }
 
         const groups = alliancesWithIntel.map(a => ({ id: a.id, name: a.tag || `Alliance #${a.id}`, type: 'alliance' }));
@@ -95,13 +96,13 @@ client.on('messageCreate', async (message) => {
                 if (chosenGroup.type === 'solos') {
                     groupPlayers = db.prepare(`
                         SELECT id, name FROM players
-                        WHERE alliance_id IS NULL
+                        WHERE alliance_id IS NULL AND has_intel = 1
                         ORDER BY name ASC
                     `).all();
                 } else {
                     groupPlayers = db.prepare(`
                         SELECT id, name FROM players
-                        WHERE alliance_id = ?
+                        WHERE alliance_id = ? AND has_intel = 1
                         ORDER BY name ASC
                     `).all(chosenGroup.id);
                 }
@@ -167,7 +168,6 @@ client.on('messageCreate', async (message) => {
                     else countryDisplay = cleanCountry.substring(0, 3).toUpperCase();
                 }
 
-                // FIXED: Direct conditional intercept when tracking flag displays an inactive footprint
                 let raceStatsVal = '';
                 if (!player.has_intel) {
                     raceStatsVal = '⚠️ **Intel Not Available**\n*Scan player profile in-game to sync stats.*';
@@ -313,7 +313,6 @@ client.on('messageCreate', async (message) => {
             else countryDisplay = cleanCountry.substring(0, 3).toUpperCase();
         }
 
-        // FIXED: Direct conditional intercept when tracking flag displays an inactive footprint
         let raceStatsVal = '';
         if (!player.has_intel) {
             raceStatsVal = '⚠️ **Intel Not Available**\n*Scan player profile in-game to sync stats.*';
