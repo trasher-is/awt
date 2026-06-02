@@ -116,7 +116,7 @@
                         </div>
                     </div>
                     <div>
-                        <div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Activity Log (GMT +0)</div>
+                        <div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Activity Log</div>
                         <div class="bg-card border border-border rounded p-2 shadow-sm h-28 w-full">
                             <canvas id="playerHeatmapChart"></canvas>
                         </div>
@@ -264,7 +264,7 @@
             if (playerCtxContainer) playerCtxContainer.classList.remove('hidden');
             if (playerLabel) {
                 playerLabel.classList.remove('hidden');
-                playerLabel.innerText = `#${playerId}`;
+                playerLabel.innerText = `#${playerId}`; // Set clean fallback number while data loads
             }
 
             loadPlayerIntel(playerId);
@@ -424,7 +424,7 @@
                         <span class="text-red-400 font-medium">by [${f.alliance_tag || '?'}] ${f.owner_name || 'Unknown'} (CV: ${cv.toLocaleString()})</span>
                     </div>`;
                 }).join('') : '<span class="text-muted-foreground italic text-center py-2">No fleets detected.</span>';
-                document.getElementById('intel-history-list').innerHTML = data.history.length ? data.history.map(h => `<div class="text-s leading-tight mb-2 border-l-2 border-border pl-2"><span class="text-muted-foreground">${new Date(h.timestamp).toLocaleTimeString()} (#${h.planet_index})</span><br>${h.event_type_id === 1 ? `<span class="text-foreground font-medium">${h.old_owner || 'None'} &rarr; ${h.new_owner || 'None'}</span>` : `<span class="text-red-400 font-medium">Population Drop</span>`}</div>`).join('') : '<span class="text-muted-foreground italic text-center py-2">No recent history.</span>';
+                document.getElementById('intel-history-list').innerHTML = data.history.length ? data.history.map(h => `<div class="text-s leading-tight mb-2 border-l-2 border-border pl-2"><span class="text-muted-foreground">${new Date(h.timestamp.replace(' ', 'T') + 'Z').toLocaleTimeString()} (#${h.planet_index})</span><br>${h.event_type_id === 1 ? `<span class="text-foreground font-medium">${h.old_owner || 'None'} &rarr; ${h.new_owner || 'None'}</span>` : `<span class="text-red-400 font-medium">Population Drop</span>`}</div>`).join('') : '<span class="text-muted-foreground italic text-center py-2">No recent history.</span>';
 
                 const iframe = document.getElementById('game-frame');
                 if (iframe.contentWindow) iframe.contentWindow.postMessage({ type: 'INJECT_TACTICAL_OVERLAYS', payload: { plans: data.plans, fleets: data.fleets, planets: data.planets } }, window.location.origin);
@@ -460,6 +460,21 @@
                 
                 if (data.success && data.player) {
                     const p = data.player;
+                    
+                    // Inject the alliance tag, clickable profile link, and raw ID directly where data is successfully loaded
+                    const playerLabel = document.getElementById('ui-player-id');
+                    if (playerLabel) {
+                        const allyTag = p.alliance_tag ? `[${p.alliance_tag}] ` : '';
+                        const pName = p.name || 'Unknown';
+                        
+                        playerLabel.innerHTML = `
+                            <span class="text-muted-foreground font-bold">${allyTag}</span>
+                            <a href="/Game/Players/Profile/${p.id}" class="text-blue-400 hover:underline font-semibold" target="_top">
+                                ${pName}
+                            </a> 
+                            <span class="text-xs text-muted-foreground ml-1">(#${p.id})</span>
+                        `;
+                    }
                     
                     const row = (lbl, val) => `<div class="flex justify-between items-center py-0.5"><span class="text-muted-foreground">${lbl}</span><span class="font-medium text-foreground">${val}</span></div>`;
                     const trait = (lbl, val) => `<div class="flex justify-between items-center py-0"><span class="text-muted-foreground">${lbl}</span><span class="font-medium text-foreground">${val > 0 ? '+'+val : val}</span></div>`;
@@ -534,13 +549,23 @@
                         const ctxH = document.getElementById('playerHeatmapChart').getContext('2d');
                         if (playerHeatmapChartInstance) playerHeatmapChartInstance.destroy();
                         
+                        // Calculate local timezone hour offset from UTC (e.g., Vilnius is +3 in summer)
+                        const offsetHours = Math.round(-new Date().getTimezoneOffset() / 60);
+                        
+                        // Shift the 24-hour data array to match the local timezone grid perfectly
+                        const localHeatmap = Array(24).fill(0);
+                        for (let i = 0; i < 24; i++) {
+                            const localHour = (i + offsetHours + 24) % 24;
+                            localHeatmap[localHour] = data.heatmap[i];
+                        }
+                        
                         playerHeatmapChartInstance = new Chart(ctxH, {
                             type: 'bar',
                             data: {
                                 labels: Array.from({length: 24}, (_, i) => `${i}h`),
                                 datasets: [{
                                     label: 'Login Events',
-                                    data: data.heatmap,
+                                    data: localHeatmap, // Swapped to the local adjusted array
                                     backgroundColor: 'rgba(34, 197, 94, 0.6)',
                                     borderColor: '#22c55e',
                                     borderWidth: 1,
@@ -616,7 +641,7 @@
                     if (p.isPlayerView && p.playerId) { 
                         playerCtxContainer.classList.remove('hidden');
                         playerLabel.classList.remove('hidden');
-                        playerLabel.innerText = `#${p.playerId}`;
+                        playerLabel.innerText = `#${p.playerId}`; // Set fallback context ID text immediately
                         loadPlayerIntel(p.playerId);
                     }
                     if (p.isMap && p.mapX && p.mapY) {

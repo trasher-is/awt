@@ -1,4 +1,4 @@
-import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer } from './page-injections.js';
+import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers } from './page-injections.js';
 
 export function initSpy() {
     let currentMapX = null;
@@ -536,6 +536,7 @@ export function initSpy() {
         }
         if (pathLower.includes('/game/science')) {
             initScienceCultureCalc();
+            initScienceTimers();
         }
         if (pathLower.includes('/game/planets/planet/')) {
             initStarbaseTimer();

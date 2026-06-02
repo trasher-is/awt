@@ -142,10 +142,16 @@ router.post('/sync/system', requireAuth, (req, res) => {
             const oldP = getOldPlanet.get(system_id, p.planet_index);
             
             let finalOwnerId = p.owner ? p.owner.id : null;
-            
-            // CRITICAL FOG OF WAR GUARD: If scan reports "Unknown", fall back to our existing data
+            let finalPopulation = p.population;
+            let finalStarbase = p.starbase;
+            let finalHasFleet = p.has_fleet;
+
+            // CRITICAL FOG OF WAR GUARD: If scan reports "Unknown", protect historical stats from being nuked
             if (p.is_unknown && oldP) {
                 finalOwnerId = oldP.owner_id;
+                finalPopulation = oldP.population;
+                finalStarbase = oldP.starbase;
+                finalHasFleet = oldP.has_fleet;
             }
 
             if (oldP) {
@@ -153,26 +159,37 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 if (!p.is_unknown && oldP.owner_id !== finalOwnerId) {
                     logEvent.run(system_id, p.planet_index, 1, oldP.owner_id, finalOwnerId); // 1 = OWNER_CHANGE
                 }
-                // Significant Population Drop (possible bombardment)
-                if (oldP.population > 0 && p.population < oldP.population - 5) {
-                    logEvent.run(system_id, p.planet_index, 2, oldP.population, p.population); // 2 = POP_DROP
+                // Significant Population Drop: Skip history generation entirely if it's an unverified/unknown scan
+                if (!p.is_unknown && oldP.population > 0 && finalPopulation < oldP.population - 5) {
+                    logEvent.run(system_id, p.planet_index, 2, oldP.population, finalPopulation); // 2 = POP_DROP
                 }
             }
 
-            // Standard Upsert
-            if (p.owner) {
+            // Standard Upsert (Skip structural updates for players/alliances if we can't see them clearly)
+            if (p.owner && !p.is_unknown) {
                 if (p.owner.alliance_id) upsertAlliance.run(p.owner.alliance_id, p.owner.alliance_tag, p.owner.alliance_tag); 
                 upsertPlayer.run(p.owner.id, p.owner.name, p.owner.alliance_id || null);
             }
             
-            // Pass the calculated finalOwnerId down to the update command
-            upsertPlanet.run(p.game_planet_id, system_id, p.planet_index, finalOwnerId, p.population, p.starbase, p.has_fleet);
+            // Pass the calculated final parameters securely down to the table updater
+            upsertPlanet.run(p.game_planet_id, system_id, p.planet_index, finalOwnerId, finalPopulation, finalStarbase, finalHasFleet);
+
+            // Target fleet records cleanly: Only drop fleets on planets we have concrete vision over
+            if (!p.is_unknown) {
+                db.prepare(`DELETE FROM fleets WHERE system_id = ? AND planet_index = ?`).run(system_id, p.planet_index);
+            }
         }
 
-        // 2. Wipe & Replace Fleets
+        // 2. Safely Process Fleets without wiping hidden tactical data
         if (Array.isArray(fleetsData)) {
-            db.prepare(`DELETE FROM fleets WHERE system_id = ?`).run(system_id);
             for (const f of fleetsData) {
+                const matchingPlanet = planetsData.find(p => p.planet_index === f.planet_index);
+                
+                // If a fleet is reported on an obscured planet row, skip updating it (keeps historical fleet intact)
+                if (matchingPlanet && matchingPlanet.is_unknown) {
+                    continue;
+                }
+
                 if (f.owner_id) {
                     db.prepare(`INSERT INTO players (id, name) VALUES (?, 'Unknown') ON CONFLICT(id) DO NOTHING`).run(f.owner_id);
                 }
@@ -261,7 +278,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
                     biology=0, economy=0, energy=0, mathematics=0, physics=0, social=0,
                     trade_revenue=0, artefact=NULL, eco_bonus=0,
                     race_growth=0, race_science=0, race_culture=0, race_production=0, race_speed=0, race_attack=0, race_defense=0,
-                    race_trader=0, race_sul=0, origin_system=NULL, has_intel=0
+                    race_trader=0, race_sul=0, origin_system=NULL, has_intel=0, intel_updated_at=NULL
                 WHERE id = ?
             `).run(player.id);
         }
@@ -278,7 +295,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 trade_revenue, artefact, eco_bonus,
                 race_growth, race_science, race_culture, race_production, race_speed, race_attack, race_defense,
                 race_trader, race_sul,
-                joined, logins, has_intel
+                joined, logins, has_intel, intel_updated_at
             ) VALUES (
                 @id, @name, @alliance_id, @country, @local_time, @idle_time, @origin_system, 
                 @level, @ranking, @points, @science_level, @culture_level, 
@@ -286,20 +303,40 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 @trade_revenue, @artefact, @eco_bonus,
                 @race_growth, @race_science, @race_culture, @race_production, @race_speed, @race_attack, @race_defense,
                 @race_trader, @race_sul,
-                @joined, @logins, @has_intel
+                @joined, @logins, @has_intel,
+                CASE WHEN @has_intel = 1 THEN CURRENT_TIMESTAMP ELSE NULL END
             ) ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name, alliance_id=excluded.alliance_id, country=excluded.country, 
                 local_time=excluded.local_time, idle_time=excluded.idle_time, origin_system=excluded.origin_system,
                 level=excluded.level, ranking=excluded.ranking, points=excluded.points, 
                 science_level=excluded.science_level, culture_level=excluded.culture_level,
-                biology=excluded.biology, economy=excluded.economy, energy=excluded.energy, 
-                mathematics=excluded.mathematics, physics=excluded.physics, social=excluded.social,
-                trade_revenue=excluded.trade_revenue, artefact=excluded.artefact, eco_bonus=excluded.eco_bonus,
-                race_growth=excluded.race_growth, race_science=excluded.race_science, race_culture=excluded.race_culture,
-                race_production=excluded.race_production, race_speed=excluded.race_speed, race_attack=excluded.race_attack, race_defense=excluded.race_defense,
-                race_trader=excluded.race_trader, race_sul=excluded.race_sul,
-                joined=excluded.joined, logins=excluded.logins, has_intel=excluded.has_intel,
-                updated_at=CURRENT_TIMESTAMP
+                joined=excluded.joined, logins=excluded.logins,
+                updated_at=CURRENT_TIMESTAMP,
+                
+                -- Conditional Updates: Keep old data if incoming payload lacks live intelligence
+                biology = CASE WHEN excluded.has_intel = 1 THEN excluded.biology ELSE players.biology END,
+                economy = CASE WHEN excluded.has_intel = 1 THEN excluded.economy ELSE players.economy END,
+                energy = CASE WHEN excluded.has_intel = 1 THEN excluded.energy ELSE players.energy END,
+                mathematics = CASE WHEN excluded.has_intel = 1 THEN excluded.mathematics ELSE players.mathematics END,
+                physics = CASE WHEN excluded.has_intel = 1 THEN excluded.physics ELSE players.physics END,
+                social = CASE WHEN excluded.has_intel = 1 THEN excluded.social ELSE players.social END,
+                trade_revenue = CASE WHEN excluded.has_intel = 1 THEN excluded.trade_revenue ELSE players.trade_revenue END,
+                artefact = CASE WHEN excluded.has_intel = 1 THEN excluded.artefact ELSE players.artefact END,
+                eco_bonus = CASE WHEN excluded.has_intel = 1 THEN excluded.eco_bonus ELSE players.eco_bonus END,
+                
+                race_growth = CASE WHEN excluded.has_intel = 1 THEN excluded.race_growth ELSE players.race_growth END,
+                race_science = CASE WHEN excluded.has_intel = 1 THEN excluded.race_science ELSE players.race_science END,
+                race_culture = CASE WHEN excluded.has_intel = 1 THEN excluded.race_culture ELSE players.race_culture END,
+                race_production = CASE WHEN excluded.has_intel = 1 THEN excluded.race_production ELSE players.race_production END,
+                race_speed = CASE WHEN excluded.has_intel = 1 THEN excluded.race_speed ELSE players.race_speed END,
+                race_attack = CASE WHEN excluded.has_intel = 1 THEN excluded.race_attack ELSE players.race_attack END,
+                race_defense = CASE WHEN excluded.has_intel = 1 THEN excluded.race_defense ELSE players.race_defense END,
+                race_trader = CASE WHEN excluded.has_intel = 1 THEN excluded.race_trader ELSE players.race_trader END,
+                race_sul = CASE WHEN excluded.has_intel = 1 THEN excluded.race_sul ELSE players.race_sul END,
+                
+                -- Track exact time intel was last parsed, and ensure has_intel sticks to 1 if we hold historical logs
+                intel_updated_at = CASE WHEN excluded.has_intel = 1 THEN CURRENT_TIMESTAMP ELSE players.intel_updated_at END,
+                has_intel = CASE WHEN excluded.has_intel = 1 THEN 1 ELSE players.has_intel END
         `).run(player);
 
         if (player.logins > 0 && (!oldPlayer || oldPlayer.logins !== player.logins)) {

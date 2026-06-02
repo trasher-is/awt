@@ -448,3 +448,55 @@ export async function initPersistentPlanPills() {
         console.log("[Hub Debug] Path did not match alliance profile criteria. Injections skipped.");
     }
 })();
+
+export function initScienceTimers() {
+    if (!window.location.pathname.toLowerCase().includes('/game/science')) return;
+
+    const queueClasses = ['bi-1-circle', 'bi-2-circle', 'bi-3-circle', 'bi-repeat'];
+    const queuedItems = [];
+
+    // 1. Find and sort queued sciences by their exact execution order
+    queueClasses.forEach(cls => {
+        const icon = document.querySelector(`.${cls}`);
+        if (icon) {
+            const row = icon.closest('tr');
+            if (row && row.cells[4] && row.cells[5]) {
+                const iconsInRow = Array.from(row.cells[5].querySelectorAll('i'));
+                const index = iconsInRow.indexOf(icon);
+                const timersInRow = Array.from(row.cells[4].querySelectorAll('.timer'));
+                const timerEl = timersInRow[index];
+                
+                if (timerEl) {
+                    const seconds = parseInt(timerEl.getAttribute('data-value'), 10) || 0;
+                    queuedItems.push({
+                        className: cls,
+                        timerEl: timerEl,
+                        seconds: seconds
+                    });
+                }
+            }
+        }
+    });
+
+    // 2. Compute cumulative times and inject timestamps right next to the native timers
+    let cumulativeSeconds = 0;
+
+    queuedItems.forEach(item => {
+        cumulativeSeconds += item.seconds;
+
+        const finishDate = new Date(Date.now() + cumulativeSeconds * 1000);
+        const dateStr = finishDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + 
+                        finishDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+
+        // Idempotency: Check if the badge is already there so we don't stack duplicates
+        let dateSpan = item.timerEl.nextElementSibling;
+        if (!dateSpan || !dateSpan.classList.contains('custom-science-date')) {
+            dateSpan = document.createElement('span');
+            dateSpan.className = 'custom-science-date ms-2';
+            dateSpan.style.cssText = 'color: #888; font-size: 11px; font-weight: normal;';
+            item.timerEl.parentNode.insertBefore(dateSpan, item.timerEl.nextSibling);
+        }
+        
+        dateSpan.innerText = `(${dateStr})`;
+    });
+}
