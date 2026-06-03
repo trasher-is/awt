@@ -163,6 +163,9 @@
                 <button onclick="openFleetDatabasePanel()" class="h-8 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
                     <i class="fa-solid fa-crow w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-sm">Fleets</span>
                 </button>
+                <button onclick="openOperationsTimelinePanel()" class="h-8 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
+                    <i class="fa-solid fa-timeline w-6 text-center text-sm text-primary"></i><span class="ml-4 sidebar-text text-sm">Ops Timeline</span>
+                </button>
             </div>
 
             <div class="flex flex-col py-4 hide-collapsed mt-auto">
@@ -721,13 +724,120 @@
             if (window.innerWidth < 768) toggleSidebar();
         }
 
+        // Append 'operations-timeline-panel' to your existing panel loop array
         function closeOtherPanels(exceptId) {
-            ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel'].forEach(id => {
+            ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'operations-timeline-panel'].forEach(id => {
                 if (id !== exceptId) {
                     const p = document.getElementById(id);
                     if (p) p.classList.replace('translate-x-0', 'translate-x-full');
                 }
             });
+        }
+
+        async function openOperationsTimelinePanel() {
+            let panel = document.getElementById('operations-timeline-panel');
+            if (!panel) {
+                const panelHtml = `
+                    <div id="operations-timeline-panel" class="fixed top-0 right-0 h-full w-full md:w-[32rem] bg-background/98 border-l border-border transform translate-x-full transition-transform duration-300 z-50 flex flex-col shadow-2xl">
+                        <div class="h-14 border-b border-border flex items-center justify-between px-6 shrink-0 bg-card">
+                            <div class="flex items-center gap-2">
+                                <i class="fa-solid fa-timeline text-primary text-lg"></i>
+                                <h2 class="text-base font-semibold tracking-wide">Alliance Operations Timeline</h2>
+                            </div>
+                            <button onclick="closeOperationsTimelinePanel()" class="text-muted-foreground hover:text-foreground transition-colors h-8 w-8 rounded-md hover:bg-accent flex items-center justify-center">
+                                <i class="fa-solid fa-xmark text-lg"></i>
+                            </button>
+                        </div>
+                        <div class="flex-1 overflow-y-auto p-4 flex flex-col gap-3" id="ops-timeline-body"></div>
+                    </div>
+                `;
+                document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', panelHtml);
+                panel = document.getElementById('operations-timeline-panel');
+            }
+
+            if (panel.classList.contains('translate-x-0')) return closeOperationsTimelinePanel();
+            closeOtherPanels('operations-timeline-panel');
+
+            panel.classList.replace('translate-x-full', 'translate-x-0');
+            if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
+
+            document.getElementById('ops-timeline-body').innerHTML = '<div class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Reading Operation Vectors...</div>';
+            
+            try {
+                const res = await fetch('/hub-api/intel/timeline');
+                const data = await res.json();
+                if (data.success) {
+                    renderOperationsTimeline(data.timeline);
+                }
+            } catch (err) {
+                document.getElementById('ops-timeline-body').innerHTML = '<div class="text-center py-8 text-red-400">Failed to load trajectories.</div>';
+            }
+        }
+
+        function closeOperationsTimelinePanel() { 
+            const p = document.getElementById('operations-timeline-panel'); 
+            if (p) p.classList.replace('translate-x-0', 'translate-x-full'); 
+        }
+
+        function renderOperationsTimeline(timeline) {
+            const container = document.getElementById('ops-timeline-body');
+            if (!timeline || timeline.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-12 bg-card border border-border rounded-xl p-4 text-muted-foreground italic">
+                        <i class="fa-solid fa-circle-info block text-2xl mb-2 text-muted-foreground/40"></i>
+                        No active fleet operations or landing trajectories logged in system registry.
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = timeline.map(op => {
+                const cv = (op.destroyers * 3) + (op.cruisers * 24) + (op.battleships * 60);
+                const planSection = op.plan_note ? `
+                    <div class="mt-2.5 bg-background border-l-2 border-aw-warning p-2 rounded text-xs">
+                        <span class="text-muted-foreground font-semibold block uppercase tracking-wider text-[10px] mb-0.5">Instructions (by ${op.plan_author || 'Unknown'}):</span>
+                        <p class="text-foreground italic">${op.plan_note}</p>
+                    </div>
+                ` : '';
+
+                return `
+                    <div class="bg-card border border-border rounded-xl p-4 shadow-md flex flex-col gap-2 relative overflow-hidden group">
+                        <div class="flex justify-between items-start">
+                            <div class="flex flex-col">
+                                <span class="text-xs text-muted-foreground font-medium uppercase tracking-wider">Target Coordinate Vector</span>
+                                <button onclick="navToIframe('/Game/Map/SolarSystem/${op.system_id}')" class="text-left font-bold text-foreground hover:text-blue-400 text-sm mt-0.5 transition-colors">
+                                    ${op.system_name || 'Unknown'} #${op.planet_index} <span class="font-mono text-xs text-muted-foreground">(${op.x}/${op.y})</span>
+                                </button>
+                            </div>
+                            <div class="flex flex-col items-end">
+                                <span class="text-xs text-red-400 font-bold px-2 py-0.5 bg-red-500/10 border border-red-500/20 rounded-full">
+                                    ETA: ${op.arrival_time}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2 mt-1 border-t border-border/50 pt-2 text-xs">
+                            <div>
+                                <span class="text-muted-foreground">Commanding Officer:</span><br>
+                                <span class="font-semibold text-foreground">[${op.alliance_tag || '?'}] ${op.owner_name || 'Unknown'}</span>
+                            </div>
+                            <div>
+                                <span class="text-muted-foreground">Combat Weight:</span><br>
+                                <span class="font-bold text-aw-warning">CV ${cv.toLocaleString()}</span>
+                            </div>
+                        </div>
+
+                        <div class="flex gap-4 text-xs text-muted-foreground bg-background/40 px-2 py-1.5 rounded border border-border/40 mt-1">
+                            <span><strong class="text-foreground">${op.battleships}</strong> BB</span>
+                            <span><strong class="text-foreground">${op.cruisers}</strong> CR</span>
+                            <span><strong class="text-foreground">${op.destroyers}</strong> DD</span>
+                            <span><strong class="text-foreground">${op.transports}</strong> TR</span>
+                        </div>
+
+                        ${planSection}
+                    </div>
+                `;
+            }).join('');
         }
 
         let rawDbPlayers = [], dbSortCol = 'points', dbSortAsc = false;

@@ -1120,4 +1120,30 @@ router.get('/intel/alliance-stats', requireAuth, (req, res) => {
     }
 });
 
+// --- UNIFIED OPERATIONS TIMELINE ---
+router.get('/intel/timeline', requireAuth, (req, res) => {
+    try {
+        const timeline = db.prepare(`
+            SELECT f.*, 
+                   s.name as system_name, s.x, s.y,
+                   p.name as owner_name, a.tag as alliance_tag,
+                   pl.note as plan_note, u.game_name as plan_author
+            FROM fleets f
+            LEFT JOIN systems s ON f.system_id = s.id
+            LEFT JOIN players p ON f.owner_id = p.id
+            LEFT JOIN alliances a ON p.alliance_id = a.id
+            -- Correlate tactical plan logs to matching destinations
+            LEFT JOIN planet_plans pl ON f.system_id = pl.system_id AND f.planet_index = pl.planet_index
+            LEFT JOIN app_users u ON pl.author_id = u.id
+            WHERE f.arrival_time IS NOT NULL AND f.arrival_time != '-'
+            ORDER BY f.arrival_time ASC
+        `).all();
+
+        res.json({ success: true, timeline });
+    } catch (err) {
+        console.error("[DB Error] Failed to generate timeline dataset:", err);
+        res.status(500).json({ error: 'Failed to build timeline dataset' });
+    }
+});
+
 module.exports = router;
