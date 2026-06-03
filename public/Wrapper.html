@@ -791,47 +791,126 @@
                 return;
             }
 
-            container.innerHTML = timeline.map(op => {
-                const cv = (op.destroyers * 3) + (op.cruisers * 24) + (op.battleships * 60);
-                const planSection = op.plan_note ? `
-                    <div class="mt-2.5 bg-background border-l-2 border-aw-warning p-2 rounded text-xs">
-                        <span class="text-muted-foreground font-semibold block uppercase tracking-wider text-[10px] mb-0.5">Instructions (by ${op.plan_author || 'Unknown'}):</span>
-                        <p class="text-foreground italic">${op.plan_note}</p>
+            // 1. Group operations by Target Planet Coordinate Vectors
+            const groups = {};
+            timeline.forEach(op => {
+                const key = `${op.system_id}_${op.planet_index}`;
+                if (!groups[key]) {
+                    groups[key] = {
+                        system_name: op.system_name,
+                        system_id: op.system_id,
+                        planet_index: op.planet_index,
+                        x: op.x,
+                        y: op.y,
+                        plan_note: op.plan_note,
+                        plan_author: op.plan_author,
+                        fleets: []
+                    };
+                }
+                groups[key].fleets.push(op);
+            });
+
+            container.innerHTML = Object.values(groups).map(group => {
+                
+                // Helper parser to cleanly handle absolute date-times or pure clock strings for reliable time math
+                const parseTimeToMs = (str) => {
+                    if (!str || str === '-') return 0;
+                    
+                    // Attempt standard timestamp parsing first
+                    let timestamp = Date.parse(str.includes('T') ? str : str.replace(' ', 'T') + 'Z');
+                    if (!isNaN(timestamp)) return timestamp;
+
+                    // Fallback: Parse standalone clock times (HH:MM:SS) to relative millisecond values
+                    const timeMatch = str.match(/(\d{1,2}):(\d{2})(?::(\d{2}))/);
+                    if (timeMatch) {
+                        const hrs = parseInt(timeMatch[1], 10);
+                        const mins = parseInt(timeMatch[2], 10);
+                        const secs = parseInt(timeMatch[3] || 0, 10);
+                        return ((hrs * 60 + mins) * 60 + secs) * 1000;
+                    }
+                    return 0;
+                };
+
+                // 2. Conflict Analysis Check: Scan for matching land vectors within 15 minutes of each other
+                group.fleets.forEach((f1, i) => {
+                    f1.hasOverlap = false;
+                    const t1 = parseTimeToMs(f1.arrival_time);
+                    if (!t1) return;
+
+                    group.fleets.forEach((f2, j) => {
+                        if (i === j) return;
+                        const t2 = parseTimeToMs(f2.arrival_time);
+                        if (!t2) return;
+
+                        // 15 Minutes window checking value = 15 * 60 * 1000 ms
+                        if (Math.abs(t1 - t2) <= 15 * 60 * 1000) {
+                            f1.hasOverlap = true;
+                        }
+                    });
+                });
+
+                // 3. Generate Compacter Fleet Component Rows
+                const fleetRows = group.fleets.map(f => {
+                    const cv = (f.destroyers * 3) + (f.cruisers * 24) + (f.battleships * 60);
+                    
+                    // Format or fallback safely to prevent any variant of "Invalid Date"
+                    let displayTime = f.arrival_time;
+                    if (f.arrival_time.includes('-') || f.arrival_time.includes('/')) {
+                        const d = new Date(f.arrival_time.includes('T') ? f.arrival_time : f.arrival_time.replace(' ', 'T') + 'Z');
+                        if (!isNaN(d.getTime())) {
+                            displayTime = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                        }
+                    }
+
+                    // Dynamically apply warning visual overrides if synchronized targets collide
+                    const boxStyle = f.hasOverlap 
+                        ? 'border-red-500 bg-red-950/20' 
+                        : 'border-border/40 bg-background/30';
+                    const etaStyle = f.hasOverlap 
+                        ? 'font-bold text-red-400 text-xs' 
+                        : 'text-muted-foreground text-[11px]';
+
+                    return `
+                        <div class="border ${boxStyle} rounded-md px-2 py-1 flex flex-col gap-0.5 text-xs">
+                            <div class="flex justify-between items-center">
+                                <span class="font-medium text-foreground truncate max-w-[15rem]">[${f.alliance_tag || '?'}] ${f.owner_name || 'Unknown'}</span>
+                                <span class="${etaStyle}">ETA: ${displayTime}</span>
+                            </div>
+                            <div class="flex justify-between items-center text-muted-foreground text-[11px]">
+                                <div class="flex gap-2">
+                                    <span><strong>${f.battleships}</strong> BS</span>
+                                    <span><strong>${f.cruisers}</strong> CR</span>
+                                    <span><strong>${f.destroyers}</strong> DS</span>
+                                    <span><strong>${f.colony_ships}</strong> CS</span>
+                                    <span><strong>${f.transports}</strong> TR</span>
+                                </div>
+                                <span class="font-medium text-aw-warning text-[11px]">CV ${cv.toLocaleString()}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                const planSection = group.plan_note ? `
+                    <div class="bg-background/50 border-l-2 border-aw-warning p-2 rounded text-xs mt-1">
+                        <span class="text-muted-foreground font-bold text-[10px] block uppercase tracking-wider mb-0.5">Plan (${group.plan_author}):</span>
+                        <p class="text-foreground italic">${group.plan_note}</p>
                     </div>
                 ` : '';
 
                 return `
-                    <div class="bg-card border border-border rounded-xl p-4 shadow-md flex flex-col gap-2 relative overflow-hidden group">
-                        <div class="flex justify-between items-start">
-                            <div class="flex flex-col">
-                                <span class="text-xs text-muted-foreground font-medium uppercase tracking-wider">Target Coordinate Vector</span>
-                                <button onclick="navToIframe('/Game/Map/SolarSystem/${op.system_id}')" class="text-left font-bold text-foreground hover:text-blue-400 text-sm mt-0.5 transition-colors">
-                                    ${op.system_name || 'Unknown'} #${op.planet_index} <span class="font-mono text-xs text-muted-foreground">(${op.x}/${op.y})</span>
-                                </button>
-                            </div>
-                            <div class="flex flex-col items-end">
-                                <span class="text-xs text-red-400 font-bold px-2 py-0.5 bg-red-500/10 border border-red-500/20 rounded-full">
-                                    ETA: ${op.arrival_time}
-                                </span>
-                            </div>
+                    <div class="bg-card border border-border rounded-xl p-3 shadow-md flex flex-col gap-2">
+                        <div class="flex justify-between items-center border-b border-border/40 pb-1.5">
+                            <button onclick="navToIframe('/Game/Map/SolarSystem/${group.system_id}')" class="font-bold text-foreground hover:text-blue-400 text-sm transition-colors text-left">
+                                ${group.system_name || 'Unknown'} #${group.planet_index} 
+                                <span class="font-mono text-xs text-muted-foreground ml-1">(${group.x}/${group.y})</span>
+                            </button>
+                            <span class="text-[11px] text-muted-foreground bg-secondary/80 px-2 py-0.5 rounded font-medium">
+                                ${group.fleets.length} ${group.fleets.length === 1 ? 'Fleet' : 'Fleets'}
+                            </span>
                         </div>
-
-                        <div class="grid grid-cols-2 gap-2 mt-1 border-t border-border/50 pt-2 text-xs">
-                            <div>
-                                <span class="text-muted-foreground">Commanding Officer:</span><br>
-                                <span class="font-semibold text-foreground">[${op.alliance_tag || '?'}] ${op.owner_name || 'Unknown'}</span>
-                            </div>
-                            <div>
-                                <span class="text-muted-foreground">Combat Weight:</span><br>
-                                <span class="font-bold text-aw-warning">CV ${cv.toLocaleString()}</span>
-                            </div>
-                        </div>
-
-                        <div class="flex gap-4 text-xs text-muted-foreground bg-background/40 px-2 py-1.5 rounded border border-border/40 mt-1">
-                            <span><strong class="text-foreground">${op.battleships}</strong> BB</span>
-                            <span><strong class="text-foreground">${op.cruisers}</strong> CR</span>
-                            <span><strong class="text-foreground">${op.destroyers}</strong> DD</span>
-                            <span><strong class="text-foreground">${op.transports}</strong> TR</span>
+                        
+                        <div class="flex flex-col gap-1.5">
+                            ${fleetRows}
                         </div>
 
                         ${planSection}
