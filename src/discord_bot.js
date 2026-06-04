@@ -37,7 +37,9 @@ client.on('messageCreate', async (message) => {
                 { name: '`!plan <sys_id> <planet_num> <instructions...>`', value: 'Adds a tactical plan/note to a specific planet. (Requires your Discord ID to be linked in the Hub).\n*Example: `!plan 123 4 Send colony ship`*' },
                 { name: '`!vision <system_id> [alliance_tag]`', value: 'Performs a radar scan to see which alliance members have vision over a target system.\n*Example: `!vision 123 RAID`*' },
                 { name: '`!holes [alliance_tag]`', value: 'Scans your alliance\'s territory to find empty planets, hostile threats, and planned slots.\n*Example: `!holes RAID`*' },
-                { name: '`!tt <sysA> <plnA> <sysB> <plnB> <speed> <nrg>`', value: 'Calculates fleet travel time between two coordinates.\n*Example: `!tt 100 1 200 4 10 5`*\n*(You can also swap speed/energy for a player name: `!tt 100 1 200 4 PlayerOne`)*' }
+                { name: '`!tt <sysA> <plnA> <sysB> <plnB> <speed> <nrg>`', value: 'Calculates fleet travel time between two coordinates.\n*Example: `!tt 100 1 200 4 10 5`*\n*(You can also swap speed/energy for a player name: `!tt 100 1 200 4 PlayerOne`)*' },
+                { name: '`!ghosts <sys_id> <planet_num> <alliance_tag>`', value: 'Calculates the shortest/longest hidden fleet arrival window from hostile members with radar vision over a system.\n*Example: `!ghosts 1 10 AO`*' },
+                { name: '`!bio`', value: 'Generates intelligence alerts highlighting players who possess a +6 biology or science advantage over your personal bio level.' }
             )
             .setFooter({ text: 'AWT Intelligence Hub' });
 
@@ -49,6 +51,82 @@ client.on('messageCreate', async (message) => {
     // ----------------------------------------------------
     if (command === 'getid') {
         return message.reply(`The ID of this channel is: **${message.channel.id}**`);
+    }
+
+    // ----------------------------------------------------
+    // !bio - BIOLOGY THREAT MATRIX
+    // ----------------------------------------------------
+    if (command === 'bio') {
+        const discordName = message.author.username;
+        
+        // Find the linked user session mapping
+        const user = db.prepare(`SELECT id, game_name FROM app_users WHERE LOWER(discord_name) = ? OR LOWER(discord_name) = ?`)
+                       .get(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
+
+        if (!user) {
+            return message.reply(`❌ Your Discord username (\`${discordName}\`) is not linked to any Hub account. Add it in the Command Center first.`);
+        }
+
+        // Pull the author's own recorded profiles to extract baseline values
+        const me = db.prepare(`SELECT id, biology FROM players WHERE LOWER(name) = ?`).get(user.game_name.toLowerCase());
+        if (!me) {
+            return message.reply(`❌ Could not locate your player profile data (\`${user.game_name}\`) in the synced database tracking array. Please scan your profile in-game first.`);
+        }
+
+        const myBio = me.biology || 0;
+        const threatThreshold = myBio + 6;
+
+        // 1. Confirmed High Biology (has_intel = 1) -> Match bio directly
+        const confirmedThreats = db.prepare(`
+            SELECT p.name, p.biology, a.tag as ally_tag
+            FROM players p
+            LEFT JOIN alliances a ON p.alliance_id = a.id
+            WHERE p.has_intel = 1 AND p.biology >= ? AND p.id != ?
+            ORDER BY p.biology DESC, p.name ASC
+            LIMIT 25
+        `).all(threatThreshold, me.id);
+
+        // 2. Suspected High Biology (has_intel = 0) -> Match science level as proxy ceiling
+        const suspectedThreats = db.prepare(`
+            SELECT p.name, p.science_level, a.tag as ally_tag
+            FROM players p
+            LEFT JOIN alliances a ON p.alliance_id = a.id
+            WHERE p.has_intel = 0 AND p.science_level >= ? AND p.id != ?
+            ORDER BY p.science_level DESC, p.name ASC
+            LIMIT 25
+        `).all(threatThreshold, me.id);
+
+        const embed = new EmbedBuilder()
+            .setTitle(`🧬 Biology Threat Matrix (Your Bio: ${myBio})`)
+            .setDescription(`Scanning for active entities displaying an advantage of **+6** levels or higher over your baseline radar coverage (Threshold: **${threatThreshold}+**):`)
+            .setColor('#10b981'); // Emerald green theme for bio profile metrics
+
+        let confirmedStr = "";
+        if (confirmedThreats.length > 0) {
+            confirmedThreats.forEach(p => {
+                const tagStr = p.ally_tag ? `[${p.ally_tag}] ` : "";
+                confirmedStr += `• ${tagStr}${p.name} — Bio: **${p.biology}**\n`;
+            });
+        } else {
+            confirmedStr = "*No verified out-of-range biology logs stored above threshold.*";
+        }
+
+        let suspectedStr = "";
+        if (suspectedThreats.length > 0) {
+            suspectedThreats.forEach(p => {
+                const tagStr = p.ally_tag ? `[${p.ally_tag}] ` : "";
+                suspectedStr += `• ${tagStr}${p.name} — Sci Lvl: **${p.science_level}**\n`;
+            });
+        } else {
+            suspectedStr = "*No obscured high science metrics discovered.*";
+        }
+
+        embed.addFields(
+            { name: `✅ Confirmed Bio Advantages (has_intel = 1)`, value: confirmedStr },
+            { name: `⚠️ Unscanned Profiles / Proxy Threat Level (has_intel = 0 via Science Level)`, value: suspectedStr }
+        );
+
+        return message.reply({ embeds: [embed] });
     }
 
     // ----------------------------------------------------
@@ -686,6 +764,105 @@ client.on('messageCreate', async (message) => {
             .setDescription(report)
             .setColor('#f97316')
             .setFooter({ text: `Monitored systems: ${systemsWithHoles} | *Italics* = Spoken for (!plan) | **Bold** = Hostile Presence` });
+
+        return message.reply({ embeds: [embed] });
+    }
+
+    // ----------------------------------------------------
+    // !ghosts <sys_id> <planet> <alliance_tag> - GHOST FORECAST
+    // ----------------------------------------------------
+    if (command === 'ghosts') {
+        const sysId = parseInt(args[0], 10);
+        const planetNum = parseInt(args[1], 10);
+        const tag = args[2] ? args[2].toUpperCase() : null;
+
+        if (isNaN(sysId) || isNaN(planetNum) || !tag) {
+            return message.reply('❌ **Usage:** `!ghosts <system_id> <planet_num> <alliance_tag>`\n*Example: `!ghosts 1 10 AO`*');
+        }
+
+        const targetSys = db.prepare("SELECT name, x, y FROM systems WHERE id = ?").get(sysId);
+        if (!targetSys) return message.reply(`❌ System **[${sysId}]** not found in the database.`);
+
+        // Find all players in that alliance with an origin system recorded
+        const alliancePlayers = db.prepare(`
+            SELECT p.id, p.name, p.biology, p.science_level, p.energy, p.race_speed, s.id as orig_sys_id, s.x as orig_x, s.y as orig_y
+            FROM players p
+            JOIN alliances a ON p.alliance_id = a.id
+            JOIN systems s ON p.origin_system = s.id
+            WHERE a.tag = ?
+        `).all(tag);
+
+        if (!alliancePlayers || alliancePlayers.length === 0) {
+            return message.reply(`❌ No tracked players found for alliance [${tag}] with known origin systems.`);
+        }
+
+        const tx = targetSys.x;
+        const ty = targetSys.y;
+        const ghostLines = [];
+
+        alliancePlayers.forEach(p => {
+            // 1. Radar Vision Check (using their origin system as radar baseline)
+            const distanceToTarget = Math.sqrt(Math.pow(p.orig_x - tx, 2) + Math.pow(p.orig_y - ty, 2));
+            const requiredBio = Math.ceil(distanceToTarget);
+            const visionRadius = (p.biology && p.biology > 0) ? p.biology : (p.science_level || 1);
+
+            // If they didn't have vision over the system, they couldn't see to react/launch
+            if (visionRadius < requiredBio) return;
+
+            // 2. Gather all possible launch points (Scraped planets + Origin system baseline)
+            const launchPoints = [];
+            launchPoints.push({ x: p.orig_x, y: p.orig_y, planet_index: 1 }); // Default fallback slot
+
+            const scrapedPlanets = db.prepare(`
+                SELECT p.planet_index, s.x, s.y
+                FROM planets p
+                JOIN systems s ON p.system_id = s.id
+                WHERE p.owner_id = ?
+            `).all(p.id);
+
+            scrapedPlanets.forEach(sp => {
+                if (!launchPoints.some(lp => lp.x === sp.x && lp.y === sp.y && lp.planet_index === sp.planet_index)) {
+                    launchPoints.push({ x: sp.x, y: sp.y, planet_index: sp.planet_index });
+                }
+            });
+
+            // 3. Compute travel window extrema across their entire empire cluster
+            let minTime = Infinity;
+            let maxTime = -Infinity;
+
+            launchPoints.forEach(lp => {
+                const secs = calcTravelSeconds(lp.x, lp.y, lp.planet_index, tx, ty, planetNum, p.energy, p.race_speed, false);
+                if (secs < minTime) minTime = secs;
+                if (secs > maxTime) maxTime = secs;
+            });
+
+            if (minTime !== Infinity) {
+                ghostLines.push({
+                    name: p.name,
+                    minStr: formatTime(minTime),
+                    maxStr: formatTime(maxTime),
+                    minVal: minTime
+                });
+            }
+        });
+
+        if (ghostLines.length === 0) {
+            return message.reply(`🟢 Safe sector check: No members of [${tag}] hold active radar vision over system #${sysId}. No ghosts possible.`);
+        }
+
+        // Sort dynamically by closest potential threat arrivals first
+        ghostLines.sort((a, b) => a.minVal - b.minVal);
+
+        let reportStr = "";
+        ghostLines.forEach((g, idx) => {
+            reportStr += `**${idx + 1}. ${g.name}**: shortest \`${g.minStr}\`, longest \`${g.maxStr}\`\n`;
+        });
+
+        const embed = new EmbedBuilder()
+            .setTitle(`👻 Stealth Ghost Trajectory Matrix: [${tag}]`)
+            .setDescription(`Possible pre-capture incoming tracking windows for **Planet #${planetNum}** in system **${targetSys.name || 'Unknown'} [${sysId}]**:\n\n${reportStr}`)
+            .setColor('#4b5563') // Tactical slate-gray
+            .setFooter({ text: 'Calculated using server vector configurations.' });
 
         return message.reply({ embeds: [embed] });
     }
