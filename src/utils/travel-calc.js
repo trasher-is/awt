@@ -1,4 +1,4 @@
-function calcTravelSeconds(startX, startY, endX, endY, energy, raceSpeed, isAlliance) {
+function calcTravelSeconds(startX, startY, startPlanet, endX, endY, endPlanet, energy, raceSpeed, isAlliance) {
     const eng = parseInt(energy) || 0;
     const spd = parseInt(raceSpeed) || 0;
     const energyMod = Math.pow(0.91, eng);
@@ -8,12 +8,18 @@ function calcTravelSeconds(startX, startY, endX, endY, energy, raceSpeed, isAlli
     let travelTime = 0;
 
     if (startX === endX && startY === endY) {
-        travelTime = Math.floor((14400 * totalMod) + 1200); 
+        // SAME SYSTEM TRAVEL
+        const planetDiff = Math.abs(startPlanet - endPlanet);
+        travelTime = Math.floor((14400 * Math.sqrt(planetDiff + 1) * totalMod) + 1200); 
     } else {
+        // DEEP SPACE TRAVEL
         const dx = endX - startX;
         const dy = endY - startY;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        travelTime = Math.floor((dist * 36000 * totalMod) + 2700); 
+        const planetDiff = Math.abs(startPlanet - endPlanet);
+        
+        // Base coordinate time + linear planet slot distance penalty (3500s per slot)
+        travelTime = Math.floor(((dist * 36000) + (planetDiff * 3500)) * totalMod + 6300); 
     }
 
     return isAlliance ? Math.floor(travelTime * 0.5) : travelTime;

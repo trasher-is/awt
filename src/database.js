@@ -287,6 +287,19 @@ function initDatabase() {
         )
     `);
 
+    // --- SYSTEM TAKEOVER CAMPAIGN TABLE ---
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS planet_takeovers (
+            system_id INTEGER,
+            planet_index INTEGER,
+            assigned_name TEXT,
+            pipeline_status INTEGER DEFAULT 1, -- 1=Recon/Targets, 2=Breaking, 3=Cleared/Ready, 4=Secured
+            target_arrival_time TEXT,          -- User-chosen local completion time (HH:MM:SS)
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (system_id, planet_index)
+        )
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

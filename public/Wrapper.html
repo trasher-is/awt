@@ -60,7 +60,14 @@
                 <div class="px-4 py-2 text-s text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed flex justify-between items-center">
                     <span>System Intel</span><span id="ui-sys-id" class="text-foreground font-mono hidden">--</span>
                 </div>
-                
+
+                <div class="flex items-center gap-2">
+                    <button onclick="openTakeoverBoardPanel()" class="text-muted-foreground hover:text-green-400 transition-colors" title="Test planner">
+                        <i class="fa-solid fa-square-poll-horizontal text-base"></i>
+                    </button>
+                    <span id="ui-sys-id" class="text-foreground font-mono">--</span>
+                </div>
+            
                 <div id="system-intel-container" class="px-4 py-2 hide-collapsed flex flex-col gap-4 text-sm">
                     <div>
                         <div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Planets</div>
@@ -724,14 +731,176 @@
             if (window.innerWidth < 768) toggleSidebar();
         }
 
-        // Append 'operations-timeline-panel' to your existing panel loop array
+        // Include 'takeover-board-panel' in your existing sidebar reset engine function loops
         function closeOtherPanels(exceptId) {
-            ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'operations-timeline-panel'].forEach(id => {
+            ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'operations-timeline-panel', 'takeover-board-panel'].forEach(id => {
                 if (id !== exceptId) {
                     const p = document.getElementById(id);
                     if (p) p.classList.replace('translate-x-0', 'translate-x-full');
                 }
             });
+        }
+
+        async function openTakeoverBoardPanel() {
+            if (!currentSystemId) return showToast('No coordinate network loaded');
+            let panel = document.getElementById('takeover-board-panel');
+            
+            if (!panel) {
+                const layout = `
+                    <div id="takeover-board-panel" class="fixed top-0 right-0 h-full w-full bg-background/99 backdrop-blur-md transform translate-x-full transition-transform duration-300 z-50 flex flex-col shadow-2xl">
+                        <div class="h-14 border-b border-border flex items-center justify-between px-6 bg-card shrink-0">
+                            <div class="flex items-center gap-3">
+                                <i class="fa-solid fa-square-poll-horizontal text-green-400 text-lg"></i>
+                                <h2 class="text-base font-semibold tracking-wide">System Takeover Pipeline <span class="text-xs font-mono text-muted-foreground" id="kanban-title-id"></span></h2>
+                            </div>
+                            <button onclick="closeTakeoverBoardPanel()" class="text-muted-foreground hover:text-foreground transition-colors h-8 w-8 rounded-md hover:bg-accent flex items-center justify-center"><i class="fa-solid fa-xmark text-lg"></i></button>
+                        </div>
+                        <div class="flex-1 overflow-y-auto p-4 grid grid-cols-1 md:grid-cols-4 gap-4" id="kanban-columns-container"></div>
+                    </div>
+                `;
+                document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', layout);
+                panel = document.getElementById('takeover-board-panel');
+            }
+
+            if (panel.classList.contains('translate-x-0')) return closeTakeoverBoardPanel();
+            closeOtherPanels('takeover-board-panel');
+            panel.classList.replace('translate-x-full', 'translate-x-0');
+            if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
+
+            document.getElementById('kanban-title-id').innerText = `#${currentSystemId}`;
+            await refreshTakeoverBoard();
+        }
+
+        function closeTakeoverBoardPanel() { const p = document.getElementById('takeover-board-panel'); if (p) p.classList.replace('translate-x-0', 'translate-x-full'); }
+
+        async function refreshTakeoverBoard() {
+            const body = document.getElementById('kanban-columns-container');
+            body.innerHTML = '<div class="col-span-1 md:col-span-4 text-center py-12 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Aligning tactical grids...</div>';
+            
+            try {
+                const [boardRes, usersRes] = await Promise.all([
+                    fetch(`/hub-api/intel/takeover/${currentSystemId}`),
+                    fetch('/hub-api/intel/members')
+                ]);
+                const boardData = await boardRes.json();
+                const usersData = await usersRes.json();
+
+                if (boardData.success && usersData.success) {
+                    renderTakeoverBoard(boardData.board, usersData.members);
+                }
+            } catch(e) {
+                body.innerHTML = '<div class="col-span-1 md:col-span-4 text-center py-12 text-red-400">Failed to pull database parameters.</div>';
+            }
+        }
+
+        function renderTakeoverBoard(planets, users) {
+            const columns = [
+                { id: 1, title: '1. Recon / Targets', color: 'border-blue-500/50' },
+                { id: 2, title: '2. Breaking Inbound', color: 'border-amber-500/50' },
+                { id: 3, title: '3. Cleared / Ready', color: 'border-purple-500/50' },
+                { id: 4, title: '4. Secured', color: 'border-green-500/50' }
+            ];
+
+            const colNodes = columns.map(c => `<div class="flex flex-col bg-card/40 border border-border rounded-xl p-3 h-fit min-h-[12rem] md:min-h-[80vh]"><div class="flex justify-between items-center border-b ${c.color} pb-2 mb-3"><h3 class="font-bold text-sm tracking-wide text-foreground/90">${c.title}</h3><span class="text-xs bg-secondary/80 font-semibold px-2 py-0.5 rounded-full text-muted-foreground" id="col-count-${c.id}">0</span></div><div class="flex flex-col gap-2.5" id="col-body-${c.id}"></div></div>`);
+            document.getElementById('kanban-columns-container').innerHTML = colNodes.join('');
+
+            planets.forEach(p => {
+                const status = p.pipeline_status || 1;
+                const bodyNode = document.getElementById(`col-body-${status}`);
+                const counterNode = document.getElementById(`col-count-${status}`);
+                counterNode.innerText = parseInt(counterNode.innerText, 10) + 1;
+
+                // --- INTEGRATED LAUNCH TIME CALCULATOR ---
+                let launchTimeText = '';
+                if (p.target_arrival_time && p.origin_x !== null && p.target_x !== null) {
+                    try {
+                        const eng = p.runner_energy || 0;
+                        const spd = p.runner_speed || 0;
+                        const energyMod = Math.pow(0.91, eng);
+                        const speedMod = 1.0 - (spd * 0.11);
+                        const totalMod = energyMod * speedMod;
+
+                        let travelSeconds = 0;
+                        if (p.origin_x === p.target_x && p.origin_y === p.target_y) {
+                            travelSeconds = Math.floor((14400 * totalMod) + 1200);
+                        } else {
+                            const dx = p.target_x - p.origin_x;
+                            const dy = p.target_y - p.origin_y;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            travelSeconds = Math.floor((dist * 36000 * totalMod) + 2700);
+                        }
+
+                        // Parse out chosen clock input inside local timezone specs
+                        const todayStr = new Date().toISOString().split('T')[0];
+                        const targetDateTime = new Date(`${todayStr}T${p.target_arrival_time}`);
+                        
+                        if (!isNaN(targetDateTime.getTime())) {
+                            const launchDateTime = new Date(targetDateTime.getTime() - (travelSeconds * 1000));
+                            launchTimeText = `
+                                <div class="mt-1.5 pt-1.5 border-t border-border/40 text-[11px] text-muted-foreground flex flex-col gap-0.5">
+                                    <div class="flex justify-between"><span>Travel:</span> <span class="font-mono text-foreground font-medium">${Math.floor(travelSeconds/3600)}h ${Math.floor((travelSeconds%3600)/60)}m</span></div>
+                                    <div class="flex justify-between text-green-400"><span>Launch Clock:</span> <span class="font-bold">${launchDateTime.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false})}</span></div>
+                                </div>
+                            `;
+                        }
+                    } catch(err) {}
+                }
+
+                const userOptions = users.map(u => `<option value="${u}" ${p.assigned_name === u ? 'selected' : ''}>${u}</option>`).join('');
+
+                const card = `
+                    <div class="bg-background border border-border hover:border-muted/80 rounded-lg p-3 shadow-sm flex flex-col gap-1.5 transition-colors relative">
+                        <div class="flex justify-between items-center">
+                            <span class="font-bold text-foreground text-sm">Planet #${p.planet_index}</span>
+                            <div class="flex gap-1">
+                                ${status > 1 ? `<button onclick="shiftNodeColumn(${p.planet_index}, ${status - 1})" class="h-6 w-6 rounded border border-border bg-card flex items-center justify-center text-muted-foreground hover:text-foreground text-xs"><i class="fa-solid fa-chevron-left"></i></button>` : ''}
+                                ${status < 4 ? `<button onclick="shiftNodeColumn(${p.planet_index}, ${status + 1})" class="h-6 w-6 rounded border border-border bg-card flex items-center justify-center text-muted-foreground hover:text-foreground text-xs"><i class="fa-solid fa-chevron-right"></i></button>` : ''}
+                            </div>
+                        </div>
+
+                        <div class="text-xs text-muted-foreground flex flex-col gap-0.5">
+                            <div class="truncate">Intel: <span class="text-foreground font-medium">${p.owner_name ? `[${p.alliance_tag || '?'}] ${p.owner_name}` : 'Empty Space'}</span></div>
+                            <div class="flex gap-3"><span>Pop: <strong class="text-foreground">${(p.population || 0).toLocaleString()}</strong></span><span>SB: <strong class="text-foreground">${p.starbase || 0}</strong></span></div>
+                        </div>
+
+                        <div class="flex flex-col gap-1.5 mt-1">
+                            <select onchange="assignNodeRunner(${p.planet_index}, this.value)" class="h-7 w-full rounded border border-input bg-card px-1.5 py-0.5 text-xs text-muted-foreground focus:outline-none">
+                                <option value="__REMOVE__">-- Assign Raider --</option>
+                                ${userOptions}
+                            </select>
+
+                            <div class="flex items-center gap-1.5">
+                                <input type="time" step="1" value="${p.target_arrival_time || ''}" onchange="setNodeArrivalTime(${p.planet_index}, this.value)" class="h-7 flex-1 rounded border border-input bg-card px-1.5 py-0.5 text-xs text-foreground focus:outline-none font-mono">
+                                ${p.target_arrival_time ? `<button onclick="setNodeArrivalTime(${p.planet_index}, '__REMOVE__')" class="h-7 w-7 rounded border border-border bg-card hover:bg-red-950/20 text-muted-foreground hover:text-red-400 flex items-center justify-center text-xs"><i class="fa-solid fa-trash-can"></i></button>` : ''}
+                            </div>
+                        </div>
+
+                        ${launchTimeText}
+                    </div>
+                `;
+                bodyNode.innerHTML += card;
+            });
+        }
+
+        async function shiftNodeColumn(planetIdx, newStatus) {
+            try {
+                const res = await fetch('/hub-api/intel/takeover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ system_id: currentSystemId, planet_index: planetIdx, pipeline_status: newStatus }) });
+                if (res.ok) await refreshTakeoverBoard();
+            } catch(e) {}
+        }
+
+        async function assignNodeRunner(planetIdx, userName) {
+            try {
+                const res = await fetch('/hub-api/intel/takeover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ system_id: currentSystemId, planet_index: planetIdx, assigned_name: userName }) });
+                if (res.ok) { showToast(userName === '__REMOVE__' ? 'Assignment dropped' : `Assigned to ${userName}`); await refreshTakeoverBoard(); }
+            } catch(e) {}
+        }
+
+        async function setNodeArrivalTime(planetIdx, clockVal) {
+            try {
+                const res = await fetch('/hub-api/intel/takeover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ system_id: currentSystemId, planet_index: planetIdx, target_arrival_time: clockVal }) });
+                if (res.ok) { showToast(clockVal === '__REMOVE__' ? 'Arrival cleared' : 'Landing time adjusted'); await refreshTakeoverBoard(); }
+            } catch(e) {}
         }
 
         async function openOperationsTimelinePanel() {

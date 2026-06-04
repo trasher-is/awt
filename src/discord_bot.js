@@ -1,5 +1,6 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
-const db = require('./database'); 
+const db = require('./database');
+const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
 
 const client = new Client({
     intents: [
@@ -21,10 +22,96 @@ client.on('messageCreate', async (message) => {
     const command = args.shift().toLowerCase();
 
     // ----------------------------------------------------
+    // !help - DISPLAY ALL AVAILABLE COMMANDS
+    // ----------------------------------------------------
+    if (command === 'help') {
+        const embed = new EmbedBuilder()
+            .setTitle('🛠️ Command Center Help')
+            .setDescription('Here is a list of all available commands and how to use them:')
+            .setColor('#10b981') // Green color
+            .addFields(
+                { name: '`!intels`', value: 'Opens an interactive text menu to browse tracked intelligence profiles.' },
+                { name: '`!sys <system_id>`', value: 'Displays intel for a specific solar system (Planets, Fleets, Plans).\n*Example: `!sys 123`*' },
+                { name: '`!intel <player_name>`', value: 'Displays detailed intelligence and stats for a specific player.\n*Example: `!intel PlayerOne`*' },
+                { name: '`!dist <sys1_id> <sys2_id>`', value: 'Calculates the distance and required biology level between two systems.\n*Example: `!dist 100 200`*' },
+                { name: '`!plan <sys_id> <planet_num> <instructions...>`', value: 'Adds a tactical plan/note to a specific planet. (Requires your Discord ID to be linked in the Hub).\n*Example: `!plan 123 4 Send colony ship`*' },
+                { name: '`!vision <system_id> [alliance_tag]`', value: 'Performs a radar scan to see which alliance members have vision over a target system.\n*Example: `!vision 123 RAID`*' },
+                { name: '`!holes [alliance_tag]`', value: 'Scans your alliance\'s territory to find empty planets, hostile threats, and planned slots.\n*Example: `!holes RAID`*' },
+                { name: '`!tt <sysA> <plnA> <sysB> <plnB> <speed> <nrg>`', value: 'Calculates fleet travel time between two coordinates.\n*Example: `!tt 100 1 200 4 10 5`*\n*(You can also swap speed/energy for a player name: `!tt 100 1 200 4 PlayerOne`)*' }
+            )
+            .setFooter({ text: 'AWT Intelligence Hub' });
+
+        return message.reply({ embeds: [embed] });
+    }
+
+    // ----------------------------------------------------
     // !getid - DISPLAY CHANNEL ID
     // ----------------------------------------------------
     if (command === 'getid') {
         return message.reply(`The ID of this channel is: **${message.channel.id}**`);
+    }
+
+    // ----------------------------------------------------
+    // !tt - TRAVEL TIME CALCULATOR
+    // ----------------------------------------------------
+    if (command === 'tt') {
+        if (args.length < 5) {
+            return message.reply('❌ **Usage:**\nManual: `!tt <sys_id_A> <planet_A> <sys_id_B> <planet_B> <racespeed> <energy>`\nSemi-manual: `!tt <sys_id_A> <planet_A> <sys_id_B> <planet_B> <player_name>`');
+        }
+
+        const sysA = parseInt(args[0], 10);
+        const plnA = parseInt(args[1], 10);
+        const sysB = parseInt(args[2], 10);
+        const plnB = parseInt(args[3], 10);
+
+        if (isNaN(sysA) || isNaN(plnA) || isNaN(sysB) || isNaN(plnB)) {
+            return message.reply('❌ Invalid system or planet numbers provided.');
+        }
+
+        let speed = 0;
+        let energy = 0;
+        let playerNameDisplay = 'Manual Entry';
+
+        // Check if manual entry
+        if (args.length >= 6 && !isNaN(args[4]) && !isNaN(args[5])) {
+            speed = parseInt(args[4], 10);
+            energy = parseInt(args[5], 10);
+        } else {
+            // Semi-manual: look up player stats from the database
+            const playerName = args.slice(4).join(' ');
+            const player = db.prepare(`SELECT name, race_speed, energy FROM players WHERE name LIKE ?`).get(playerName);
+            
+            if (!player) {
+                return message.reply(`❌ Player **${playerName}** not found in the database. Please provide valid stats manually or check the spelling.`);
+            }
+            
+            speed = player.race_speed || 0;
+            energy = player.energy || 0;
+            playerNameDisplay = player.name;
+        }
+
+        const sys1 = db.prepare(`SELECT name, x, y FROM systems WHERE id = ?`).get(sysA);
+        const sys2 = db.prepare(`SELECT name, x, y FROM systems WHERE id = ?`).get(sysB);
+
+        if (!sys1) return message.reply(`❌ Origin System #${sysA} not found in the database.`);
+        if (!sys2) return message.reply(`❌ Destination System #${sysB} not found in the database.`);
+
+        // Successfully running the updated 9-parameter version
+        const fullTimeSecs = calcTravelSeconds(sys1.x, sys1.y, plnA, sys2.x, sys2.y, plnB, energy, speed, false);
+        const halfTimeSecs = calcTravelSeconds(sys1.x, sys1.y, plnA, sys2.x, sys2.y, plnB, energy, speed, true);
+
+        const embed = new EmbedBuilder()
+            .setTitle('⏱️ Travel Time Calculator')
+            .setColor('#f59e0b')
+            .addFields(
+                { name: 'Origin', value: `**${sys1.name || 'Unknown'} #${sysA}**\nPlanet: ${plnA}\nCoords: ${sys1.x} / ${sys1.y}`, inline: true },
+                { name: 'Destination', value: `**${sys2.name || 'Unknown'} #${sysB}**\nPlanet: ${plnB}\nCoords: ${sys2.x} / ${sys2.y}`, inline: true },
+                { name: 'Profile Engine', value: `**${playerNameDisplay}**\nSpeed: ${speed}\nEnergy: ${energy}`, inline: true },
+                { name: 'Standard Travel', value: `**${formatTime(fullTimeSecs)}**`, inline: true },
+                { name: 'Alliance Travel (50%)', value: `**${formatTime(halfTimeSecs)}**`, inline: true }
+            );
+
+        return message.reply({ embeds: [embed] });
     }
 
     // ----------------------------------------------------

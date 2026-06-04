@@ -1146,4 +1146,55 @@ router.get('/intel/timeline', requireAuth, (req, res) => {
     }
 });
 
+// --- GET TAKEOVER PIPELINE STATE ---
+router.get('/intel/takeover/:systemId', requireAuth, (req, res) => {
+    try {
+        const sysId = req.params.systemId;
+        const board = db.prepare(`
+            SELECT p.planet_index, p.population, p.starbase, p.has_fleet,
+                   u.name as owner_name, a.tag as alliance_tag,
+                   t.assigned_name, t.pipeline_status, t.target_arrival_time,
+                   runner.energy as runner_energy, runner.race_speed as runner_speed,
+                   sys_target.x as target_x, sys_target.y as target_y,
+                   sys_origin.x as origin_x, sys_origin.y as origin_y
+            FROM planets p
+            LEFT JOIN players u ON p.owner_id = u.id
+            LEFT JOIN alliances a ON u.alliance_id = a.id
+            LEFT JOIN planet_takeovers t ON p.system_id = t.system_id AND p.planet_index = t.planet_index
+            LEFT JOIN players runner ON LOWER(t.assigned_name) = LOWER(runner.name)
+            LEFT JOIN systems sys_target ON p.system_id = sys_target.id
+            LEFT JOIN systems sys_origin ON runner.origin_system = sys_origin.id
+            WHERE p.system_id = ?
+            ORDER BY p.planet_index ASC
+        `).all(sysId);
+
+        res.json({ success: true, board });
+    } catch (err) {
+        console.error("[DB Error] Failed to generate takeover context board:", err);
+        res.status(500).json({ error: 'Failed to load pipeline datasets' });
+    }
+});
+
+// --- UPDATE PLANET TAKEOVER NODE ---
+router.post('/intel/takeover', requireAuth, (req, res) => {
+    const { system_id, planet_index, assigned_name, pipeline_status, target_arrival_time } = req.body;
+    if (!system_id || !planet_index) return res.status(400).json({ error: 'Missing parameters' });
+
+    try {
+        db.prepare(`
+            INSERT INTO planet_takeovers (system_id, planet_index, assigned_name, pipeline_status, target_arrival_time, updated_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(system_id, planet_index) DO UPDATE SET
+                assigned_name = CASE WHEN excluded.assigned_name = '__REMOVE__' THEN NULL ELSE COALESCE(excluded.assigned_name, assigned_name) END,
+                pipeline_status = COALESCE(excluded.pipeline_status, pipeline_status),
+                target_arrival_time = CASE WHEN excluded.target_arrival_time = '__REMOVE__' THEN NULL ELSE COALESCE(excluded.target_arrival_time, target_arrival_time) END,
+                updated_at = CURRENT_TIMESTAMP
+        `).run(system_id, planet_index, assigned_name || null, pipeline_status || null, target_arrival_time || null);
+        
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to balance metrics adjustment sequence' });
+    }
+});
+
 module.exports = router;
