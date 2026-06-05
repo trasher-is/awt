@@ -14,6 +14,23 @@ client.on('clientReady', () => {
     console.log(`[Discord] Tactical Bot active and logged in as ${client.user.tag}`);
 });
 
+function parseTimerInput(input) {
+    const cleanInput = input.trim().toLowerCase();
+    let durationMs = 0;
+
+    // Grab hours and minutes using flexible regex (handles space or no space)
+    const hourMatch = cleanInput.match(/(\d+)\s*(h|hour|hours)/);
+    const minMatch = cleanInput.match(/(\d+)\s*(m|min|mins|minute|minutes)/);
+
+    // If it doesn't match either, it's garbage input
+    if (!hourMatch && !minMatch) return null; 
+
+    if (hourMatch) durationMs += parseInt(hourMatch[1], 10) * 60 * 60 * 1000;
+    if (minMatch) durationMs += parseInt(minMatch[1], 10) * 60 * 1000;
+
+    return durationMs;
+}
+
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.content.startsWith('!')) return;
@@ -51,6 +68,33 @@ client.on('messageCreate', async (message) => {
     // ----------------------------------------------------
     if (command === 'getid') {
         return message.reply(`The ID of this channel is: **${message.channel.id}**`);
+    }
+
+    // ----------------------------------------------------
+    // !timer - SET A CUSTOM TIMER TO PING YOU BACK
+    // ----------------------------------------------------
+
+    if (message.content.startsWith('!timer ')) {
+        const args = message.content.slice(7).trim(); // Strip away "!timer "
+        
+        if (!args) {
+            return message.reply("❌ Usage: `!timer 10mins` or `!timer 1 hour 8 mins`");
+        }
+
+        const delayMs = parseTimerInput(args);
+
+        if (!delayMs) {
+            return message.reply("❌ Invalid format. Use simple relative timings like `10mins`, `1h 8m`, or `1 hour 5 minutes`.");
+        }
+
+        // Acknowledge the timer
+        const minutesTotal = Math.round(delayMs / 60000);
+        await message.reply(`⏰ Timer set! I will ping you here in **${minutesTotal} minutes**.`);
+
+        // Wait and execute the ping
+        setTimeout(() => {
+            message.reply(`🔔 <@${message.author.id}> **TIME IS UP!** Your timer for "${args}" has finished.`);
+        }, delayMs);
     }
 
     // ----------------------------------------------------

@@ -63,7 +63,7 @@ export async function scrapeAlliance() {
         if (response.ok) {
             console.log(`[Spy] Alliance '${p.tag}' synced! (${p.members.length} members mapped)`);
             
-            window.parent.postMessage({ type: 'SHOW_TOAST', payload: `Alliance [${p.tag}] Synced` }, window.location.origin);
+            // Toast notification removed from here
             
             const header = document.querySelector('h5 span');
             if (header && !header.querySelector('.aw-synced')) {
@@ -87,7 +87,7 @@ export async function scrapeAllianceMembers() {
     if (eyeButtons.length === 0) return;
 
     console.log(`[AWT Scraper] Found ${eyeButtons.length} alliance members. Syncing detailed stats in background...`);
-    window.parent.postMessage({ type: 'SHOW_TOAST', payload: 'Syncing Alliance Stats...' }, window.location.origin);
+    // Toast notification removed from here
 
     for (const btn of eyeButtons) {
         try {
@@ -171,5 +171,5 @@ export async function scrapeAllianceMembers() {
             console.error(`[AWT Scraper] Error collecting data for member link:`, err);
         }
     }
-    window.parent.postMessage({ type: 'SHOW_TOAST', payload: 'Alliance Stats Updated!' }, window.location.origin);
+    // Toast notification removed from here
 }

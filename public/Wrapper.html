@@ -39,8 +39,8 @@
 </head>
 <body class="w-screen h-screen overflow-hidden bg-background text-foreground font-sans text-sm select-none" oncontextmenu="return false;">
 
-    <main class="absolute inset-0 w-full h-full bg-black z-0">
-        <iframe id="game-frame" class="w-full h-full border-none"></iframe>
+    <main class="absolute inset-0 w-full bg-black z-0" style="height: 100dvh;">
+        <iframe id="game-frame" class="w-full border-none" style="height: 100dvh;"></iframe>
     </main>
 
     <button id="mobile-trigger" onclick="toggleSidebar()" class="hidden absolute top-12 left-4 z-40 bg-background border border-border text-foreground w-10 h-10 rounded-md shadow-sm items-center justify-center hover:bg-accent">
