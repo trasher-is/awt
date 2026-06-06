@@ -251,7 +251,13 @@ router.post('/sync/player', requireAuth, (req, res) => {
         race_defense: p.race_defense || 0,
         race_trader: p.race_trader || 0,
         race_sul: p.race_sul || 0,
-        has_intel: p.has_intel || 0
+        has_intel: p.has_intel || 0,
+        
+        // Dynamic additions mapping extracted array strings
+        home_planet_id: p.home_planet_id || null,
+        home_system_id: p.home_system_id || null,
+        home_planet_index: p.home_planet_index || null,
+        possible_homes: p.possible_homes ? JSON.stringify(p.possible_homes) : '[]'
     };
 
     const oldPlayer = db.prepare('SELECT logins, points, origin_system FROM players WHERE id = ?').get(p.id);
@@ -278,7 +284,8 @@ router.post('/sync/player', requireAuth, (req, res) => {
                     biology=0, economy=0, energy=0, mathematics=0, physics=0, social=0,
                     trade_revenue=0, artefact=NULL, eco_bonus=0,
                     race_growth=0, race_science=0, race_culture=0, race_production=0, race_speed=0, race_attack=0, race_defense=0,
-                    race_trader=0, race_sul=0, origin_system=NULL, has_intel=0, intel_updated_at=NULL
+                    race_trader=0, race_sul=0, origin_system=NULL, has_intel=0, intel_updated_at=NULL,
+                    home_planet_id=NULL, home_system_id=NULL, home_planet_index=NULL, possible_homes='[]'
                 WHERE id = ?
             `).run(player.id);
         }
@@ -295,7 +302,8 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 trade_revenue, artefact, eco_bonus,
                 race_growth, race_science, race_culture, race_production, race_speed, race_attack, race_defense,
                 race_trader, race_sul,
-                joined, logins, has_intel, intel_updated_at
+                joined, logins, has_intel, intel_updated_at,
+                home_planet_id, home_system_id, home_planet_index, possible_homes
             ) VALUES (
                 @id, @name, @alliance_id, @country, @local_time, @idle_time, @origin_system, 
                 @level, @ranking, @points, @science_level, @culture_level, 
@@ -304,16 +312,20 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 @race_growth, @race_science, @race_culture, @race_production, @race_speed, @race_attack, @race_defense,
                 @race_trader, @race_sul,
                 @joined, @logins, @has_intel,
-                CASE WHEN @has_intel = 1 THEN CURRENT_TIMESTAMP ELSE NULL END
+                CASE WHEN @has_intel = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
+                @home_planet_id, @home_system_id, @home_planet_index, @possible_homes
             ) ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name, alliance_id=excluded.alliance_id, country=excluded.country, 
                 local_time=excluded.local_time, idle_time=excluded.idle_time, origin_system=excluded.origin_system,
                 level=excluded.level, ranking=excluded.ranking, points=excluded.points, 
                 science_level=excluded.science_level, culture_level=excluded.culture_level,
                 joined=excluded.joined, logins=excluded.logins,
+                home_planet_id=excluded.home_planet_id,
+                home_system_id=excluded.home_system_id,
+                home_planet_index=excluded.home_planet_index,
+                possible_homes=excluded.possible_homes,
                 updated_at=CURRENT_TIMESTAMP,
                 
-                -- Conditional Updates: Keep old data if incoming payload lacks live intelligence
                 biology = CASE WHEN excluded.has_intel = 1 THEN excluded.biology ELSE players.biology END,
                 economy = CASE WHEN excluded.has_intel = 1 THEN excluded.economy ELSE players.economy END,
                 energy = CASE WHEN excluded.has_intel = 1 THEN excluded.energy ELSE players.energy END,
@@ -334,7 +346,6 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 race_trader = CASE WHEN excluded.has_intel = 1 THEN excluded.race_trader ELSE players.race_trader END,
                 race_sul = CASE WHEN excluded.has_intel = 1 THEN excluded.race_sul ELSE players.race_sul END,
                 
-                -- Track exact time intel was last parsed, and ensure has_intel sticks to 1 if we hold historical logs
                 intel_updated_at = CASE WHEN excluded.has_intel = 1 THEN CURRENT_TIMESTAMP ELSE players.intel_updated_at END,
                 has_intel = CASE WHEN excluded.has_intel = 1 THEN 1 ELSE players.has_intel END
         `).run(player);
@@ -785,10 +796,11 @@ router.get('/intel/system/:id', requireAuth, (req, res) => {
     try {
         const sysId = req.params.id;
 
-        // 1. Get Planets & Owners
+        // 1. Get Planets & Owners (Updated to extract tactical home indicators)
         const planets = db.prepare(`
             SELECT p.planet_index, p.population, p.starbase, p.has_fleet, p.is_sieged, 
-                   u.name as owner_name, a.tag as alliance_tag
+                   u.name as owner_name, u.home_system_id, u.home_planet_index, u.possible_homes, 
+                   a.tag as alliance_tag
             FROM planets p
             LEFT JOIN players u ON p.owner_id = u.id
             LEFT JOIN alliances a ON u.alliance_id = a.id

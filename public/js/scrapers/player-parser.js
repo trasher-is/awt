@@ -9,7 +9,13 @@ export function extractPlayerData(playerId, doc = document) {
         trade_revenue: 0, artefact: null, eco_bonus: 0,
         race_growth: 0, race_science: 0, race_culture: 0, race_production: 0, race_speed: 0, race_attack: 0, race_defense: 0,
         race_trader: 0, race_sul: 0,
-        has_intel: 0 // <--- Initialize default tracking byte
+        has_intel: 0, // <--- Initialize default tracking byte
+        
+        // New tracking fields for tactical home planet visualization
+        home_planet_id: null,
+        home_system_id: null,
+        home_planet_index: null,
+        possible_homes: [] 
     };
 
     // Verify presence of specialized alliance intelligence blocks
@@ -118,6 +124,54 @@ export function extractPlayerData(playerId, doc = document) {
             if (text.includes('Trader')) p.race_trader = parseRace(text);
             if (text.includes('Start Up') || text.includes('Start Up Lab')) p.race_sul = parseRace(text);
         });
+    }
+
+    // Scrape Planets table data for Home and Candidate Home planet designations
+    const planetRows = doc.querySelectorAll('tr[data-planet-id]');
+    if (planetRows.length > 0) {
+        const parsedPlanets = [];
+
+        planetRows.forEach(row => {
+            const game_planet_id = parseInt(row.getAttribute('data-planet-id'), 10);
+            const link = row.querySelector('a[href^="/Game/Map/SolarSystem/"]');
+            let system_id = null;
+            let planet_index = null;
+
+            if (link) {
+                const href = link.getAttribute('href');
+                const matches = href.match(/\/SolarSystem\/(\d+)\/(\d+)/);
+                if (matches) {
+                    system_id = parseInt(matches[1], 10);
+                    planet_index = parseInt(matches[2], 10);
+                }
+            }
+
+            const tds = row.querySelectorAll('td');
+            // Pop is column 3 (index 2)
+            const pop = tds[2] ? parseInt(tds[2].innerText.trim(), 10) : 0;
+
+            parsedPlanets.push({ game_planet_id, system_id, planet_index, pop });
+        });
+
+        if (parsedPlanets.length > 0) {
+            const mainHome = parsedPlanets[0];
+            p.home_planet_id = mainHome.game_planet_id;
+            p.home_system_id = mainHome.system_id;
+            p.home_planet_index = mainHome.planet_index;
+
+            // Find possible alternatives (same pop as main home, skipping index 0 itself)
+            const alternatives = [];
+            for (let i = 1; i < parsedPlanets.length; i++) {
+                if (parsedPlanets[i].pop === mainHome.pop) {
+                    alternatives.push({
+                        game_planet_id: parsedPlanets[i].game_planet_id,
+                        system_id: parsedPlanets[i].system_id,
+                        planet_index: parsedPlanets[i].planet_index
+                    });
+                }
+            }
+            p.possible_homes = alternatives;
+        }
     }
 
     return p;

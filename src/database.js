@@ -120,28 +120,41 @@ function initDatabase() {
     try {
         db.exec(`ALTER TABLE players ADD COLUMN idle_time TEXT`);
         console.log("[DB] Added idle_time column to players table.");
-    } catch (e) {
-        // If it throws an error, the column already exists, so we just ignore it.
-    }
+    } catch (e) {}
 
-    // Safely inject the discord_name column if it doesn't exist
     try {
         db.exec(`ALTER TABLE app_users ADD COLUMN discord_name TEXT`);
         console.log("[DB] Added discord_name column to app_users table.");
-    } catch (e) {
-        // Ignored
-    }
+    } catch (e) {}
 
     try {
         db.exec(`ALTER TABLE players ADD COLUMN has_intel INTEGER DEFAULT 0`);
         console.log("[DB] Added has_intel column to players table.");
-    } catch (e) {
-        // Ignored: Column already exists
-    }
+    } catch (e) {}
 
     try {
         db.exec(`ALTER TABLE players ADD COLUMN intel_updated_at TEXT`);
         console.log("[DB] Added intel_updated_at column to players table.");
+    } catch (e) {}
+
+    try {
+        db.exec(`ALTER TABLE players ADD COLUMN home_planet_id INTEGER`);
+        console.log("[DB] Added home_planet_id column to players table.");
+    } catch (e) {}
+
+    try {
+        db.exec(`ALTER TABLE players ADD COLUMN home_system_id INTEGER`);
+        console.log("[DB] Added home_system_id column to players table.");
+    } catch (e) {}
+
+    try {
+        db.exec(`ALTER TABLE players ADD COLUMN home_planet_index INTEGER`);
+        console.log("[DB] Added home_planet_index column to players table.");
+    } catch (e) {}
+
+    try {
+        db.exec(`ALTER TABLE players ADD COLUMN possible_homes TEXT`);
+        console.log("[DB] Added possible_homes column to players table.");
     } catch (e) {}
 
     // 4. Map & Systems

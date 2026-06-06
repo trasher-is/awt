@@ -574,9 +574,22 @@ export function initSpy() {
         }
 
         if (data.type === 'INJECT_TACTICAL_OVERLAYS') {
-            const { plans } = data.payload; 
+            const { plans, planets: apiPlanets } = data.payload; 
             document.querySelectorAll('.aw-hub-indicator').forEach(el => el.remove());
             document.querySelectorAll('#solarSystem tr').forEach(row => { row.style.borderLeft = ''; });
+
+            // FIX: Inject FontAwesome directly into the isolated iframe head if missing
+            if (!document.querySelector('link[href*="font-awesome"]')) {
+                const faLink = document.createElement('link');
+                faLink.rel = 'stylesheet';
+                faLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';
+                document.head.appendChild(faLink);
+            }
+
+            const pathLower = (window.location.pathname + window.location.search).toLowerCase();
+            const systemMatch = pathLower.match(/solarsystem\/(\d+)/) || pathLower.match(/\/system\/(\d+)/);
+            const currentSystemIdStr = systemMatch ? systemMatch[1] : simulatedSystemId;
+            const systemIdInt = currentSystemIdStr ? parseInt(currentSystemIdStr, 10) : null;
 
             const rows = document.querySelectorAll('#solarSystem > tbody > tr[data-planet-id]');
             rows.forEach(row => {
@@ -607,7 +620,30 @@ export function initSpy() {
                 let indicatorHTML = '';
                 let borderColor = '';
                 let titleText = '';
+                let homeIconHtml = ''; 
 
+                // --- 1. CORE & CANDIDATE HOME PLANET MATCHING RULES ENGINE ---
+                if (apiPlanets && Array.isArray(apiPlanets) && systemIdInt) {
+                    const matchedPlanetData = apiPlanets.find(ap => ap.planet_index === planetIndex);
+                    
+                    if (matchedPlanetData) {
+                        if (matchedPlanetData.home_system_id === systemIdInt && matchedPlanetData.home_planet_index === planetIndex) {
+                            homeIconHtml = '<i class="fa fa-house-fire text-danger ms-1 me-1" title="CRITICAL: Primary Home Base" style="font-size: 1.15em; vertical-align: middle;"></i>';
+                        } else if (matchedPlanetData.possible_homes) {
+                            try {
+                                const options = JSON.parse(matchedPlanetData.possible_homes || '[]');
+                                const isPossibleHome = options.some(opt => opt.system_id === systemIdInt && opt.planet_index === planetIndex);
+                                if (isPossibleHome) {
+                                    homeIconHtml = '<i class="fa fa-house-fire ms-1 me-1" style="color: orange; font-size: 1.15em; vertical-align: middle;" title="TACTICAL ALERT: Potential Home Swap Base"></i>';
+                                }
+                            } catch (err) {
+                                console.error("[UI Error] Failed parsing candidate home targets:", err);
+                            }
+                        }
+                    }
+                }
+
+                // --- 2. STANDARD COMBAT OVERLAY LOGIC ---
                 if (isSieged) {
                     indicatorHTML = '<span class="badge bg-purple ms-2" style="background-color: #b17608; color: white;">Siege</span>';
                     borderColor = '#b17608';
@@ -647,13 +683,16 @@ export function initSpy() {
                     }
                 }
 
-                if (indicatorHTML) {
-                    row.style.borderLeft = `3px solid ${borderColor}`;
+                // --- 3. DOM INJECTION RE-RENDERING ---
+                if (indicatorHTML || homeIconHtml) {
+                    if (borderColor) row.style.borderLeft = `3px solid ${borderColor}`;
+                    
                     const indicator = document.createElement('span');
                     indicator.className = 'aw-hub-indicator';
                     indicator.style.cursor = 'help';
-                    indicator.title = titleText;
-                    indicator.innerHTML = indicatorHTML;
+                    if (titleText) indicator.title = titleText;
+                    
+                    indicator.innerHTML = homeIconHtml + indicatorHTML;
                     firstCell.appendChild(indicator);
                 }
             });
