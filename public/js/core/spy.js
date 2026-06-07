@@ -575,10 +575,11 @@ export function initSpy() {
 
         if (data.type === 'INJECT_TACTICAL_OVERLAYS') {
             const { plans, planets: apiPlanets } = data.payload; 
-            document.querySelectorAll('.aw-hub-indicator').forEach(el => el.remove());
+            
+            // FIX: Purge both overlay containers and custom persistent pills to prevent duplicate rendering
+            document.querySelectorAll('.aw-hub-indicator, .awt-persistent-pill').forEach(el => el.remove());
             document.querySelectorAll('#solarSystem tr').forEach(row => { row.style.borderLeft = ''; });
 
-            // FIX: Inject FontAwesome directly into the isolated iframe head if missing
             if (!document.querySelector('link[href*="font-awesome"]')) {
                 const faLink = document.createElement('link');
                 faLink.rel = 'stylesheet';
@@ -608,25 +609,24 @@ export function initSpy() {
                 const isFriendlySiege = row.classList.contains('friendly-siege');
                 
                 const actionCell = row.querySelectorAll('td')[4];
-                const actionHtml = actionCell ? actionCell.innerHTML : ''; 
+                if (!actionCell) return;
                 
-                const incomingAttack = actionHtml.includes('Incoming hostile fleet') || actionHtml.includes('Hostile fleet incoming');
-                const hostileOrbit = actionHtml.includes('Hostile fleet in orbit');
-                const alliedTransit = actionHtml.includes('Incoming allied') || 
-                                      actionHtml.includes('Allied fleet') || 
-                                      actionHtml.includes('Incoming friendly fleet') ||
-                                      actionHtml.includes('bi-rocket-takeoff-fill');
+                const incomingAttack = !!actionCell.querySelector('.bi-rocket-takeoff-fill.indicator-incoming');
+                const alliedTransit = !!actionCell.querySelector('.bi-rocket-takeoff-fill.indicator-incoming-friendly');
+                const hostileOrbit = !!actionCell.querySelector('.bi-rocket-fill.indicator-incoming');
 
                 let indicatorHTML = '';
                 let borderColor = '';
-                let titleText = '';
+                let titleParts = []; 
                 let homeIconHtml = ''; 
+                let bestGuardedHtml = ''; // Initialize standalone guarded layout variable
 
-                // --- 1. CORE & CANDIDATE HOME PLANET MATCHING RULES ENGINE ---
+                // --- 1. UNIFIED INTEL & HOME/GUARDED RULES ENGINE ---
                 if (apiPlanets && Array.isArray(apiPlanets) && systemIdInt) {
                     const matchedPlanetData = apiPlanets.find(ap => ap.planet_index === planetIndex);
                     
                     if (matchedPlanetData) {
+                        // Core Home Evaluation
                         if (matchedPlanetData.home_system_id === systemIdInt && matchedPlanetData.home_planet_index === planetIndex) {
                             homeIconHtml = '<i class="fa fa-house-fire text-danger ms-1 me-1" title="CRITICAL: Primary Home Base" style="font-size: 1.15em; vertical-align: middle;"></i>';
                         } else if (matchedPlanetData.possible_homes) {
@@ -640,33 +640,94 @@ export function initSpy() {
                                 console.error("[UI Error] Failed parsing candidate home targets:", err);
                             }
                         }
+
+                        // FIX: Pull Best Guarded directly from the matching planet item to prevent loops fight
+                        if (matchedPlanetData.guard_cv) {
+                            // Style: light grey background, no border, black bold text
+                            bestGuardedHtml = `<span class="badge ms-1 me-1" title="RANKINGS ALERT: Top 50 Best Guarded Planet" style="background: #e2e8f0 !important; color: #1e293b !important; border: none !important; font-size: 0.85em; padding: 2px 6px; vertical-align: middle; font-weight: bold;"><i class="fa-solid fa-shield-cat me-1"></i> ${matchedPlanetData.guard_cv}</span>`;
+                        }
                     }
                 }
 
-                // --- 2. STANDARD COMBAT OVERLAY LOGIC ---
+                // --- 2. SUB-TABLE ROSTER TARGET INTERCEPTORS ---
+                const collapseRow = document.querySelector(`.fleetsPlanet${planetId}`);
+                let actualSiegerName = 'Ally';
+                let enemySiegerName = 'Enemy'; 
+                let attackingEnemyName = '';
+                let movingAllyName = '';
+
+                if (collapseRow) {
+                    const subRows = collapseRow.querySelectorAll('tbody tr');
+                    let subSectionMode = ''; 
+
+                    subRows.forEach(r => {
+                        if (r.classList.contains('head') || r.querySelector('th')) {
+                            const headerText = r.innerText.trim().toLowerCase();
+                            if (headerText.includes('incoming') || headerText.includes('inc')) {
+                                subSectionMode = 'incoming';
+                            } else if (headerText.includes('orbit')) {
+                                subSectionMode = 'orbit';
+                            }
+                            return;
+                        }
+
+                        const pLink = r.querySelector('a[href^="/Game/Players/Profile/"]');
+                        if (pLink) {
+                            const parsedName = pLink.innerText.trim();
+                            const isAlly = alliedPlayerNamesCache.has(parsedName.toLowerCase());
+
+                            if (r.classList.contains('siege')) {
+                                if (isAlly) actualSiegerName = parsedName;
+                                else enemySiegerName = parsedName;
+                            }
+
+                            if (subSectionMode === 'incoming') {
+                                if (!isAlly && !attackingEnemyName) attackingEnemyName = parsedName;
+                                else if (isAlly && !movingAllyName) movingAllyName = parsedName;
+                            } else if (subSectionMode === 'orbit') {
+                                if (isAlly && actualSiegerName === 'Ally' && isFriendlySiege) actualSiegerName = parsedName;
+                                if (!isAlly && enemySiegerName === 'Enemy' && isSieged) enemySiegerName = parsedName;
+                            } else {
+                                if (isAlly && actualSiegerName === 'Ally' && isFriendlySiege) actualSiegerName = parsedName;
+                                if (!isAlly && enemySiegerName === 'Enemy' && isSieged) enemySiegerName = parsedName;
+                                if (!isAlly && !attackingEnemyName && incomingAttack) attackingEnemyName = parsedName;
+                            }
+                        }
+                    });
+                }
+
+                // --- 3. COMBAT OVERLAY MULTI-STACK ENGINE ---
                 if (isSieged) {
-                    indicatorHTML = '<span class="badge bg-purple ms-2" style="background-color: #b17608; color: white;">Siege</span>';
+                    const siegeLabel = enemySiegerName !== 'Enemy' ? `${enemySiegerName} sieging` : 'Siege';
+                    indicatorHTML += `<span class="badge bg-purple ms-2" style="background-color: #b17608; color: white;">${siegeLabel}</span>`;
                     borderColor = '#b17608';
-                    titleText = 'Enemy Siege Detected';
-                } else if (isFriendlySiege) {
-                    const collapseRow = document.querySelector(`.fleetsPlanet${planetId}`);
-                    const siegerLink = collapseRow?.querySelector('a[href^="/Game/Players/Profile/"]');
-                    const siegerName = siegerLink ? siegerLink.innerText.trim() : 'Ally';
-                    indicatorHTML = `<span class="badge ms-2" style="background-color: #07832c; color: white;">${siegerName} sieging</span>`;
-                    borderColor = '#07832c'; 
-                    titleText = `Allied Siege by ${siegerName}`;
-                } else if (incomingAttack) {
-                    indicatorHTML = '<span class="badge bg-danger ms-2">Attack</span>';
-                    borderColor = '#dc3545';
-                    titleText = 'Incoming Enemy Fleet';
-                } else if (hostileOrbit && isAlliedPlanet) {
-                    indicatorHTML = '<span class="badge bg-danger ms-2">Hostile</span>';
-                    borderColor = '#dc3545';
-                    titleText = 'Hostile Fleet in Orbit';
-                } else if (alliedTransit) {
-                    indicatorHTML = '<span class="badge bg-warning text-dark ms-2">Ally moving</span>';
-                    borderColor = '#ffc107'; 
-                    titleText = 'Allied Fleet Transit';
+                    titleParts.push(`Enemy Siege by ${enemySiegerName}`);
+                }
+
+                if (isFriendlySiege) {
+                    indicatorHTML += `<span class="badge ms-2" style="background-color: #07832c; color: white;">${actualSiegerName} sieging</span>`;
+                    if (!borderColor || borderColor === '#ffc107') borderColor = '#07832c';
+                    titleParts.push(`Allied Siege by ${actualSiegerName}`);
+                }
+
+                if (incomingAttack) {
+                    const attackLabel = attackingEnemyName ? `${attackingEnemyName} attacking` : 'Attack';
+                    indicatorHTML += `<span class="badge bg-danger ms-2">${attackLabel}</span>`;
+                    borderColor = '#dc3545'; 
+                    titleParts.push(`Hostile Inbound: ${attackingEnemyName || 'Enemy'}`);
+                }
+
+                if (hostileOrbit && isAlliedPlanet && !isSieged) {
+                    indicatorHTML += '<span class="badge bg-danger ms-2">Hostile</span>';
+                    if (!borderColor) borderColor = '#dc3545';
+                    titleParts.push('Hostile Fleet in Orbit');
+                }
+
+                if (alliedTransit) {
+                    const transitLabel = movingAllyName ? `${movingAllyName} moving` : 'Ally moving';
+                    indicatorHTML += `<span class="badge bg-warning text-dark ms-2">${transitLabel}</span>`;
+                    if (!borderColor) borderColor = '#ffc107';
+                    titleParts.push(`Allied Transit: ${movingAllyName || 'Ally'}`);
                 }
 
                 const planetPlans = plans.filter(p => p.planet_index === planetIndex);
@@ -674,25 +735,25 @@ export function initSpy() {
                     borderColor = '#f8f9fa';
                     if (planetPlans.length === 1) {
                         indicatorHTML = `<span class="badge bg-light text-dark border ms-2">Plan</span>`;
-                        titleText = `Intel Note: ${planetPlans[0].note} (${planetPlans[0].author})`;
+                        titleParts.push(`Intel Note: ${planetPlans[0].note} (${planetPlans[0].author})`);
                     } else {
                         indicatorHTML = planetPlans.map((p, idx) => 
                             `<span class="badge bg-light text-dark border ms-1" style="font-size: 8px; padding: 1px 3px; cursor: help;" title="[Plan ${idx + 1}] ${p.note} (${p.author})">P${idx + 1}</span>`
                         ).join('');
-                        titleText = ''; 
                     }
                 }
 
-                // --- 3. DOM INJECTION RE-RENDERING ---
-                if (indicatorHTML || homeIconHtml) {
+                // --- 4. DOM INJECTION ---
+                if (indicatorHTML || homeIconHtml || bestGuardedHtml) {
                     if (borderColor) row.style.borderLeft = `3px solid ${borderColor}`;
                     
                     const indicator = document.createElement('span');
                     indicator.className = 'aw-hub-indicator';
                     indicator.style.cursor = 'help';
-                    if (titleText) indicator.title = titleText;
+                    if (titleParts.length > 0) indicator.title = titleParts.join(' | ');
                     
-                    indicator.innerHTML = homeIconHtml + indicatorHTML;
+                    // Render layout variables side-by-side cleanly inside a single element
+                    indicator.innerHTML = homeIconHtml + bestGuardedHtml + indicatorHTML;
                     firstCell.appendChild(indicator);
                 }
             });

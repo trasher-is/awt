@@ -105,7 +105,10 @@ router.post('/sync/system', requireAuth, (req, res) => {
     
     const upsertPlayer = db.prepare(`
         INSERT INTO players (id, name, alliance_id) VALUES (?, ?, ?) 
-        ON CONFLICT(id) DO UPDATE SET name=excluded.name, alliance_id=excluded.alliance_id, updated_at=CURRENT_TIMESTAMP
+        ON CONFLICT(id) DO UPDATE SET 
+            name = excluded.name, 
+            alliance_id = CASE WHEN excluded.alliance_id IS NOT NULL THEN excluded.alliance_id ELSE players.alliance_id END, 
+            updated_at = CURRENT_TIMESTAMP
     `);
     
     const upsertPlanet = db.prepare(`
@@ -796,14 +799,16 @@ router.get('/intel/system/:id', requireAuth, (req, res) => {
     try {
         const sysId = req.params.id;
 
-        // 1. Get Planets & Owners (Updated to extract tactical home indicators)
+        // 1. Get Planets & Owners (Updated to grab joined Guarded Ranking values)
         const planets = db.prepare(`
-            SELECT p.planet_index, p.population, p.starbase, p.has_fleet, p.is_sieged, 
+            SELECT p.planet_index, p.population, p.starbase, p.has_fleet, p.is_sieged, p.game_planet_id,
                    u.name as owner_name, u.home_system_id, u.home_planet_index, u.possible_homes, 
-                   a.tag as alliance_tag
+                   a.tag as alliance_tag,
+                   bg.cv as guard_cv
             FROM planets p
             LEFT JOIN players u ON p.owner_id = u.id
             LEFT JOIN alliances a ON u.alliance_id = a.id
+            LEFT JOIN best_guarded bg ON p.game_planet_id = bg.game_planet_id
             WHERE p.system_id = ?
             ORDER BY p.planet_index ASC
         `).all(sysId);
@@ -842,6 +847,43 @@ router.get('/intel/system/:id', requireAuth, (req, res) => {
     } catch (err) {
         console.error("[DB Error] Failed to fetch system intel:", err);
         res.status(500).json({ error: 'Failed to fetch intel' });
+    }
+});
+
+// --- RANKING: BEST GUARDED DATA INGESTION SYNC LAYER ---
+router.post('/sync/best-guarded', requireAuth, (req, res) => {
+    const { last_update, entries } = req.body;
+    if (!last_update || !Array.isArray(entries)) {
+        return res.status(400).json({ error: 'Invalid rank tracking payload payload data structures' });
+    }
+
+    // Daily lock guard check against the exact server tick date signature
+    const existingCheck = db.prepare("SELECT COUNT(*) as count FROM best_guarded WHERE updated_at = ?").get(last_update);
+    if (existingCheck.count > 0) {
+        return res.json({ success: true, skipped: true, message: 'Rankings already updated for today.' });
+    }
+
+    console.log(`[API] Processing fresh Best Guarded ranking sync batch updated at: ${last_update}`);
+
+    const syncTx = db.transaction((rows) => {
+        db.prepare("DELETE FROM best_guarded").run(); // Clear stale indices safely
+        
+        const insertStmt = db.prepare(`
+            INSERT INTO best_guarded (game_planet_id, cv, updated_at) 
+            VALUES (?, ?, ?)
+        `);
+        
+        for (const row of rows) {
+            insertStmt.run(row.planet_id, row.cv, last_update);
+        }
+    });
+
+    try {
+        syncTx(entries);
+        res.json({ success: true, skipped: false });
+    } catch (err) {
+        console.error('[DB Error] Best Guarded sync process failure:', err);
+        res.status(500).json({ error: 'Database ranking sync error event' });
     }
 });
 

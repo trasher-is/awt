@@ -500,3 +500,50 @@ export function initScienceTimers() {
         dateSpan.innerText = `(${dateStr})`;
     });
 }
+
+(function autoScrapeRankings() {
+    if (!window.location.pathname.toLowerCase().includes('/ranking/bestguarded')) return;
+
+    console.log('[Hub Tracker] Best Guarded ranking channel recognized. Evaluating metrics...');
+    const lastUpdateSpan = document.querySelector('span[data-utc]');
+    const tickTimestamp = lastUpdateSpan ? lastUpdateSpan.getAttribute('data-utc') : null;
+
+    if (!tickTimestamp) {
+        console.warn('[Hub Tracker] Missing core timestamp metric data element attributes.');
+        return;
+    }
+
+    const rows = document.querySelectorAll('table.table tbody tr');
+    const processedEntries = [];
+
+    rows.forEach(row => {
+        const targetLink = row.querySelector('a[href^="/Game/Map/Planet/"]');
+        if (!targetLink) return;
+
+        const planetId = parseInt(targetLink.getAttribute('href').split('/').pop(), 10);
+        const tds = row.querySelectorAll('td');
+
+        if (tds.length >= 5 && !isNaN(planetId)) {
+            // Normalize spaces and convert raw space breaks cleanly
+            const parsedCvValue = tds[4].innerText.replace(/\u00a0/g, ' ').trim();
+            processedEntries.push({ planet_id: planetId, cv: parsedCvValue });
+        }
+    });
+
+    if (processedEntries.length > 0) {
+        fetch('/hub-api/sync/best-guarded', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ last_update: tickTimestamp, entries: processedEntries })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.skipped) {
+                console.log('[Hub Tracker] Sync execution skipped: Data already updated for this current day block.');
+            } else {
+                console.log('[Hub Tracker] Daily guarded tracking updates successfully recorded.');
+            }
+        })
+        .catch(err => console.error('[Hub Tracker] Ranking update injection error trace:', err));
+    }
+})();

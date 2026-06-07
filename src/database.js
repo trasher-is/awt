@@ -168,6 +168,15 @@ function initDatabase() {
         )
     `);
 
+    // --- NEW TABLE: RANKINGS AUTOMATION BLOCK (BEST GUARDED) ---
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS best_guarded (
+            game_planet_id INTEGER PRIMARY KEY,
+            cv TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    `);
+
     db.exec(`
         CREATE TABLE IF NOT EXISTS planets (
             game_planet_id INTEGER UNIQUE,
