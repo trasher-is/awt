@@ -9,13 +9,23 @@ export function extractPlayerData(playerId, doc = document) {
         trade_revenue: 0, artefact: null, eco_bonus: 0,
         race_growth: 0, race_science: 0, race_culture: 0, race_production: 0, race_speed: 0, race_attack: 0, race_defense: 0,
         race_trader: 0, race_sul: 0,
-        has_intel: 0, // <--- Initialize default tracking byte
+        has_intel: 0, 
         
         // New tracking fields for tactical home planet visualization
         home_planet_id: null,
         home_system_id: null,
         home_planet_index: null,
-        possible_homes: [] 
+        possible_homes: [],
+
+        // Infrastructure Metrics (Populated later by background stats scan)
+        total_planets: 0,
+        total_population: 0,
+        total_farms: 0,
+        total_factories: 0,
+        total_labs: 0,
+        total_cybernetics: 0,
+        cv_used: 0,
+        cv_limit: 0
     };
 
     // Verify presence of specialized alliance intelligence blocks
@@ -57,6 +67,10 @@ export function extractPlayerData(playerId, doc = document) {
     p.joined = getRowVal('Joined'); 
     p.logins = parseInt(getRowVal('Logins'), 10) || 0; 
     
+    // Optional extraction loops if visible on public views
+    p.cv_limit = parseInt(getRowVal('CV Limit'), 10) || 0;
+    p.cv_used = parseInt(getRowVal('CV Used'), 10) || 0;
+
     const countryImg = doc.querySelector('img[src^="/img/country/"]');
     if (countryImg) {
         p.country = countryImg.getAttribute('alt') || countryImg.getAttribute('title');
@@ -87,7 +101,6 @@ export function extractPlayerData(playerId, doc = document) {
         }
     }
 
-    // Only scrape these values if the Intelligence Report is visible
     if (p.has_intel === 1) {
         p.biology = parseInt(getRowVal('Biology', true), 10) || 0;
         p.economy = parseInt(getRowVal('Economy', true), 10) || 0;
@@ -126,11 +139,9 @@ export function extractPlayerData(playerId, doc = document) {
         });
     }
 
-    // Scrape Planets table data for Home and Candidate Home planet designations
     const planetRows = doc.querySelectorAll('tr[data-planet-id]');
     if (planetRows.length > 0) {
         const parsedPlanets = [];
-
         planetRows.forEach(row => {
             const game_planet_id = parseInt(row.getAttribute('data-planet-id'), 10);
             const link = row.querySelector('a[href^="/Game/Map/SolarSystem/"]');
@@ -145,11 +156,8 @@ export function extractPlayerData(playerId, doc = document) {
                     planet_index = parseInt(matches[2], 10);
                 }
             }
-
             const tds = row.querySelectorAll('td');
-            // Pop is column 3 (index 2)
             const pop = tds[2] ? parseInt(tds[2].innerText.trim(), 10) : 0;
-
             parsedPlanets.push({ game_planet_id, system_id, planet_index, pop });
         });
 
@@ -159,7 +167,6 @@ export function extractPlayerData(playerId, doc = document) {
             p.home_system_id = mainHome.system_id;
             p.home_planet_index = mainHome.planet_index;
 
-            // Find possible alternatives (same pop as main home, skipping index 0 itself)
             const alternatives = [];
             for (let i = 1; i < parsedPlanets.length; i++) {
                 if (parsedPlanets[i].pop === mainHome.pop) {
@@ -177,11 +184,63 @@ export function extractPlayerData(playerId, doc = document) {
     return p;
 }
 
-export async function scrapePlayer(playerId) {
-    console.log(`[Spy] Initiating deep scrape for Player ID: ${playerId}`);
+// Generates the safe date URL string parameters to step backwards over obfuscation walls
+export function buildSecuredStatsUrl(playerId) {
+    const now = new Date();
     
+    const contextFrom = new Date(now);
+    contextFrom.setDate(now.getDate() - 5);
+    
+    const contextTo = new Date(now);
+    contextTo.setDate(now.getDate() - 3);
+    
+    const formatDate = (d) => d.toISOString().split('T')[0];
+    
+    return `/Game/Players/Statistic?from=${formatDate(contextFrom)}&to=${formatDate(contextTo)}&playerId=${playerId}`;
+}
+
+export async function scrapePlayer(playerId) {
+    console.log(`[Spy] Initiating deep profile parse sequence for Player ID: ${playerId}`);
+    
+    // 1. Gather baseline profile parameters synchronously
     const p = extractPlayerData(playerId, document);
 
+    // 2. Background execute fetch over custom-calculated safe historical index boundaries
+    const statsUrl = buildSecuredStatsUrl(playerId);
+    console.log(`[Spy] Fetching infrastructure history matrix via endpoint: ${statsUrl}`);
+    
+    try {
+        const statsResponse = await fetch(statsUrl);
+        if (statsResponse.ok) {
+            const htmlText = await statsResponse.text();
+            
+            // Regex targeting string data: var data = [ ... ];
+            const dataRegexMatch = htmlText.match(/var\s+data\s*=\s*(\[[\s\S]*?\]);/);
+            if (dataRegexMatch) {
+                const infrastructureHistoryArray = JSON.parse(dataRegexMatch[1]);
+                
+                if (Array.isArray(infrastructureHistoryArray) && infrastructureHistoryArray.length > 0) {
+                    // Extract the latest non-redacted log element entry at the tail end of the query window
+                    const latestLogRecord = infrastructureHistoryArray[infrastructureHistoryArray.length - 1];
+                    console.log(`[Spy] Historical infrastructure values decrypted:`, latestLogRecord);
+                    
+                    // Direct structural conversion mapping down into matching keys
+                    p.total_planets     = parseInt(latestLogRecord.count, 10) || 0;
+                    p.total_population  = parseInt(latestLogRecord.population, 10) || 0;
+                    p.total_farms       = parseInt(latestLogRecord.farms, 10) || 0;
+                    p.total_factories   = parseInt(latestLogRecord.factories, 10) || 0;
+                    p.total_labs        = parseInt(latestLogRecord.labs, 10) || 0;
+                    p.total_cybernetics = parseInt(latestLogRecord.cybernets, 10) || 0;
+                }
+            } else {
+                console.warn(`[Spy] Script data block initialization line missing on target history window layout.`);
+            }
+        }
+    } catch (statsErr) {
+        console.error(`[Spy] Background infrastructure parsing failure:`, statsErr);
+    }
+
+    // 3. Post notification up to UI frame context
     window.parent.postMessage({
         type: 'GAME_CONTEXT',
         payload: {
@@ -191,15 +250,23 @@ export async function scrapePlayer(playerId) {
         }
     }, window.location.origin);
 
+    // 4. Ship structural payload transaction package directly to backend server route receiver
     try {
-        const response = await fetch('/hub-api/sync/player', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
+        const response = await fetch('/hub-api/sync/player', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(p) 
+        });
+        
         if (response.ok) {
             console.log(`[Spy] Player Profile '${p.name}' synced successfully.`);
-            window.parent.postMessage({ type: 'SHOW_TOAST', payload: `Player ${p.name} Synced` }, window.location.origin);
+            window.parent.postMessage({ type: 'SHOW_TOAST', payload: `Player ${p.name} Complete Profile Synced` }, window.location.origin);
             const header = document.querySelector('th[colspan="2"] span');
             if (header && !header.querySelector('.aw-synced')) {
                 header.innerHTML += ' <span class="badge bg-success ms-2 aw-synced" style="font-size: 0.6em; vertical-align: middle; background-color: #22c55e !important; color: #fff;"><i class="bi bi-cloud-check"></i> Hub Synced</span>';
             }
         }
-    } catch (err) { console.error(`[Spy] Player API request failed`, err); }
+    } catch (err) { 
+        console.error(`[Spy] Player API upload transaction failed:`, err); 
+    }
 }

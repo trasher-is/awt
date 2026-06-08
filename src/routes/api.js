@@ -1174,6 +1174,48 @@ router.get('/intel/alliance-stats', requireAuth, (req, res) => {
     }
 });
 
+// --- GET ALL ACTIVE SCANNED ALLIANCES FOR SELECTION FILTER BUTTONS ---
+router.get('/intel/war-room/alliances', requireAuth, (req, res) => {
+    try {
+        const alliances = db.prepare(`
+            SELECT a.id, a.tag, a.name, COUNT(p.id) as active_members_count, MAX(p.updated_at) as last_scan_time
+            FROM alliances a
+            JOIN players p ON p.alliance_id = a.id
+            GROUP BY a.id
+            HAVING active_members_count >= 1
+            ORDER BY active_members_count DESC, a.tag ASC
+        `).all();
+        res.json({ success: true, alliances });
+    } catch (err) {
+        console.error("[DB Error] Failed to fetch active alliances for War Room:", err);
+        res.status(500).json({ error: 'Failed to retrieve filter metrics' });
+    }
+});
+
+// --- GET ENEMY DATA MATRIX FOR CHOSEN ALLIANCE ---
+router.get('/intel/war-room/players', requireAuth, (req, res) => {
+    const { alliance_id } = req.query;
+    if (!alliance_id) return res.status(400).json({ error: 'Missing Alliance Identifier selection' });
+
+    try {
+        const players = db.prepare(`
+            SELECT p.id, p.name, p.economy, p.social, p.physics, p.mathematics, p.energy, p.idle_time,
+                   p.race_attack, p.race_defense, p.race_speed, p.updated_at as player_scan_time,
+                   p.total_population, p.total_factories, p.total_farms, p.total_cybernets, p.total_labs,
+                   a.tag as alliance_tag,
+                   (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as total_planets
+            FROM players p
+            JOIN alliances a ON p.alliance_id = a.id
+            WHERE p.alliance_id = ?
+        `).all(alliance_id);
+
+        res.json({ success: true, players });
+    } catch (err) {
+        console.error("[DB Error] Failed to execute query array for War Room Matrix:", err);
+        res.status(500).json({ error: 'Failed to pull target metrics record dataset' });
+    }
+});
+
 // --- UNIFIED OPERATIONS TIMELINE ---
 router.get('/intel/timeline', requireAuth, (req, res) => {
     try {

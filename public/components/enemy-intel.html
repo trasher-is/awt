@@ -1,0 +1,306 @@
+<div id="enemy-intel-panel" class="fixed top-0 right-0 h-full w-full md:w-[calc(100%-3.5rem)] bg-black border-l border-border transform translate-x-full transition-transform duration-300 z-40 flex flex-col shadow-2xl">
+    
+    <div class="h-14 border-b border-border flex items-center justify-between px-6 bg-zinc-900 shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-md bg-red-950/30 flex items-center justify-center text-red-500 border border-red-500/20">
+                <i class="fa-solid fa-crosshair text-base"></i>
+            </div>
+            <div>
+                <h2 class="font-bold text-foreground tracking-wide">Cross-Alliance Enemy Intel Room</h2>
+                <p class="text-sm text-muted-foreground">Aggregated profiles, exact industrial outputs, and parsed activity tracking loops</p>
+            </div>
+        </div>
+        <button onclick="closeEnemyIntelPanel()" class="w-8 h-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
+            <i class="fa-solid fa-xmark text-base"></i>
+        </button>
+    </div>
+
+    <div class="p-4 border-b border-border bg-zinc-950 flex flex-col gap-3 shrink-0">
+        <div class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Scanned Targets Directory:</div>
+        <div id="war-room-alliance-pills" class="flex flex-wrap gap-2 max-h-24 overflow-y-auto pr-2">
+            <span class="text-sm text-muted-foreground font-mono animate-pulse">Loading targets index array...</span>
+        </div>
+    </div>
+
+    <div class="p-4 border-b border-border bg-zinc-900 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-4">
+            <button id="btn-refresh-enemy-intel" onclick="window.refreshActiveWarAlliance()" disabled class="inline-flex items-center justify-center h-9 px-4 rounded-md bg-white text-black font-medium hover:bg-white/90 transition-colors text-sm gap-2 shadow-sm disabled:opacity-40 disabled:pointer-events-none">
+                <i id="icon-refresh-enemy-intel" class="fa-solid fa-rotate"></i> Scan Target Profile
+            </button>
+            <span id="enemy-intel-last-scanned" class="text-sm text-muted-foreground font-mono bg-black px-2.5 py-1.5 rounded border border-border/40">
+                Last Scanned: N/A
+            </span>
+        </div>
+        <div class="text-xs text-muted-foreground font-mono bg-zinc-950 px-3 py-1.5 rounded border border-border/20">
+            * <span class="text-zinc-500 font-bold">?</span> indicates unverified profile data (Economy scan missing)
+        </div>
+    </div>
+
+    <div class="flex-1 overflow-auto bg-black">
+        <table class="w-full text-left border-collapse min-w-[1400px]" id="warIntelTable">
+            <thead>
+                <tr class="border-b border-border bg-zinc-900 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10">
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('name', 'string')">Enemy Player <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('economy', 'number')">Eco <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('calculated_prod', 'number')">~Prod/h <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('cv_day', 'number')">~CV/Day <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('max_cv', 'number')">Max CV <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('race_attack', 'number')">Att <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('race_defense', 'number')">Def <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('race_speed', 'number')">Spd <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('physics', 'number')">Phy <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('mathematics', 'number')">Math <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('energy', 'number')">Ene <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('idle_seconds', 'number')">Idle State <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('total_planets', 'number')">Planets Assets <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                </tr>
+            </thead>
+            <tbody id="enemy-intel-table-body" class="divide-y divide-border/40 bg-black text-sm font-mono">
+                <tr id="war-room-placeholder"><td colspan="13" class="text-center py-8 text-muted-foreground">Select an target alliance pill above to filter dataset matrices</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    let warRoomData = [];
+    let warRoomSortCol = '';
+    let warRoomSortAsc = false;
+    let selectedAllianceId = null;
+
+    // Open/Close functions
+    function openEnemyIntelPanel() {
+        const p = document.getElementById('enemy-intel-panel');
+        p.classList.remove('translate-x-full');
+        loadWarRoomAlliancesList();
+    }
+    function closeEnemyIntelPanel() {
+        document.getElementById('enemy-intel-panel').classList.add('translate-x-full');
+    }
+
+    // Secondary parsing calculations loop for layout configuration strings
+    function parseIdleStringToSeconds(idleStr) {
+        if (!idleStr || idleStr === 'Unknown') return -1;
+        if (/active|online/i.test(idleStr)) return 0;
+        
+        let secs = 0;
+        const d = idleStr.match(/(\d+)\s*d/);
+        const h = idleStr.match(/(\d+)\s*h/);
+        const m = idleStr.match(/(\d+)\s*m/);
+        const s = idleStr.match(/(\d+)\s*s/);
+        
+        if (!d && !h && !m && !s) return -1;
+        if (d) secs += parseInt(d[1]) * 86400;
+        if (h) secs += parseInt(h[1]) * 3600;
+        if (m) secs += parseInt(m[1]) * 60;
+        if (s) secs += parseInt(s[1]);
+        return secs;
+    }
+
+    function formatRaceModifier(val, isMasked) {
+        if (isMasked) return '<span class="text-zinc-600">?</span>';
+        if (val === null || val === undefined) return '<span class="text-zinc-500">-</span>';
+        return val > 0 ? `<span class="text-emerald-500 font-bold">+${val}</span>` : val < 0 ? `<span class="text-rose-500 font-bold">${val}</span>` : `<span class="text-zinc-400">${val}</span>`;
+    }
+
+    // Pull directory of available scanned target arrays
+    async function loadWarRoomAlliancesList() {
+        try {
+            const res = await fetch('/api/intel/war-room/alliances');
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error);
+
+            const pillsBox = document.getElementById('war-room-alliance-pills');
+            pillsBox.innerHTML = '';
+
+            if(data.alliances.length === 0) {
+                pillsBox.innerHTML = '<span class="text-xs text-muted-foreground font-mono">No external alliance profiles scanned inside the local database indexes yet</span>';
+                return;
+            }
+
+            data.alliances.forEach(a => {
+                const btn = document.createElement('button');
+                btn.className = `px-3 py-1 text-xs font-mono font-bold uppercase rounded border transition-all flex items-center gap-1.5 ${
+                    selectedAllianceId === a.id 
+                    ? 'bg-red-500 text-black border-red-400 shadow shadow-red-500/20' 
+                    : 'bg-zinc-900 text-zinc-300 border-border hover:bg-zinc-800 hover:text-white'
+                }`;
+                btn.onclick = () => selectWarRoomAlliance(a.id, a.tag, a.last_scan_time);
+                btn.innerHTML = `<span>[${a.tag}]</span><span class="px-1 py-0.25 bg-black/40 rounded text-[10px] text-muted-foreground border border-white/5">${a.active_members_count}</span>`;
+                pillsBox.appendChild(btn);
+            });
+        } catch (err) {
+            console.error("War room context load failure:", err);
+        }
+    }
+
+    function selectWarRoomAlliance(allianceId, tag, lastScanTime) {
+        selectedAllianceId = allianceId;
+        document.getElementById('btn-refresh-enemy-intel').removeAttribute('disabled');
+        
+        if (lastScanTime) {
+            const d = new Date(lastScanTime);
+            document.getElementById('enemy-intel-last-scanned').innerText = `Last Scanned: ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+        } else {
+            document.getElementById('enemy-intel-last-scanned').innerText = 'Last Scanned: N/A';
+        }
+
+        loadWarRoomMatrixData();
+        loadWarRoomAlliancesList(); // Refresh pill selections state highlights
+    }
+
+    async function loadWarRoomMatrixData() {
+        if (!selectedAllianceId) return;
+        const tbody = document.getElementById('enemy-intel-table-body');
+        tbody.innerHTML = `<tr><td colspan="13" class="text-center py-6 font-mono text-zinc-400"><i class="fa-solid fa-spinner fa-spin me-2 text-red-500"></i> Decrypting intelligence matrices from DB indexes...</td></tr>`;
+
+        try {
+            const res = await fetch(`/api/intel/war-room/players?alliance_id=${selectedAllianceId}`);
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error);
+
+            warRoomData = data.players.map(p => {
+                const factories = p.total_factories || 0;
+                const pop = p.total_population || 0;
+                const eco = p.economy || 0;
+                const social = p.social || 0;
+
+                // Game dynamic formula logic definitions
+                const estimatedProd = (factories + pop) * 2.5;
+                const dailyPP = estimatedProd * 24;
+                const costFor3CV = 30 - Math.floor(eco * 0.3);
+                const cvDay = costFor3CV > 0 ? Math.floor((dailyPP / costFor3CV) * 3) : 0;
+                const maxCv = pop * (social + 3) * 10;
+                const idleSecs = parseIdleStringToSeconds(p.idle_time);
+
+                return {
+                    ...p,
+                    calculated_prod: estimatedProd,
+                    cv_day: cvDay,
+                    max_cv: maxCv,
+                    idle_seconds: idleSecs
+                };
+            });
+
+            // Maintain sorting configurations over target selection transitions
+            if (warRoomSortCol) {
+                executeSortingRoutine();
+            } else {
+                renderWarRoomTable(warRoomData);
+            }
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="13" class="text-center py-6 text-red-500 font-bold">API Sync Failure Exception Event: ${err.message}</td></tr>`;
+        }
+    }
+
+    function renderWarRoomTable(data) {
+        const tbody = document.getElementById('enemy-intel-table-body');
+        tbody.innerHTML = '';
+
+        if(data.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="13" class="text-center py-6 text-zinc-500">No scanned player rows mapped to this target index loop</td></tr>`;
+            return;
+        }
+
+        data.forEach(p => {
+            const isUnknown = !p.economy || p.economy === 0;
+
+            // Activity tracker background configurations logic loop
+            let idleStyle = "color: #a1a1aa;"; 
+            if (p.idle_seconds >= 0) {
+                const idleMins = p.idle_seconds / 60;
+                const cappedMins = Math.min(idleMins, 360); 
+                // Color scaling matching dark room configurations cleanly
+                const hue = 120 - (cappedMins / 360) * 120;
+                idleStyle = `background-color: hsla(${hue}, 75%, 12%, 0.45); color: hsl(${hue}, 90%, 65%); border: 1px solid hsla(${hue}, 75%, 25%, 0.3);`;
+            }
+
+            const tr = document.createElement('tr');
+            tr.className = "hover:bg-zinc-900/40 transition-colors border-b border-zinc-900/60";
+            tr.innerHTML = `
+                <td class="p-3 font-bold text-foreground">
+                    <span class="text-red-500 font-extrabold mr-1">[${p.alliance_tag}]</span> 
+                    <a href="/Game/Players/Profile/${p.id}" target="_blank" class="hover:underline hover:text-red-400">${p.name}</a>
+                </td>
+                <td class="p-3 text-zinc-300">${isUnknown ? '<span class="text-zinc-600 font-bold">?</span>' : p.economy}</td>
+                <td class="p-3 text-emerald-400 font-bold">${Math.round(p.calculated_prod).toLocaleString()}</td>
+                <td class="p-3 text-amber-400 font-bold">${isUnknown ? '<span class="text-zinc-600 font-bold">?</span>' : p.cv_day.toLocaleString()}</td>
+                <td class="p-3 text-cyan-400">${isUnknown ? '<span class="text-zinc-600 font-bold">?</span>' : p.max_cv.toLocaleString()}</td>
+                <td class="p-3">${formatRaceModifier(p.race_attack, isUnknown)}</td>
+                <td class="p-3">${formatRaceModifier(p.race_defense, isUnknown)}</td>
+                <td class="p-3">${formatRaceModifier(p.race_speed, isUnknown)}</td>
+                <td class="p-3 text-zinc-300">${isUnknown ? '<span class="text-zinc-600 font-bold">?</span>' : (p.physics || 0)}</td>
+                <td class="p-3 text-zinc-300">${isUnknown ? '<span class="text-zinc-600 font-bold">?</span>' : (p.mathematics || 0)}</td>
+                <td class="p-3 text-zinc-300">${isUnknown ? '<span class="text-zinc-600 font-bold">?</span>' : (p.energy || 0)}</td>
+                <td class="p-3"><span class="px-2 py-0.5 rounded text-xs font-mono tracking-wide" style="${idleStyle}">${p.idle_time || 'Unknown'}</span></td>
+                <td class="p-3 text-zinc-400 font-bold">${p.total_planets || 0} assets</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function sortWarRoom(colKey, type) {
+        if (warRoomSortCol === colKey) {
+            warRoomSortAsc = !warRoomSortAsc;
+        } else {
+            warRoomSortCol = colKey;
+            warRoomSortAsc = (type === 'string');
+        }
+        executeSortingRoutine();
+    }
+
+    function executeSortingRoutine() {
+        warRoomData.sort((a, b) => {
+            let valA = a[warRoomSortCol];
+            let valB = b[warRoomSortCol];
+
+            if (typeof valA === 'string') {
+                valA = valA ? valA.toLowerCase() : '';
+                valB = valB ? valB.toLowerCase() : '';
+            } else {
+                // Keep incomplete or masked values nested neatly at the bottom line boundaries
+                valA = valA === null || valA === undefined ? (warRoomSortAsc ? 99999999 : -99999999) : valA;
+                valB = valB === null || valB === undefined ? (warRoomSortAsc ? 99999999 : -99999999) : valB;
+            }
+
+            if (valA < valB) return warRoomSortAsc ? -1 : 1;
+            if (valA > valB) return warRoomSortAsc ? 1 : -1;
+
+            // Secondary sorting ties breaking logic matching engine properties
+            if (valA === valB) {
+                let secKey = warRoomSortCol === 'race_attack' ? 'physics' : warRoomSortCol === 'race_defense' ? 'mathematics' : warRoomSortCol === 'race_speed' ? 'energy' : null;
+                if (secKey) {
+                    let secA = a[secKey] || -999999;
+                    let secB = b[secKey] || -999999;
+                    if (secA < secB) return warRoomSortAsc ? -1 : 1;
+                    if (secA > secB) return warRoomSortAsc ? 1 : -1;
+                }
+            }
+            return 0;
+        });
+
+        renderWarRoomTable(warRoomData);
+    }
+
+    async function refreshActiveWarAlliance() {
+        if (!selectedAllianceId) return;
+        const btn = document.getElementById('btn-refresh-enemy-intel');
+        const icon = document.getElementById('icon-refresh-enemy-intel');
+        
+        btn.setAttribute('disabled', 'true');
+        icon.classList.add('fa-spin');
+
+        // Target active mass scanners dynamically
+        if (window.triggerMassScannerExecutionLoop) {
+            await window.triggerMassScannerExecutionLoop(selectedAllianceId);
+        }
+        
+        await loadWarRoomMatrixData();
+        
+        btn.removeAttribute('disabled');
+        icon.classList.remove('fa-spin');
+    }
+
+    window.sortWarRoom = sortWarRoom;
+    window.refreshActiveWarAlliance = refreshActiveWarAlliance;
+</script>
