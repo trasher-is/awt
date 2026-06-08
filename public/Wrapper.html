@@ -155,9 +155,9 @@
 
             <div class="flex flex-col py-2 border-b border-border">
                 <div class="px-4 py-2 text-s text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed">Archives</div>
-                <button onclick="openEnemyIntelPanel()" class="flex items-center text-red-500 hover:text-red-400 gap-2">
-                <i class="fa-solid fa-crosshair"></i> <span>War Room</span>
-            </button>
+                <button onclick="openEnemyIntelPanel()" class="h-8 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-color">
+                    <i class="fa-solid fa-bomb w-6 text-center text-sm"></i> <span class="ml-4 sidebar-text text-sm">War Room</span>
+                </button>
                 <button onclick="openAllianceStatsPanel()" class="h-8 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
                     <i class="fa-solid fa-chess w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-sm">Alliance Stats</span>
                 </button>
@@ -174,7 +174,7 @@
                     <i class="fa-solid fa-crow w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-sm">Fleets</span>
                 </button>
                 <button onclick="openOperationsTimelinePanel()" class="h-8 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
-                    <i class="fa-solid fa-timeline w-6 text-center text-sm text-primary"></i><span class="ml-4 sidebar-text text-sm">Ops Timeline</span>
+                    <i class="fa-solid fa-timeline w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-sm">Ops Timeline</span>
                 </button>
             </div>
 
@@ -736,7 +736,7 @@
 
         // Include 'takeover-board-panel' in your existing sidebar reset engine function loops
         function closeOtherPanels(exceptId) {
-            ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'operations-timeline-panel', 'takeover-board-panel'].forEach(id => {
+            ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'operations-timeline-panel', 'takeover-board-panel', 'enemy-intel-panel'].forEach(id => {
                 if (id !== exceptId) {
                     const p = document.getElementById(id);
                     if (p) p.classList.replace('translate-x-0', 'translate-x-full');
@@ -1308,6 +1308,38 @@
             } catch (err) { document.getElementById('flt-db-table-body').innerHTML = '<tr><td colspan="11" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
         }
         function closeFleetDatabasePanel() { const p = document.getElementById('fleet-database-panel'); if (p) p.classList.replace('translate-x-0', 'translate-x-full'); }
+
+        async function openEnemyIntelPanel() {
+            let panel = document.getElementById('enemy-intel-panel');
+            if (!panel) {
+                try {
+                    // Dynamically ingest the independent component file from your assets registry folder
+                    const res = await fetch('/hub-assets/components/enemy-intel.html');
+                    const html = await res.text();
+                    document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', html);
+                    panel = document.getElementById('enemy-intel-panel');
+                } catch (err) { 
+                    return console.error("[AWT Hub] Failed to fetch layout for War Room:", err); 
+                }
+            }
+            
+            if (panel.classList.contains('translate-x-0')) return closeEnemyIntelPanel();
+            closeOtherPanels('enemy-intel-panel');
+
+            // Slide panel screen overlay cleanly into active viewport vision space
+            panel.classList.replace('translate-x-full', 'translate-x-0');
+            if (document.getElementById('sidebar').classList.contains('expanded')) toggleSidebar();
+            
+            // Fire off the entry script definitions initialization sequence bound inside your component asset block
+            if (window.loadWarRoomAlliancesList) {
+                await window.loadWarRoomAlliancesList();
+            }
+        }
+
+        function closeEnemyIntelPanel() { 
+            const p = document.getElementById('enemy-intel-panel'); 
+            if (p) p.classList.replace('translate-x-0', 'translate-x-full'); 
+        }
 
         let rawDbAllyStats = [], allyStatsSortCol = 'player_id', allyStatsSortAsc = true;
 
