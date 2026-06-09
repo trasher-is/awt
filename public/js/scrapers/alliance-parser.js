@@ -41,15 +41,20 @@ export async function scrapeAlliance() {
         }
     });
 
-    // 3. Rip the entire Member roster
-    // By searching for all player links inside tables, we grab both the leader and the members roster in one sweep.
-    document.querySelectorAll('table tbody a[href^="/Game/Players/Profile/"]').forEach(link => {
-        const mId = parseInt(link.getAttribute('href').split('/').pop(), 10);
-        const mName = link.innerText.trim();
+    // 3. Rip the entire Member roster cleanly from the roster tracking buttons
+    // Since rows contain 2 members horizontally, we target the distinct member buttons directly.
+    document.querySelectorAll('a[href*="/Game/Alliance/Member/"]').forEach(btn => {
+        const mId = parseInt(btn.getAttribute('href').split('/').pop(), 10);
         
-        // Ensure we don't add duplicates
-        if (!p.members.find(m => m.id === mId)) {
-            p.members.push({ id: mId, name: mName });
+        // Find the matching profile link on the page using the ID to steal the name string
+        const playerProfileLink = document.querySelector(`a[href^="/Game/Players/Profile/${mId}"]`);
+        if (playerProfileLink) {
+            const mName = playerProfileLink.innerText.trim();
+            
+            // Prevent duplicate mutations
+            if (!p.members.find(m => m.id === mId)) {
+                p.members.push({ id: mId, name: mName });
+            }
         }
     });
 

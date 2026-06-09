@@ -256,11 +256,20 @@ router.post('/sync/player', requireAuth, (req, res) => {
         race_sul: p.race_sul || 0,
         has_intel: p.has_intel || 0,
         
-        // Dynamic additions mapping extracted array strings
         home_planet_id: p.home_planet_id || null,
         home_system_id: p.home_system_id || null,
         home_planet_index: p.home_planet_index || null,
-        possible_homes: p.possible_homes ? JSON.stringify(p.possible_homes) : '[]'
+        possible_homes: p.possible_homes ? JSON.stringify(p.possible_homes) : '[]',
+
+        // Infrastructure Trackers (Parsed from page elements but distinct from Intel state changes)
+        total_planets: p.total_planets || 0,
+        total_population: p.total_population || 0,
+        total_farms: p.total_farms || 0,
+        total_factories: p.total_factories || 0,
+        total_labs: p.total_labs || 0,
+        total_cybernetics: p.total_cybernetics || 0,
+        cv_used: p.cv_used || 0,
+        cv_limit: p.cv_limit || 0
     };
 
     const oldPlayer = db.prepare('SELECT logins, points, origin_system FROM players WHERE id = ?').get(p.id);
@@ -273,14 +282,8 @@ router.post('/sync/player', requireAuth, (req, res) => {
         if (loginsDropped || originChanged || pointsNuked) {
             console.log(`[SYSTEM] Verified Player ${player.id} restarted or moved origin! Purging ghost assets.`);
             
-            db.prepare(`
-                UPDATE planets 
-                SET owner_id = NULL, population = 0, starbase = 0, has_fleet = 0, is_sieged = 0 
-                WHERE owner_id = ?
-            `).run(player.id);
-            
+            db.prepare(`UPDATE planets SET owner_id = NULL, population = 0, starbase = 0, has_fleet = 0, is_sieged = 0 WHERE owner_id = ?`).run(player.id);
             db.prepare(`DELETE FROM fleets WHERE owner_id = ?`).run(player.id);
-
             db.prepare(`
                 UPDATE players SET 
                     level=0, points=0, ranking=NULL, science_level=0, culture_level=0,
@@ -288,7 +291,8 @@ router.post('/sync/player', requireAuth, (req, res) => {
                     trade_revenue=0, artefact=NULL, eco_bonus=0,
                     race_growth=0, race_science=0, race_culture=0, race_production=0, race_speed=0, race_attack=0, race_defense=0,
                     race_trader=0, race_sul=0, origin_system=NULL, has_intel=0, intel_updated_at=NULL,
-                    home_planet_id=NULL, home_system_id=NULL, home_planet_index=NULL, possible_homes='[]'
+                    home_planet_id=NULL, home_system_id=NULL, home_planet_index=NULL, possible_homes='[]',
+                    total_planets=0, total_population=0, total_farms=0, total_factories=0, total_labs=0, total_cybernetics=0, cv_used=0, cv_limit=0
                 WHERE id = ?
             `).run(player.id);
         }
@@ -304,29 +308,29 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 biology, economy, energy, mathematics, physics, social, 
                 trade_revenue, artefact, eco_bonus,
                 race_growth, race_science, race_culture, race_production, race_speed, race_attack, race_defense,
-                race_trader, race_sul,
-                joined, logins, has_intel, intel_updated_at,
-                home_planet_id, home_system_id, home_planet_index, possible_homes
+                race_trader, race_sul, joined, logins, has_intel, intel_updated_at,
+                home_planet_id, home_system_id, home_planet_index, possible_homes,
+                total_planets, total_population, total_farms, total_factories, total_labs, total_cybernetics, cv_used, cv_limit
             ) VALUES (
                 @id, @name, @alliance_id, @country, @local_time, @idle_time, @origin_system, 
                 @level, @ranking, @points, @science_level, @culture_level, 
                 @biology, @economy, @energy, @mathematics, @physics, @social, 
                 @trade_revenue, @artefact, @eco_bonus,
                 @race_growth, @race_science, @race_culture, @race_production, @race_speed, @race_attack, @race_defense,
-                @race_trader, @race_sul,
-                @joined, @logins, @has_intel,
+                @race_trader, @race_sul, @joined, @logins, @has_intel,
                 CASE WHEN @has_intel = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
-                @home_planet_id, @home_system_id, @home_planet_index, @possible_homes
+                @home_planet_id, @home_system_id, @home_planet_index, @possible_homes,
+                @total_planets, @total_population, @total_farms, @total_factories, @total_labs, @total_cybernetics, @cv_used, @cv_limit
             ) ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name, alliance_id=excluded.alliance_id, country=excluded.country, 
                 local_time=excluded.local_time, idle_time=excluded.idle_time, origin_system=excluded.origin_system,
                 level=excluded.level, ranking=excluded.ranking, points=excluded.points, 
                 science_level=excluded.science_level, culture_level=excluded.culture_level,
                 joined=excluded.joined, logins=excluded.logins,
-                home_planet_id=excluded.home_planet_id,
-                home_system_id=excluded.home_system_id,
-                home_planet_index=excluded.home_planet_index,
-                possible_homes=excluded.possible_homes,
+                home_planet_id=excluded.home_planet_id, home_system_id=excluded.home_system_id, home_planet_index=excluded.home_planet_index,
+                possible_homes=excluded.possible_homes, total_planets=excluded.total_planets, total_population=excluded.total_population,
+                total_farms=excluded.total_farms, total_factories=excluded.total_factories, total_labs=excluded.total_labs,
+                total_cybernetics=excluded.total_cybernetics, cv_used=excluded.cv_used, cv_limit=excluded.cv_limit,
                 updated_at=CURRENT_TIMESTAMP,
                 
                 biology = CASE WHEN excluded.has_intel = 1 THEN excluded.biology ELSE players.biology END,
@@ -338,7 +342,6 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 trade_revenue = CASE WHEN excluded.has_intel = 1 THEN excluded.trade_revenue ELSE players.trade_revenue END,
                 artefact = CASE WHEN excluded.has_intel = 1 THEN excluded.artefact ELSE players.artefact END,
                 eco_bonus = CASE WHEN excluded.has_intel = 1 THEN excluded.eco_bonus ELSE players.eco_bonus END,
-                
                 race_growth = CASE WHEN excluded.has_intel = 1 THEN excluded.race_growth ELSE players.race_growth END,
                 race_science = CASE WHEN excluded.has_intel = 1 THEN excluded.race_science ELSE players.race_science END,
                 race_culture = CASE WHEN excluded.has_intel = 1 THEN excluded.race_culture ELSE players.race_culture END,
@@ -348,7 +351,6 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 race_defense = CASE WHEN excluded.has_intel = 1 THEN excluded.race_defense ELSE players.race_defense END,
                 race_trader = CASE WHEN excluded.has_intel = 1 THEN excluded.race_trader ELSE players.race_trader END,
                 race_sul = CASE WHEN excluded.has_intel = 1 THEN excluded.race_sul ELSE players.race_sul END,
-                
                 intel_updated_at = CASE WHEN excluded.has_intel = 1 THEN CURRENT_TIMESTAMP ELSE players.intel_updated_at END,
                 has_intel = CASE WHEN excluded.has_intel = 1 THEN 1 ELSE players.has_intel END
         `).run(player);
@@ -364,6 +366,31 @@ router.post('/sync/player', requireAuth, (req, res) => {
     } catch (err) {
         console.error(`[DB Error] Failed to sync player ${p.id}:`, err);
         res.status(500).json({ error: 'Database sync failed' });
+    }
+});
+
+// --- GET ENEMY DATA MATRIX FOR CHOSEN ALLIANCE ---
+router.get('/intel/war-room/players', requireAuth, (req, res) => {
+    const { alliance_id } = req.query;
+    if (!alliance_id) return res.status(400).json({ error: 'Missing Alliance Identifier selection' });
+
+    try {
+        const players = db.prepare(`
+            SELECT p.id, p.name, p.economy, p.social, p.physics, p.mathematics, p.energy, p.idle_time,
+                   p.race_attack, p.race_defense, p.race_speed, p.updated_at as player_scan_time,
+                   p.total_population, p.total_factories, p.total_farms, p.total_cybernetics, p.total_labs,
+                   p.level, p.culture_level, p.has_intel,
+                   a.tag as alliance_tag,
+                   (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as total_planets
+            FROM players p
+            JOIN alliances a ON p.alliance_id = a.id
+            WHERE p.alliance_id = ?
+        `).all(alliance_id);
+
+        res.json({ success: true, players });
+    } catch (err) {
+        console.error("[DB Error] Failed to execute query array for War Room Matrix:", err);
+        res.status(500).json({ error: 'Failed to pull target metrics record dataset' });
     }
 });
 
@@ -1177,42 +1204,19 @@ router.get('/intel/alliance-stats', requireAuth, (req, res) => {
 // --- GET ALL ACTIVE SCANNED ALLIANCES FOR SELECTION FILTER BUTTONS ---
 router.get('/intel/war-room/alliances', requireAuth, (req, res) => {
     try {
+        // Explicitly group by all selected non-aggregate elements to avoid engine resolution errors
         const alliances = db.prepare(`
             SELECT a.id, a.tag, a.name, COUNT(p.id) as active_members_count, MAX(p.updated_at) as last_scan_time
             FROM alliances a
             JOIN players p ON p.alliance_id = a.id
-            GROUP BY a.id
-            HAVING active_members_count >= 1
-            ORDER BY active_members_count DESC, a.tag ASC
+            GROUP BY a.id, a.tag, a.name
+            HAVING COUNT(p.id) >= 1
+            ORDER BY COUNT(p.id) DESC, a.tag ASC
         `).all();
         res.json({ success: true, alliances });
     } catch (err) {
         console.error("[DB Error] Failed to fetch active alliances for War Room:", err);
         res.status(500).json({ error: 'Failed to retrieve filter metrics' });
-    }
-});
-
-// --- GET ENEMY DATA MATRIX FOR CHOSEN ALLIANCE ---
-router.get('/intel/war-room/players', requireAuth, (req, res) => {
-    const { alliance_id } = req.query;
-    if (!alliance_id) return res.status(400).json({ error: 'Missing Alliance Identifier selection' });
-
-    try {
-        const players = db.prepare(`
-            SELECT p.id, p.name, p.economy, p.social, p.physics, p.mathematics, p.energy, p.idle_time,
-                   p.race_attack, p.race_defense, p.race_speed, p.updated_at as player_scan_time,
-                   p.total_population, p.total_factories, p.total_farms, p.total_cybernets, p.total_labs,
-                   a.tag as alliance_tag,
-                   (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as total_planets
-            FROM players p
-            JOIN alliances a ON p.alliance_id = a.id
-            WHERE p.alliance_id = ?
-        `).all(alliance_id);
-
-        res.json({ success: true, players });
-    } catch (err) {
-        console.error("[DB Error] Failed to execute query array for War Room Matrix:", err);
-        res.status(500).json({ error: 'Failed to pull target metrics record dataset' });
     }
 });
 

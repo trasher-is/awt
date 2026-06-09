@@ -1,4 +1,4 @@
-import { extractPlayerData } from './player-parser.js';
+import { extractPlayerData, buildSecuredStatsUrl } from './player-parser.js';
 
 export async function runMassScan(updateProgressCb) {
     console.log("[Mass Scan] Initiating sequence...");
@@ -210,15 +210,95 @@ export async function runPlayerScan(updateProgressCb) {
             // FIXED: Reuses shared selector configuration context from central helper function quietly
             const p = extractPlayerData(playerId, doc);
 
+            // --- PRIDĖTA LOGIKA: Nuskaitome infrastruktūros istoriją (Total pop, factories, etc.) ---
+            try {
+                const statsUrl = buildSecuredStatsUrl(playerId);
+                const statsResponse = await fetch(statsUrl);
+                if (statsResponse.ok) {
+                    const statsHtmlText = await statsResponse.text();
+                    const dataRegexMatch = statsHtmlText.match(/var\s+data\s*=\s*(\[[\s\S]*?\]);/);
+                    
+                    if (dataRegexMatch) {
+                        const infrastructureHistoryArray = JSON.parse(dataRegexMatch[1]);
+                        if (Array.isArray(infrastructureHistoryArray) && infrastructureHistoryArray.length > 0) {
+                            const latestLogRecord = infrastructureHistoryArray[infrastructureHistoryArray.length - 1];
+                            p.total_planets     = parseInt(latestLogRecord.count, 10) || 0;
+                            p.total_population  = parseInt(latestLogRecord.population, 10) || 0;
+                            p.total_farms       = parseInt(latestLogRecord.farms, 10) || 0;
+                            p.total_factories   = parseInt(latestLogRecord.factories, 10) || 0;
+                            p.total_labs        = parseInt(latestLogRecord.labs, 10) || 0;
+                            p.total_cybernetics = parseInt(latestLogRecord.cybernets, 10) || 0;
+                        }
+                    }
+                }
+            } catch (statsErr) {
+                console.warn(`[Mass Scan] Failed to fetch stats for Player ID: ${playerId}`, statsErr);
+            }
+            // -----------------------------------------------------------------------------
+
             if (p.name) {
                 await fetch('/hub-api/sync/player', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
             }
             
-            await new Promise(resolve => setTimeout(resolve, 100));
+            // Kadangi dabar vienam žaidėjui daromos 2 užklausos, rekomenduojama šiek tiek padidinti delay, kad negauti IP bano
+            await new Promise(resolve => setTimeout(resolve, 200));
         }
         updateProgressCb("Player Scan Complete!", total, total);
     } catch (err) {
         console.error("[Mass Scan] Fatal Error", err);
         updateProgressCb("Scan Failed. Check Console.", 0, 0);
     }
+}
+
+export async function scanPlayerList(playerIds, updateProgressCb) {
+    console.log(`[Mass Scan] Scanning ${playerIds.length} specific players...`);
+    const total = playerIds.length;
+
+    if (!total) { 
+        updateProgressCb("Error: No players to scan", 0, 0); 
+        return; 
+    }
+
+    for (let i = 0; i < total; i++) {
+        const playerId = playerIds[i];
+        updateProgressCb(`Scanning Player #${playerId}...`, i + 1, total);
+
+        const res = await fetch(`/Game/Players/Profile/${playerId}`);
+        if (!res.ok) continue; 
+        
+        const html = await res.text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+
+        const p = extractPlayerData(playerId, doc);
+
+        // -- Paimame tavo anksčiau sutvarkytą infrastruktūros fetch (buildSecuredStatsUrl) --
+        try {
+            const statsUrl = buildSecuredStatsUrl(playerId);
+            const statsResponse = await fetch(statsUrl);
+            if (statsResponse.ok) {
+                const statsHtmlText = await statsResponse.text();
+                const dataRegexMatch = statsHtmlText.match(/var\s+data\s*=\s*(\[[\s\S]*?\]);/);
+                if (dataRegexMatch) {
+                    const infrastructureHistoryArray = JSON.parse(dataRegexMatch[1]);
+                    if (Array.isArray(infrastructureHistoryArray) && infrastructureHistoryArray.length > 0) {
+                        const latestLogRecord = infrastructureHistoryArray[infrastructureHistoryArray.length - 1];
+                        p.total_planets     = parseInt(latestLogRecord.count, 10) || 0;
+                        p.total_population  = parseInt(latestLogRecord.population, 10) || 0;
+                        p.total_farms       = parseInt(latestLogRecord.farms, 10) || 0;
+                        p.total_factories   = parseInt(latestLogRecord.factories, 10) || 0;
+                        p.total_labs        = parseInt(latestLogRecord.labs, 10) || 0;
+                        p.total_cybernetics = parseInt(latestLogRecord.cybernets, 10) || 0;
+                    }
+                }
+            }
+        } catch (e) {}
+        // -----------------------------------------------------------------------------------
+
+        if (p.name) {
+            await fetch('/hub-api/sync/player', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    updateProgressCb("Alliance Scan Complete!", total, total);
 }
