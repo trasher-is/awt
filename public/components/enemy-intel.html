@@ -1,4 +1,4 @@
-<div id="enemy-intel-panel" class="fixed top-0 right-0 h-full w-full bg-black border-l border-border transform translate-x-full transition-transform duration-300 z-40 flex flex-col shadow-2xl">
+<div id="enemy-intel-panel" class="absolute top-0 left-0 md:left-14 right-0 h-full bg-black border-l border-border transform translate-x-full transition-transform duration-300 z-40 flex flex-col shadow-2xl">
     
     <div class="h-14 border-b border-border flex items-center justify-between px-6 bg-zinc-900 shrink-0">
         <div class="flex items-center gap-3">
@@ -7,7 +7,7 @@
             </div>
             <div>
                 <h2 class="font-bold text-foreground tracking-wide">Cross-Alliance Enemy Intel Room</h2>
-                <p class="text-sm text-muted-foreground">Aggregated profiles, exact industrial outputs, and parsed activity tracking loops</p>
+                <p class="text-sm text-muted-foreground">Production data is 4 days old.</p>
             </div>
         </div>
         <button onclick="closeEnemyIntelPanel()" class="w-8 h-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
@@ -16,7 +16,7 @@
     </div>
 
     <div class="p-4 border-b border-border bg-zinc-950 flex flex-col gap-3 shrink-0">
-        <div class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Scanned Targets Directory:</div>
+        <div class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Scanned Alliances:</div>
         <div id="war-room-alliance-pills" class="flex flex-wrap gap-2 max-h-24 overflow-y-auto pr-2">
             <span class="text-sm text-muted-foreground font-mono animate-pulse">Loading targets index array...</span>
         </div>
@@ -37,23 +37,23 @@
     </div>
 
     <div class="flex-1 overflow-auto bg-black">
-        <table class="w-full text-left border-collapse min-w-[1500px] relative" id="warIntelTable">
+        <table class="w-full text-left border-collapse min-w-max md:min-w-[1500px] relative" id="warIntelTable">
             <thead>
-                <tr class="border-b border-border bg-zinc-900 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-30">
-                    <th p-3 cursor-pointer hover:bg-accent/40 select-none sticky left-0 md:static bg-zinc-900 md:bg-transparent z-20 md:z-auto w-24 min-w-[6rem] md:w-auto md:min-w-0 whitespace-normal md:whitespace-nowrap break-words md:break-normal text-center md:text-left border-r border-zinc-700 md:border-none" onclick="window.sortWarRoom('name', 'string')">Player</th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('level', 'number')">PL <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('economy', 'number')">Eco <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('calculated_prod', 'number')">~Prod/h <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('cv_day', 'number')">~CV/Day <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('max_cv', 'number')">Max CV <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('race_attack', 'number')">Att <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('race_defense', 'number')">Def <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('race_speed', 'number')">Spd <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('physics', 'number')">Phy <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('mathematics', 'number')">Math <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('energy', 'number')">Ene <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('idle_seconds', 'number')">Idle State <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortWarRoom('total_planets', 'number')">Planet Assets <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                <tr class="border-b border-border bg-zinc-900 text-[10px] md:text-[11px] font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-30">
+                    <th class="px-2 py-2 md:p-3 cursor-pointer hover:bg-accent/40 select-none sticky left-0 md:static bg-zinc-900 md:bg-transparent z-20 md:z-auto w-20 min-w-[5rem] md:w-auto md:min-w-0 whitespace-normal md:whitespace-nowrap break-words md:break-normal text-center md:text-left border-r border-zinc-700 md:border-none" onclick="window.sortWarRoom('name', 'string')">Player</th>
+                    <th class="px-1 py-2 md:p-3 cursor-pointer hover:bg-accent/40 select-none text-center md:text-left" onclick="window.sortWarRoom('level', 'number')">PL <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="px-1 py-2 md:p-3 cursor-pointer hover:bg-accent/40 select-none text-center md:text-left" onclick="window.sortWarRoom('economy', 'number')">Eco <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="px-1 py-2 md:p-3 cursor-pointer hover:bg-accent/40 select-none text-center md:text-left" onclick="window.sortWarRoom('calculated_prod', 'number')">~Prod/h <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="px-1 py-2 md:p-3 cursor-pointer hover:bg-accent/40 select-none text-center md:text-left" onclick="window.sortWarRoom('cv_day', 'number')">~CV/Day <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="px-1 py-2 md:p-3 cursor-pointer hover:bg-accent/40 select-none text-center md:text-left" onclick="window.sortWarRoom('max_cv', 'number')">Max CV <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="px-1 py-2 md:p-3 cursor-pointer hover:bg-accent/40 select-none text-center md:text-left" onclick="window.sortWarRoom('race_attack', 'number')">Att <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="px-1 py-2 md:p-3 cursor-pointer hover:bg-accent/40 select-none text-center md:text-left" onclick="window.sortWarRoom('race_defense', 'number')">Def <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="px-1 py-2 md:p-3 cursor-pointer hover:bg-accent/40 select-none text-center md:text-left" onclick="window.sortWarRoom('race_speed', 'number')">Spd <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="px-1 py-2 md:p-3 cursor-pointer hover:bg-accent/40 select-none text-center md:text-left" onclick="window.sortWarRoom('physics', 'number')">Phy <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="px-1 py-2 md:p-3 cursor-pointer hover:bg-accent/40 select-none text-center md:text-left" onclick="window.sortWarRoom('mathematics', 'number')">Math <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="px-1 py-2 md:p-3 cursor-pointer hover:bg-accent/40 select-none text-center md:text-left" onclick="window.sortWarRoom('energy', 'number')">Enrg <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="px-1 py-2 md:p-3 cursor-pointer hover:bg-accent/40 select-none text-center md:text-left" onclick="window.sortWarRoom('idle_seconds', 'number')">Idle <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="px-1 py-2 md:p-3 cursor-pointer hover:bg-accent/40 select-none text-center md:text-left" onclick="window.sortWarRoom('total_planets', 'number')">Planets <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
                 </tr>
             </thead>
             <tbody id="enemy-intel-table-body" class="divide-y divide-border/40 bg-black text-sm font-mono">

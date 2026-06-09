@@ -1108,23 +1108,23 @@
             const tbody = document.getElementById('db-table-body');
             if (!tbody) return;
             tbody.innerHTML = f.map(p => `
-                <tr class="hover:bg-accent/50 transition-colors">
-                    <td class="p-3 font-mono">${p.id}</td>
-                    <td class="p-3 font-medium text-foreground">${p.name || 'Unknown'}</td>
-                    <td class="p-3 text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : '-'}</td>
-                    <td class="p-3">${p.level}</td>
-                    <td class="p-3 text-primary font-medium">${(p.points || 0).toLocaleString()}</td>
-                    <td class="p-3 border-l border-border">${p.planet_count || 0}</td>
-                    <td class="p-3 ${p.idle_time && p.idle_time.includes('Online') ? 'text-green-400' : ''}">${p.idle_time || '-'}</td>
-                    <td class="p-3 border-l border-border">${p.artefact || '-'}</td>
-                    <td class="p-3 text-primary">${(p.trade_revenue || 0).toLocaleString()}</td>
-                    <td class="p-3 text-blue-400 border-l border-border">${p.physics}</td>
-                    <td class="p-3 text-green-400">${p.biology}</td>
-                    <td class="p-3 text-yellow-400">${p.economy}</td>
-                    <td class="p-3 text-purple-400">${p.energy}</td>
-                    <td class="p-3 text-orange-400">${p.mathematics}</td>
-                    <td class="p-3 text-pink-400 border-r border-border">${p.social}</td>
-                    <td class="p-3 text-muted-foreground">${new Date(p.updated_at).toLocaleString()}</td>
+                <tr class="hover:bg-accent/50 transition-colors text-xs md:text-sm">
+                    <td class="px-1 py-2 md:p-3 font-mono">${p.id}</td>
+                    <td class="px-1 py-2 md:p-3 font-medium text-foreground">${p.name || 'Unknown'}</td>
+                    <td class="px-1 py-2 md:p-3 text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : '-'}</td>
+                    <td class="px-1 py-2 md:p-3">${p.level}</td>
+                    <td class="px-1 py-2 md:p-3 text-primary font-medium">${(p.points || 0).toLocaleString()}</td>
+                    <td class="px-1 py-2 md:p-3 border-l border-border">${p.planet_count || 0}</td>
+                    <td class="px-1 py-2 md:p-3 ${p.idle_time && p.idle_time.includes('Online') ? 'text-green-400' : ''}">${p.idle_time || '-'}</td>
+                    <td class="px-1 py-2 md:p-3 border-l border-border">${p.artefact || '-'}</td>
+                    <td class="px-1 py-2 md:p-3 text-primary">${(p.trade_revenue || 0).toLocaleString()}</td>
+                    <td class="px-1 py-2 md:p-3 text-blue-400 border-l border-border">${p.physics}</td>
+                    <td class="px-1 py-2 md:p-3 text-green-400">${p.biology}</td>
+                    <td class="px-1 py-2 md:p-3 text-yellow-400">${p.economy}</td>
+                    <td class="px-1 py-2 md:p-3 text-purple-400">${p.energy}</td>
+                    <td class="px-1 py-2 md:p-3 text-orange-400">${p.mathematics}</td>
+                    <td class="px-1 py-2 md:p-3 text-pink-400 border-r border-border">${p.social}</td>
+                    <td class="px-1 py-2 md:p-3 text-muted-foreground">${new Date(p.updated_at).toLocaleString()}</td>
                 </tr>`).join('');
         };
 
@@ -1140,14 +1140,14 @@
             const tbody = document.getElementById('sys-db-table-body');
             if (!tbody) return;
             tbody.innerHTML = f.map(s => `
-                <tr class="hover:bg-accent/50 transition-colors">
-                    <td class="p-3 font-mono">${s.id}</td>
-                    <td class="p-3 font-medium text-foreground">${s.name || 'Unknown'}</td>
-                    <td class="p-3">${s.x}</td>
-                    <td class="p-3">${s.y}</td>
-                    <td class="p-3 border-l border-border text-aw-ally">${s.planet_count || 0}</td>
-                    <td class="p-3 text-aw-enemy">${s.fleet_count || 0}</td>
-                    <td class="p-3 border-l border-border text-muted-foreground">${new Date(s.updated_at).toLocaleString()}</td>
+                <tr class="hover:bg-accent/50 transition-colors text-xs md:text-sm">
+                    <td class="px-1 py-2 md:p-3 font-mono">${s.id}</td>
+                    <td class="px-1 py-2 md:p-3 font-medium text-foreground">${s.name || 'Unknown'}</td>
+                    <td class="px-1 py-2 md:p-3">${s.x}</td>
+                    <td class="px-1 py-2 md:p-3">${s.y}</td>
+                    <td class="px-1 py-2 md:p-3 border-l border-border text-aw-ally">${s.planet_count || 0}</td>
+                    <td class="px-1 py-2 md:p-3 text-aw-enemy">${s.fleet_count || 0}</td>
+                    <td class="px-1 py-2 md:p-3 border-l border-border text-muted-foreground">${new Date(s.updated_at).toLocaleString()}</td>
                 </tr>`).join('');
         };
 
@@ -1163,15 +1163,15 @@
             const tbody = document.getElementById('pln-db-table-body');
             if (!tbody) return;
             tbody.innerHTML = f.map(p => `
-                <tr class="hover:bg-accent/50 transition-colors">
-                    <td class="p-3 font-mono">${p.system_id}</td>
-                    <td class="p-3">${p.system_name || 'Unknown'}</td>
-                    <td class="p-3 font-medium text-foreground">#${p.planet_index}</td>
-                    <td class="p-3 border-l border-border">${p.owner_name || 'Empty'}</td>
-                    <td class="p-3 text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : '-'}</td>
-                    <td class="p-3 border-l border-border text-primary">${(p.population || 0).toLocaleString()}</td>
-                    <td class="p-3 text-aw-warning">${p.starbase || 0}</td>
-                    <td class="p-3 border-l border-border text-muted-foreground">${new Date(p.updated_at).toLocaleString()}</td>
+                <tr class="hover:bg-accent/50 transition-colors text-xs md:text-sm">
+                    <td class="px-1 py-2 md:p-3 font-mono">${p.system_id}</td>
+                    <td class="px-1 py-2 md:p-3">${p.system_name || 'Unknown'}</td>
+                    <td class="px-1 py-2 md:p-3 font-medium text-foreground">#${p.planet_index}</td>
+                    <td class="px-1 py-2 md:p-3 border-l border-border">${p.owner_name || 'Empty'}</td>
+                    <td class="px-1 py-2 md:p-3 text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : '-'}</td>
+                    <td class="px-1 py-2 md:p-3 border-l border-border text-primary">${(p.population || 0).toLocaleString()}</td>
+                    <td class="px-1 py-2 md:p-3 text-aw-warning">${p.starbase || 0}</td>
+                    <td class="px-1 py-2 md:p-3 border-l border-border text-muted-foreground">${new Date(p.updated_at).toLocaleString()}</td>
                 </tr>`).join('');
         };
 
@@ -1187,18 +1187,18 @@
             const tbody = document.getElementById('flt-db-table-body');
             if (!tbody) return;
             tbody.innerHTML = f.map(f => `
-                <tr class="hover:bg-accent/50 transition-colors">
-                    <td class="p-3">${f.system_name || 'Unknown'}</td>
-                    <td class="p-3 font-medium text-foreground">#${f.planet_index}</td>
-                    <td class="p-3 border-l border-border">${f.owner_name || 'Unknown'}</td>
-                    <td class="p-3 text-aw-warning">${f.alliance_tag ? `[${f.alliance_tag}]` : '-'}</td>
-                    <td class="p-3 border-l border-border text-gray-400">${f.transports || 0}</td>
-                    <td class="p-3 text-gray-400">${f.colony_ships || 0}</td>
-                    <td class="p-3 text-red-400 border-l border-border">${f.destroyers || 0}</td>
-                    <td class="p-3 text-red-400">${f.cruisers || 0}</td>
-                    <td class="p-3 text-red-400">${f.battleships || 0}</td>
-                    <td class="p-3 text-aw-warning border-l border-border font-bold">${(f.cv || 0).toLocaleString()}</td>
-                    <td class="p-3 border-l border-border ${f.arrival_time && f.arrival_time !== '-' ? 'text-red-400 font-bold' : 'text-muted-foreground'}">${f.arrival_time || 'Stationed'}</td>
+                <tr class="hover:bg-accent/50 transition-colors text-xs md:text-sm">
+                    <td class="px-1 py-2 md:p-3">${f.system_name || 'Unknown'}</td>
+                    <td class="px-1 py-2 md:p-3 font-medium text-foreground">#${f.planet_index}</td>
+                    <td class="px-1 py-2 md:p-3 border-l border-border">${f.owner_name || 'Unknown'}</td>
+                    <td class="px-1 py-2 md:p-3 text-aw-warning">${f.alliance_tag ? `[${f.alliance_tag}]` : '-'}</td>
+                    <td class="px-1 py-2 md:p-3 border-l border-border text-gray-400">${f.transports || 0}</td>
+                    <td class="px-1 py-2 md:p-3 text-gray-400">${f.colony_ships || 0}</td>
+                    <td class="px-1 py-2 md:p-3 text-red-400 border-l border-border">${f.destroyers || 0}</td>
+                    <td class="px-1 py-2 md:p-3 text-red-400">${f.cruisers || 0}</td>
+                    <td class="px-1 py-2 md:p-3 text-red-400">${f.battleships || 0}</td>
+                    <td class="px-1 py-2 md:p-3 text-aw-warning border-l border-border font-bold">${(f.cv || 0).toLocaleString()}</td>
+                    <td class="px-1 py-2 md:p-3 border-l border-border ${f.arrival_time && f.arrival_time !== '-' ? 'text-red-400 font-bold' : 'text-muted-foreground'}">${f.arrival_time || 'Stationed'}</td>
                 </tr>`).join('');
         };
 
@@ -1471,26 +1471,26 @@
                 const displayPlanets = `${p.total_planets || 0} <span class="text-zinc-500 text-xs">of</span> ${hasIntel ? (p.culture_level || '--') : '--'}`;
                 const localTime = new Date(p.updated_at + 'Z').toLocaleString();
                 const tr = document.createElement('tr');
-                tr.className = "hover:bg-zinc-900/40 transition-colors border-b border-zinc-900/60 group";
+                tr.className = "hover:bg-zinc-900/40 transition-colors border-b border-zinc-900/60 group text-xs md:text-sm";
                 tr.innerHTML = `
-                    <td class="p-3 font-bold text-foreground sticky left-0 md:static bg-zinc-900 md:bg-transparent z-20 md:z-auto w-24 min-w-[6rem] md:w-auto md:min-w-0 whitespace-normal break-words md:whitespace-nowrap md:break-normal text-center md:text-left border-r border-zinc-700 md:border-none">
+                    <td class="px-2 py-2 md:p-3 font-bold text-foreground sticky left-0 md:static bg-zinc-900 md:bg-transparent z-20 md:z-auto w-20 min-w-[5rem] md:w-auto md:min-w-0 whitespace-normal break-words md:whitespace-nowrap md:break-normal text-center md:text-left border-r border-zinc-700 md:border-none">
                         <a href="/Game/Players/Profile/${p.id}" target="_blank" class="hover:underline hover:text-red-400">
                             ${p.name}
                         </a>
                     </td>
-                    <td class="p-3 text-zinc-300 font-bold">${p.level || '-'}</td>
-                    <td class="p-3 text-zinc-400">${displayEco}</td>
-                    <td class="p-3 text-emerald-400 font-bold">${Math.round(p.calculated_prod).toLocaleString()}</td>
-                    <td class="p-3 text-amber-400 font-bold">${displayCvDay}</td>
-                    <td class="p-3 text-cyan-400">${displayMaxCv}</td>
-                    <td class="p-3">${displayAtt}</td>
-                    <td class="p-3">${displayDef}</td>
-                    <td class="p-3">${displaySpd}</td>
-                    <td class="p-3 text-zinc-400">${displayPhy}</td>
-                    <td class="p-3 text-zinc-400">${displayMath}</td>
-                    <td class="p-3 text-zinc-400">${displayEne}</td>
-                    <td class="p-3"><span class="px-2 py-0.5 rounded text-xs font-mono tracking-wide" style="${idleStyle}">${p.idle_time || 'Unknown'}</span></td>
-                    <td class="p-3 text-zinc-100 font-bold">${displayPlanets}</td>
+                    <td class="px-1 py-2 md:p-3 text-zinc-300 font-bold text-center md:text-left">${p.level || '-'}</td>
+                    <td class="px-1 py-2 md:p-3 text-zinc-400 text-center md:text-left">${displayEco}</td>
+                    <td class="px-1 py-2 md:p-3 text-emerald-400 font-bold text-center md:text-left">${Math.round(p.calculated_prod).toLocaleString()}</td>
+                    <td class="px-1 py-2 md:p-3 text-amber-400 font-bold text-center md:text-left">${displayCvDay}</td>
+                    <td class="px-1 py-2 md:p-3 text-cyan-400 text-center md:text-left">${displayMaxCv}</td>
+                    <td class="px-1 py-2 md:p-3 text-center md:text-left">${displayAtt}</td>
+                    <td class="px-1 py-2 md:p-3 text-center md:text-left">${displayDef}</td>
+                    <td class="px-1 py-2 md:p-3 text-center md:text-left">${displaySpd}</td>
+                    <td class="px-1 py-2 md:p-3 text-zinc-400 text-center md:text-left">${displayPhy}</td>
+                    <td class="px-1 py-2 md:p-3 text-zinc-400 text-center md:text-left">${displayMath}</td>
+                    <td class="px-1 py-2 md:p-3 text-zinc-400 text-center md:text-left">${displayEne}</td>
+                    <td class="px-1 py-2 md:p-3 text-center md:text-left"><span class="px-1 py-0.5 rounded text-[10px] font-mono tracking-wide" style="${idleStyle}">${p.idle_time || 'Unknown'}</span></td>
+                    <td class="px-1 py-2 md:p-3 text-zinc-100 font-bold text-center md:text-left">${displayPlanets}</td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -1660,24 +1660,24 @@
             if (!tbody) return;
 
             tbody.innerHTML = filtered.map(s => `
-                <tr class="hover:bg-accent/50 transition-colors border-b border-border/60">
-                    <td class="p-3 text-muted-foreground font-mono">${s.player_id}</td>
-                    <td class="p-3 font-medium text-foreground">${s.player_name || 'Unknown'}</td>
-                    <td class="p-3 text-aw-ally font-semibold">${s.planets_text || '-'}</td>
-                    <td class="p-3 font-semibold text-yellow-500">${formatCultureCountdown(s.next_culture_at)}</td>
-                    <td class="p-3 text-blue-400 font-semibold">${s.science_rate || '-'}</td>
-                    <td class="p-3 text-purple-400 font-semibold">${s.culture_rate || '-'}</td>
-                    <td class="p-3 text-orange-400 font-semibold">${s.production_rate || '-'}</td>
-                    <td class="p-3 text-emerald-400">${s.astro_dollars || '-'}</td>
-                    <td class="p-3 text-slate-300">${s.production_points || '-'}</td>
-                    <td class="p-3 text-pink-400 font-semibold">${s.artefact || 'None'}</td>
-                    <td class="p-3 text-sky-400">${s.level_text || '-'}</td>
-                    <td class="p-3 text-red-400">${s.cv_limit_text || '-'}</td>
-                    <td class="p-3 text-amber-500 font-bold">${s.economy}</td>
-                    <td class="p-3 text-cyan-400 font-bold">${s.energy}</td>
-                    <td class="p-3 text-indigo-400 font-bold">${s.mathematics}</td>
-                    <td class="p-3 text-violet-400 font-bold">${s.physics}</td>
-                    <td class="p-3 text-foreground font-bold bg-white/5">${s.population}</td>
+                <tr class="hover:bg-accent/50 transition-colors border-b border-border/60 text-xs md:text-sm">
+                    <td class="px-1 py-2 md:p-3 text-muted-foreground font-mono">${s.player_id}</td>
+                    <td class="px-1 py-2 md:p-3 font-medium text-foreground">${s.player_name || 'Unknown'}</td>
+                    <td class="px-1 py-2 md:p-3 text-aw-ally font-semibold">${s.planets_text || '-'}</td>
+                    <td class="px-1 py-2 md:p-3 font-semibold text-yellow-500">${formatCultureCountdown(s.next_culture_at)}</td>
+                    <td class="px-1 py-2 md:p-3 text-blue-400 font-semibold">${s.science_rate || '-'}</td>
+                    <td class="px-1 py-2 md:p-3 text-purple-400 font-semibold">${s.culture_rate || '-'}</td>
+                    <td class="px-1 py-2 md:p-3 text-orange-400 font-semibold">${s.production_rate || '-'}</td>
+                    <td class="px-1 py-2 md:p-3 text-emerald-400">${s.astro_dollars || '-'}</td>
+                    <td class="px-1 py-2 md:p-3 text-slate-300">${s.production_points || '-'}</td>
+                    <td class="px-1 py-2 md:p-3 text-pink-400 font-semibold">${s.artefact || 'None'}</td>
+                    <td class="px-1 py-2 md:p-3 text-sky-400">${s.level_text || '-'}</td>
+                    <td class="px-1 py-2 md:p-3 text-red-400">${s.cv_limit_text || '-'}</td>
+                    <td class="px-1 py-2 md:p-3 text-amber-500 font-bold">${s.economy}</td>
+                    <td class="px-1 py-2 md:p-3 text-cyan-400 font-bold">${s.energy}</td>
+                    <td class="px-1 py-2 md:p-3 text-indigo-400 font-bold">${s.mathematics}</td>
+                    <td class="px-1 py-2 md:p-3 text-violet-400 font-bold">${s.physics}</td>
+                    <td class="px-1 py-2 md:p-3 text-foreground font-bold bg-white/5">${s.population}</td>
                 </tr>
             `).join('');
         };
