@@ -44,6 +44,10 @@ async function executeSearch(type) {
                     input.value = '';
                     resultsContainer.innerHTML = '';
                     loadPlayerIntel(id);
+                    
+                    // Priverstinai įjungiame šoninio meniu skiltį rankinės paieškos metu
+                    document.getElementById('player-context-tools')?.classList.remove('hidden');
+                    document.getElementById('context-tools')?.classList.add('hidden');
                 });
             });
         } else if (type === 'system') {
@@ -68,5 +72,5 @@ async function executeSearch(type) {
 export function navToIframe(path) {
     const gameFrame = document.getElementById('game-frame');
     if (gameFrame) gameFrame.src = path;
-    if (window.innerWidth < 768 && typeof window.toggleSidebarInternal === 'function') window.toggleSidebarInternal();
+    if (window.innerWidth < 768 && typeof window.toggleSidebar === 'function') window.toggleSidebar();
 }

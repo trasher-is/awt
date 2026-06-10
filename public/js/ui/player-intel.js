@@ -27,19 +27,19 @@ export async function loadPlayerIntel(playerId) {
                 intelBlocks = `
                     <div class="bg-card border border-border p-3 rounded shadow-sm text-center text-muted-foreground text-xs">
                         <i class="fa-solid fa-triangle-exclamation text-aw-warning mb-1 text-sm"></i><br>
-                        <span class="text-foreground font-semibold block mb-0.5">Žvalgybos duomenų nėra</span>
-                        Nuskenuokite profilį žaidime.
+                        <span class="text-foreground font-semibold block mb-0.5">No Intel Data</span>
+                        Scan the profile in-game.
                     </div>`;
             } else {
                 intelBlocks = `
                     <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
-                        <div class="text-s text-muted-foreground font-bold uppercase tracking-wider mb-1">Ekonomika</div>
-                        ${row('Prekybos pajamos', (p.trade_revenue || 0).toLocaleString())}
-                        ${row('Eko Bonusas', `+${p.eco_bonus || 0}%`)}
-                        ${row('Artefaktas', p.artefact || 'Nėra')}
+                        <div class="text-s text-muted-foreground font-bold uppercase tracking-wider mb-1">Economy</div>
+                        ${row('Trade Revenue', (p.trade_revenue || 0).toLocaleString())}
+                        ${row('Eco Bonus', `+${p.eco_bonus || 0}%`)}
+                        ${row('Artefact', p.artefact || 'None')}
                     </div>
                     <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
-                        <div class="text-s text-muted-foreground font-bold uppercase tracking-wider mb-1">Mokslai</div>
+                        <div class="text-s text-muted-foreground font-bold uppercase tracking-wider mb-1">Sciences</div>
                         <div class="grid grid-cols-2 gap-x-4">
                             ${row('Bio', p.biology || 0)}${row('Eco', p.economy || 0)}
                             ${row('Ene', p.energy || 0)}${row('Math', p.mathematics || 0)}
@@ -51,11 +51,11 @@ export async function loadPlayerIntel(playerId) {
             document.getElementById('player-stats-list').innerHTML = `
                 <div class="flex flex-col gap-2">
                     <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
-                        ${row('Taškai', (p.points || 0).toLocaleString())}
-                        ${row('Reitingas', p.ranking ? `#${p.ranking}` : '-')}
-                        ${row('Lygis (PL)', p.level || '-')}
-                        ${row('Planetos', `${p.planet_count || 0} iš ${p.has_intel ? p.culture_level : '--'}`)}
-                        ${row('Būsena', p.idle_time || 'Nežinoma')}
+                        ${row('Points', (p.points || 0).toLocaleString())}
+                        ${row('Ranking', p.ranking ? `#${p.ranking}` : '-')}
+                        ${row('Level (PL)', p.level || '-')}
+                        ${row('Planets', `${p.planet_count || 0} of ${p.has_intel ? p.culture_level : '--'}`)}
+                        ${row('Status', p.idle_time || 'Unknown')}
                     </div>
                     ${intelBlocks}
                 </div>`;
@@ -74,7 +74,7 @@ export async function loadPlayerIntel(playerId) {
                         type: 'bar',
                         data: {
                             labels: Array.from({length: 24}, (_, i) => `${i}h`),
-                            datasets: [{ label: 'Prisijungimai', data: localHeatmap, backgroundColor: 'rgba(34, 197, 94, 0.6)', borderColor: '#22c55e', borderWidth: 1, borderRadius: 2 }]
+                            datasets: [{ label: 'Activity', data: localHeatmap, backgroundColor: 'rgba(34, 197, 94, 0.6)', borderColor: '#22c55e', borderWidth: 1, borderRadius: 2 }]
                         },
                         options: {
                             responsive: true, maintainAspectRatio: false,

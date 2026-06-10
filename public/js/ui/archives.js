@@ -45,7 +45,7 @@ export async function openDatabasePanel() {
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
     closeOtherPanels('database-panel');
     panel.classList.replace('translate-x-full', 'translate-x-0');
-    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebarInternal === 'function') window.toggleSidebarInternal();
+    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
     
     document.getElementById('db-table-body').innerHTML = '<tr><td colspan="16" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Intelligence...</td></tr>';
     try {
@@ -66,7 +66,7 @@ export async function openSystemDatabasePanel() {
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
     closeOtherPanels('system-database-panel');
     panel.classList.replace('translate-x-full', 'translate-x-0');
-    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebarInternal === 'function') window.toggleSidebarInternal();
+    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
     
     document.getElementById('sys-db-table-body').innerHTML = '<tr><td colspan="7" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Archive...</td></tr>';
     try {
@@ -87,7 +87,7 @@ export async function openPlanetDatabasePanel() {
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
     closeOtherPanels('planet-database-panel');
     panel.classList.replace('translate-x-full', 'translate-x-0');
-    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebarInternal === 'function') window.toggleSidebarInternal();
+    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
     
     document.getElementById('pln-db-table-body').innerHTML = '<tr><td colspan="8" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Archive...</td></tr>';
     try {
@@ -108,7 +108,7 @@ export async function openFleetDatabasePanel() {
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
     closeOtherPanels('fleet-database-panel');
     panel.classList.replace('translate-x-full', 'translate-x-0');
-    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebarInternal === 'function') window.toggleSidebarInternal();
+    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
     
     document.getElementById('flt-db-table-body').innerHTML = '<tr><td colspan="11" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Archive...</td></tr>';
     try {
@@ -134,14 +134,12 @@ export async function openEnemyIntelPanel() {
         document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
         panel = document.getElementById('enemy-intel-panel');
 
-        // Saugus mygtukų pririšimas
         panel.querySelector('#close-war-room-btn')?.addEventListener('click', () => {
             panel.classList.replace('translate-x-0', 'translate-x-full');
         });
 
         panel.querySelector('#btn-refresh-enemy-intel')?.addEventListener('click', refreshActiveWarAlliance);
 
-        // Rikivimo antraščių pririšimas
         panel.querySelectorAll('th[data-sort-col]').forEach(th => {
             th.addEventListener('click', (e) => {
                 const col = e.currentTarget.getAttribute('data-sort-col');
@@ -154,7 +152,7 @@ export async function openEnemyIntelPanel() {
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
     closeOtherPanels('enemy-intel-panel');
     panel.classList.replace('translate-x-full', 'translate-x-0');
-    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebarInternal === 'function') window.toggleSidebarInternal();
+    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
     
     loadWarRoomAlliancesList();
 }
@@ -223,7 +221,7 @@ function selectWarRoomAlliance(allianceId, tag, lastScanTime) {
     }
 
     loadWarRoomMatrixData();
-    loadWarRoomAlliancesList(); // Refresh pill selections state highlights
+    loadWarRoomAlliancesList();
 }
 
 async function loadWarRoomMatrixData() {
@@ -269,7 +267,8 @@ function renderWarRoomTable(data) {
     }
 
     data.forEach(p => {
-        const isUnknown = !p.economy || p.economy === 0;
+        // Pakeista iš !p.economy į !p.has_intel tikrinimą
+        const isUnknown = !p.has_intel;
         let idleStyle = "color: #a1a1aa;"; 
         if (p.idle_seconds >= 0) {
             const idleMins = p.idle_seconds / 60;
@@ -291,13 +290,12 @@ function renderWarRoomTable(data) {
             <td class="p-3 text-zinc-300">${isUnknown ? '<span class="text-zinc-600 font-bold">?</span>' : (p.mathematics || 0)}</td>
             <td class="p-3 text-zinc-300">${isUnknown ? '<span class="text-zinc-600 font-bold">?</span>' : (p.energy || 0)}</td>
             <td class="p-3"><span class="px-2 py-0.5 rounded text-xs font-mono tracking-wide" style="${idleStyle}">${p.idle_time || 'Unknown'}</span></td>
-            <td class="p-3 text-zinc-400 font-bold">${p.total_planets || 0} assets</td>
+            <td class="p-3 text-zinc-400 font-bold">${p.total_planets || 0} / ${isUnknown ? '?' : (p.culture_level || '?')}</td>
         `;
         tbody.appendChild(tr);
     });
 }
 
-// Fixed function name to match the caller inside render loop
 function formatWarRoomModifier(val, isMasked) {
      return formatRaceModifier(val, isMasked);
 }
@@ -321,18 +319,64 @@ function executeWarRoomSortingRoutine() {
     renderWarRoomTable(warRoomData);
 }
 
+// ATNAUJINTA: Tikrasis priešo alianso narių perfiltravimas iš žaidimo puslapio live režimu
 async function refreshActiveWarAlliance() {
     if (!selectedAllianceId) return;
     const btn = document.getElementById('btn-refresh-enemy-intel');
     const icon = document.getElementById('icon-refresh-enemy-intel');
-    btn.setAttribute('disabled', 'true');
-    icon.classList.add('fa-spin');
+    if (!btn || btn.disabled) return;
 
-    // Jeigu iškviesime mass scanner API, kai turėsime šią logiką.
-    await loadWarRoomMatrixData();
-    
-    btn.removeAttribute('disabled');
-    icon.classList.remove('fa-spin');
+    btn.setAttribute('disabled', 'true');
+    if (icon) icon.className = 'fa-solid fa-circle-notch fa-spin';
+
+    if (typeof window.showToast === 'function') window.showToast('Siunčiamas alianso narių sąrašas...');
+
+    try {
+        // 1. Užkrauname alianso profilį tiesiai iš AstroWars žaidimo
+        const res = await fetch(`/Game/Alliance/Profile/${selectedAllianceId}`);
+        if (!res.ok) throw new Error('Nepavyko gauti žaidimo alianso profilio duomenų');
+        
+        const html = await res.text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        
+        // 2. Surenkame visų jame esančių narių ID nuorodas
+        const links = doc.querySelectorAll('a[href^="/Game/Players/Profile/"]');
+        const playerIds = Array.from(links)
+            .map(link => parseInt(link.getAttribute('href').split('/').pop(), 10))
+            .filter(id => !isNaN(id));
+            
+        const uniqueIds = Array.from(new Set(playerIds));
+
+        if (uniqueIds.length === 0) {
+            if (typeof window.showToast === 'function') window.showToast('Narių nerasta alianso profilyje');
+            btn.removeAttribute('disabled');
+            if (icon) icon.className = 'fa-solid fa-rotate';
+            return;
+        }
+
+        if (typeof window.showToast === 'function') window.showToast(`Updating ${uniqueIds.length} members...`);
+
+        // 3. Dinamiškai importuojame jūsų masinį skenerį, kad išvengtume circular dependencies
+        const { scanPlayerList } = await import('../scrapers/mass-scanner.js');
+        
+        // Vykdome gilų atnaujinimą per jūsų scraperį
+        await scanPlayerList(uniqueIds, (statusMsg, current, total) => {
+            btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> ${current}/${total}`;
+        });
+
+        if (typeof window.showToast === 'function') window.showToast('Skenavimas baigtas sėkmingai!');
+        
+        // 4. Perkrauname matricą iš DB
+        await loadWarRoomMatrixData();
+    } catch (err) {
+        console.error(err);
+        if (typeof window.showToast === 'function') window.showToast(`Klaida: ${err.message}`);
+    } finally {
+        if (btn) {
+            btn.removeAttribute('disabled');
+            btn.innerHTML = `<i id="icon-refresh-enemy-intel" class="fa-solid fa-rotate"></i> Rescan Alliance`;
+        }
+    }
 }
 
 export async function openAllianceStatsPanel() {
@@ -343,7 +387,6 @@ export async function openAllianceStatsPanel() {
         panel = document.getElementById('alliance-stats-panel');
         convertLegacyClickAttributes(panel, 'ally');
         
-        // Paimame "Update all" mygtuką ir priskiriame švarų Listenerį
         const updateBtn = document.getElementById('btn-update-alliance-stats');
         if (updateBtn) {
             updateBtn.removeAttribute('onclick');
@@ -353,7 +396,7 @@ export async function openAllianceStatsPanel() {
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
     closeOtherPanels('alliance-stats-panel');
     panel.classList.replace('translate-x-full', 'translate-x-0');
-    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebarInternal === 'function') window.toggleSidebarInternal();
+    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
     
     document.getElementById('ally-stats-table-body').innerHTML = '<tr><td colspan="17" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Reading Alliance Records...</td></tr>';
     await refreshAllianceStatsData();
@@ -433,7 +476,6 @@ export async function triggerAllianceStatsUpdate() {
     }
 }
 
-// --- RENDER (TABLE DRAWING) FUNCTIONS ---
 function renderPlayerTable() {
     const input = document.getElementById('db-search-input');
     const q = (input ? input.value : '').toLowerCase();

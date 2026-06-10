@@ -1,5 +1,5 @@
 import { handleSearchInput, navToIframe } from './search.js';
-import { loadPlans, savePlan, deletePlan, setIntelSystemId } from './system-intel.js'; // <- Pridėtas setIntelSystemId
+import { loadPlans, savePlan, deletePlan, setIntelSystemId } from './system-intel.js';
 import { loadPlayerIntel } from './player-intel.js';
 import { 
     openDatabasePanel, 
@@ -18,13 +18,10 @@ export function getCurrentSystemId() { return currentSystemId; }
 
 // --- DOM INITIALIZATION & EVENT LISTENERS ---
 window.addEventListener('DOMContentLoaded', () => {
-    // Užkardome dešinį pelės klavišą
-    // 1. GRĄŽINAM ŽAIDIMO VAIZDĄ (Šios eilutės trūko!)
     const urlParams = new URLSearchParams(window.location.search);
     const gameFrame = document.getElementById('game-frame');
     if (gameFrame) gameFrame.src = urlParams.get('p') || '/';
 
-    // Prisirišame nuolatinius Wrapperio elementus natively
     document.getElementById('mobile-trigger')?.addEventListener('click', toggleSidebar);
     document.getElementById('sidebar-toggle-btn')?.addEventListener('click', toggleSidebar);
     document.getElementById('save-plan-btn')?.addEventListener('click', savePlan);
@@ -34,12 +31,10 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('search-player-input')?.addEventListener('input', () => handleSearchInput('player'));
     document.getElementById('search-system-input')?.addEventListener('input', () => handleSearchInput('system'));
 
-    // Admin Panel navigacija
     document.getElementById('admin-panel-btn')?.addEventListener('click', () => {
         window.location.href = '/admin';
     });
 
-    // Didieji archyvų skydeliai
     document.getElementById('open-war-room-btn')?.addEventListener('click', openEnemyIntelPanel);
     document.getElementById('open-alliance-stats-btn')?.addEventListener('click', openAllianceStatsPanel);
     document.getElementById('open-players-db-btn')?.addEventListener('click', openDatabasePanel);
@@ -47,12 +42,10 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('open-planets-db-btn')?.addEventListener('click', openPlanetDatabasePanel);
     document.getElementById('open-fleets-db-btn')?.addEventListener('click', openFleetDatabasePanel);
 
-    // Masiniai skeneriai
     document.getElementById('btn-mass-scan')?.addEventListener('click', runMassGalaxyScan);
     document.getElementById('btn-mass-scan-players')?.addEventListener('click', runMassPlayerScan);
 
     // --- EVENT DELEGATION DINAMIŠKIEMS ELEMENTAMS ---
-    // Stebime žaidėjų paieškos rezultatų paspaudimus
     document.getElementById('search-player-results')?.addEventListener('click', (e) => {
         const btn = e.target.closest('.btn-search-player');
         if (btn) {
@@ -60,10 +53,13 @@ window.addEventListener('DOMContentLoaded', () => {
             document.getElementById('search-player-input').value = '';
             document.getElementById('search-player-results').innerHTML = '';
             loadPlayerIntel(id);
+            
+            // Užtikriname, kad šoniniame meniu pasirodytų žaidėjo blokas
+            document.getElementById('player-context-tools')?.classList.remove('hidden');
+            document.getElementById('context-tools')?.classList.add('hidden');
         }
     });
 
-    // Stebime sistemų paieškos rezultatų paspaudimus
     document.getElementById('search-system-results')?.addEventListener('click', (e) => {
         const btn = e.target.closest('.btn-search-system');
         if (btn) {
@@ -74,7 +70,6 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Stebime taktinių planų trynimo paspaudimus
     document.getElementById('plans-list')?.addEventListener('click', (e) => {
         const btn = e.target.closest('.btn-delete-plan');
         if (btn) {
@@ -83,7 +78,6 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Inicializuojame šoninį meniu pagal vartotojo nustatymus
     if (localStorage.getItem('sidebarOpen') === 'true' && window.innerWidth >= 768) {
         document.getElementById('sidebar')?.classList.add('expanded');
         document.getElementById('mobile-trigger')?.classList.add('hidden');
@@ -111,6 +105,9 @@ export function toggleSidebar() {
     if (isOpen) refreshDbStats();
 }
 
+// Pririšame prie globalaus lango, kad pasiektų kiti komponentai
+window.toggleSidebar = toggleSidebar;
+
 export function showToast(message) {
     const toast = document.getElementById('toast');
     const toastMsg = document.getElementById('toast-msg');
@@ -124,8 +121,8 @@ export function showToast(message) {
         toast.classList.add('toast-enter'); 
     }, 2500);
 }
+window.showToast = showToast;
 
-// --- PRIVILEGES & CREDENTIALS UGNIASIENĖ ---
 async function initWrapper() {
     try {
         const res = await fetch('/hub-api/me');
@@ -157,7 +154,6 @@ async function refreshDbStats() {
     } catch (err) {}
 }
 
-// --- RADAR TELEMETRY ---
 async function handleAllianceVisionToggle() {
     const isChecked = document.getElementById('toggle-alliance-vision').checked;
     const iframe = document.getElementById('game-frame');
@@ -199,7 +195,7 @@ async function handleAllianceVisionToggle() {
     }
 }
 
-// --- MULTI-FRAME LISTENER (ANTI-SPY FIREWALL) ---
+// --- MULTI-FRAME LISTENER (Švelnesnė apsauga) ---
 window.addEventListener('message', async (event) => {
     if (event.origin !== window.location.origin) return;
     const data = event.data;
@@ -229,37 +225,43 @@ window.addEventListener('message', async (event) => {
         const sysLabel = document.getElementById('ui-sys-id');
         const playerLabel = document.getElementById('ui-player-id');
         
-        if (ctxContainer && playerCtxContainer && btnMap && sysLabel && playerLabel) {
+        // Atpalaiduotas tikrinimas, kuris nesulaužo likusio kodo, jei trūksta elementų wrapperio faile
+        if (ctxContainer && playerCtxContainer) {
             const isIntel = p.isSystemView || p.isPlayerView || p.isMap;
             if (isIntel) {
                 ctxContainer.classList.add('hidden');
                 playerCtxContainer.classList.add('hidden');
-                btnMap.classList.add('hidden');
-                sysLabel.classList.add('hidden');
-                playerLabel.classList.add('hidden');
+                if (btnMap) btnMap.classList.add('hidden');
+                if (sysLabel) sysLabel.classList.add('hidden');
+                if (playerLabel) playerLabel.classList.add('hidden');
 
                 if (p.isSystemView && p.systemId) {
                     currentSystemId = p.systemId;
                     ctxContainer.classList.remove('hidden'); 
-                    sysLabel.classList.remove('hidden');
-                    sysLabel.innerText = `Sistema #${p.systemId}`;
+                    if (sysLabel) {
+                        sysLabel.classList.remove('hidden');
+                        sysLabel.innerText = `Sistema #${p.systemId}`;
+                    }
                     loadPlans(p.systemId);
                 } 
                 if (p.isPlayerView && p.playerId) { 
                     playerCtxContainer.classList.remove('hidden');
-                    playerLabel.classList.remove('hidden');
-                    playerLabel.innerText = `#${p.playerId}`;
+                    if (playerLabel) {
+                        playerLabel.classList.remove('hidden');
+                        playerLabel.innerText = `#${p.playerId}`;
+                    }
                     loadPlayerIntel(p.playerId);
                 }
                 if (p.isMap && p.mapX && p.mapY) {
                     ctxContainer.classList.remove('hidden'); 
-                    btnMap.classList.remove('hidden');
-                    document.getElementById('ui-map-coords').innerText = `${p.mapX} / ${p.mapY}`;
+                    if (btnMap) btnMap.classList.remove('hidden');
+                    const mapCoords = document.getElementById('ui-map-coords');
+                    if (mapCoords) mapCoords.innerText = `${p.mapX} / ${p.mapY}`;
                 }
             } else if (p.path && !p.path.includes('/Profile/') && !p.path.includes('/SolarSystem/')) {
                 ctxContainer.classList.add('hidden');
                 playerCtxContainer.classList.add('hidden');
-                btnMap.classList.add('hidden');
+                if (btnMap) btnMap.classList.add('hidden');
             }
         }
     } else if (data.type === 'SHOW_TOAST') {
@@ -268,7 +270,6 @@ window.addEventListener('message', async (event) => {
     }
 });
 
-// --- AUTOMATED MAS SCRAPERS VIA WORKERS ---
 const container = document.getElementById('scan-progress-container');
 const textStatus = document.getElementById('scan-status-text');
 const textCount = document.getElementById('scan-count-text');
