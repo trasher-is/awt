@@ -1,0 +1,28 @@
+/* Custom švarūs slankikliai (Scrollbars) */
+::-webkit-scrollbar { width: 2px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(240 3.7% 20%); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(240 5% 64.9%); }
+
+/* Toast pranešimų animacijos */
+.toast-enter { transform: translateY(100%); opacity: 0; }
+.toast-active { transform: translateY(0); opacity: 1; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+
+/* Šoninio meniu (Sidebar) transformacijos ir prisitaikymas */
+.sidebar-text { transition: opacity 0.2s ease-in-out; opacity: 0; white-space: nowrap; pointer-events: none; }
+
+@media (min-width: 768px) { 
+    #sidebar.expanded { width: 22rem; } 
+    #sidebar.expanded .sidebar-text { opacity: 1; pointer-events: auto; } 
+    #sidebar:not(.expanded) .hide-collapsed { display: none; } 
+}
+
+@media (max-width: 767px) { 
+    #sidebar { transform: translateX(-100%); width: 100%; border-right: none; } 
+    #sidebar.expanded { transform: translateX(0); } 
+    #sidebar.expanded .sidebar-text { opacity: 1; pointer-events: auto; } 
+    #mobile-trigger { display: flex; } 
+}
+
+/* Taktinių planų kortelių indikatorius */
+.plan-card { border-left: 3px solid #f59e0b; }
