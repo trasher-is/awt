@@ -39,6 +39,18 @@ export async function loadPlayerIntel(playerId) {
                         ${row('Artefact', p.artefact || 'None')}
                     </div>
                     <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
+                        <div class="text-s text-muted-foreground font-bold uppercase tracking-wider mb-1">Race Modifiers</div>
+                        ${trait('Growth', p.race_growth || 0)}
+                        ${trait('Science', p.race_science || 0)}
+                        ${trait('Culture', p.race_culture || 0)}
+                        ${trait('Production', p.race_production || 0)}
+                        ${trait('Speed', p.race_speed || 0)}
+                        ${trait('Attack', p.race_attack || 0)}
+                        ${trait('Defense', p.race_defense || 0)}
+                        ${p.race_trader && Number(p.race_trader) !== 0 ? trait('Trader', p.race_trader) : ''}
+                        ${p.race_sul && Number(p.race_sul) !== 0 ? trait('Sul', p.race_sul) : ''}
+                    </div>
+                    <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
                         <div class="text-s text-muted-foreground font-bold uppercase tracking-wider mb-1">Sciences</div>
                         <div class="grid grid-cols-2 gap-x-4">
                             ${row('Bio', p.biology || 0)}${row('Eco', p.economy || 0)}
