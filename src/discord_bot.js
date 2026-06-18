@@ -400,11 +400,11 @@ client.on('messageCreate', async (message) => {
                         },
                         { 
                             name: '🏗️ Infrastructure', 
-                            value: `Planets: **${player.actual_planets || 0} / ${player.has_intel ? player.culture_level : '--'}**\nTotal Pop: **${player.actual_pop || 0}**\nTrade Rev: **${player.has_intel ? player.trade_revenue.toLocaleString() : '--'}**\nProd: **${player.has_intel ? player.production_rate + '/h' : '--'}**\nSci: **${player.has_intel ? player.science_rate + '/h' : '--'}**\nCult: **${player.has_intel ? player.culture_rate + '/h' : '--'}**\nArtefact: **${player.artefact && player.artefact !== 'N/A' ? player.artefact : '--'}**`, 
-                            inline: true 
+                            value: `Planets: **${player.actual_planets || 0} / ${player.has_intel ? player.culture_level : '--'}**\nTotal Pop: **${player.actual_pop || 0}**\nTrade Rev: **${player.has_intel ? (player.trade_revenue || 0).toLocaleString() : '--'}**\nProd: **${player.has_intel ? player.production_rate + '/h' : '--'}**\nSci: **${player.has_intel ? player.science_rate + '/h' : '--'}**\nCult: **${player.has_intel ? player.culture_rate + '/h' : '--'}**\nArtefact: **${player.artefact && player.artefact !== 'N/A' ? player.artefact : '--'}**`,
+                            inline: true
                         },
-                        { 
-                            name: '**Race & Science Intel**', 
+                        {
+                            name: '**Race & Science Intel**',
                             value: raceStatsVal, 
                             inline: true 
                         }
@@ -545,8 +545,8 @@ client.on('messageCreate', async (message) => {
                 },
                 { 
                     name: '🏗️ Infrastructure', 
-                    value: `Planets: **${player.actual_planets || 0} / ${player.has_intel ? player.culture_level : '--'}**\nTotal Pop: **${player.actual_pop || 0}**\nTrade Rev: **${player.has_intel ? player.trade_revenue.toLocaleString() : '--'}**\nProd: **${player.has_intel ? player.production_rate + '/h' : '--'}**\nSci: **${player.has_intel ? player.science_rate + '/h' : '--'}**\nCult: **${player.has_intel ? player.culture_rate + '/h' : '--'}**\nArtefact: **${player.artefact && player.artefact !== 'N/A' ? player.artefact : '--'}**`, 
-                    inline: true 
+                    value: `Planets: **${player.actual_planets || 0} / ${player.has_intel ? player.culture_level : '--'}**\nTotal Pop: **${player.actual_pop || 0}**\nTrade Rev: **${player.has_intel ? (player.trade_revenue || 0).toLocaleString() : '--'}**\nProd: **${player.has_intel ? player.production_rate + '/h' : '--'}**\nSci: **${player.has_intel ? player.science_rate + '/h' : '--'}**\nCult: **${player.has_intel ? player.culture_rate + '/h' : '--'}**\nArtefact: **${player.artefact && player.artefact !== 'N/A' ? player.artefact : '--'}**`,
+                    inline: true
                 },
                 { 
                     name: '**Race & Science Intel**', 
@@ -664,14 +664,16 @@ client.on('messageCreate', async (message) => {
             const visionRadius = (p.biology && p.biology > 0) ? p.biology : (p.science_level || 1);
 
             if (visionRadius >= requiredBio) {
-                inVision.push(p.name);
+                // Displays their current vision ceiling alongside what was actually required
+                inVision.push(`${p.name} (Has: **${visionRadius}** / Needs: **${requiredBio}**)`);
             } else {
-                outOfVision.push(p.name);
+                // Displays exactly how short they are of getting vision
+                outOfVision.push(`${p.name} (Has: **${visionRadius}** / Needs: **${requiredBio}**)`);
             }
         });
 
-        let inVisionStr = inVision.length > 0 ? inVision.join(', ') : "None";
-        let outOfVisionStr = outOfVision.length > 0 ? outOfVision.join(', ') : "None";
+        let inVisionStr = inVision.length > 0 ? inVision.join('\n') : "None";
+        let outOfVisionStr = outOfVision.length > 0 ? outOfVision.join('\n') : "None";
 
         if (inVisionStr.length > 1024) inVisionStr = inVisionStr.substring(0, 1020) + "...";
         if (outOfVisionStr.length > 1024) outOfVisionStr = outOfVisionStr.substring(0, 1020) + "...";
