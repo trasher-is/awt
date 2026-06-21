@@ -3,15 +3,25 @@
 // home-launch buildable-CV estimate can convert A$ into PP at the live rate.
 
 // Parse "$0,91" / "$761,66" / "$2 865,73" → 0.91 / 761.66 / 2865.73
+// Locale-agnostic: handles both "8 122,72" (comma decimal) and "8,122.72" (dot
+// decimal), plus space/NBSP thousands. Both separators present -> later one is the
+// decimal; a single separator with exactly 3 trailing digits is thousands.
 function parsePrice(text) {
-    if (!text) return null;
-    let t = text.replace(/[^\d.,]/g, '').trim();      // strip $, spaces, NBSP
-    if (!t) return null;
-    if (t.includes(',')) {
-        // Comma is the decimal separator in this locale; dots are thousands.
-        t = t.replace(/\./g, '').replace(',', '.');
+    if (text == null) return null;
+    let s = String(text).replace(/[^\d.,\-]/g, '');   // strip $, spaces, NBSP, letters
+    if (!s) return null;
+    const nComma = (s.match(/,/g) || []).length;
+    const nDot = (s.match(/\./g) || []).length;
+    let dec = null;
+    if (nComma && nDot) {
+        dec = s.lastIndexOf(',') > s.lastIndexOf('.') ? ',' : '.';
+    } else if (nComma === 1 || nDot === 1) {
+        const sep = nComma ? ',' : '.';
+        if (s.length - s.lastIndexOf(sep) - 1 !== 3) dec = sep;
     }
-    const val = parseFloat(t);
+    if (dec) s = s.split(dec === ',' ? '.' : ',').join('').replace(dec, '.');
+    else s = s.replace(/[.,]/g, '');
+    const val = parseFloat(s);
     return isNaN(val) ? null : val;
 }
 

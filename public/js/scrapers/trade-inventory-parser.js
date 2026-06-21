@@ -4,13 +4,26 @@
 // from the live Prices table on the same page. The hub stores it per member so
 // the Trade Agreements board can show who's sitting on how much.
 
-// "$776,45" / "$2 880,97" / "0/6" -> number (comma is the decimal separator).
-function parsePrice(text) {
-    if (!text) return null;
-    let t = String(text).replace(/[^\d.,]/g, '').trim();   // strip $, NBSP, spaces
-    if (!t) return null;
-    if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');   // dot = thousands, comma = decimal
-    const v = parseFloat(t);
+// Locale-agnostic number parse: handles both "8 122,72" (comma decimal) and
+// "8,122.72" (dot decimal), plus space/NBSP thousands. When both separators are
+// present the LATER one is the decimal; with a single separator, exactly 3 digits
+// after it means thousands, otherwise it's the decimal (prices show 2 decimals).
+function parseNumber(text) {
+    if (text == null) return null;
+    let s = String(text).replace(/[^\d.,\-]/g, '');        // strip $, NBSP, spaces, letters
+    if (!s) return null;
+    const nComma = (s.match(/,/g) || []).length;
+    const nDot = (s.match(/\./g) || []).length;
+    let dec = null;
+    if (nComma && nDot) {
+        dec = s.lastIndexOf(',') > s.lastIndexOf('.') ? ',' : '.';
+    } else if (nComma === 1 || nDot === 1) {
+        const sep = nComma ? ',' : '.';
+        if (s.length - s.lastIndexOf(sep) - 1 !== 3) dec = sep;   // not a 3-digit group => decimal
+    }
+    if (dec) s = s.split(dec === ',' ? '.' : ',').join('').replace(dec, '.');
+    else s = s.replace(/[.,]/g, '');                       // all separators are thousands
+    const v = parseFloat(s);
     return isNaN(v) ? null : v;
 }
 
@@ -23,7 +36,7 @@ export async function scrapeTradeInventory() {
             const priceCell = row.querySelector('td.text-end');
             if (!link || !priceCell) return;
             const name = link.innerText.trim();
-            const price = parsePrice(priceCell.innerText);
+            const price = parseNumber(priceCell.innerText);
             if (name && price != null) priceMap[name] = price;
         });
         const suPrice = priceMap['Supply Unit'] || 0;
