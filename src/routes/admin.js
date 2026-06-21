@@ -241,4 +241,34 @@ router.delete('/admin/broadcasts/:id', requireAdmin, (req, res) => {
     }
 });
 
+// --- ADMIN: APP SETTINGS (key/value) ---
+router.get('/admin/settings', requireAdmin, (req, res) => {
+    try {
+        const rows = db.prepare(`SELECT key, value FROM app_settings`).all();
+        const settings = {};
+        rows.forEach(r => { settings[r.key] = r.value; });
+        res.json({ success: true, settings });
+    } catch (err) {
+        console.error("[DB Error] Failed to fetch settings:", err);
+        res.status(500).json({ error: 'Failed to fetch settings' });
+    }
+});
+
+router.post('/admin/settings', requireAdmin, (req, res) => {
+    const { key, value } = req.body;
+    const allowedKeys = ['discord_announce_channel', 'discord_incoming_channel'];
+    if (!allowedKeys.includes(key)) return res.status(400).json({ error: 'Unknown setting key' });
+
+    try {
+        db.prepare(`
+            INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+        `).run(key, value == null ? '' : String(value).trim());
+        res.json({ success: true });
+    } catch (err) {
+        console.error("[DB Error] Failed to save setting:", err);
+        res.status(500).json({ error: 'Failed to save setting' });
+    }
+});
+
 module.exports = router;

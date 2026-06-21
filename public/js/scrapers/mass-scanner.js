@@ -1,4 +1,5 @@
 import { extractPlayerData, buildSecuredStatsUrl } from './player-parser.js';
+import { parseArrivalToISO } from '../utils/fleet-time.js';
 
 export async function runMassScan(updateProgressCb) {
     console.log("[Mass Scan] Initiating sequence...");
@@ -125,7 +126,8 @@ export async function runMassScan(updateProgressCb) {
                                         destroyers: parseInt(fTds[3].innerText.replace(/[^\d]/g, ''), 10) || 0,
                                         cruisers: parseInt(fTds[4].innerText.replace(/[^\d]/g, ''), 10) || 0,
                                         battleships: parseInt(fTds[5].innerText.replace(/[^\d]/g, ''), 10) || 0,
-                                        arrival_time: arrival_time
+                                        arrival_time: arrival_time,
+                                        arrival_at: parseArrivalToISO(arrival_time)
                                     });
                                 }
                             } catch (e) {}
@@ -138,7 +140,7 @@ export async function runMassScan(updateProgressCb) {
                 await fetch('/hub-api/sync/system', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ system_id: sysId, planets, fleets })
+                    body: JSON.stringify({ system_id: sysId, planets, fleets, scan_mode: 'galaxy' })
                 });
             }
 
@@ -210,7 +212,7 @@ export async function runPlayerScan(updateProgressCb) {
             // FIXED: Reuses shared selector configuration context from central helper function quietly
             const p = extractPlayerData(playerId, doc);
 
-            // --- PRIDĖTA LOGIKA: Nuskaitome infrastruktūros istoriją (Total pop, factories, etc.) ---
+            // --- ADDED LOGIC: Read infrastructure history (Total pop, factories, etc.) ---
             try {
                 const statsUrl = buildSecuredStatsUrl(playerId);
                 const statsResponse = await fetch(statsUrl);
@@ -240,7 +242,7 @@ export async function runPlayerScan(updateProgressCb) {
                 await fetch('/hub-api/sync/player', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
             }
             
-            // Kadangi dabar vienam žaidėjui daromos 2 užklausos, rekomenduojama šiek tiek padidinti delay, kad negauti IP bano
+            // Since 2 requests are now made per player, it's recommended to slightly increase the delay to avoid an IP ban
             await new Promise(resolve => setTimeout(resolve, 200));
         }
         updateProgressCb("Player Scan Complete!", total, total);
@@ -271,7 +273,7 @@ export async function scanPlayerList(playerIds, updateProgressCb) {
 
         const p = extractPlayerData(playerId, doc);
 
-        // -- Paimame tavo anksčiau sutvarkytą infrastruktūros fetch (buildSecuredStatsUrl) --
+        // -- Use the previously prepared infrastructure fetch (buildSecuredStatsUrl) --
         try {
             const statsUrl = buildSecuredStatsUrl(playerId);
             const statsResponse = await fetch(statsUrl);

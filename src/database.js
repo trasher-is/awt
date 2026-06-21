@@ -157,6 +157,12 @@ function initDatabase() {
         console.log("[DB] Added possible_homes column to players table.");
     } catch (e) {}
 
+    // Absolute (UTC ISO) landing time for in-flight fleets, computed browser-side at scrape time.
+    try {
+        db.exec(`ALTER TABLE fleets ADD COLUMN arrival_at TEXT`);
+        console.log("[DB] Added arrival_at column to fleets table.");
+    } catch (e) {}
+
     // 4. Map & Systems
     db.exec(`
         CREATE TABLE IF NOT EXISTS systems (
@@ -319,6 +325,32 @@ function initDatabase() {
             target_arrival_time TEXT,          -- User-chosen local completion time (HH:MM:SS)
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (system_id, planet_index)
+        )
+    `);
+
+    // --- COLLABORATIVE TRADE AGREEMENTS ---
+    // Lifecycle: proposed -> confirmed -> done. pair_key is the lowercased, sorted
+    // "a|b" so each unordered pair is unique regardless of who proposed it.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS trade_agreements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pair_key TEXT NOT NULL UNIQUE,
+            player_a TEXT NOT NULL,
+            player_b TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'proposed',
+            initiator TEXT,
+            is_admin_set INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    // --- GENERIC KEY/VALUE SETTINGS STORE ---
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     `);
 

@@ -11,8 +11,9 @@ router.get('/intel/war-room/players', requireAuth, (req, res) => {
     try {
         const players = db.prepare(`
             SELECT p.id, p.name, p.economy, p.social, p.physics, p.mathematics, p.energy, p.idle_time,
-                   p.race_attack, p.race_defense, p.race_speed, p.updated_at as player_scan_time,
+                   p.race_attack, p.race_defense, p.race_speed, p.race_production, p.updated_at as player_scan_time,
                    p.total_population, p.total_factories, p.total_farms, p.total_cybernetics, p.total_labs,
+                   p.trade_revenue, p.artefact,
                    p.level, p.culture_level, p.has_intel,
                    a.tag as alliance_tag,
                    (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as total_planets
@@ -115,13 +116,13 @@ router.get('/intel/system/:id', requireAuth, (req, res) => {
 
         // 3. Get History (Last 10 events) - FIXED: Removed event_types table dependency
         const history = db.prepare(`
-            SELECT e.planet_index, e.event_type_id, e.timestamp,
+            SELECT e.id, e.planet_index, e.event_type_id, e.timestamp, e.old_value, e.new_value,
                    o1.name as old_owner, o2.name as new_owner
             FROM planet_events e
             LEFT JOIN players o1 ON e.old_value = o1.id AND e.event_type_id = 1
             LEFT JOIN players o2 ON e.new_value = o2.id AND e.event_type_id = 1
             WHERE e.system_id = ?
-            ORDER BY e.timestamp DESC
+            ORDER BY e.timestamp DESC, e.id DESC
             LIMIT 10
         `).all(sysId);
 
@@ -309,6 +310,50 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
     } catch (error) {
         console.error('[API] Error fetching player intel:', error);
         res.status(500).json({ success: false, error: 'Server error' });
+    }
+});
+
+// --- TRADE AGREEMENT SCHEDULER DATA ---
+// Returns alliance members with parsed economic numbers + the live PP market price,
+// for the client-side Trade Agreement scheduler.
+router.get('/intel/trade-analysis', requireAuth, (req, res) => {
+    try {
+        const toInt = (s) => parseInt(String(s == null ? '' : s).replace(/[^\d]/g, ''), 10) || 0;
+
+        const rows = db.prepare(`
+            SELECT p.name,
+                   ams.production_rate,
+                   ams.astro_dollars,
+                   ams.production_points,
+                   p.trade_partners
+            FROM alliance_member_stats ams
+            JOIN players p ON p.id = ams.player_id
+        `).all();
+
+        const players = rows.map(r => {
+            let partners = [];
+            if (r.trade_partners) {
+                try {
+                    const parsed = JSON.parse(r.trade_partners);
+                    if (Array.isArray(parsed)) partners = parsed.map(x => String(x).toLowerCase());
+                } catch (e) { /* not JSON / empty */ }
+            }
+            return {
+                name: r.name,
+                production_rate: toInt(r.production_rate),
+                astro_dollars: toInt(r.astro_dollars),
+                production_points: toInt(r.production_points),
+                trade_partners: partners
+            };
+        });
+
+        const ppRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'pp_price'`).get();
+        const pp_price = ppRow ? (parseFloat(ppRow.value) || 0) : 0;
+
+        res.json({ success: true, players, pp_price });
+    } catch (err) {
+        console.error('[DB Error] Failed trade analysis:', err);
+        res.status(500).json({ error: 'Failed to build trade analysis' });
     }
 });
 

@@ -21,13 +21,13 @@ async function executeSearch(type) {
         return; 
     }
 
-    resultsContainer.innerHTML = '<div class="text-s text-muted-foreground text-center py-2"><i class="fa-solid fa-circle-notch fa-spin"></i> Ieškoma...</div>';
+    resultsContainer.innerHTML = '<div class="text-s text-muted-foreground text-center py-2"><i class="fa-solid fa-circle-notch fa-spin"></i> Searching...</div>';
     try {
         const res = await fetch(`/hub-api/search/${type}?q=${encodeURIComponent(q)}`);
         const data = await res.json();
 
         if (!data.success || data.results.length === 0) {
-            resultsContainer.innerHTML = '<div class="text-s text-muted-foreground text-center py-2 bg-card rounded border border-border">Nerasta.</div>';
+            resultsContainer.innerHTML = '<div class="text-s text-muted-foreground text-center py-2 bg-card rounded border border-border">Not found.</div>';
             return;
         }
 
@@ -45,7 +45,7 @@ async function executeSearch(type) {
                     resultsContainer.innerHTML = '';
                     loadPlayerIntel(id);
                     
-                    // Priverstinai įjungiame šoninio meniu skiltį rankinės paieškos metu
+                    // Force-open the sidebar player section during manual search
                     document.getElementById('player-context-tools')?.classList.remove('hidden');
                     document.getElementById('context-tools')?.classList.add('hidden');
                 });
@@ -66,7 +66,7 @@ async function executeSearch(type) {
                 });
             });
         }
-    } catch (err) { resultsContainer.innerHTML = '<div class="text-s text-red-500 text-center py-2">Klaida.</div>'; }
+    } catch (err) { resultsContainer.innerHTML = '<div class="text-s text-red-500 text-center py-2">Error.</div>'; }
 }
 
 export function navToIframe(path) {

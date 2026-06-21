@@ -1,3 +1,5 @@
+import { parseArrivalToISO } from '../utils/fleet-time.js';
+
 export async function scrapeSystem(systemId) {
     console.log(`[Spy] Initiating scrape for System ID: ${systemId}`);
     
@@ -83,7 +85,8 @@ export async function scrapeSystem(systemId) {
                                         destroyers: parseInt(fTds[3].innerText.replace(/[^\d]/g, ''), 10) || 0,
                                         cruisers: parseInt(fTds[4].innerText.replace(/[^\d]/g, ''), 10) || 0,
                                         battleships: parseInt(fTds[5].innerText.replace(/[^\d]/g, ''), 10) || 0,
-                                        arrival_time: arrival_time
+                                        arrival_time: arrival_time,
+                                        arrival_at: parseArrivalToISO(arrival_time)
                                     });
                         }
                     } catch (fleetErr) {

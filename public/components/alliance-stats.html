@@ -28,29 +28,29 @@
 
     <!-- Scraped Data Table Container (Solid Background) -->
     <div class="flex-1 overflow-auto bg-black">
-        <table class="w-full text-left border-collapse min-w-[1300px]">
+        <table class="w-full text-left border-collapse">
             <thead>
                 <tr class="border-b border-border bg-zinc-900 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10">
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('player_id')">ID <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('player_name')">Member <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('planets_text')">Planets <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('next_culture_at')">Next Culture <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('science_rate')">Sci Rate <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('culture_rate')">Cul Rate <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('production_rate')">Prd Rate <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('astro_dollars')">Astro Dollars <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('production_points')">PP <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('artefact')">Artefact <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('level_text')">Player Level <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('cv_limit_text')">CV Limit <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('economy')">Eco <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('energy')">Ene <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('mathematics')">Math <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('physics')">Phy <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="p-3 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('population')">Population <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
+                    <th class="sticky left-0 z-20 bg-zinc-900 px-2 py-1.5 cursor-pointer hover:bg-accent/40 select-none w-[110px]" onclick="window.sortAllyStats('player_name')">Member <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('player_id')">ID <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('planets_text')">Planets <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('next_culture_at')">Next Cult <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('science_rate')">Sci <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('culture_rate')">Cul <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('production_rate')">Prd <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('astro_dollars')">Astro$ <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('production_points')">PP <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('artefact')">Artefact <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('level_text')">Level <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('cv_limit_text')">CV Limit <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('economy')">Eco <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('energy')">Ene <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('mathematics')">Math <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('physics')">Phy <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" onclick="window.sortAllyStats('population')">Pop <i class="fa-solid fa-sort opacity-50"></i></th>
                 </tr>
             </thead>
-            <tbody id="ally-stats-table-body" class="divide-y divide-border/40 bg-black text-sm font-mono">
+            <tbody id="ally-stats-table-body" class="divide-y divide-border/40 bg-black text-xs font-mono">
                 <!-- Data Row Injection Destination -->
             </tbody>
         </table>

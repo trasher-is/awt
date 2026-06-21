@@ -924,4 +924,98 @@ function initDiscordBot(token) {
     });
 }
 
-module.exports = { initDiscordBot };
+// ----------------------------------------------------
+// SYSTEM CHANGE ANNOUNCER (used by the galaxy scanner)
+// ----------------------------------------------------
+function getSettingValue(key) {
+    try {
+        const row = db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(key);
+        const v = row && row.value ? row.value.trim() : '';
+        return v || null;
+    } catch (err) {
+        return null;
+    }
+}
+
+function getAnnounceChannelId() {
+    return getSettingValue('discord_announce_channel');
+}
+
+/**
+ * Announce planet events detected for a single system to the configured channel.
+ * `events` is an array of { planet_index, type, old_owner, new_owner, old_pop, new_pop }.
+ * Safe no-op if the bot isn't ready, no channel is configured, or there are no events.
+ */
+async function announceSystemChanges(system, events) {
+    if (!Array.isArray(events) || events.length === 0) return;
+    if (!client.isReady()) return;
+
+    const channelId = getAnnounceChannelId();
+    if (!channelId) return;
+
+    let channel;
+    try {
+        channel = await client.channels.fetch(channelId);
+    } catch (err) {
+        console.error('[Discord] Could not fetch announce channel:', err.message);
+        return;
+    }
+    if (!channel || typeof channel.send !== 'function') return;
+
+    const sysLabel = `${system.name ? system.name + ' ' : ''}#${system.id}${(system.x != null && system.y != null) ? ` (${system.x}/${system.y})` : ''}`;
+
+    const lines = events.map(e => {
+        if (e.type === 'OWNER_CHANGE') {
+            return `🪐 **Planet ${e.planet_index}**: ${e.old_owner || 'Empty'} → **${e.new_owner || 'Empty'}**`;
+        }
+        if (e.type === 'POP_DROP') {
+            return `📉 **Planet ${e.planet_index}**: population ${e.old_pop} → ${e.new_pop}`;
+        }
+        return null;
+    }).filter(Boolean);
+
+    if (lines.length === 0) return;
+
+    const embed = new EmbedBuilder()
+        .setTitle(`🛰️ System Change: ${sysLabel}`)
+        .setDescription(lines.join('\n'))
+        .setColor('#f59e0b');
+
+    try {
+        await channel.send({ embeds: [embed] });
+    } catch (err) {
+        console.error('[Discord] Failed to send system change announcement:', err.message);
+    }
+}
+
+/**
+ * Send a pre-built incoming-attack alert to the configured incoming channel.
+ * The webhook route assembles the message (it has DB + travel-calc access);
+ * the bot just delivers it. Safe no-op if not ready or no channel configured.
+ */
+async function sendIncomingAlert(content) {
+    if (!client.isReady()) return false;
+    const channelId = getSettingValue('discord_incoming_channel');
+    if (!channelId) return false;
+
+    let channel;
+    try {
+        channel = await client.channels.fetch(channelId);
+    } catch (err) {
+        console.error('[Discord] Could not fetch incoming channel:', err.message);
+        return false;
+    }
+    if (!channel || typeof channel.send !== 'function') return false;
+
+    // Discord hard-caps message content at 2000 chars.
+    const text = content.length > 1990 ? content.slice(0, 1987) + '...' : content;
+    try {
+        await channel.send({ content: text });
+        return true;
+    } catch (err) {
+        console.error('[Discord] Failed to send incoming alert:', err.message);
+        return false;
+    }
+}
+
+module.exports = { initDiscordBot, announceSystemChanges, sendIncomingAlert };

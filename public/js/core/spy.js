@@ -411,6 +411,16 @@ export function initSpy() {
                     .then(module => module.scrapeGalaxy())
                     .catch(err => console.error(err));
             }
+
+            if (pathLower.includes('/game/trade/agreements')) {
+                import('../scrapers/trade-agreements-parser.js')
+                    .then(module => module.scrapeTradeAgreements())
+                    .catch(err => console.error(err));
+            } else if (pathLower.includes('/game/trade')) {
+                import('../scrapers/trade-parser.js')
+                    .then(module => module.scrapeTradePrices())
+                    .catch(err => console.error(err));
+            }
         }
     }
 

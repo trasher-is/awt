@@ -1,11 +1,12 @@
 const express = require('express');
 const db = require('../database');
 const { requireAuth } = require('./_middleware');
+const { announceSystemChanges } = require('../discord_bot');
 const router = express.Router();
 
 // --- MAP SCRAPER DATA RECEIVER ---
 router.post('/sync/system', requireAuth, (req, res) => {
-    const { system_id, planets, fleets } = req.body; // <-- Added fleets
+    const { system_id, planets, fleets, scan_mode } = req.body; // <-- Added fleets, scan_mode
 
     if (!system_id || !Array.isArray(planets)) {
         return res.status(400).json({ error: 'Invalid payload' });
@@ -40,16 +41,31 @@ router.post('/sync/system', requireAuth, (req, res) => {
 
     // Prepared statement for the new fleets
     const insertFleet = db.prepare(`
-        INSERT INTO fleets (game_fleet_id, owner_id, system_id, planet_index, transports, colony_ships, destroyers, cruisers, battleships, arrival_time)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO fleets (game_fleet_id, owner_id, system_id, planet_index, transports, colony_ships, destroyers, cruisers, battleships, arrival_time, arrival_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     // --- NEW: History Logging Prep ---
     const getOldPlanet = db.prepare(`SELECT owner_id, population FROM planets WHERE system_id = ? AND planet_index = ?`);
+    const getPlayerName = db.prepare(`
+        SELECT p.name, a.tag AS alliance_tag
+        FROM players p
+        LEFT JOIN alliances a ON p.alliance_id = a.id
+        WHERE p.id = ?
+    `);
     const logEvent = db.prepare(`
         INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value)
         VALUES (?, ?, ?, ?, ?)
     `);
+
+    // Collect human-readable events for the Discord announcer (only used during a galaxy scan)
+    const announceEvents = [];
+    const nameOf = (id) => {
+        if (!id) return null;
+        const row = getPlayerName.get(id);
+        if (!row) return `#${id}`;
+        return row.alliance_tag ? `[${row.alliance_tag}] ${row.name}` : row.name;
+    };
 
     const syncTransaction = db.transaction((planetsData, fleetsData) => {
 
@@ -76,10 +92,24 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 // Owner Change: Skip event creation if this is an obscured shadow scan
                 if (!p.is_unknown && oldP.owner_id !== finalOwnerId) {
                     logEvent.run(system_id, p.planet_index, 1, oldP.owner_id, finalOwnerId); // 1 = OWNER_CHANGE
+                    announceEvents.push({
+                        planet_index: p.planet_index,
+                        type: 'OWNER_CHANGE',
+                        old_owner: nameOf(oldP.owner_id),
+                        new_owner: p.owner
+                            ? (p.owner.alliance_tag ? `[${p.owner.alliance_tag}] ${p.owner.name}` : p.owner.name)
+                            : nameOf(finalOwnerId)
+                    });
                 }
                 // Significant Population Drop: Skip history generation entirely if it's an unverified/unknown scan
                 if (!p.is_unknown && oldP.population > 0 && finalPopulation < oldP.population - 5) {
                     logEvent.run(system_id, p.planet_index, 2, oldP.population, finalPopulation); // 2 = POP_DROP
+                    announceEvents.push({
+                        planet_index: p.planet_index,
+                        type: 'POP_DROP',
+                        old_pop: oldP.population,
+                        new_pop: finalPopulation
+                    });
                 }
             }
 
@@ -111,13 +141,23 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 if (f.owner_id) {
                     db.prepare(`INSERT INTO players (id, name) VALUES (?, 'Unknown') ON CONFLICT(id) DO NOTHING`).run(f.owner_id);
                 }
-                insertFleet.run(f.game_fleet_id, f.owner_id, system_id, f.planet_index, f.transports, f.colony_ships, f.destroyers, f.cruisers, f.battleships, f.arrival_time || null);
+                insertFleet.run(f.game_fleet_id, f.owner_id, system_id, f.planet_index, f.transports, f.colony_ships, f.destroyers, f.cruisers, f.battleships, f.arrival_time || null, f.arrival_at || null);
             }
         }
     });
 
     try {
         syncTransaction(planets, fleets || []);
+
+        // Announce detected planet events to Discord — both during a full galaxy scan
+        // and during normal map browsing.
+        if (announceEvents.length > 0) {
+            const sys = db.prepare(`SELECT id, name, x, y FROM systems WHERE id = ?`).get(system_id) || { id: system_id };
+            announceSystemChanges(sys, announceEvents).catch(err =>
+                console.error('[Discord] announce error:', err.message)
+            );
+        }
+
         res.json({ success: true, synced_count: planets.length });
     } catch (err) {
         console.error(`[DB Error] Failed to sync system ${system_id}:`, err);
@@ -451,6 +491,49 @@ router.post('/sync/alliance-stats', requireAuth, (req, res) => {
     } catch (err) {
         console.error("[DB Error] Alliance member stats sync failed:", err);
         res.status(500).json({ error: 'Database transaction failed' });
+    }
+});
+
+// --- ALLIANCE ROSTER RECONCILE ---
+// Body: { member_ids: [..] } — the full set of player_ids currently in the alliance.
+// Stats rows for anyone NOT in this set (i.e. resigned/left) are removed so they
+// stop appearing in alliance stats and on the trade-agreements board.
+router.post('/sync/alliance-roster', requireAuth, (req, res) => {
+    const ids = Array.isArray(req.body.member_ids)
+        ? req.body.member_ids.map(Number).filter(Number.isInteger)
+        : [];
+    // Guard against wiping everything if the roster scrape came back empty.
+    if (ids.length === 0) return res.json({ success: true, removed: 0 });
+
+    try {
+        const placeholders = ids.map(() => '?').join(',');
+        const info = db.prepare(
+            `DELETE FROM alliance_member_stats WHERE player_id NOT IN (${placeholders})`
+        ).run(...ids);
+        if (info.changes > 0) console.log(`[API] Alliance roster reconcile: removed ${info.changes} stale member(s).`);
+        res.json({ success: true, removed: info.changes });
+    } catch (err) {
+        console.error("[DB Error] Alliance roster reconcile failed:", err);
+        res.status(500).json({ error: 'Database transaction failed' });
+    }
+});
+
+// --- TRADE MARKET PRICE RECEIVER (Production Point / Supply Unit) ---
+router.post('/sync/trade-prices', requireAuth, (req, res) => {
+    const { pp_price, su_price } = req.body;
+
+    const upsert = db.prepare(`
+        INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+    `);
+
+    try {
+        if (pp_price != null && !isNaN(pp_price)) upsert.run('pp_price', String(pp_price));
+        if (su_price != null && !isNaN(su_price)) upsert.run('su_price', String(su_price));
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[DB Error] Failed to store trade prices:', err);
+        res.status(500).json({ error: 'Failed to store trade prices' });
     }
 });
 

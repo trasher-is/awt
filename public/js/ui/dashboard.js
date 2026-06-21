@@ -6,8 +6,9 @@ import {
     openSystemDatabasePanel, 
     openPlanetDatabasePanel, 
     openFleetDatabasePanel, 
-    openEnemyIntelPanel, 
-    openAllianceStatsPanel 
+    openEnemyIntelPanel,
+    openAllianceStatsPanel,
+    openTradeAgreementsPanel
 } from './archives.js';
 import { runMassScan, runPlayerScan } from '../scrapers/mass-scanner.js';
 
@@ -37,6 +38,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('open-war-room-btn')?.addEventListener('click', openEnemyIntelPanel);
     document.getElementById('open-alliance-stats-btn')?.addEventListener('click', openAllianceStatsPanel);
+    document.getElementById('open-trade-agreements-btn')?.addEventListener('click', openTradeAgreementsPanel);
     document.getElementById('open-players-db-btn')?.addEventListener('click', openDatabasePanel);
     document.getElementById('open-systems-db-btn')?.addEventListener('click', openSystemDatabasePanel);
     document.getElementById('open-planets-db-btn')?.addEventListener('click', openPlanetDatabasePanel);
@@ -45,7 +47,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-mass-scan')?.addEventListener('click', runMassGalaxyScan);
     document.getElementById('btn-mass-scan-players')?.addEventListener('click', runMassPlayerScan);
 
-    // --- EVENT DELEGATION DINAMIŠKIEMS ELEMENTAMS ---
+    // --- EVENT DELEGATION FOR DYNAMIC ELEMENTS ---
     document.getElementById('search-player-results')?.addEventListener('click', (e) => {
         const btn = e.target.closest('.btn-search-player');
         if (btn) {
@@ -54,7 +56,7 @@ window.addEventListener('DOMContentLoaded', () => {
             document.getElementById('search-player-results').innerHTML = '';
             loadPlayerIntel(id);
             
-            // Užtikriname, kad šoniniame meniu pasirodytų žaidėjo blokas
+            // Ensure the player block shows up in the sidebar
             document.getElementById('player-context-tools')?.classList.remove('hidden');
             document.getElementById('context-tools')?.classList.add('hidden');
         }
@@ -105,7 +107,7 @@ export function toggleSidebar() {
     if (isOpen) refreshDbStats();
 }
 
-// Pririšame prie globalaus lango, kad pasiektų kiti komponentai
+// Bind to the global window so other components can reach it
 window.toggleSidebar = toggleSidebar;
 
 export function showToast(message) {
@@ -164,7 +166,7 @@ async function handleAllianceVisionToggle() {
         return;
     }
 
-    showToast('Surenkami alianso radarų duomenys...');
+    showToast('Collecting alliance radar data...');
     try {
         const [statsRes, playersRes] = await Promise.all([
             fetch('/hub-api/intel/alliance-stats'),
@@ -186,16 +188,16 @@ async function handleAllianceVisionToggle() {
 
             iframe.contentWindow.postMessage({ type: 'SHOW_ALLIANCE_VISION', payload: { visions: allianceVisionData } }, window.location.origin);
         } else {
-            showToast('Nepavyko apjungti radarų tinklo');
+            showToast('Failed to merge radar network');
             document.getElementById('toggle-alliance-vision').checked = false;
         }
     } catch (err) {
-        showToast('Duomenų srautai nepasiekiami');
+        showToast('Data streams unavailable');
         document.getElementById('toggle-alliance-vision').checked = false;
     }
 }
 
-// --- MULTI-FRAME LISTENER (Švelnesnė apsauga) ---
+// --- MULTI-FRAME LISTENER (lenient guard) ---
 window.addEventListener('message', async (event) => {
     if (event.origin !== window.location.origin) return;
     const data = event.data;
@@ -225,7 +227,7 @@ window.addEventListener('message', async (event) => {
         const sysLabel = document.getElementById('ui-sys-id');
         const playerLabel = document.getElementById('ui-player-id');
         
-        // Atpalaiduotas tikrinimas, kuris nesulaužo likusio kodo, jei trūksta elementų wrapperio faile
+        // Relaxed check that won't break the rest of the code if elements are missing in the wrapper file
         if (ctxContainer && playerCtxContainer) {
             const isIntel = p.isSystemView || p.isPlayerView || p.isMap;
             if (isIntel) {
@@ -240,7 +242,7 @@ window.addEventListener('message', async (event) => {
                     ctxContainer.classList.remove('hidden'); 
                     if (sysLabel) {
                         sysLabel.classList.remove('hidden');
-                        sysLabel.innerText = `Sistema #${p.systemId}`;
+                        sysLabel.innerText = `System #${p.systemId}`;
                     }
                     loadPlans(p.systemId);
                 } 

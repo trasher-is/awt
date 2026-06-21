@@ -144,6 +144,39 @@
 
         <section class="flex flex-col gap-4">
             <div>
+                <h2 class="text-xl font-bold tracking-tight border-b border-border pb-2">Discord Integration</h2>
+            </div>
+
+            <div class="bg-card border border-border rounded-lg p-4 shadow-sm">
+                <h3 class="font-bold text-foreground mb-1"><i class="fa-brands fa-discord text-[#5865F2] mr-1"></i> System Change Announcer</h3>
+                <p class="text-xs text-muted-foreground mb-3">Planet owner changes and population drops detected during a full galaxy scan are posted to this channel. Leave empty to disable. Use <code>!getid</code> in a channel to get its ID.</p>
+                <div class="flex flex-col md:flex-row gap-2 md:items-end">
+                    <div class="flex-1">
+                        <label class="text-xs text-muted-foreground mb-1 block">Announcement Channel ID</label>
+                        <input type="text" id="discordChannelId" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm font-mono" placeholder="e.g. 123456789012345678">
+                    </div>
+                    <button onclick="saveDiscordChannel()" class="h-9 px-4 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Save</button>
+                </div>
+                <span id="discordChannelStatus" class="text-xs text-muted-foreground mt-2 block"></span>
+            </div>
+
+            <div class="bg-card border border-border rounded-lg p-4 shadow-sm">
+                <h3 class="font-bold text-foreground mb-1"><i class="fa-solid fa-triangle-exclamation text-aw-warning mr-1"></i> Incoming Attack Alerts</h3>
+                <p class="text-xs text-muted-foreground mb-3">Incoming-attack notifications (from the in-game forwarder webhook) are posted here, with the list of allied fleets that can defend in time. Leave empty to disable.</p>
+                <div class="flex flex-col md:flex-row gap-2 md:items-end">
+                    <div class="flex-1">
+                        <label class="text-xs text-muted-foreground mb-1 block">Incoming Channel ID</label>
+                        <input type="text" id="incomingChannelId" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm font-mono" placeholder="e.g. 123456789012345678">
+                    </div>
+                    <button onclick="saveIncomingChannel()" class="h-9 px-4 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Save</button>
+                </div>
+                <span id="incomingChannelStatus" class="text-xs text-muted-foreground mt-2 block"></span>
+            </div>
+
+        </section>
+
+        <section class="flex flex-col gap-4">
+            <div>
                 <h2 class="text-xl font-bold tracking-tight border-b border-border pb-2">Tool Status & Metrics</h2>
             </div>
             
@@ -222,6 +255,7 @@
                     loadUsers();
                     loadStatus();
                     loadBroadcasts();
+                    loadSettings();
                 } else {
                     window.location.href = '/dashboard';
                 }
@@ -233,6 +267,49 @@
 
         function logout() {
             fetch('/hub-api/logout', { method: 'POST' }).then(() => { window.location.href = '/hub-assets/login.html'; });
+        }
+
+        // --- DISCORD INTEGRATION SETTINGS ---
+        async function loadSettings() {
+            try {
+                const res = await fetch('/hub-api/admin/settings');
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('discordChannelId').value = data.settings.discord_announce_channel || '';
+                    document.getElementById('incomingChannelId').value = data.settings.discord_incoming_channel || '';
+                }
+            } catch (e) {}
+        }
+
+        async function saveSetting(key, inputId, statusId) {
+            const value = document.getElementById(inputId).value.trim();
+            const status = document.getElementById(statusId);
+            try {
+                const res = await fetch('/hub-api/admin/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key, value })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    status.textContent = value ? '✅ Saved. Enabled.' : '✅ Saved. Disabled.';
+                    status.className = 'text-xs text-green-400 mt-2 block';
+                } else {
+                    status.textContent = '❌ ' + (data.error || 'Failed to save.');
+                    status.className = 'text-xs text-red-400 mt-2 block';
+                }
+            } catch (e) {
+                status.textContent = '❌ Network error.';
+                status.className = 'text-xs text-red-400 mt-2 block';
+            }
+        }
+
+        function saveDiscordChannel() {
+            return saveSetting('discord_announce_channel', 'discordChannelId', 'discordChannelStatus');
+        }
+
+        function saveIncomingChannel() {
+            return saveSetting('discord_incoming_channel', 'incomingChannelId', 'incomingChannelStatus');
         }
 
         // --- 2. GLOBAL ALLIANCE BROADCAST UTILITIES ---

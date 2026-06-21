@@ -1,4 +1,6 @@
 // public/js/ui/player-intel.js
+import { navToIframe } from './search.js';
+
 let playerHeatmapChartInstance = null;
 
 export async function loadPlayerIntel(playerId) {
@@ -6,7 +8,7 @@ export async function loadPlayerIntel(playerId) {
     try {
         const res = await fetch(`/hub-api/intel/player/${playerId}`);
         const data = await res.json();
-        
+
         if (data.success && data.player) {
             const p = data.player;
             const playerLabel = document.getElementById('ui-player-id');
@@ -14,11 +16,19 @@ export async function loadPlayerIntel(playerId) {
                 const allyTag = p.alliance_tag ? `[${p.alliance_tag}] ` : '';
                 playerLabel.innerHTML = `
                     <span class="text-muted-foreground font-bold">${allyTag}</span>
-                    <a href="/Game/Players/Profile/${p.id}" class="text-blue-400 hover:underline font-semibold" target="_top">${p.name || 'Unknown'}</a> 
+                    <a href="#" data-player-profile="${p.id}" class="text-blue-400 hover:underline font-semibold">${p.name || 'Unknown'}</a>
                     <span class="text-xs text-muted-foreground ml-1">(#${p.id})</span>
                 `;
+                const profileLink = playerLabel.querySelector('[data-player-profile]');
+                profileLink?.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    navToIframe(`/Game/Players/Profile/${p.id}`);
+                });
             }
-            
+
+            // Mark the player's planets on the in-game map and render the planet list.
+            renderPlayerPlanets(p, data.systems || []);
+
             const row = (lbl, val) => `<div class="flex justify-between items-center py-0.5"><span class="text-muted-foreground">${lbl}</span><span class="font-medium text-foreground">${val}</span></div>`;
             const trait = (lbl, val) => `<div class="flex justify-between items-center py-0"><span class="text-muted-foreground">${lbl}</span><span class="font-medium text-foreground">${val > 0 ? '+'+val : val}</span></div>`;
 
@@ -98,4 +108,38 @@ export async function loadPlayerIntel(playerId) {
             }
         }
     } catch (err) { console.error(err); }
+}
+
+function renderPlayerPlanets(p, systems) {
+    const gameFrame = document.getElementById('game-frame');
+
+    // Highlight the systems where this player owns planets on the map.
+    gameFrame?.contentWindow?.postMessage({
+        type: 'HIGHLIGHT_PLAYER_VISION',
+        payload: {
+            systems: systems.map(s => ({ id: s.id, name: s.name, x: s.x, y: s.y })),
+            range: p.biology || 0,
+            originSystemId: p.origin_system || null
+        }
+    }, window.location.origin);
+
+    const list = document.getElementById('player-planets-list');
+    if (!list) return;
+
+    if (!systems.length) {
+        list.innerHTML = '<span class="text-muted-foreground italic text-xs">No known planets.</span>';
+        return;
+    }
+
+    list.innerHTML = systems.map(s => `
+        <button data-system-path="/Game/Map/SolarSystem/${s.id}" class="btn-player-planet text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1 text-s transition-colors flex justify-between items-center shadow-sm">
+            <span class="truncate font-medium">${s.name || `System #${s.id}`}</span>
+            <span class="text-s text-muted-foreground font-mono">${s.x}/${s.y}</span>
+        </button>`).join('');
+
+    list.querySelectorAll('.btn-player-planet').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            navToIframe(e.currentTarget.getAttribute('data-system-path'));
+        });
+    });
 }

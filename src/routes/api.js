@@ -7,6 +7,7 @@ router.use(require('./auth'));
 router.use(require('./sync'));
 router.use(require('./admin'));
 router.use(require('./intel'));
+router.use(require('./trade'));
 router.use(require('./search'));
 
 module.exports = router;

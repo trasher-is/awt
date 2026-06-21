@@ -69,6 +69,9 @@ app.use('/hub-assets', express.static(path.join(__dirname, 'public')));
 // 🔴 FIX: Attached the JSON parser strictly to OUR api routes only.
 app.use('/hub-api', express.json({ limit: '50mb' }), apiRoutes);
 
+// External game-notification webhook (no session auth — called by the in-game forwarder).
+app.use('/api', express.json({ limit: '5mb' }), require('./src/routes/webhook'));
+
 // --- 3. AUTHENTICATION FIREWALL ---
 const requireAuth = (req, res, next) => {
     if (req.session && req.session.userId) return next();

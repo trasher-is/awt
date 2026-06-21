@@ -1,0 +1,85 @@
+<div id="trade-agreements-panel" class="fixed top-0 right-0 h-full w-full md:w-[calc(100%-3.5rem)] bg-black border-l border-border transform translate-x-full transition-transform duration-300 z-40 flex flex-col shadow-2xl">
+
+    <!-- Header -->
+    <div class="h-14 border-b border-border flex items-center justify-between px-6 bg-zinc-900 shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-md bg-white/5 flex items-center justify-center text-primary">
+                <i class="fa-solid fa-handshake text-base"></i>
+            </div>
+            <div>
+                <h2 class="font-bold text-foreground tracking-wide">Trade Agreements</h2>
+                <p class="text-sm text-muted-foreground">Propose pairings, confirm partners, track completion across the alliance</p>
+            </div>
+        </div>
+        <button id="btn-close-trade-agreements" class="w-8 h-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
+            <i class="fa-solid fa-xmark text-base"></i>
+        </button>
+    </div>
+
+    <!-- Toolbar / tabs -->
+    <div class="p-4 border-b border-border bg-zinc-950 flex flex-wrap items-center gap-3 shrink-0">
+        <div class="inline-flex rounded-md border border-border overflow-hidden">
+            <button id="ta-tab-board" class="h-9 px-4 text-sm font-medium bg-white text-black">Board</button>
+            <button id="ta-tab-schedule" class="h-9 px-4 text-sm font-medium bg-transparent text-muted-foreground hover:text-foreground">Schedule</button>
+        </div>
+        <button id="btn-refresh-ta" class="inline-flex items-center justify-center h-9 px-4 rounded-md bg-secondary text-secondary-foreground font-medium hover:bg-secondary/80 transition-colors text-sm gap-2 shadow-sm">
+            <i class="fa-solid fa-rotate"></i> Refresh
+        </button>
+        <span id="ta-identity" class="text-sm text-muted-foreground font-mono bg-zinc-900 px-2.5 py-1.5 rounded border border-border/40">You: --</span>
+        <span class="text-xs text-muted-foreground ml-auto flex items-center gap-3">
+            <span><span class="inline-block w-3 h-3 rounded-sm align-middle" style="background:#a16207"></span> proposed</span>
+            <span><span class="inline-block w-3 h-3 rounded-sm align-middle" style="background:#15803d"></span> confirmed</span>
+            <span><span class="inline-block w-3 h-3 rounded-sm align-middle" style="background:#1d4ed8"></span> done</span>
+        </span>
+    </div>
+
+    <!-- BOARD VIEW -->
+    <div id="ta-view-board" class="flex-1 overflow-auto bg-black p-4 flex flex-col gap-5">
+
+        <!-- Pending confirmations for me -->
+        <div id="ta-confirm-box" class="hidden">
+            <div class="text-sm font-semibold text-foreground mb-2">Awaiting your confirmation</div>
+            <div id="ta-confirm-list" class="flex flex-col gap-2"></div>
+        </div>
+
+        <!-- Admin force-set -->
+        <div id="ta-admin-box" class="hidden bg-zinc-950 border border-border rounded-lg p-3">
+            <div class="text-sm font-semibold text-foreground mb-2"><i class="fa-solid fa-user-shield mr-1 text-aw-warning"></i> Admin: force a pairing</div>
+            <div class="flex flex-wrap gap-2 items-center">
+                <select id="ta-admin-a" class="h-9 rounded-md border border-input bg-background px-2 text-sm"></select>
+                <i class="fa-solid fa-right-left text-muted-foreground"></i>
+                <select id="ta-admin-b" class="h-9 rounded-md border border-input bg-background px-2 text-sm"></select>
+                <button id="ta-admin-set" class="h-9 px-4 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium">Set (confirmed)</button>
+                <span id="ta-admin-status" class="text-xs text-muted-foreground"></span>
+            </div>
+        </div>
+
+        <!-- Matrix -->
+        <div class="overflow-auto">
+            <table class="border-collapse text-xs" id="ta-matrix"></table>
+        </div>
+    </div>
+
+    <!-- SCHEDULE VIEW -->
+    <div id="ta-view-schedule" class="hidden flex-1 overflow-auto bg-black">
+        <div class="p-4 border-b border-border bg-zinc-950 flex flex-wrap items-center gap-4">
+            <span id="ta-pp-price" class="text-sm text-muted-foreground font-mono bg-zinc-900 px-2.5 py-1.5 rounded border border-border/40">PP price: --</span>
+            <p class="text-xs text-muted-foreground">Execution order for <b>confirmed</b> agreements not yet completed, by budget growth.</p>
+            <div class="flex items-center gap-6 ml-auto">
+                <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider">Total time</div><div id="ta-sum-time" class="text-lg font-bold text-foreground">--</div></div>
+                <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider">Trades left</div><div id="ta-sum-trades" class="text-lg font-bold text-green-400">--</div></div>
+            </div>
+        </div>
+        <table class="w-full text-left border-collapse">
+            <thead>
+                <tr class="border-b border-border bg-zinc-900 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10">
+                    <th class="p-3 w-12">#</th><th class="p-3 w-1/2">Pairing</th>
+                    <th class="p-3 w-12">#</th><th class="p-3 w-1/2">Pairing</th>
+                </tr>
+            </thead>
+            <tbody id="ta-results-body" class="divide-y divide-border/40 bg-black text-sm">
+                <tr><td colspan="4" class="text-center py-8 text-muted-foreground">Switch to this tab to compute the schedule.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
