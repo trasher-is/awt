@@ -166,6 +166,185 @@ export async function initScienceCultureCalc() {
     }
 }
 
+// ---------------------------------------------------------------
+// SCIENCE LEVEL CALCULATOR (interactive)
+// "Pick a science, enter a target level -> total time + finish date."
+// Reuses the proven culture-calc maths: read current level + research
+// rate + in-progress timer from the page, then divide the remaining
+// points-per-level (from the Info table) by the rate.
+// ---------------------------------------------------------------
+// name = display/level-table key; aliases = how the row's first cell may read
+// (the science page abbreviates: Bio Eco E Math Phy Soc Cul). Matched exactly so
+// "E" (Energy) doesn't substring-match Eco, etc.
+const SCIENCES = [
+    { name: 'Biology', aliases: ['biology', 'bio'] },
+    { name: 'Economy', aliases: ['economy', 'eco'] },
+    { name: 'Energy', aliases: ['energy', 'e'] },
+    { name: 'Mathematics', aliases: ['mathematics', 'math'] },
+    { name: 'Physics', aliases: ['physics', 'phy'] },
+    { name: 'Social', aliases: ['social', 'soc'] },
+    { name: 'Culture', aliases: ['culture', 'cul'] },
+];
+const _pointsTableCache = {};
+
+// "$2 865,73" / "1 234" / "49,5" -> number (comma is the decimal separator here)
+function parseLocaleNumber(str) {
+    if (!str) return 0;
+    let t = String(str).replace(/[^\d.,]/g, '').trim();
+    if (!t) return 0;
+    if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
+    else t = t.replace(/\.(?=\d{3}\b)/g, '');   // dots as thousands separators
+    const v = parseFloat(t);
+    return isNaN(v) ? 0 : v;
+}
+
+// Cumulative incremental points required to advance INTO each level.
+async function getPointsTable(url) {
+    if (_pointsTableCache[url]) return _pointsTableCache[url];
+    const res = await fetch(url);
+    const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+    const map = {};
+    doc.querySelectorAll('table tbody tr').forEach(r => {
+        const cells = r.querySelectorAll('td');
+        if (cells.length >= 2) {
+            const lvl = parseInt(cells[0].innerText, 10);
+            const pts = parseInt(cells[1].innerText.replace(/\s/g, '').replace(/[.,]/g, ''), 10);
+            if (!isNaN(lvl) && !isNaN(pts)) map[lvl] = pts;
+        }
+    });
+    _pointsTableCache[url] = map;
+    return map;
+}
+
+// Read {level, rate (pts/h), timerSecs, researching} for a science off the page.
+// `sci` is a SCIENCES entry { name, aliases }.
+function readScienceState(sci) {
+    // Find the row whose first cell exactly equals one of the aliases (the page
+    // abbreviates names), with a numeric level in the second cell.
+    let row = null, level = NaN;
+    document.querySelectorAll('table tr').forEach(r => {
+        if (row || !r.cells || r.cells.length < 2 || !r.cells[0]) return;
+        const c0 = r.cells[0].innerText.trim().toLowerCase();
+        if (!sci.aliases.includes(c0)) return;
+        const lvl = parseInt(r.cells[1].innerText, 10);
+        if (!isNaN(lvl)) { row = r; level = lvl; }
+    });
+    if (!row) return null;
+
+    // Rate is the shared research output, shown in a header like "Science +293.3/h"
+    // (or "Culture +X/h"); also tolerate abbreviated "Sci"/"Cul" labels on mobile.
+    // You research one science at a time, so all six sciences share the Science rate.
+    const labels = sci.name === 'Culture' ? ['Culture', 'Cul'] : ['Science', 'Sci'];
+    const rateRe = new RegExp('(?:' + labels.join('|') + ')\\s*\\+([\\d.,\\s\\u00a0]+)\\/h', 'i');
+    let rate = 0;
+    document.querySelectorAll('th, td').forEach(el => {
+        if (rate) return;
+        const mm = (el.innerText || '').match(rateRe);
+        if (mm) { rate = parseLocaleNumber(mm[1]); }
+    });
+
+    const timer = row.querySelector('.timer-active');
+    const timerSecs = timer ? (parseInt(timer.getAttribute('data-value'), 10) || 0) : 0;
+
+    return { level, rate, timerSecs, researching: !!timer };
+}
+
+export async function initScienceLevelCalculator() {
+    if (!window.location.pathname.toLowerCase().includes('/game/science')) return;
+    if (document.getElementById('hub-science-calc')) return;
+
+    // Always render the box first so it's visible even if detection fails —
+    // this is how we diagnose mobile (no console there): the box shows what it found.
+    const box = document.createElement('div');
+    box.id = 'hub-science-calc';
+    box.style.cssText = 'box-sizing:border-box;margin:8px 0 0 0;padding:10px 12px;border:1px solid #444;border-radius:6px;background:#1a1a1a;color:#ddd;font-size:13px;width:100%;max-width:520px;';
+
+    // Detect which sciences are present on the page (with their current level).
+    const available = SCIENCES
+        .map(sci => ({ name: sci.name, sci, state: readScienceState(sci) }))
+        .filter(s => s.state);
+
+    if (available.length === 0) {
+        // Diagnostic readout, visible on-screen (incl. mobile).
+        const tables = document.querySelectorAll('table').length;
+        const rows = document.querySelectorAll('table tr').length;
+        const firstCells = Array.from(document.querySelectorAll('table tr'))
+            .slice(0, 8)
+            .map(r => (r.cells && r.cells[0] ? r.cells[0].innerText.trim().slice(0, 18) : '∅'))
+            .filter(Boolean);
+        box.innerHTML = `
+            <div style="font-weight:bold;color:#fff;margin-bottom:6px;">🔬 Research Calculator — no sciences detected</div>
+            <div style="color:#c96;font-size:11px;line-height:1.5;">
+                tables: ${tables} · rows: ${rows}<br>
+                first cells: ${firstCells.length ? firstCells.join(' | ') : '(none)'}
+            </div>`;
+        const clk = document.querySelector('[data-clock]');
+        ((clk && clk.closest('div')) || document.body || document.documentElement).appendChild(box);
+        return;
+    }
+
+    box.innerHTML = `
+        <div style="font-weight:bold;color:#fff;margin-bottom:8px;">🔬 Research Time Calculator</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+            <select id="hub-sci-select" style="background:#222;color:#eee;border:1px solid #555;border-radius:4px;padding:4px 6px;">
+                ${available.map(s => `<option value="${s.name}">${s.name} (lvl ${s.state.level})</option>`).join('')}
+            </select>
+            <span style="color:#888;">to level</span>
+            <input id="hub-sci-target" type="number" min="1" style="width:70px;background:#222;color:#eee;border:1px solid #555;border-radius:4px;padding:4px 6px;" placeholder="30">
+        </div>
+        <div id="hub-sci-result" style="margin-top:8px;color:#aaa;min-height:18px;"></div>
+    `;
+    // Drop it into the top badge bar (clock / hosting-cycle badges), below those
+    // badges, so it shows in the same spot on PC and mobile.
+    const clock = document.querySelector('[data-clock]');
+    const badgeBar = clock ? clock.closest('div') : null;
+    (badgeBar || document.body || document.documentElement).appendChild(box);
+
+    const selEl = box.querySelector('#hub-sci-select');
+    const targetEl = box.querySelector('#hub-sci-target');
+    const resultEl = box.querySelector('#hub-sci-result');
+
+    const compute = async () => {
+        const name = selEl.value;
+        const sci = SCIENCES.find(s => s.name === name);
+        const target = parseInt(targetEl.value, 10);
+        const st = sci ? readScienceState(sci) : null;
+        if (!st) { resultEl.innerHTML = '<span style="color:#e88;">Could not read current state.</span>'; return; }
+        if (isNaN(target)) { resultEl.innerText = ''; return; }
+        if (target <= st.level) { resultEl.innerHTML = `<span style="color:#9c9;">Already at level ${st.level}.</span>`; return; }
+        if (st.rate <= 0) { resultEl.innerHTML = '<span style="color:#e88;">No research rate detected for this science.</span>'; return; }
+
+        try {
+            const url = name === 'Culture' ? '/Info/CultureTable' : '/Info/ScienceTable';
+            const table = await getPointsTable(url);
+
+            let total = 0;
+            let startK = st.level + 1;
+            if (st.researching) { total += st.timerSecs; startK = st.level + 2; }   // active timer finishes current+1
+
+            const missing = [];
+            for (let k = startK; k <= target; k++) {
+                const pts = table[k];
+                if (pts == null || isNaN(pts)) { missing.push(k); continue; }
+                total += (pts / st.rate) * 3600;
+            }
+
+            const finish = new Date(Date.now() + total * 1000);
+            const dateStr = finish.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
+                            finish.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+            let html = `<span style="color:#aaa;">Lvl ${st.level} → ${target}:</span> <span style="color:#fff;font-weight:bold;">${formatDuration(total)}</span> <span style="color:#888;">(${dateStr})</span>`;
+            html += `<br><span style="color:#666;font-size:11px;">rate ${st.rate.toLocaleString()}/h${st.researching ? ' · current research counted' : ''}</span>`;
+            if (missing.length) html += `<br><span style="color:#c96;font-size:11px;">No cost data for level(s): ${missing.join(', ')}</span>`;
+            resultEl.innerHTML = html;
+        } catch (e) {
+            resultEl.innerHTML = '<span style="color:#e88;">Failed to load the level cost table.</span>';
+        }
+    };
+
+    selEl.addEventListener('change', compute);
+    targetEl.addEventListener('input', compute);
+}
+
 function formatDuration(totalSeconds) {
     const days = Math.floor(totalSeconds / 86400);
     const hours = Math.floor((totalSeconds % 86400) / 3600);

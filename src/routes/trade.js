@@ -192,4 +192,39 @@ router.post('/sync/trade-agreements', requireAuth, (req, res) => {
     }
 });
 
+// --- COMPLETION SYNC (alliance-wide): scraped from each member's "Trade Partners" table ---
+// Body: { pairs: [["Owner","Partner"], ...] } — every owner↔partner pairing seen across
+// the alliance scan. Each becomes a 'done' agreement. Symmetric pairs collapse via pair_key.
+router.post('/sync/trade-partners', requireAuth, (req, res) => {
+    const pairs = Array.isArray(req.body.pairs) ? req.body.pairs : [];
+
+    const markDone = db.prepare(`
+        INSERT INTO trade_agreements (pair_key, player_a, player_b, status, initiator, is_admin_set)
+        VALUES (?, ?, ?, 'done', 'scan', 0)
+        ON CONFLICT(pair_key) DO UPDATE SET status='done', updated_at=CURRENT_TIMESTAMP
+    `);
+
+    const tx = db.transaction((list) => {
+        let n = 0;
+        for (const pair of list) {
+            if (!Array.isArray(pair) || pair.length < 2) continue;
+            const a = canonicalName(String(pair[0]).trim());
+            const b = canonicalName(String(pair[1]).trim());
+            if (!a || !b || a.toLowerCase() === b.toLowerCase()) continue;
+            const [pa, pb] = [a, b].sort((x, y) => x.toLowerCase().localeCompare(y.toLowerCase()));
+            markDone.run(pairKey(a, b), pa, pb);
+            n++;
+        }
+        return n;
+    });
+
+    try {
+        const n = tx(pairs);
+        res.json({ success: true, synced: n });
+    } catch (e) {
+        console.error('[DB Error] sync trade-partners:', e);
+        res.status(500).json({ error: 'Failed to sync trade partners' });
+    }
+});
+
 module.exports = router;

@@ -430,6 +430,28 @@ export async function refreshAllianceStatsData() {
     } catch (err) {}
 }
 
+// Extract trade-partner names from a member's /Game/Alliance/Member page.
+// The page has a "Trade Partners" section header (th, colspan 3) followed by
+// one row per partner (name link + percentages), until the next section header.
+function parseTradePartners(mDoc) {
+    let headerRow = null;
+    mDoc.querySelectorAll('th').forEach(th => {
+        if (!headerRow && /trade partners/i.test(th.innerText)) headerRow = th.closest('tr');
+    });
+    if (!headerRow) return [];
+
+    const partners = [];
+    let row = headerRow.nextElementSibling;
+    while (row) {
+        if (row.querySelector('th')) break;        // reached the next section
+        const link = row.querySelector('a[href*="/Game/Players/Profile/"]');
+        const name = link ? link.innerText.trim() : '';
+        if (name) partners.push(name);
+        row = row.nextElementSibling;
+    }
+    return partners;
+}
+
 export async function triggerAllianceStatsUpdate() {
     const btn = document.getElementById('btn-update-alliance-stats');
     const icon = document.getElementById('icon-update-alliance-stats');
@@ -448,6 +470,7 @@ export async function triggerAllianceStatsUpdate() {
 
         if (typeof window.showToast === 'function') window.showToast(`Updating ${memberLinks.length} members' data...`);
         const syncedIds = [];
+        const tradePairs = [];
         for (const link of memberLinks) {
             try {
                 const targetUrl = link.href;
@@ -459,6 +482,9 @@ export async function triggerAllianceStatsUpdate() {
                 const tds = Array.from(mDoc.querySelectorAll('td'));
                 const name = mDoc.querySelector('a[href*="/Game/Players/Profile/"]')?.innerText.trim();
                 if (!name) continue;
+
+                // Collect this member's completed trade agreements from their Trade Partners table.
+                parseTradePartners(mDoc).forEach(partner => tradePairs.push([name, partner]));
 
                 const planetTd = tds.find(td => td.innerHTML.includes('Planets<br>(Next Culture)'));
                 let planetsText = '', nextCultureSeconds = null;
@@ -493,6 +519,12 @@ export async function triggerAllianceStatsUpdate() {
         if (syncedIds.length) {
             try {
                 await fetch('/hub-api/sync/alliance-roster', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ member_ids: syncedIds }) });
+            } catch (e) {}
+        }
+        // Sync completed trade agreements gathered from members' Trade Partners tables.
+        if (tradePairs.length) {
+            try {
+                await fetch('/hub-api/sync/trade-partners', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pairs: tradePairs }) });
             } catch (e) {}
         }
         if (typeof window.showToast === 'function') window.showToast('Sinchronizacija baigta');
@@ -617,7 +649,7 @@ export async function openTradeAgreementsPanel() {
         panel = document.getElementById('trade-agreements-panel');
 
         panel.querySelector('#btn-close-trade-agreements')?.addEventListener('click', () => panel.classList.replace('translate-x-0', 'translate-x-full'));
-        panel.querySelector('#btn-refresh-ta')?.addEventListener('click', loadTradeAgreements);
+        panel.querySelector('#btn-refresh-ta')?.addEventListener('click', refreshTradeAgreements);
         panel.querySelector('#ta-tab-board')?.addEventListener('click', () => switchTaTab('board'));
         panel.querySelector('#ta-tab-schedule')?.addEventListener('click', () => switchTaTab('schedule'));
         panel.querySelector('#ta-admin-set')?.addEventListener('click', adminSetPair);
@@ -663,6 +695,36 @@ async function loadTradeAgreements() {
         const m = document.getElementById('ta-matrix');
         if (m) m.innerHTML = `<tr><td class="text-red-500 p-4">Failed to load trade agreements.</td></tr>`;
     }
+}
+
+// Refresh = re-scan the alliance page (like Alliance Stats): walk each member's
+// page, read their Trade Partners table, sync the completed agreements, then reload.
+async function refreshTradeAgreements() {
+    const btn = document.getElementById('btn-refresh-ta');
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Scanning alliance...'; }
+    try {
+        const doc = new DOMParser().parseFromString(await (await fetch('/Game/Alliance')).text(), 'text/html');
+        const memberLinks = Array.from(doc.querySelectorAll('a[href*="/Game/Alliance/Member/"]'));
+        const tradePairs = [];
+        for (const link of memberLinks) {
+            try {
+                if (!/\/Member\/(\d+)/.test(link.href)) continue;
+                const mDoc = new DOMParser().parseFromString(await (await fetch(link.href)).text(), 'text/html');
+                const name = mDoc.querySelector('a[href*="/Game/Players/Profile/"]')?.innerText.trim();
+                if (!name) continue;
+                parseTradePartners(mDoc).forEach(partner => tradePairs.push([name, partner]));
+            } catch (e) {}
+        }
+        if (tradePairs.length) {
+            await fetch('/hub-api/sync/trade-partners', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pairs: tradePairs }) });
+        }
+    } catch (e) {
+        if (typeof window.showToast === 'function') window.showToast('Alliance scan failed');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    }
+    await loadTradeAgreements();
 }
 
 function taStatusFor(a, b) {
