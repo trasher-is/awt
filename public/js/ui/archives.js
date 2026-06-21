@@ -431,24 +431,22 @@ export async function refreshAllianceStatsData() {
 }
 
 // Extract trade-partner names from a member's /Game/Alliance/Member page.
-// The page has a "Trade Partners" section header (th, colspan 3) followed by
-// one row per partner (name link + percentages), until the next section header.
+// The "Trade Partners" table has the header in <thead> and partner rows in
+// <tbody> (each: player link + alliance tag + Receiving/Giving %). We scope to
+// that table and pull the player-profile links — which skips the column-label
+// row, the "Sum" row, and the [TAG] alliance links automatically.
 function parseTradePartners(mDoc) {
-    let headerRow = null;
+    let table = null;
     mDoc.querySelectorAll('th').forEach(th => {
-        if (!headerRow && /trade partners/i.test(th.innerText)) headerRow = th.closest('tr');
+        if (!table && /trade partners/i.test(th.innerText)) table = th.closest('table');
     });
-    if (!headerRow) return [];
+    if (!table) return [];
 
     const partners = [];
-    let row = headerRow.nextElementSibling;
-    while (row) {
-        if (row.querySelector('th')) break;        // reached the next section
-        const link = row.querySelector('a[href*="/Game/Players/Profile/"]');
-        const name = link ? link.innerText.trim() : '';
+    table.querySelectorAll('a[href*="/Game/Players/Profile/"]').forEach(a => {
+        const name = a.innerText.trim();
         if (name) partners.push(name);
-        row = row.nextElementSibling;
-    }
+    });
     return partners;
 }
 
