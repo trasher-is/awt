@@ -635,6 +635,14 @@ const taShort = (name) => {
     const o = { shitmonkey: 'SM', mnhebi: 'Hebi', thedoctor797: 'Doc', theknife: 'Knif' };
     return o[name.toLowerCase()] || name.substring(0, 4);
 };
+// Compact A$ formatter: 1 234 567 -> "1.2M", 12 345 -> "12k", 0 -> "–".
+const fmtAU = (n) => {
+    n = Number(n) || 0;
+    if (n <= 0) return '–';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return Math.round(n / 1e3) + 'k';
+    return String(Math.round(n));
+};
 const taPairKey = (a, b) => [a.toLowerCase(), b.toLowerCase()].sort().join('|');
 const taCount = (nameLower, agreements) =>
     agreements.filter(t => t.status !== 'cancelled' && t.pair_key.split('|').includes(nameLower)).length;
@@ -781,6 +789,10 @@ function renderTaBoard() {
         const t = p.isTrader ? 'text-yellow-400' : 'text-muted-foreground';
         html += `<th class="bg-zinc-900 px-1 py-1 border border-border/40 ${t}" title="${p.name}">${taShort(p.name)}</th>`;
     });
+    // Trailing wealth columns: a spacer, then hoarded A$ and visible A$ (+PP).
+    html += `<th class="bg-black border-0" style="min-width:14px"></th>`;
+    html += `<th class="bg-zinc-900 px-2 py-1 text-amber-400 border border-border/40" title="A$ value of artifacts + supply units this member is holding">Hoard A$</th>`;
+    html += `<th class="bg-zinc-900 px-2 py-1 text-emerald-400 border border-border/40" title="Visible liquidity: Astro Dollars + Production Points valued in A$">A$+PP</th>`;
     html += `</tr></thead><tbody>`;
 
     members.forEach(p1 => {
@@ -792,6 +804,9 @@ function renderTaBoard() {
         members.forEach(p2 => {
             html += taCell(p1, p2, { me: meLower, isAdmin, maxTas, traderSet, agreements, full1 });
         });
+        html += `<td class="bg-black border-0"></td>`;
+        html += `<td class="px-2 py-1 text-right border border-border/40 text-amber-400 font-semibold" title="${(p1.hoarded_au || 0).toLocaleString()} A$">${fmtAU(p1.hoarded_au)}</td>`;
+        html += `<td class="px-2 py-1 text-right border border-border/40 text-emerald-400" title="${(p1.visible_au || 0).toLocaleString()} A$">${fmtAU(p1.visible_au)}</td>`;
         html += `</tr>`;
     });
     html += `</tbody>`;

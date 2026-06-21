@@ -420,6 +420,9 @@ export function initSpy() {
                 import('../scrapers/trade-parser.js')
                     .then(module => module.scrapeTradePrices())
                     .catch(err => console.error(err));
+                import('../scrapers/trade-inventory-parser.js')
+                    .then(module => module.scrapeTradeInventory())
+                    .catch(err => console.error(err));
             }
         }
     }

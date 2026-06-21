@@ -311,9 +311,17 @@ function initDatabase() {
             mathematics INTEGER,
             physics INTEGER,
             population INTEGER,
+            hoarded_au INTEGER DEFAULT 0,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     `);
+
+    // A$ value of artifacts + supply units a member is holding (scraped from their
+    // /Game/Trade inventory). Added here so existing DBs pick it up too.
+    try {
+        db.exec(`ALTER TABLE alliance_member_stats ADD COLUMN hoarded_au INTEGER DEFAULT 0`);
+        console.log("[DB] Added hoarded_au column to alliance_member_stats table.");
+    } catch (e) {}
 
     // --- SYSTEM TAKEOVER CAMPAIGN TABLE ---
     db.exec(`

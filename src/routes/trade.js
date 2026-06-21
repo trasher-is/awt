@@ -20,15 +20,40 @@ function getTraders() {
     return rows.map(r => r.name.toLowerCase());
 }
 
-// Current alliance members (those we have stats for), with trader flag.
+// "$1 234,56" / "1 234" -> number (comma is the decimal separator on these pages).
+function parseLocaleNumber(str) {
+    if (str == null) return 0;
+    let t = String(str).replace(/[^\d.,]/g, '').trim();
+    if (!t) return 0;
+    if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
+    const v = parseFloat(t);
+    return isNaN(v) ? 0 : v;
+}
+
+// Current alliance members (those we have stats for), with trader flag and wealth.
+//   hoarded_au — A$ value of artifacts + supply units held (from /Game/Trade scrape)
+//   visible_au — openly-visible liquidity: Astro Dollars + Production Points × PP price
 function getMembers() {
+    const ppRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'pp_price'`).get();
+    const ppPrice = ppRow ? parseFloat(ppRow.value) || 0 : 0;
+
     const rows = db.prepare(`
-        SELECT p.name, p.has_intel, p.race_trader
+        SELECT p.name, p.has_intel, p.race_trader,
+               ams.hoarded_au, ams.astro_dollars, ams.production_points
         FROM alliance_member_stats ams
         JOIN players p ON p.id = ams.player_id
         ORDER BY p.name COLLATE NOCASE ASC
     `).all();
-    return rows.map(r => ({ name: r.name, isTrader: r.has_intel === 1 && r.race_trader > 0 }));
+
+    return rows.map(r => {
+        const visible = parseLocaleNumber(r.astro_dollars) + parseLocaleNumber(r.production_points) * ppPrice;
+        return {
+            name: r.name,
+            isTrader: r.has_intel === 1 && r.race_trader > 0,
+            hoarded_au: Math.round(r.hoarded_au || 0),
+            visible_au: Math.round(visible)
+        };
+    });
 }
 
 // How many active agreements (proposed/confirmed/done) a player is involved in.
@@ -224,6 +249,30 @@ router.post('/sync/trade-partners', requireAuth, (req, res) => {
     } catch (e) {
         console.error('[DB Error] sync trade-partners:', e);
         res.status(500).json({ error: 'Failed to sync trade partners' });
+    }
+});
+
+// --- HOARD SYNC: the logged-in member's A$ value of held artifacts + supply units ---
+// Body: { hoarded_au: <number> } — scraped from their /Game/Trade inventory.
+router.post('/sync/trade-inventory', requireAuth, (req, res) => {
+    const me = req.session.gameName;
+    if (!me) return res.status(400).json({ error: 'No session identity' });
+
+    const n = parseInt(req.body.hoarded_au, 10);
+    const value = isNaN(n) ? 0 : Math.max(0, n);
+
+    try {
+        const row = db.prepare(`SELECT id FROM players WHERE name = ? COLLATE NOCASE`).get(me);
+        if (!row) return res.json({ success: true, stored: false });
+        db.prepare(`
+            INSERT INTO alliance_member_stats (player_id, hoarded_au, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(player_id) DO UPDATE SET hoarded_au = excluded.hoarded_au, updated_at = CURRENT_TIMESTAMP
+        `).run(row.id, value);
+        res.json({ success: true, stored: true });
+    } catch (e) {
+        console.error('[DB Error] sync trade-inventory:', e);
+        res.status(500).json({ error: 'Failed to sync inventory' });
     }
 });
 
