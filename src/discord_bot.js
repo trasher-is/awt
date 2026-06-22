@@ -531,7 +531,17 @@ client.on('messageCreate', async (message) => {
             if (player.race_trader) extraTraits.push(`Tra: **${player.race_trader > 0 ? '+' : ''}${player.race_trader}**`);
             if (player.race_sul) extraTraits.push(`SUL: **${player.race_sul > 0 ? '+' : ''}${player.race_sul}**`);
             if (extraTraits.length > 0) raceStatsVal += `\n${extraTraits.join(' | ')}`;
-            raceStatsVal += `\n\n**Sciences**\nBio: **${player.biology}** | Eco: **${player.economy}**\nEne: **${player.energy}** | Mat: **${player.mathematics}**\nPhy: **${player.physics}** | Soc: **${player.social}**`;
+
+            const sciLines = `Bio: **${player.biology}** | Eco: **${player.economy}**\nEne: **${player.energy}** | Mat: **${player.mathematics}**\nPhy: **${player.physics}** | Soc: **${player.social}**`;
+            const intelAge = player.intel_updated_at ? (Date.now() - new Date(player.intel_updated_at).getTime()) : Infinity;
+            const intelTs = player.intel_updated_at ? Math.floor(new Date(player.intel_updated_at).getTime() / 1000) : null;
+            if (intelAge > 24 * 60 * 60 * 1000) {
+                raceStatsVal += `\n\n**Sciences** ⚠️ as of <t:${intelTs}:R>\n${sciLines}`;
+            } else if (intelAge > 12 * 60 * 60 * 1000) {
+                raceStatsVal += `\n\n**Sciences** <t:${intelTs}:R>\n${sciLines}`;
+            } else {
+                raceStatsVal += `\n\n**Sciences**\n${sciLines}`;
+            }
         }
 
         const embed = new EmbedBuilder()
@@ -543,9 +553,17 @@ client.on('messageCreate', async (message) => {
                     value: `PL: **${player.level}**\nPoints: **${player.points}**\nRank: **${player.ranking}**\nOrigin: **#${player.origin_system || '--'}**\nLocal Time: **${player.local_time || '--'}**\nIdle Time: **${player.idle_time || '--'}**\nCountry: **${countryDisplay}**`, 
                     inline: true 
                 },
-                { 
-                    name: '🏗️ Infrastructure', 
-                    value: `Planets: **${player.actual_planets || 0} / ${player.has_intel ? player.culture_level : '--'}**\nTotal Pop: **${player.actual_pop || 0}**\nTrade Rev: **${player.has_intel ? (player.trade_revenue || 0).toLocaleString() : '--'}**\nProd: **${player.has_intel ? player.production_rate + '/h' : '--'}**\nSci: **${player.has_intel ? player.science_rate + '/h' : '--'}**\nCult: **${player.has_intel ? player.culture_rate + '/h' : '--'}**\nArtefact: **${player.artefact && player.artefact !== 'N/A' ? player.artefact : '--'}**`,
+                {
+                    name: '🏗️ Infrastructure',
+                    value: (() => {
+                        if (!player.has_intel) {
+                            return `Planets: **${player.actual_planets || 0} / --**\nTotal Pop: **${player.actual_pop || 0}**\nTrade Rev: **--**\nArtefact: **--**`;
+                        }
+                        const infraAge = player.intel_updated_at ? (Date.now() - new Date(player.intel_updated_at).getTime()) : Infinity;
+                        const artefactVal = player.artefact && player.artefact !== 'N/A' ? player.artefact : '--';
+                        const artefactDisplay = infraAge > 24 * 60 * 60 * 1000 ? `${artefactVal} ❓` : artefactVal;
+                        return `Planets: **${player.actual_planets || 0} / ${player.culture_level}**\nTotal Pop: **${player.actual_pop || 0}**\nTrade Rev: **${(player.trade_revenue || 0).toLocaleString()}**\nArtefact: **${artefactDisplay}**`;
+                    })(),
                     inline: true
                 },
                 { 
