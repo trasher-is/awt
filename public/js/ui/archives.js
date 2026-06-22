@@ -41,18 +41,19 @@ export async function openDatabasePanel() {
         document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
         panel = document.getElementById('database-panel');
         convertLegacyClickAttributes(panel, 'player');
+        panel.querySelector('#db-search-input')?.addEventListener('input', renderPlayerTable);
     }
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
     closeOtherPanels('database-panel');
     panel.classList.replace('translate-x-full', 'translate-x-0');
     if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
-    
-    document.getElementById('db-table-body').innerHTML = '<tr><td colspan="16" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Intelligence...</td></tr>';
+
+    document.getElementById('db-table-body').innerHTML = '<tr><td colspan="25" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Intelligence...</td></tr>';
     try {
         const res = await fetch('/hub-api/intel/players');
         const data = await res.json();
         if (data.success) { rawDbPlayers = data.players; renderPlayerTable(); }
-    } catch (err) { document.getElementById('db-table-body').innerHTML = '<tr><td colspan="16" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
+    } catch (err) { document.getElementById('db-table-body').innerHTML = '<tr><td colspan="25" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
 }
 
 export async function openSystemDatabasePanel() {
@@ -535,6 +536,17 @@ export async function triggerAllianceStatsUpdate() {
     }
 }
 
+// Parse a DB timestamp that may be ISO ("2026-06-22T10:00:00.000Z") or a sqlite
+// "YYYY-MM-DD HH:MM:SS" (UTC, no zone) into a localized short string.
+function fmtIntelDate(val) {
+    if (!val) return '-';
+    let d = new Date(val);
+    if (isNaN(d) && typeof val === 'string') d = new Date(val.replace(' ', 'T') + 'Z');
+    if (isNaN(d)) return '-';
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
+           d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 function renderPlayerTable() {
     const input = document.getElementById('db-search-input');
     const q = (input ? input.value : '').toLowerCase();
@@ -542,10 +554,41 @@ function renderPlayerTable() {
     f.sort((a, b) => { let v1 = a[dbSortCol]||0, v2 = b[dbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (dbSortAsc?-1:1) : (v1>v2 ? (dbSortAsc?1:-1) : 0); });
     const countEl = document.getElementById('db-result-count'); if (countEl) countEl.innerText = f.length;
     const tbody = document.getElementById('db-table-body'); if (!tbody) return;
-    tbody.innerHTML = f.map(p => `
+
+    const q0 = '<span class="text-zinc-600">?</span>';   // intel-gated unknown
+    tbody.innerHTML = f.map(p => {
+        const intel = !!p.has_intel;
+        // Public columns are always shown; deep-scan columns show "?" until intel is captured.
+        const gated = (val, fmt) => intel ? (fmt ? fmt(val) : (val ?? 0)) : q0;
+        return `
         <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3 font-mono">${p.id}</td><td class="p-3 font-medium text-foreground">${p.name || 'Unknown'}</td><td class="p-3 text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : '-'}</td><td>${p.level}</td><td class="p-3 text-primary font-medium">${(p.points || 0).toLocaleString()}</td><td class="p-3 border-l border-border">${p.planet_count || 0}</td><td class="p-3 ${p.idle_time && p.idle_time.includes('Online') ? 'text-green-400' : ''}">${p.idle_time || '-'}</td><td class="p-3 border-l border-border">${p.artefact || '-'}</td><td class="p-3 text-primary">${(p.trade_revenue || 0).toLocaleString()}</td><td class="p-3 text-blue-400 border-l border-border">${p.physics}</td><td class="p-3 text-green-400">${p.biology}</td><td class="p-3 text-yellow-400">${p.economy}</td><td class="p-3 text-purple-400">${p.energy}</td><td class="p-3 text-orange-400">${p.mathematics}</td><td class="p-3 text-pink-400 border-r border-border">${p.social}</td><td class="p-3 text-muted-foreground">${new Date(p.updated_at).toLocaleString()}</td>
-        </tr>`).join('');
+            <td class="p-3 font-medium text-foreground sticky left-0 z-10 bg-card"><a href="/Game/Players/Profile/${p.id}" target="_blank" class="hover:underline hover:text-primary">${p.name || 'Unknown'}</a></td>
+            <td class="p-3 text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : '-'}</td>
+            <td class="p-3">${p.level || 0}</td>
+            <td class="p-3 text-blue-300">${p.science_level || 0}</td>
+            <td class="p-3 text-purple-300">${p.culture_level || 0}</td>
+            <td class="p-3 text-primary font-medium">${(p.points || 0).toLocaleString()}</td>
+            <td class="p-3 border-l border-border">${p.planet_count || 0}</td>
+            <td class="p-3 text-primary">${(p.total_population || 0).toLocaleString()}</td>
+            <td class="p-3 whitespace-nowrap">${intel ? `${(p.cv_used || 0).toLocaleString()}/${(p.cv_limit || 0).toLocaleString()}` : q0}</td>
+            <td class="p-3 border-l border-border">${formatRaceModifier(p.race_growth, !intel)}</td>
+            <td class="p-3">${formatRaceModifier(p.race_science, !intel)}</td>
+            <td class="p-3">${formatRaceModifier(p.race_culture, !intel)}</td>
+            <td class="p-3">${formatRaceModifier(p.race_production, !intel)}</td>
+            <td class="p-3">${formatRaceModifier(p.race_speed, !intel)}</td>
+            <td class="p-3">${formatRaceModifier(p.race_attack, !intel)}</td>
+            <td class="p-3">${formatRaceModifier(p.race_defense, !intel)}</td>
+            <td class="p-3 text-primary border-l border-border">${intel ? (p.trade_revenue || 0) + '%' : q0}</td>
+            <td class="p-3 text-green-400 border-l border-border">${gated(p.biology)}</td>
+            <td class="p-3 text-yellow-400">${gated(p.economy)}</td>
+            <td class="p-3 text-purple-400">${gated(p.energy)}</td>
+            <td class="p-3 text-orange-400">${gated(p.mathematics)}</td>
+            <td class="p-3 text-blue-400">${gated(p.physics)}</td>
+            <td class="p-3 text-pink-400">${gated(p.social)}</td>
+            <td class="p-3 border-l border-border">${intel ? (p.artefact || '-') : q0}</td>
+            <td class="p-3 text-muted-foreground border-l border-border">${fmtIntelDate(p.intel_updated_at)}</td>
+        </tr>`;
+    }).join('');
 }
 
 function renderSystemTable() {

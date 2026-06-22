@@ -6,7 +6,7 @@
     <div class="flex-1 overflow-hidden flex flex-col p-4 md:p-6 gap-4">
         <div class="flex justify-between items-center gap-4">
             <div class="relative w-full md:w-72">
-                <input type="text" id="db-search-input" placeholder="Filter by Name, ID, or [TAG]..." class="flex h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8" oninput="renderPlayerTable()">
+                <input type="text" id="db-search-input" placeholder="Filter by Name, ID, or [TAG]..." class="flex h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8">
                 <i class="fa-solid fa-filter absolute right-3 top-2.5 text-muted-foreground text-sm pointer-events-none"></i>
             </div>
             <div class="text-sm text-muted-foreground font-mono">Showing <span id="db-result-count" class="text-foreground font-bold">0</span> records</div>
@@ -15,22 +15,31 @@
             <table class="w-full text-left text-sm whitespace-nowrap">
                 <thead class="sticky top-0 bg-secondary text-secondary-foreground shadow-sm z-10">
                     <tr>
-                        <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('id')">ID <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                        <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('name')">Name <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 sticky left-0 z-20 bg-secondary" onclick="sortDb('name')">Name <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
                         <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('alliance_tag')">Ally <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                        <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('level')">Lvl <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('level')">PL <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-blue-300" onclick="sortDb('science_level')">SciLvl <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-purple-300" onclick="sortDb('culture_level')">CulLvl <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
                         <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('points')">Points <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
                         <th class="p-3 cursor-pointer hover:bg-secondary/80 border-l border-border" onclick="sortDb('planet_count')">Planets <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                        <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('idle_time')">Idle <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                        <th class="p-3 cursor-pointer hover:bg-secondary/80 border-l border-border" onclick="sortDb('artefact')">Artefact <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                        <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('trade_revenue')">Trade <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-blue-400 border-l border-border" onclick="sortDb('physics')">Phys <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-green-400" onclick="sortDb('biology')">Bio <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-yellow-400" onclick="sortDb('economy')">Econ <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-primary" onclick="sortDb('total_population')">Pop <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('cv_used')">CV <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-emerald-300 border-l border-border" onclick="sortDb('race_growth')">Gro <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-emerald-300" onclick="sortDb('race_science')">Sci <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-emerald-300" onclick="sortDb('race_culture')">Cult <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-emerald-300" onclick="sortDb('race_production')">Prod <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-rose-400" onclick="sortDb('race_speed')">Spd <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-rose-400" onclick="sortDb('race_attack')">Att <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-rose-400" onclick="sortDb('race_defense')">Def <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-primary border-l border-border" onclick="sortDb('trade_revenue')">Trade <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-green-400 border-l border-border" onclick="sortDb('biology')">Bio <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-yellow-400" onclick="sortDb('economy')">Eco <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
                         <th class="p-3 cursor-pointer hover:bg-secondary/80 text-purple-400" onclick="sortDb('energy')">Nrg <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
                         <th class="p-3 cursor-pointer hover:bg-secondary/80 text-orange-400" onclick="sortDb('mathematics')">Math <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-pink-400 border-r border-border" onclick="sortDb('social')">Soc <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
-                        <th class="p-3 cursor-pointer hover:bg-secondary/80" onclick="sortDb('updated_at')">Last Intel <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-blue-400" onclick="sortDb('physics')">Phy <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 text-pink-400" onclick="sortDb('social')">Soc <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 border-l border-border" onclick="sortDb('artefact')">Artefact <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
+                        <th class="p-3 cursor-pointer hover:bg-secondary/80 border-l border-border" onclick="sortDb('intel_updated_at')">Last Intel <i class="fa-solid fa-sort ml-1 opacity-50"></i></th>
                     </tr>
                 </thead>
                 <tbody id="db-table-body" class="divide-y divide-border"></tbody>

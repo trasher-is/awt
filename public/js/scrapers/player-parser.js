@@ -181,6 +181,18 @@ export function extractPlayerData(playerId, doc = document) {
         }
     }
 
+    // Planets table footer carries reliable, always-public totals (no intel needed):
+    //   Sum row -> [ "Sum", "<owned> of <total>", <total population>, <total starbase> ].
+    // Prefer these over the Statistic-history fetch, which can be empty/redacted.
+    const sumRow = Array.from(doc.querySelectorAll('table tfoot tr'))
+        .find(r => r.cells && r.cells[0] && r.cells[0].innerText.trim() === 'Sum');
+    if (sumRow && sumRow.cells.length >= 3) {
+        const ownedMatch = sumRow.cells[1] ? sumRow.cells[1].innerText.match(/\d+/) : null;
+        if (ownedMatch) p.total_planets = parseInt(ownedMatch[0], 10) || p.total_planets;
+        const popDigits = sumRow.cells[2] ? sumRow.cells[2].innerText.replace(/[^\d]/g, '') : '';
+        if (popDigits) p.total_population = parseInt(popDigits, 10) || p.total_population;
+    }
+
     return p;
 }
 
@@ -224,9 +236,11 @@ export async function scrapePlayer(playerId) {
                     const latestLogRecord = infrastructureHistoryArray[infrastructureHistoryArray.length - 1];
                     console.log(`[Spy] Historical infrastructure values decrypted:`, latestLogRecord);
                     
-                    // Direct structural conversion mapping down into matching keys
-                    p.total_planets     = parseInt(latestLogRecord.count, 10) || 0;
-                    p.total_population  = parseInt(latestLogRecord.population, 10) || 0;
+                    // Direct structural conversion mapping down into matching keys.
+                    // Planets/population already come from the profile's Planets table
+                    // (more current + always public) — only fall back to history if absent.
+                    p.total_planets     = p.total_planets    || parseInt(latestLogRecord.count, 10) || 0;
+                    p.total_population  = p.total_population  || parseInt(latestLogRecord.population, 10) || 0;
                     p.total_farms       = parseInt(latestLogRecord.farms, 10) || 0;
                     p.total_factories   = parseInt(latestLogRecord.factories, 10) || 0;
                     p.total_labs        = parseInt(latestLogRecord.labs, 10) || 0;

@@ -455,6 +455,231 @@ export function initStarbaseTimer() {
     barContainer.appendChild(timerDiv);
 }
 
+// ---------------------------------------------------------------
+// PLAYER LEVEL (PL) AUTOGROWTH CALCULATOR (profile page)
+// PL grows twice a day (00:00 & 12:00 CET) by a % of current XP.
+// The % depends on the race's combat stats: SAD = Speed+Attack+Defence
+// (each -4..+4, so SAD ranges -12..+12). Growth% = (SAD + 12) * 0.062,
+// i.e. +0% at SAD -12, ~0.744% at SAD 0, ~1.488% at SAD +12. (factor = (SAD+12)*0.00062)
+// ---------------------------------------------------------------
+let _plAggCache = null;
+
+// Build {level: aggregatedXP} from /Info/PlayerLevelTable (cols: Level, XP, Aggregated).
+async function getPLAggregatedTable() {
+    if (_plAggCache) return _plAggCache;
+    const res = await fetch('/Info/PlayerLevelTable');
+    const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+    const map = {};
+    doc.querySelectorAll('table tbody tr').forEach(r => {
+        const cells = r.querySelectorAll('td');
+        if (cells.length >= 3) {
+            const lvl = parseInt(cells[0].innerText, 10);
+            const agg = parseLocaleNumber(cells[2].innerText);
+            if (!isNaN(lvl) && agg > 0) map[lvl] = agg;
+        }
+    });
+    _plAggCache = map;
+    return map;
+}
+
+// Read a race combat stat (Speed/Attack/Defence) off the profile's race-summary table.
+function readRaceStat(label) {
+    let val = null;
+    document.querySelectorAll('.race-summary tbody td').forEach(td => {
+        if (val !== null) return;
+        const text = td.innerText.trim();
+        if (text.includes(label)) {
+            const m = text.match(/([+-]?\d+)\s*$/);
+            if (m) val = parseInt(m[1], 10);
+        }
+    });
+    return val;
+}
+
+// Next PL update is at 00:00 or 12:00 Europe/Berlin time. Returns a Date.
+function nextPLUpdate() {
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit',
+        second: '2-digit', hour12: false
+    }).formatToParts(now);
+    const get = t => parseInt(parts.find(p => p.type === t).value, 10);
+    const h = get('hour') % 24, m = get('minute'), s = get('second');
+    const secsSinceMidnight = h * 3600 + m * 60 + s;
+    const secsToNext = ((secsSinceMidnight < 43200) ? 43200 : 86400) - secsSinceMidnight;
+    return new Date(now.getTime() + secsToNext * 1000);
+}
+
+// Monotonic index of the current 12h PL-update slot in Berlin wall-clock time.
+// Two readings in the same slot saw no update between them; a difference of N
+// means N update boundaries (00:00 / 12:00 Berlin) were crossed.
+function berlinSlotIndex(date) {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false
+    }).formatToParts(date);
+    const g = t => parseInt(parts.find(p => p.type === t).value, 10);
+    // Treat Berlin wall-clock as if UTC purely to get a stable half-day counter.
+    const wall = Date.UTC(g('year'), g('month') - 1, g('day'), g('hour') % 24, g('minute'));
+    return Math.floor(wall / 43200000);
+}
+
+export async function initProfilePLGrowth() {
+    if (!window.location.pathname.toLowerCase().includes('/game/players/profile/')) return;
+
+    // Locate the "Player Level" value cell: "6 - 77% (72 XP)".
+    let valCell = null, levelText = '';
+    document.querySelectorAll('table tbody tr').forEach(row => {
+        if (valCell) return;
+        const cells = row.querySelectorAll('th, td');
+        if (cells.length >= 2 && cells[0].innerText.includes('Player Level')) {
+            valCell = cells[1];
+            levelText = cells[1].innerText;
+        }
+    });
+    if (!valCell) return;
+    if (valCell.querySelector('.awt-pl-growth')) return;   // idempotent
+
+    const lvlMatch = levelText.match(/(\d+)\s*-\s*(\d+)\s*%/);
+    const xpMatch = levelText.match(/([\d.,\s ]+)\s*XP/);
+    if (!lvlMatch || !xpMatch) return;
+
+    const currentLevel = parseInt(lvlMatch[1], 10);
+    const xpToNext = parseLocaleNumber(xpMatch[1]);
+    if (isNaN(currentLevel) || xpToNext <= 0) return;
+
+    // Mark early so the 200ms poller doesn't re-enter while we await.
+    const placeholder = document.createElement('div');
+    placeholder.className = 'awt-pl-growth';
+    placeholder.style.cssText = 'margin-top:4px;font-size:11px;color:#888;';
+    placeholder.textContent = '⏳ PL growth…';
+    valCell.appendChild(placeholder);
+
+    try {
+        const agg = await getPLAggregatedTable();
+        const nextLevel = currentLevel + 1;
+        const target = agg[nextLevel];
+        if (!target) { placeholder.remove(); return; }
+
+        const currentXP = target - xpToNext;
+
+        const speed = readRaceStat('Speed');
+        const attack = readRaceStat('Attack');
+        const defence = readRaceStat('Defence') ?? readRaceStat('Defense');
+
+        if (speed === null || attack === null || defence === null) {
+            placeholder.innerHTML = `<span style="color:#c96;">PL ${currentXP.toLocaleString()} XP — combat stats not visible (need intel)</span>`;
+            return;
+        }
+
+        const sad = speed + attack + defence;
+        const factor = Math.max(0, Math.min(24, sad + 12)) * 0.00062;   // (SAD+12)*0.062%
+        const pct = (factor * 100);
+
+        if (factor <= 0) {
+            placeholder.innerHTML = `<span style="color:#aaa;">PL ${currentXP.toLocaleString()} XP · SAD ${sad >= 0 ? '+' : ''}${sad} → <b style="color:#fff;">+0%</b> (no growth)</span>`;
+            return;
+        }
+
+        const gainNext = currentXP * factor;
+        const xpAfter = currentXP + gainNext;
+        const remainAfter = target - xpAfter;
+
+        // Daily figures (2 updates/day): XP after a full day and the effective daily %.
+        const xpAfterDay = currentXP * Math.pow(1 + factor, 2);
+        const gainDay = xpAfterDay - currentXP;
+        const pctDay = (Math.pow(1 + factor, 2) - 1) * 100;
+
+        // Helper: how many updates from `xp` to reach `tgt`, compounding 1+factor.
+        const updatesToReach = (xp, tgt) => Math.ceil(Math.log(tgt / xp) / Math.log(1 + factor));
+
+        // Updates / ETA to the next level.
+        const updates = updatesToReach(currentXP, target);
+        const upd = nextPLUpdate();
+        // First growth lands at the next update; level-up after `updates` updates.
+        const finish = new Date(upd.getTime() + (updates - 1) * 43200 * 1000);
+        const fmtDate = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
+                             d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+
+        // Levels gained over the next 7 and 30 days (each = 2 updates).
+        const levelsIn = (days) => {
+            const finalXP = currentXP * Math.pow(1 + factor, days * 2);
+            let lvl = currentLevel;
+            while (agg[lvl + 1] && finalXP >= agg[lvl + 1]) lvl++;
+            return lvl - currentLevel;
+        };
+
+        // --- Observed growth (localStorage) — auto-collects measured vs predicted ---
+        // Keyed by player id so multiple profiles track independently.
+        const idMatch = window.location.pathname.match(/\/profile\/(\d+)/i);
+        const playerId = idMatch ? idMatch[1] : 'unknown';
+        const lsKey = `awt-pl-obs-${playerId}`;
+        let observedHTML = '';
+        try {
+            const now = new Date();
+            const nowSlot = berlinSlotIndex(now);
+            const prev = JSON.parse(localStorage.getItem(lsKey) || 'null');
+
+            if (prev && Number.isFinite(prev.xp) && currentXP > prev.xp) {
+                const updatesPassed = Math.max(1, nowSlot - prev.slot);
+                const measuredGain = currentXP - prev.xp;
+                const measuredPerUpd = Math.pow(currentXP / prev.xp, 1 / updatesPassed) - 1;
+                const measuredPct = measuredPerUpd * 100;
+                const effSad = measuredPct / 0.062 - 12;           // back-solve SAD from rate
+                // Predicted total gain over the window, then flag only if the gap exceeds
+                // integer-rounding noise (~±1 XP per update crossed).
+                const predGain = prev.xp * (Math.pow(1 + factor, updatesPassed) - 1);
+                const off = Math.abs(measuredGain - predGain) > updatesPassed + 1;
+                observedHTML = `<div style="color:${off ? '#e0b' : '#6b9'};">measured: +${measuredPct.toFixed(3)}%/upd `
+                    + `(+${Math.round(measuredGain)} XP / ${updatesPassed} upd) ≈ SAD ${effSad >= 0 ? '+' : ''}${effSad.toFixed(1)}`
+                    + `${off ? ` · formula +${pct.toFixed(2)}% (Δ${(measuredGain - predGain >= 0 ? '+' : '')}${(measuredGain - predGain).toFixed(1)} XP)` : ''}</div>`;
+
+                // Accumulate clean data points so we can test the level hypothesis later.
+                // Each row: level, SAD, base xp, measured %/upd, effective SAD, updates.
+                try {
+                    const hKey = `awt-pl-hist-${playerId}`;
+                    const hist = JSON.parse(localStorage.getItem(hKey) || '[]');
+                    hist.push({ lvl: currentLevel, sad, base: Math.round(prev.xp),
+                                pct: +measuredPct.toFixed(3), eff: +effSad.toFixed(1), upd: updatesPassed });
+                    while (hist.length > 60) hist.shift();
+                    localStorage.setItem(hKey, JSON.stringify(hist));
+                } catch (_) {}
+            }
+            // window.awtPLDump() -> console.table of every player's recorded history.
+            if (!window.awtPLDump) {
+                window.awtPLDump = () => {
+                    const rows = [];
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const k = localStorage.key(i);
+                        if (!k.startsWith('awt-pl-hist-')) continue;
+                        const id = k.replace('awt-pl-hist-', '');
+                        (JSON.parse(localStorage.getItem(k) || '[]')).forEach(r => rows.push({ id, ...r }));
+                    }
+                    console.table(rows);
+                    return rows;
+                };
+            }
+            // Update baseline only when XP changed (so we keep a pre-update anchor).
+            if (!prev || currentXP !== prev.xp) {
+                localStorage.setItem(lsKey, JSON.stringify({ xp: currentXP, slot: nowSlot, sad }));
+            }
+        } catch (_) { /* localStorage may be unavailable; observation is best-effort */ }
+
+        placeholder.innerHTML = `
+            <div style="color:#aaa;">PL <span style="color:#fff;font-weight:bold;">${Math.round(currentXP).toLocaleString()}</span> XP
+                · SAD ${sad >= 0 ? '+' : ''}${sad} → <span style="color:#fff;font-weight:bold;">+${pct.toFixed(2)}%</span>/upd
+                <span style="color:#666;">(+${pctDay.toFixed(2)}%/day)</span></div>
+            <div style="color:#888;">next: +${gainNext.toFixed(1)} XP → ${Math.round(remainAfter).toLocaleString()} XP to lvl ${nextLevel}
+                <span style="color:#666;">· +${gainDay.toFixed(0)} XP/day</span></div>
+            <div style="color:#888;">lvl ${nextLevel} in ${updates} upd <span style="color:#666;">(${fmtDate(finish)})</span></div>
+            <div style="color:#888;">≈ +${levelsIn(7)} lvl in 7d · +${levelsIn(30)} lvl in 30d</div>
+            ${observedHTML}`;
+    } catch (e) {
+        console.error('[AWT] PL growth calc failed:', e);
+        placeholder.remove();
+    }
+}
+
 let currentObservedTable = null;
 let systemTableObserver = null;
 
