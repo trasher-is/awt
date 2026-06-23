@@ -51,7 +51,7 @@ function getMembers() {
 
     const rows = db.prepare(`
         SELECT p.name, p.has_intel, p.race_trader,
-               ams.hoarded_au, ams.astro_dollars, ams.production_points
+               ams.hoarded_au, ams.astro_dollars, ams.production_points, ams.production_rate
         FROM alliance_member_stats ams
         JOIN players p ON p.id = ams.player_id
         ORDER BY p.name COLLATE NOCASE ASC
@@ -59,11 +59,14 @@ function getMembers() {
 
     return rows.map(r => {
         const visible = parseLocaleNumber(r.astro_dollars) + parseLocaleNumber(r.production_points) * ppPrice;
+        // A$/hour income: Production Points produced per hour valued at the live PP price.
+        const auPerH = parseLocaleNumber(r.production_rate) * ppPrice;
         return {
             name: r.name,
             isTrader: r.has_intel === 1 && r.race_trader > 0,
             hoarded_au: Math.round(r.hoarded_au || 0),
-            visible_au: Math.round(visible)
+            visible_au: Math.round(visible),
+            au_per_h: Math.round(auPerH)
         };
     });
 }

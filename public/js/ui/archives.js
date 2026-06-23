@@ -48,12 +48,12 @@ export async function openDatabasePanel() {
     panel.classList.replace('translate-x-full', 'translate-x-0');
     if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
 
-    document.getElementById('db-table-body').innerHTML = '<tr><td colspan="25" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Intelligence...</td></tr>';
+    document.getElementById('db-table-body').innerHTML = '<tr><td colspan="26" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Intelligence...</td></tr>';
     try {
         const res = await fetch('/hub-api/intel/players');
         const data = await res.json();
         if (data.success) { rawDbPlayers = data.players; renderPlayerTable(); }
-    } catch (err) { document.getElementById('db-table-body').innerHTML = '<tr><td colspan="25" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
+    } catch (err) { document.getElementById('db-table-body').innerHTML = '<tr><td colspan="26" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
 }
 
 export async function openSystemDatabasePanel() {
@@ -547,6 +547,15 @@ function fmtIntelDate(val) {
            d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// True if the intel timestamp is parseable and older than 24h (used to grey stale sciences).
+function isIntelStale(val) {
+    if (!val) return false;
+    let d = new Date(val);
+    if (isNaN(d) && typeof val === 'string') d = new Date(val.replace(' ', 'T') + 'Z');
+    if (isNaN(d)) return false;
+    return (Date.now() - d.getTime()) > 24 * 3600 * 1000;
+}
+
 function renderPlayerTable() {
     const input = document.getElementById('db-search-input');
     const q = (input ? input.value : '').toLowerCase();
@@ -560,6 +569,9 @@ function renderPlayerTable() {
         const intel = !!p.has_intel;
         // Public columns are always shown; deep-scan columns show "?" until intel is captured.
         const gated = (val, fmt) => intel ? (fmt ? fmt(val) : (val ?? 0)) : q0;
+        // Sciences go grey once the captured intel is older than 24h.
+        const stale = isIntelStale(p.intel_updated_at);
+        const sci = (color) => stale ? 'text-zinc-500' : color;
         return `
         <tr class="hover:bg-accent/50 transition-colors">
             <td class="p-3 font-medium text-foreground sticky left-0 z-10 bg-card"><a href="/Game/Players/Profile/${p.id}" target="_blank" class="hover:underline hover:text-primary">${p.name || 'Unknown'}</a></td>
@@ -578,13 +590,14 @@ function renderPlayerTable() {
             <td class="p-3">${formatRaceModifier(p.race_speed, !intel)}</td>
             <td class="p-3">${formatRaceModifier(p.race_attack, !intel)}</td>
             <td class="p-3">${formatRaceModifier(p.race_defense, !intel)}</td>
+            <td class="p-3 text-center">${intel ? (p.race_trader > 0 ? '<i class="fa-solid fa-check text-emerald-400"></i>' : '') : q0}</td>
             <td class="p-3 text-primary border-l border-border">${intel ? (p.trade_revenue || 0) + '%' : q0}</td>
-            <td class="p-3 text-green-400 border-l border-border">${gated(p.biology)}</td>
-            <td class="p-3 text-yellow-400">${gated(p.economy)}</td>
-            <td class="p-3 text-purple-400">${gated(p.energy)}</td>
-            <td class="p-3 text-orange-400">${gated(p.mathematics)}</td>
-            <td class="p-3 text-blue-400">${gated(p.physics)}</td>
-            <td class="p-3 text-pink-400">${gated(p.social)}</td>
+            <td class="p-3 ${sci('text-green-400')} border-l border-border">${gated(p.biology)}</td>
+            <td class="p-3 ${sci('text-yellow-400')}">${gated(p.economy)}</td>
+            <td class="p-3 ${sci('text-purple-400')}">${gated(p.energy)}</td>
+            <td class="p-3 ${sci('text-orange-400')}">${gated(p.mathematics)}</td>
+            <td class="p-3 ${sci('text-blue-400')}">${gated(p.physics)}</td>
+            <td class="p-3 ${sci('text-pink-400')}">${gated(p.social)}</td>
             <td class="p-3 border-l border-border">${intel ? (p.artefact || '-') : q0}</td>
             <td class="p-3 text-muted-foreground border-l border-border">${fmtIntelDate(p.intel_updated_at)}</td>
         </tr>`;
@@ -685,6 +698,17 @@ const fmtAU = (n) => {
     if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
     if (n >= 1e3) return Math.round(n / 1e3) + 'k';
     return String(Math.round(n));
+};
+// A trade needs 20k A$ on hand. fmtReady(needed, rate) → compact time to accrue
+// `needed` A$ at `rate` A$/h: "now" if already there, "–" if no income.
+const TA_TRADE_COST = 20000;
+const fmtReady = (needed, ratePerH) => {
+    if (!ratePerH || ratePerH <= 0) return '–';
+    if (needed <= 0) return 'now';
+    const h = needed / ratePerH;
+    if (h < 1) return Math.round(h * 60) + 'm';
+    if (h < 24) return (h < 10 ? h.toFixed(1) : Math.round(h)) + 'h';
+    return (h / 24).toFixed(1) + 'd';
 };
 const taPairKey = (a, b) => [a.toLowerCase(), b.toLowerCase()].sort().join('|');
 const taCount = (nameLower, agreements) =>
@@ -836,6 +860,7 @@ function renderTaBoard() {
     html += `<th class="bg-black border-0" style="min-width:14px"></th>`;
     html += `<th class="bg-zinc-900 px-2 py-1 text-amber-400 border border-border/40" title="A$ value of artifacts + supply units this member is holding">Hoard A$</th>`;
     html += `<th class="bg-zinc-900 px-2 py-1 text-emerald-400 border border-border/40" title="Visible liquidity: Astro Dollars + Production Points valued in A$">A$+PP</th>`;
+    html += `<th class="bg-zinc-900 px-2 py-1 text-sky-400 border border-border/40" title="Time to reach ${TA_TRADE_COST.toLocaleString()} A$ at current income (Production/h × PP price). Second value: time if the hoard is sold now.">Ready in</th>`;
     html += `</tr></thead><tbody>`;
 
     members.forEach(p1 => {
@@ -850,6 +875,11 @@ function renderTaBoard() {
         html += `<td class="bg-black border-0"></td>`;
         html += `<td class="px-2 py-1 text-right border border-border/40 text-amber-400 font-semibold" title="${(p1.hoarded_au || 0).toLocaleString()} A$">${fmtAU(p1.hoarded_au)}</td>`;
         html += `<td class="px-2 py-1 text-right border border-border/40 text-emerald-400" title="${(p1.visible_au || 0).toLocaleString()} A$">${fmtAU(p1.visible_au)}</td>`;
+        // Ready in: time to reach 20k from visible liquidity, then (muted) the same if the hoard is sold now.
+        const t1 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0), p1.au_per_h);
+        const t2 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0), p1.au_per_h);
+        const readyTitle = `${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${Math.max(0, TA_TRADE_COST - (p1.visible_au || 0)).toLocaleString()} A$ (${Math.max(0, TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0)).toLocaleString()} A$ if hoard sold)`;
+        html += `<td class="px-2 py-1 text-right border border-border/40 text-sky-400 whitespace-nowrap" title="${readyTitle}">${t1}<span class="text-muted-foreground"> / ${t2}</span></td>`;
         html += `</tr>`;
     });
     html += `</tbody>`;
