@@ -459,8 +459,10 @@ export function initStarbaseTimer() {
 // PLAYER LEVEL (PL) AUTOGROWTH CALCULATOR (profile page)
 // PL grows twice a day (00:00 & 12:00 CET) by a % of current XP.
 // The % depends on the race's combat stats: SAD = Speed+Attack+Defence
-// (each -4..+4, so SAD ranges -12..+12). Growth% = (SAD + 12) * 0.062,
-// i.e. +0% at SAD -12, ~0.744% at SAD 0, ~1.488% at SAD +12. (factor = (SAD+12)*0.00062)
+// (each -4..+4, so SAD ranges -12..+12). Growth% = (SAD + 12) * 0.0645,
+// i.e. +0% at SAD -12, ~0.774% at SAD 0, ~1.548% at SAD +12. (factor = (SAD+12)*0.000645)
+// Coefficient calibrated against low-noise observed gains (clean rows averaged ~0.0647%/unit);
+// it self-recalibrates as multi-update windows accumulate in awt-pl-hist (window.awtPLDump()).
 // ---------------------------------------------------------------
 let _plAggCache = null;
 
@@ -573,7 +575,7 @@ export async function initProfilePLGrowth() {
         }
 
         const sad = speed + attack + defence;
-        const factor = Math.max(0, Math.min(24, sad + 12)) * 0.00062;   // (SAD+12)*0.062%
+        const factor = Math.max(0, Math.min(24, sad + 12)) * 0.000645;   // (SAD+12)*0.0645%
         const pct = (factor * 100);
 
         if (factor <= 0) {
@@ -609,41 +611,56 @@ export async function initProfilePLGrowth() {
             return lvl - currentLevel;
         };
 
-        // --- Observed growth (localStorage) — auto-collects measured vs predicted ---
-        // Keyed by player id so multiple profiles track independently.
+        // --- Observed growth (localStorage) — measured vs predicted over a MULTI-update window ---
+        // Per-update integer XP rounding (±1 XP) swamps a single-update sample, so we hold the
+        // baseline anchored across several updates and measure the accumulated gain. Re-anchoring
+        // every update (the old behaviour) guaranteed maximum noise and a meaningless effSad.
         const idMatch = window.location.pathname.match(/\/profile\/(\d+)/i);
         const playerId = idMatch ? idMatch[1] : 'unknown';
         const lsKey = `awt-pl-obs-${playerId}`;
+        const COEFF = 0.0645;          // %/unit; keep in sync with `factor` above
+        const WINDOW_UPDATES = 6;      // close & record a calibration window after this many updates
         let observedHTML = '';
         try {
             const now = new Date();
             const nowSlot = berlinSlotIndex(now);
             const prev = JSON.parse(localStorage.getItem(lsKey) || 'null');
+            const sameRun = prev && Number.isFinite(prev.xp) && prev.sad === sad;
 
-            if (prev && Number.isFinite(prev.xp) && currentXP > prev.xp) {
+            if (sameRun && currentXP > prev.xp) {
                 const updatesPassed = Math.max(1, nowSlot - prev.slot);
                 const measuredGain = currentXP - prev.xp;
                 const measuredPerUpd = Math.pow(currentXP / prev.xp, 1 / updatesPassed) - 1;
                 const measuredPct = measuredPerUpd * 100;
-                const effSad = measuredPct / 0.062 - 12;           // back-solve SAD from rate
-                // Predicted total gain over the window, then flag only if the gap exceeds
-                // integer-rounding noise (~±1 XP per update crossed).
+                const effSad = measuredPct / COEFF - 12;           // back-solve SAD from rate
                 const predGain = prev.xp * (Math.pow(1 + factor, updatesPassed) - 1);
                 const off = Math.abs(measuredGain - predGain) > updatesPassed + 1;
+
+                // effSad amplifies %-noise ~16×; only show it once the window is long enough that
+                // ±1 XP rounding maps to <~0.5 SAD (base·updates ≳ 3200). Otherwise label it noisy.
+                const reliable = prev.xp * updatesPassed >= 3200;
                 observedHTML = `<div style="color:${off ? '#e0b' : '#6b9'};">measured: +${measuredPct.toFixed(3)}%/upd `
-                    + `(+${Math.round(measuredGain)} XP / ${updatesPassed} upd) ≈ SAD ${effSad >= 0 ? '+' : ''}${effSad.toFixed(1)}`
+                    + `(+${measuredGain} XP / ${updatesPassed} upd${reliable ? '' : ', noisy'})`
+                    + `${reliable ? ` ≈ SAD ${effSad >= 0 ? '+' : ''}${effSad.toFixed(1)}` : ''}`
                     + `${off ? ` · formula +${pct.toFixed(2)}% (Δ${(measuredGain - predGain >= 0 ? '+' : '')}${(measuredGain - predGain).toFixed(1)} XP)` : ''}</div>`;
 
-                // Accumulate clean data points so we can test the level hypothesis later.
+                // Record a clean calibration row once the window is long enough, then re-anchor.
                 // Each row: level, SAD, base xp, measured %/upd, effective SAD, updates.
-                try {
-                    const hKey = `awt-pl-hist-${playerId}`;
-                    const hist = JSON.parse(localStorage.getItem(hKey) || '[]');
-                    hist.push({ lvl: currentLevel, sad, base: Math.round(prev.xp),
-                                pct: +measuredPct.toFixed(3), eff: +effSad.toFixed(1), upd: updatesPassed });
-                    while (hist.length > 60) hist.shift();
-                    localStorage.setItem(hKey, JSON.stringify(hist));
-                } catch (_) {}
+                if (updatesPassed >= WINDOW_UPDATES) {
+                    try {
+                        const hKey = `awt-pl-hist-${playerId}`;
+                        const hist = JSON.parse(localStorage.getItem(hKey) || '[]');
+                        hist.push({ lvl: currentLevel, sad, base: Math.round(prev.xp),
+                                    pct: +measuredPct.toFixed(3), eff: +effSad.toFixed(1), upd: updatesPassed });
+                        while (hist.length > 60) hist.shift();
+                        localStorage.setItem(hKey, JSON.stringify(hist));
+                    } catch (_) {}
+                    localStorage.setItem(lsKey, JSON.stringify({ xp: currentXP, slot: nowSlot, sad }));
+                }
+                // else: keep the existing anchor so the window keeps accumulating.
+            } else if (!sameRun) {
+                // First sight, SAD changed, or an XP reset — (re)anchor a fresh window.
+                localStorage.setItem(lsKey, JSON.stringify({ xp: currentXP, slot: nowSlot, sad }));
             }
             // window.awtPLDump() -> console.table of every player's recorded history.
             if (!window.awtPLDump) {
@@ -658,10 +675,6 @@ export async function initProfilePLGrowth() {
                     console.table(rows);
                     return rows;
                 };
-            }
-            // Update baseline only when XP changed (so we keep a pre-update anchor).
-            if (!prev || currentXP !== prev.xp) {
-                localStorage.setItem(lsKey, JSON.stringify({ xp: currentXP, slot: nowSlot, sad }));
             }
         } catch (_) { /* localStorage may be unavailable; observation is best-effort */ }
 
