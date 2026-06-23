@@ -39,6 +39,16 @@ router.post('/sync/system', requireAuth, (req, res) => {
             updated_at=CURRENT_TIMESTAMP
     `);
 
+    // A planet's game_planet_id is globally UNIQUE, but it can show up at a new
+    // (system_id, planet_index) slot when a planet is re-slotted/relocated. The upsert
+    // above only resolves the (system_id, planet_index) conflict, so without this the
+    // INSERT path would trip the game_planet_id UNIQUE constraint and abort the whole
+    // system's transaction (losing all of that system's updates). Clear the stale row
+    // at the old location first.
+    const clearMovedPlanet = db.prepare(`
+        DELETE FROM planets WHERE game_planet_id = ? AND (system_id != ? OR planet_index != ?)
+    `);
+
     // Prepared statement for the new fleets
     const insertFleet = db.prepare(`
         INSERT INTO fleets (game_fleet_id, owner_id, system_id, planet_index, transports, colony_ships, destroyers, cruisers, battleships, arrival_time, arrival_at)
@@ -119,7 +129,12 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 upsertPlayer.run(p.owner.id, p.owner.name, p.owner.alliance_id || null);
             }
 
-            // Pass the calculated final parameters securely down to the table updater
+            // Pass the calculated final parameters securely down to the table updater.
+            // Re-home the planet if its id currently lives at another slot (avoids the
+            // game_planet_id UNIQUE collision that would otherwise roll back the system).
+            if (p.game_planet_id != null) {
+                clearMovedPlanet.run(p.game_planet_id, system_id, p.planet_index);
+            }
             upsertPlanet.run(p.game_planet_id, system_id, p.planet_index, finalOwnerId, finalPopulation, finalStarbase, finalHasFleet);
 
             // Target fleet records cleanly: Only drop fleets on planets we have concrete vision over
@@ -445,7 +460,7 @@ router.post('/sync/best-guarded', requireAuth, (req, res) => {
 // --- ALLIANCE STATS RECEIVER & SYNC ---
 router.post('/sync/alliance-stats', requireAuth, (req, res) => {
     const s = req.body;
-    if (!s.player_id) return res.status(400).json({ error: 'Missing Player ID' });
+    if (!s || !s.player_id) return res.status(400).json({ error: 'Missing Player ID' });
 
     let nextCultureAt = null;
     if (s.next_culture_seconds !== null && !isNaN(s.next_culture_seconds)) {

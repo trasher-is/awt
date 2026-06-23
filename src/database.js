@@ -6,6 +6,9 @@ const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+// Wait up to 10s for a contended write lock instead of throwing SQLITE_BUSY immediately
+// (e.g. PM2 restart overlap, backups, or a long galaxy-sync transaction).
+db.pragma('busy_timeout = 10000');
 
 function initDatabase() {
     // 1. Admin Control
