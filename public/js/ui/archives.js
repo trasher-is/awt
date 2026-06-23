@@ -703,8 +703,8 @@ const fmtAU = (n) => {
 // `needed` A$ at `rate` A$/h: "now" if already there, "–" if no income.
 const TA_TRADE_COST = 20000;
 const fmtReady = (needed, ratePerH) => {
+    if (needed <= 0) return 'now';            // already at the threshold, regardless of income
     if (!ratePerH || ratePerH <= 0) return '–';
-    if (needed <= 0) return 'now';
     const h = needed / ratePerH;
     if (h < 1) return Math.round(h * 60) + 'm';
     if (h < 24) return (h < 10 ? h.toFixed(1) : Math.round(h)) + 'h';
@@ -860,7 +860,8 @@ function renderTaBoard() {
     html += `<th class="bg-black border-0" style="min-width:14px"></th>`;
     html += `<th class="bg-zinc-900 px-2 py-1 text-amber-400 border border-border/40" title="A$ value of artifacts + supply units this member is holding">Hoard A$</th>`;
     html += `<th class="bg-zinc-900 px-2 py-1 text-emerald-400 border border-border/40" title="Visible liquidity: Astro Dollars + Production Points valued in A$">A$+PP</th>`;
-    html += `<th class="bg-zinc-900 px-2 py-1 text-sky-400 border border-border/40" title="Time to reach ${TA_TRADE_COST.toLocaleString()} A$ at current income (Production/h × PP price). Second value: time if the hoard is sold now.">Ready in</th>`;
+    html += `<th class="bg-zinc-900 px-2 py-1 text-sky-400 border border-border/40" title="Time to reach ${TA_TRADE_COST.toLocaleString()} A$ from visible liquidity at current income (Production/h × PP price)">Ready in</th>`;
+    html += `<th class="bg-zinc-900 px-2 py-1 text-sky-300 border border-border/40" title="Time to reach ${TA_TRADE_COST.toLocaleString()} A$ if the hoard is sold now (visible + hoard, then income)">Ready (sold)</th>`;
     html += `</tr></thead><tbody>`;
 
     members.forEach(p1 => {
@@ -875,11 +876,13 @@ function renderTaBoard() {
         html += `<td class="bg-black border-0"></td>`;
         html += `<td class="px-2 py-1 text-right border border-border/40 text-amber-400 font-semibold" title="${(p1.hoarded_au || 0).toLocaleString()} A$">${fmtAU(p1.hoarded_au)}</td>`;
         html += `<td class="px-2 py-1 text-right border border-border/40 text-emerald-400" title="${(p1.visible_au || 0).toLocaleString()} A$">${fmtAU(p1.visible_au)}</td>`;
-        // Ready in: time to reach 20k from visible liquidity, then (muted) the same if the hoard is sold now.
+        // Ready in: time to reach 20k from visible liquidity. Ready (sold): same once the hoard is sold now.
+        const need1 = Math.max(0, TA_TRADE_COST - (p1.visible_au || 0));
+        const need2 = Math.max(0, TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0));
         const t1 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0), p1.au_per_h);
         const t2 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0), p1.au_per_h);
-        const readyTitle = `${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${Math.max(0, TA_TRADE_COST - (p1.visible_au || 0)).toLocaleString()} A$ (${Math.max(0, TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0)).toLocaleString()} A$ if hoard sold)`;
-        html += `<td class="px-2 py-1 text-right border border-border/40 text-sky-400 whitespace-nowrap" title="${readyTitle}">${t1}<span class="text-muted-foreground"> / ${t2}</span></td>`;
+        html += `<td class="px-2 py-1 text-right border border-border/40 text-sky-400 whitespace-nowrap" title="${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${need1.toLocaleString()} A$">${t1}</td>`;
+        html += `<td class="px-2 py-1 text-right border border-border/40 text-sky-300 whitespace-nowrap" title="${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${need2.toLocaleString()} A$ after selling ${(p1.hoarded_au || 0).toLocaleString()} A$ hoard">${t2}</td>`;
         html += `</tr>`;
     });
     html += `</tbody>`;
