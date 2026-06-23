@@ -31,9 +31,34 @@ function parseTimerInput(input) {
     return durationMs;
 }
 
+// Channels (IDs, separated by commas/spaces/newlines) where the bot refuses to run
+// commands — e.g. public/guest channels. Managed from the admin tool via the
+// app_settings key 'discord_blocked_channels'. getSettingValue is hoisted below.
+function getBlockedChannels() {
+    const raw = getSettingValue('discord_blocked_channels');
+    return raw ? raw.split(/[^0-9]+/).filter(Boolean) : [];
+}
+
+// Harmless glitch-gibberish reply for a command used in a blocked channel. Randomised
+// so it varies each time and never echoes anything about the actual command set.
+function garble() {
+    const bursts = ['bzzt', 'kffzt', 'ghhrkk', 'vrrrt', '*static*', '—click—', 'sssk', 'wrrp', 'zzkt'];
+    const techno = ['SIGNAL CORRUPTED', 'UNAUTHORIZED FREQUENCY', 'CARRIER LOST', 'DECODER MISALIGNED',
+                    'PACKET SCRAMBLED', 'NULL ROUTE', 'TELEMETRY JAMMED', 'HANDSHAKE REJECTED'];
+    const glitch = ['▓', '▒', '░', '▚', '▞', '╳', '⚡', '✶', '◵', '¤', '∎', '⌗'];
+    const pick = a => a[Math.floor(Math.random() * a.length)];
+    const sym = n => Array.from({ length: n }, () => pick(glitch)).join('');
+    return `🛰️ ${pick(bursts)}— ${sym(3)} ${pick(techno)} ${sym(3)} …${pick(bursts)}… ${pick(bursts)}`;
+}
+
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.content.startsWith('!')) return;
+
+    // Public/guest channels: emit harmless static instead of processing the command.
+    if (getBlockedChannels().includes(message.channel.id)) {
+        return message.reply(garble());
+    }
 
     const args = message.content.slice(1).trim().split(/ +/);
     const command = args.shift().toLowerCase();

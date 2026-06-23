@@ -173,6 +173,16 @@
                 <span id="incomingChannelStatus" class="text-xs text-muted-foreground mt-2 block"></span>
             </div>
 
+            <div class="bg-card border border-border rounded-lg p-4 shadow-sm">
+                <h3 class="font-bold text-foreground mb-1"><i class="fa-solid fa-ghost text-muted-foreground mr-1"></i> Command Blocklist (Public Channels)</h3>
+                <p class="text-xs text-muted-foreground mb-3">In these channels the bot ignores commands and replies with harmless garbled static instead — use it for public/guest channels. Enter channel IDs separated by commas or new lines. Run <code>!getid</code> in a channel <em>before</em> blocking it to grab its ID.</p>
+                <div class="flex flex-col gap-2">
+                    <textarea id="blockedChannels" rows="3" class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm font-mono" placeholder="123456789012345678, 234567890123456789"></textarea>
+                    <button onclick="saveBlockedChannels()" class="h-9 px-4 self-start rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Save</button>
+                </div>
+                <span id="blockedChannelsStatus" class="text-xs text-muted-foreground mt-2 block"></span>
+            </div>
+
         </section>
 
         <section class="flex flex-col gap-4">
@@ -277,6 +287,7 @@
                 if (data.success) {
                     document.getElementById('discordChannelId').value = data.settings.discord_announce_channel || '';
                     document.getElementById('incomingChannelId').value = data.settings.discord_incoming_channel || '';
+                    document.getElementById('blockedChannels').value = data.settings.discord_blocked_channels || '';
                 }
             } catch (e) {}
         }
@@ -310,6 +321,10 @@
 
         function saveIncomingChannel() {
             return saveSetting('discord_incoming_channel', 'incomingChannelId', 'incomingChannelStatus');
+        }
+
+        function saveBlockedChannels() {
+            return saveSetting('discord_blocked_channels', 'blockedChannels', 'blockedChannelsStatus');
         }
 
         // --- 2. GLOBAL ALLIANCE BROADCAST UTILITIES ---
