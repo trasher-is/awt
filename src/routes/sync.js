@@ -82,6 +82,11 @@ router.post('/sync/system', requireAuth, (req, res) => {
         // 1. Process Planets, Owners, and History
         for (const p of planetsData) {
 
+            // Server-side guard: never store impossible planet ids / indices, no matter
+            // what a (possibly mobile / hub-modified) client sends.
+            if (p.game_planet_id != null && (!Number.isInteger(p.game_planet_id) || p.game_planet_id <= 0)) continue;
+            if (!Number.isInteger(p.planet_index) || p.planet_index < 1 || p.planet_index > 99) continue;
+
             // Check for history events BEFORE upserting
             const oldP = getOldPlanet.get(system_id, p.planet_index);
 
@@ -98,8 +103,20 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 finalHasFleet = oldP.has_fleet;
             }
 
+            // SOFT-UNKNOWN GUARD: a scan can fail to pick up the owner link while the
+            // planet is clearly still inhabited (population > 0). Treat that like fog of
+            // war — keep the last known owner instead of nulling it. Without this, the
+            // owner gets wiped, the next scan re-detects it, and we log a bogus
+            // "NULL → owner" event every cycle (destroying real history). Only let
+            // ownership clear to NULL when the planet is genuinely empty (pop 0).
+            if (!p.is_unknown && finalOwnerId == null && finalPopulation > 0 && oldP && oldP.owner_id != null) {
+                finalOwnerId = oldP.owner_id;
+            }
+
             if (oldP) {
-                // Owner Change: Skip event creation if this is an obscured shadow scan
+                // Owner Change only. (Population-drop events were removed — they fired
+                // alongside every ownership change and just added noise to the history.)
+                // Skip event creation if this is an obscured shadow scan.
                 if (!p.is_unknown && oldP.owner_id !== finalOwnerId) {
                     logEvent.run(system_id, p.planet_index, 1, oldP.owner_id, finalOwnerId); // 1 = OWNER_CHANGE
                     announceEvents.push({
@@ -109,16 +126,6 @@ router.post('/sync/system', requireAuth, (req, res) => {
                         new_owner: p.owner
                             ? (p.owner.alliance_tag ? `[${p.owner.alliance_tag}] ${p.owner.name}` : p.owner.name)
                             : nameOf(finalOwnerId)
-                    });
-                }
-                // Significant Population Drop: Skip history generation entirely if it's an unverified/unknown scan
-                if (!p.is_unknown && oldP.population > 0 && finalPopulation < oldP.population - 5) {
-                    logEvent.run(system_id, p.planet_index, 2, oldP.population, finalPopulation); // 2 = POP_DROP
-                    announceEvents.push({
-                        planet_index: p.planet_index,
-                        type: 'POP_DROP',
-                        old_pop: oldP.population,
-                        new_pop: finalPopulation
                     });
                 }
             }

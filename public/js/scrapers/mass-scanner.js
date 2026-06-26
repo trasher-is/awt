@@ -67,7 +67,13 @@ export async function runMassScan(updateProgressCb) {
                     const tds = row.querySelectorAll('td');
                     if (tds.length < 3) return;
 
-                    const planetIndex = parseInt(tds[0].innerText.trim(), 10);
+                    // Index cell can carry hub-injected badges (e.g. "10caveman: next") —
+                    // take only the LEADING digits so injected text/numbers never leak in.
+                    const idxMatch = (tds[0].textContent || '').trim().match(/^\d+/);
+                    const planetIndex = idxMatch ? parseInt(idxMatch[0], 10) : NaN;
+                    // Skip rows with an unusable id/index so we never store impossible values.
+                    if (!Number.isInteger(gamePlanetId) || gamePlanetId <= 0) return;
+                    if (!Number.isInteger(planetIndex) || planetIndex < 1 || planetIndex > 99) return;
                     const population = parseInt(tds[1].innerText.trim(), 10) || 0;
                     const starbase = parseInt(tds[2].innerText.trim(), 10) || 0;
 

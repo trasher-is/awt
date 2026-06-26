@@ -1,14 +1,16 @@
 import { handleSearchInput, navToIframe } from './search.js';
 import { loadPlans, savePlan, deletePlan, setIntelSystemId } from './system-intel.js';
 import { loadPlayerIntel } from './player-intel.js';
-import { 
-    openDatabasePanel, 
-    openSystemDatabasePanel, 
-    openPlanetDatabasePanel, 
-    openFleetDatabasePanel, 
+import {
+    openDatabasePanel,
+    openSystemDatabasePanel,
+    openPlanetDatabasePanel,
+    openFleetDatabasePanel,
     openEnemyIntelPanel,
     openAllianceStatsPanel,
-    openTradeAgreementsPanel
+    openTradeAgreementsPanel,
+    openBattleCalcPanel,
+    openTravelCalcPanel
 } from './archives.js';
 import { runMassScan, runPlayerScan } from '../scrapers/mass-scanner.js';
 
@@ -43,6 +45,8 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('open-systems-db-btn')?.addEventListener('click', openSystemDatabasePanel);
     document.getElementById('open-planets-db-btn')?.addEventListener('click', openPlanetDatabasePanel);
     document.getElementById('open-fleets-db-btn')?.addEventListener('click', openFleetDatabasePanel);
+    document.getElementById('open-battle-calc-btn')?.addEventListener('click', openBattleCalcPanel);
+    document.getElementById('open-travel-calc-btn')?.addEventListener('click', openTravelCalcPanel);
 
     document.getElementById('btn-mass-scan')?.addEventListener('click', runMassGalaxyScan);
     document.getElementById('btn-mass-scan-players')?.addEventListener('click', runMassPlayerScan);

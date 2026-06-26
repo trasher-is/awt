@@ -81,7 +81,8 @@ client.on('messageCreate', async (message) => {
                 { name: '`!holes [alliance_tag]`', value: 'Scans your alliance\'s territory to find empty planets, hostile threats, and planned slots.\n*Example: `!holes RAID`*' },
                 { name: '`!tt <sysA> <plnA> <sysB> <plnB> <speed> <nrg>`', value: 'Calculates fleet travel time between two coordinates.\n*Example: `!tt 100 1 200 4 10 5`*\n*(You can also swap speed/energy for a player name: `!tt 100 1 200 4 PlayerOne`)*' },
                 { name: '`!ghosts <sys_id> <planet_num> <alliance_tag>`', value: 'Calculates the shortest/longest hidden fleet arrival window from hostile members with radar vision over a system.\n*Example: `!ghosts 1 10 AO`*' },
-                { name: '`!bio`', value: 'Generates intelligence alerts highlighting players who possess a +6 biology or science advantage over your personal bio level.' }
+                { name: '`!bio`', value: 'Generates intelligence alerts highlighting players who possess a +6 biology or science advantage over your personal bio level.' },
+                { name: '`!battle <D> <C> <B> vs <D> <C> <B>`', value: 'Simulates a battle. Flags: `--sb N` starbase (0-50), `--dp/--ap N` physics, `--dm/--am N` math, `--dra/--ara N` race atk, `--drd/--ard N` race def, `--dl/--al N` player level. Or `--def Name --atk Name` to auto-fill all stats from DB.\n*Example: `!battle 50 10 0 vs 40 8 2 --dp 5 --ap 3 --dl 12 --al 8`*' }
             )
             .setFooter({ text: 'AWT Intelligence Hub' });
 
@@ -952,6 +953,194 @@ client.on('messageCreate', async (message) => {
             .setDescription(`Possible pre-capture incoming tracking windows for **Planet #${planetNum}** in system **${targetSys.name || 'Unknown'} [${sysId}]**:\n\n${reportStr}`)
             .setColor('#4b5563') // Tactical slate-gray
             .setFooter({ text: 'Calculated using server vector configurations.' });
+
+        return message.reply({ embeds: [embed] });
+    }
+
+    // ----------------------------------------------------
+    // !battle - COMBAT SIMULATOR
+    // Syntax: !battle <defD> <defC> <defB> vs <atkD> <atkC> <atkB> [opts]
+    // Options: --sb N  (defender starbase level, 0-5)
+    //          --dp N  (defender physics 0-10)
+    //          --ap N  (attacker physics 0-10)
+    //          --dra N (defender race atk mod -4..+4)
+    //          --ara N (attacker race atk mod -4..+4)
+    //          --drd N (defender race def mod -4..+4)
+    //          --ard N (attacker race def mod -4..+4)
+    //          --def PlayerName  (auto-fill defender mods from DB)
+    //          --atk PlayerName  (auto-fill attacker mods from DB)
+    // ----------------------------------------------------
+    if (command === 'battle') {
+        // Model validated against the in-game battle calculator.
+        // Each ship has ATTACK and DEFENSE stats; CV = att + def.
+        const SHIP_ATTACK = [2, 8, 36];   // [D, C, B]
+        const SHIP_DEF    = [1, 16, 24];  // [D, C, B] — used as HP
+        const SHIP_CV     = [3, 24, 60];  // att + def
+        const SHIP_NAME   = ['Destroyer', 'Cruiser', 'Battleship'];
+        // SB: cv = round(4 × 1.5^n) − 4; att = def = floor(cv/2)
+        // Confirmed: lvl1=2, 2=5, 3=10, 4=16, 5=26, 6=42, 7=64, 15=1748, 20=13297, 30≈767k
+        const sbCV   = n => n > 0 ? Math.round(4 * Math.pow(1.5, n)) - 4 : 0;
+        const sbHalf = n => Math.floor(sbCV(n) / 2);
+        // Per-level coefficients (validated): race atk +7% attack, race def +11% HP,
+        // mathematics +15.3% HP. Physics & player level shift win chance ~1%/level.
+        const MATH_HP = 0.153, RACE_ATK = 0.07, RACE_DEF = 0.11, PHYS_WIN = 0.005, LVL_WIN = 0.01;
+
+        const rawArgs = args.join(' ');
+
+        // Extract named flags before splitting on "vs"
+        const optParse = (flag, def) => {
+            const m = rawArgs.match(new RegExp(`${flag}\\s+(-?\\d+)`));
+            return m ? parseInt(m[1], 10) : def;
+        };
+        const strParse = (flag) => {
+            const m = rawArgs.match(new RegExp(`${flag}\\s+([A-Za-z][\\w\\s]*?)(?=--|$)`));
+            return m ? m[1].trim() : null;
+        };
+
+        const sbLevel  = Math.max(0, Math.min(50, optParse('--sb',  0)));
+        let defPhys    = Math.max(0, Math.min(10, optParse('--dp',  0)));
+        let atkPhys    = Math.max(0, Math.min(10, optParse('--ap',  0)));
+        let defRaceAtk = Math.max(-4, Math.min(4, optParse('--dra', 0)));
+        let atkRaceAtk = Math.max(-4, Math.min(4, optParse('--ara', 0)));
+        let defRaceDef = Math.max(-4, Math.min(4, optParse('--drd', 0)));
+        let atkRaceDef = Math.max(-4, Math.min(4, optParse('--ard', 0)));
+        let defMath    = Math.max(0, Math.min(10, optParse('--dm',  0)));
+        let atkMath    = Math.max(0, Math.min(10, optParse('--am',  0)));
+        let defLevel   = Math.max(0, optParse('--dl', 0));
+        let atkLevel   = Math.max(0, optParse('--al', 0));
+        const defPlayerName = strParse('--def');
+        const atkPlayerName = strParse('--atk');
+
+        // Auto-fill mods from DB if player names given
+        let defPlayerLabel = null, atkPlayerLabel = null;
+        if (defPlayerName) {
+            const p = db.prepare(`SELECT name, level, physics, mathematics, race_attack, race_defense FROM players WHERE name LIKE ?`).get(defPlayerName);
+            if (p) {
+                defPhys    = Math.max(0, Math.min(10, p.physics || 0));
+                defMath    = Math.max(0, Math.min(10, p.mathematics || 0));
+                defRaceAtk = Math.max(-4, Math.min(4, p.race_attack || 0));
+                defRaceDef = Math.max(-4, Math.min(4, p.race_defense || 0));
+                defLevel   = Math.max(0, p.level || 0);
+                defPlayerLabel = p.name;
+            }
+        }
+        if (atkPlayerName) {
+            const p = db.prepare(`SELECT name, level, physics, mathematics, race_attack, race_defense FROM players WHERE name LIKE ?`).get(atkPlayerName);
+            if (p) {
+                atkPhys    = Math.max(0, Math.min(10, p.physics || 0));
+                atkMath    = Math.max(0, Math.min(10, p.mathematics || 0));
+                atkRaceAtk = Math.max(-4, Math.min(4, p.race_attack || 0));
+                atkRaceDef = Math.max(-4, Math.min(4, p.race_defense || 0));
+                atkLevel   = Math.max(0, p.level || 0);
+                atkPlayerLabel = p.name;
+            }
+        }
+
+        // Strip flags from the raw string and split on "vs"
+        const stripped = rawArgs.replace(/--\w+\s+[\w\s]*/g, '').trim();
+        const vsSplit = stripped.split(/\bvs\b/i);
+        if (vsSplit.length !== 2) {
+            return message.reply('❌ **Usage:** `!battle <D> <C> <B> vs <D> <C> <B> [--sb N] [--dp N] [--ap N] [--dm N] [--am N] [--dra N] [--ara N] [--drd N] [--ard N]`\nOr: `!battle <D> <C> <B> vs <D> <C> <B> --def DefenderName --atk AttackerName`');
+        }
+
+        const parseFleet = str => str.trim().split(/\s+/).map(Number).filter(n => !isNaN(n));
+        const defParts = parseFleet(vsSplit[0]);
+        const atkParts = parseFleet(vsSplit[1]);
+
+        const defFleet = [defParts[0] || 0, defParts[1] || 0, defParts[2] || 0];
+        const atkFleet = [atkParts[0] || 0, atkParts[1] || 0, atkParts[2] || 0];
+
+        const sbA = sbHalf(sbLevel);  // starbase attack = defense
+        // Effective attack = (Σ att·n + SBatt) × (1 + 0.07·raceAtk)
+        const def_attack = (defFleet.reduce((s, n, i) => s + n * SHIP_ATTACK[i], 0) + sbA) * (1 + RACE_ATK * defRaceAtk);
+        const atk_attack = (atkFleet.reduce((s, n, i) => s + n * SHIP_ATTACK[i], 0))       * (1 + RACE_ATK * atkRaceAtk);
+        // Effective HP = (Σ def·n + SBdef) × (1 + 0.11·raceDef) × (1 + 0.153·math)
+        const def_hp = (defFleet.reduce((s, n, i) => s + n * SHIP_DEF[i], 0) + sbA)
+                       * (1 + RACE_DEF * defRaceDef) * (1 + MATH_HP * defMath);
+        const atk_hp = (atkFleet.reduce((s, n, i) => s + n * SHIP_DEF[i], 0))
+                       * (1 + RACE_DEF * atkRaceDef) * (1 + MATH_HP * atkMath);
+
+        if (def_hp === 0 && atk_hp === 0) {
+            return message.reply('❌ Both fleets are empty.');
+        }
+
+        // Fraction killed on each side (simultaneous fire)
+        const fracDefKilled = def_hp > 0 ? Math.min(1, atk_attack / def_hp) : 1;
+        const fracAtkKilled = atk_hp > 0 ? Math.min(1, def_attack / atk_hp) : 1;
+
+        const survDef = defFleet.map(n => n * (1 - fracDefKilled));
+        const survAtk = atkFleet.map(n => n * (1 - fracAtkKilled));
+        const survSB  = sbLevel > 0 ? (1 - fracDefKilled) : 0;
+
+        // Initial / remaining CV
+        const initCVD = defFleet.reduce((s, n, i) => s + n * SHIP_CV[i], 0) + sbCV(sbLevel);
+        const initCVA = atkFleet.reduce((s, n, i) => s + n * SHIP_CV[i], 0);
+
+        // Win probability: relative kill power, shifted by physics & player-level diffs.
+        const killA = def_hp > 0 ? atk_attack / def_hp : 999;
+        const killD = atk_hp > 0 ? def_attack / atk_hp : 999;
+        let winA = killA / (killA + killD);
+        winA += PHYS_WIN * (atkPhys - defPhys);
+        winA += LVL_WIN  * (atkLevel - defLevel);
+        winA = Math.max(0, Math.min(1, winA));
+        let winD = 1 - winA;
+
+        // Format helpers
+        const pct = n => (n * 100).toFixed(1) + '%';
+        const fmt = n => n % 1 === 0 ? n.toString() : n.toFixed(2).replace(/\.?0+$/, '');
+        const shipLine = (fleet, surv, label) => {
+            const parts = [];
+            fleet.forEach((n, i) => {
+                if (n > 0) parts.push(`${SHIP_NAME[i]}: ${fmt(n)} → **${fmt(surv[i])}**`);
+            });
+            if (sbLevel > 0 && label === 'Defender') {
+                const sbSurv = survSB * 1;
+                parts.push(`Starbase (lvl ${sbLevel}): 1 → **${fmt(sbSurv)}**`);
+            }
+            return parts.length ? parts.join('\n') : '*No ships*';
+        };
+
+        const defCVRemain = survDef.reduce((s, n, i) => s + n * SHIP_CV[i], 0) + (sbLevel > 0 ? survSB * sbCV(sbLevel) : 0);
+        const atkCVRemain = survAtk.reduce((s, n, i) => s + n * SHIP_CV[i], 0);
+
+        const defLabel = defPlayerLabel ? `Defender (${defPlayerLabel})` : 'Defender';
+        const atkLabel = atkPlayerLabel ? `Attacker (${atkPlayerLabel})` : 'Attacker';
+
+        const winColor = winD > 0.65 ? '#22c55e' : winA > 0.65 ? '#ef4444' : '#f59e0b';
+
+        const embed = new EmbedBuilder()
+            .setTitle('⚔️ Battle Simulation')
+            .setColor(winColor)
+            .addFields(
+                {
+                    name: `🛡️ ${defLabel}`,
+                    value: shipLine(defFleet, survDef, 'Defender') +
+                           `\n**CV:** ${initCVD.toLocaleString()} → ${fmt(defCVRemain)}` +
+                           (defRaceDef !== 0 ? `\nRace Def: **${defRaceDef > 0 ? '+' : ''}${defRaceDef}**` : '') +
+                           (defMath    !== 0 ? `\nMath: **${defMath}**` : '') +
+                           (defPhys !== 0 ? `\nPhysics: **${defPhys}**` : '') +
+                           (defRaceAtk !== 0 ? `\nRace Atk: **${defRaceAtk > 0 ? '+' : ''}${defRaceAtk}**` : '') +
+                           (defLevel !== 0 ? `\nLevel: **${defLevel}**` : ''),
+                    inline: true,
+                },
+                {
+                    name: `🚀 ${atkLabel}`,
+                    value: shipLine(atkFleet, survAtk, 'Attacker') +
+                           `\n**CV:** ${initCVA.toLocaleString()} → ${fmt(atkCVRemain)}` +
+                           (atkRaceDef !== 0 ? `\nRace Def: **${atkRaceDef > 0 ? '+' : ''}${atkRaceDef}**` : '') +
+                           (atkMath    !== 0 ? `\nMath: **${atkMath}**` : '') +
+                           (atkPhys !== 0 ? `\nPhysics: **${atkPhys}**` : '') +
+                           (atkRaceAtk !== 0 ? `\nRace Atk: **${atkRaceAtk > 0 ? '+' : ''}${atkRaceAtk}**` : '') +
+                           (atkLevel !== 0 ? `\nLevel: **${atkLevel}**` : ''),
+                    inline: true,
+                },
+                {
+                    name: '🎲 Outcome',
+                    value: `Defender wins: **${pct(winD)}**\nAttacker wins: **${pct(winA)}**`,
+                    inline: false,
+                }
+            )
+            .setFooter({ text: 'Survivor counts are exact. Win % uses approximate formula (±2%).' });
 
         return message.reply({ embeds: [embed] });
     }

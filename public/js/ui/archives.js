@@ -6,7 +6,7 @@ let rawDbFleets = [], fltDbSortCol = 'cv', fltDbSortAsc = false;
 let rawDbAllyStats = [], allyStatsSortCol = 'player_id', allyStatsSortAsc = true;
 
 function closeOtherPanels(exceptId) {
-    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel'].forEach(id => {
+    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'battle-calc-panel', 'travel-calc-panel'].forEach(id => {
         if (id !== exceptId) document.getElementById(id)?.classList.replace('translate-x-0', 'translate-x-full');
     });
 }
@@ -1094,4 +1094,34 @@ function computeAndRenderTradeSchedule(globalPlayers, ppPrice, config) {
     let footer = '';
     if (missingPlayers.size > 0) footer = `<tr><td colspan="4" class="text-center py-2 text-aw-warning bg-yellow-950/30 text-xs">⚠️ No alliance-stats data for: ${Array.from(missingPlayers).join(', ')}</td></tr>`;
     tbody.innerHTML = rows + footer;
+}
+
+export async function openBattleCalcPanel() {
+    let panel = document.getElementById('battle-calc-panel');
+    if (!panel) {
+        const res = await fetch('/hub-assets/components/battle-calc.html');
+        document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
+        panel = document.getElementById('battle-calc-panel');
+        const { initBattleCalc } = await import('./battle-calc.js');
+        initBattleCalc();
+    }
+    if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
+    closeOtherPanels('battle-calc-panel');
+    panel.classList.replace('translate-x-full', 'translate-x-0');
+    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
+}
+
+export async function openTravelCalcPanel() {
+    let panel = document.getElementById('travel-calc-panel');
+    if (!panel) {
+        const res = await fetch('/hub-assets/components/travel-calc.html');
+        document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
+        panel = document.getElementById('travel-calc-panel');
+        const { initTravelCalc } = await import('./travel-calc-ui.js');
+        initTravelCalc();
+    }
+    if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
+    closeOtherPanels('travel-calc-panel');
+    panel.classList.replace('translate-x-full', 'translate-x-0');
+    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
 }

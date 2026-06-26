@@ -1,0 +1,103 @@
+<div id="battle-calc-panel" class="fixed top-0 right-0 h-full w-full md:w-[calc(100%-3.5rem)] bg-black border-l border-border transform translate-x-full transition-transform duration-300 z-40 flex flex-col shadow-2xl overflow-hidden">
+
+    <div class="h-14 border-b border-border flex items-center justify-between px-6 bg-zinc-900 shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-md bg-white/5 flex items-center justify-center">
+                <i class="fa-solid fa-explosion text-base text-orange-400"></i>
+            </div>
+            <div>
+                <h2 class="font-bold text-foreground tracking-wide">Battle Calculator</h2>
+                <p class="text-sm text-muted-foreground">Simulate fleet combat — survivors &amp; win probability</p>
+            </div>
+        </div>
+        <button id="close-battle-calc-btn" class="w-8 h-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
+            <i class="fa-solid fa-xmark text-base"></i>
+        </button>
+    </div>
+
+    <div class="flex-1 overflow-auto bg-black p-4 md:p-6">
+        <div class="max-w-3xl mx-auto flex flex-col gap-6">
+
+            <!-- Stat table: one row per stat, columns = Defender | Attacker -->
+            <div class="bg-zinc-900 border border-border rounded-lg overflow-hidden">
+
+                <!-- Header row -->
+                <div class="grid grid-cols-[120px_1fr_1fr] border-b border-border bg-zinc-950">
+                    <div class="px-3 py-3"></div>
+                    <div class="px-3 py-3 border-l border-border flex items-center gap-2 text-emerald-400 font-semibold text-sm uppercase tracking-wider">
+                        <i class="fa-solid fa-shield-halved"></i> Defender
+                    </div>
+                    <div class="px-3 py-3 border-l border-border flex items-center gap-2 text-red-400 font-semibold text-sm uppercase tracking-wider">
+                        <i class="fa-solid fa-rocket"></i> Attacker
+                    </div>
+                </div>
+
+                <!-- Player search row -->
+                <div class="grid grid-cols-[120px_1fr_1fr] border-b border-border">
+                    <div class="px-3 py-2 flex items-center text-xs text-muted-foreground font-medium">Player</div>
+                    <div class="px-3 py-2 border-l border-border relative">
+                        <input type="text" id="bc-def-player-input" placeholder="Search name…" autocomplete="off"
+                            class="h-8 w-full rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+                        <div id="bc-def-player-dropdown" class="hidden absolute top-10 left-3 right-3 z-50 bg-zinc-900 border border-border rounded shadow-xl max-h-48 overflow-y-auto"></div>
+                    </div>
+                    <div class="px-3 py-2 border-l border-border relative">
+                        <input type="text" id="bc-atk-player-input" placeholder="Search name…" autocomplete="off"
+                            class="h-8 w-full rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+                        <div id="bc-atk-player-dropdown" class="hidden absolute top-10 left-3 right-3 z-50 bg-zinc-900 border border-border rounded shadow-xl max-h-48 overflow-y-auto"></div>
+                    </div>
+                </div>
+
+                <!-- Stat rows injected by template below -->
+                <div class="bc-row grid grid-cols-[120px_1fr_1fr] border-b border-border/50">
+                    <div class="px-3 py-2 flex items-center text-xs text-muted-foreground">Destroyers</div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-def-d" min="0" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-atk-d" min="0" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                </div>
+                <div class="bc-row grid grid-cols-[120px_1fr_1fr] border-b border-border/50">
+                    <div class="px-3 py-2 flex items-center text-xs text-muted-foreground">Cruisers</div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-def-c" min="0" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-atk-c" min="0" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                </div>
+                <div class="bc-row grid grid-cols-[120px_1fr_1fr] border-b border-border/50">
+                    <div class="px-3 py-2 flex items-center text-xs text-muted-foreground">Battleships</div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-def-b" min="0" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-atk-b" min="0" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                </div>
+                <div class="bc-row grid grid-cols-[120px_1fr_1fr] border-b border-border/50">
+                    <div class="px-3 py-2 flex items-center text-xs text-muted-foreground">Starbase lvl</div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-def-sb" min="0" max="50" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                    <div class="px-3 py-2 border-l border-border/50 flex items-center text-xs text-zinc-600">— attacker has none —</div>
+                </div>
+                <div class="bc-row grid grid-cols-[120px_1fr_1fr] border-b border-border/50">
+                    <div class="px-3 py-2 flex items-center text-xs text-muted-foreground">Physics <span class="text-zinc-600 ml-1">win%</span></div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-def-phys" min="0" max="30" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-atk-phys" min="0" max="30" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                </div>
+                <div class="bc-row grid grid-cols-[120px_1fr_1fr] border-b border-border/50">
+                    <div class="px-3 py-2 flex items-center text-xs text-muted-foreground">Mathematics <span class="text-zinc-600 ml-1">surv</span></div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-def-math" min="0" max="30" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-atk-math" min="0" max="30" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                </div>
+                <div class="bc-row grid grid-cols-[120px_1fr_1fr] border-b border-border/50">
+                    <div class="px-3 py-2 flex items-center text-xs text-muted-foreground">Player Level</div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-def-lvl" min="0" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-atk-lvl" min="0" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                </div>
+                <div class="bc-row grid grid-cols-[120px_1fr_1fr] border-b border-border/50">
+                    <div class="px-3 py-2 flex items-center text-xs text-muted-foreground">Race Attack</div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-def-ra" min="-4" max="4" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-atk-ra" min="-4" max="4" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                </div>
+                <div class="bc-row grid grid-cols-[120px_1fr_1fr]">
+                    <div class="px-3 py-2 flex items-center text-xs text-muted-foreground">Race Defense</div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-def-rd" min="-4" max="4" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-atk-rd" min="-4" max="4" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                </div>
+            </div>
+
+            <!-- Results -->
+            <div id="bc-results" class="bg-zinc-900 border border-border rounded-lg p-5 flex-col gap-4 hidden"></div>
+
+        </div>
+    </div>
+</div>
