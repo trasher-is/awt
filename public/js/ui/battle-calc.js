@@ -39,8 +39,10 @@ const WIN_FORCE = 15.25;   // logit weight on relative CV difference
 const WIN_SB_FACTOR = 0.94; // starbase counts ~0.94× its CV toward the win ratio
 const WIN_RA    = 0.50;    // per race-attack level diff
 const WIN_LVL   = 0.069;   // per player-level diff (only if a full D/C/B fleet)
-const WIN_PHYS_A = 0.0792; // physics: S = A·(e^(K·|Δ|) − 1), signed
-const WIN_PHYS_K = 0.404;
+// Physics: small per-level term plus a big jump for every full 6-level bracket
+// (the in-game "+6 physics" threshold). Signed by the difference.
+const WIN_PHYS_LIN    = 0.1034;
+const WIN_PHYS_BRACKET = 2.95;
 
 let playerCache = null;
 
@@ -63,7 +65,8 @@ function calcWin(d, a, cvD, cvA) {
     const denom = cvD + cvA;
     let S = denom > 0 ? WIN_FORCE * ((cvD - cvA) / denom) : 0;
     S += WIN_RA * (d.ra - a.ra);
-    S += sgn(dphys) * WIN_PHYS_A * (Math.exp(WIN_PHYS_K * Math.abs(dphys)) - 1);
+    const adp = Math.abs(dphys);
+    S += sgn(dphys) * (WIN_PHYS_LIN * adp + WIN_PHYS_BRACKET * Math.floor(adp / 6));
     // Player level only counts when the fleet fields all three ship types.
     const dFull = d.fleet.every(n => n > 0), aFull = a.fleet.every(n => n > 0);
     if (dFull && aFull) S += WIN_LVL * (d.lvl - a.lvl);
@@ -147,11 +150,14 @@ function render() {
         </div>`;
     }).join('');
 
+    // Starbase result is shown as the level its surviving CV maps back to (matches the game).
+    const sbRemCv = r.survSB * sbCV(r.sbLvl);
+    const sbResultLvl = sbRemCv > 0 ? Math.log((sbRemCv + 4) / 4) / Math.log(1.5) : 0;
     const sbRow = r.sbLvl > 0 ? `<div class="flex items-center gap-2 text-xs font-mono">
-        <span class="w-20 text-muted-foreground">SB lvl ${r.sbLvl}</span>
-        <span class="text-emerald-300 font-semibold">${fmt(r.survSB)}</span>
-        <span class="text-zinc-600">/ 1</span>
-        <span class="text-zinc-500 ml-auto">(${(r.survSB * 100).toFixed(1)}% survive)</span>
+        <span class="w-20 text-muted-foreground">Starbase</span>
+        <span class="text-emerald-300 font-semibold">lvl ${sbResultLvl.toFixed(2)}</span>
+        <span class="text-zinc-600">/ ${r.sbLvl}</span>
+        <span class="text-zinc-500 ml-auto">(${(r.survSB * 100).toFixed(1)}% CV left)</span>
     </div>` : '';
 
     const winColor = r.winD > 0.65 ? '#22c55e' : r.winA > 0.65 ? '#ef4444' : '#f59e0b';
