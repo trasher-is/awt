@@ -113,7 +113,100 @@ async function fetchStats(ids) {
     }
 }
 
-async function refreshAttacker(info, span, btn) {
+function fmtTime(sec) {
+    sec = Math.max(0, Math.round(sec));
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+const SRC = { orbit: '🛰️', flight: '✈️', build: '🏗️' };
+
+async function fetchDefenders(target, arrivalUnix) {
+    const res = await fetch('/hub-api/incoming/defenders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target, arrivalUnix: arrivalUnix || 0 })
+    });
+    return res.json();
+}
+
+function launchLink(a, target) {
+    if (!a.fleetId || !target || target.systemId == null || target.planetIndex == null) return '';
+    // Relative URL: the news page is served on the proxy domain, so this resolves to the
+    // logged-in player's own game. Only the fleet's owner can actually launch it.
+    const url = `/Game/Fleets/Launch/${a.fleetId}?systemId=${target.systemId}&planetIndex=${target.planetIndex}`;
+    return ` <a href="${url}" target="_blank" style="color:#60a5fa;text-decoration:none">🚀 Launch</a>`;
+}
+
+function renderDefenderData(box, d, target) {
+    if (!d.success || !d.mapped) { box.innerHTML = '<span style="opacity:.6">⚠️ Target system not mapped.</span>'; return; }
+    const row = (a, extra) =>
+        `<div>${SRC[a.source] || ''} <b>${a.name}</b> [${a.cv.toLocaleString()} CV] ➔ ${fmtTime(a.eta)}${extra}${launchLink(a, target)}</div>`;
+
+    let html = '';
+    if (d.unknownTiming) {
+        html += '<div style="font-weight:bold">🛡️ Closest defenders (timing unknown):</div>';
+        html += d.onTime.length ? d.onTime.map(a => row(a, a.note ? ` (${a.note})` : '')).join('') : '<div>❌ none found</div>';
+    } else {
+        html += '<div style="font-weight:bold;color:#4ade80">🛡️ Can defend in time:</div>';
+        html += d.onTime.length
+            ? d.onTime.map(a => row(a, ` (spare ${fmtTime(a.delta)}${a.note ? ', ' + a.note : ''})`)).join('')
+            : '<div>❌ none in time</div>';
+        if (d.late && d.late.length) {
+            html += '<div style="font-weight:bold;color:#fbbf24;margin-top:4px">🟡 Just missing it (&lt;15m):</div>';
+            html += d.late.map(a => row(a, ` (late ${fmtTime(Math.abs(a.delta))}${a.note ? ', ' + a.note : ''})`)).join('');
+        }
+    }
+    box.innerHTML = html;
+}
+
+// Parse each fleet-defender's origin system to capture game fleet ids, then store them so
+// launch links can be built. Returns true if any ids were stored.
+async function enrichFleetIds(d) {
+    const fleetDefs = [...(d.onTime || []), ...(d.late || [])]
+        .filter(a => (a.source === 'orbit' || a.source === 'flight') && a.originSys);
+    const systems = [...new Set(fleetDefs.map(a => a.originSys))];
+    if (!systems.length) return false;
+
+    const { extractSystemData } = await import('../scrapers/system-parser.js');
+    const ids = [];
+    for (const sysId of systems) {
+        try {
+            const html = await (await fetch(`/Game/Map/SolarSystem/${sysId}`)).text();
+            const doc = new DOMParser().parseFromString(html, 'text/html');
+            const { fleets } = extractSystemData(doc);
+            fleets.forEach(f => {
+                if (f.game_fleet_id && f.owner_id) {
+                    ids.push({ owner_id: f.owner_id, system_id: parseInt(sysId, 10), planet_index: f.planet_index, game_fleet_id: f.game_fleet_id });
+                }
+            });
+        } catch (e) { /* skip this system */ }
+    }
+    if (!ids.length) return false;
+    await fetch('/hub-api/sync/fleet-ids', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fleets: ids })
+    });
+    return true;
+}
+
+async function renderDefenders(box, target, arrivalUnix) {
+    if (!box) return;
+    box.style.display = 'block';
+    box.innerHTML = '<span style="opacity:.6">Computing defenders…</span>';
+    try {
+        let d = await fetchDefenders(target, arrivalUnix);
+        renderDefenderData(box, d, target);
+        // Pull fresh fleet ids for launch links, then re-render with them.
+        if (await enrichFleetIds(d)) {
+            d = await fetchDefenders(target, arrivalUnix);
+            renderDefenderData(box, d, target);
+        }
+    } catch (e) {
+        box.innerHTML = '<span style="opacity:.6">Defender lookup failed.</span>';
+    }
+}
+
+async function refreshAttacker(info, span, arrivalUnix, defBox, btn) {
     btn.disabled = true;
     const old = btn.textContent;
     btn.textContent = '⏳';
@@ -132,10 +225,13 @@ async function refreshAttacker(info, span, btn) {
         const stats = await fetchStats([info.attacker.id]);
         renderStat(span, stats[info.attacker.id]);
 
-        // 2. Refresh all alliance fleet positions so the Discord defender analysis is live.
+        // 2. Refresh all alliance fleet positions so the defender analysis is live.
         toast('Refreshing alliance fleets...');
         const n = await runAllianceFleetScan();
         toast(`${info.attacker.name} intel + ${n} members' fleets updated`);
+
+        // 3. Show who can defend in time, right here on the page.
+        await renderDefenders(defBox, info.target, arrivalUnix);
     } catch (err) {
         console.error('[News] attacker refresh failed:', err);
         toast('Refresh failed');
@@ -217,16 +313,22 @@ export function initNewsIncomingTools() {
         const timeText = (msgCell.innerText || '').split('\n')[0].trim();
         const arrivalUnix = parseNewsTimeToUnix(timeText);
 
+        // Defender analysis container (filled after a refresh).
+        const defBox = document.createElement('div');
+        defBox.className = 'aw-defenders';
+        defBox.style.cssText = 'display:none;margin-top:6px;padding:6px 8px;border-left:3px solid #3b82f6;background:rgba(30,58,138,0.25);font-size:0.9em;line-height:1.5;';
+
         // Action buttons.
         const bar = document.createElement('span');
         bar.style.cssText = 'display:inline-block;margin-left:4px;white-space:nowrap;';
-        const refreshBtn = makeBtn('🔄', 'Re-scan attacker profile into the hub');
+        const refreshBtn = makeBtn('🔄', 'Re-scan attacker + alliance fleets, then show who can defend');
         const discordBtn = makeBtn('📣', 'Send / update Discord incoming alert');
-        refreshBtn.addEventListener('click', () => refreshAttacker(info, span, refreshBtn));
+        refreshBtn.addEventListener('click', () => refreshAttacker(info, span, arrivalUnix, defBox, refreshBtn));
         discordBtn.addEventListener('click', () => announce(info, arrivalUnix, discordBtn));
         bar.appendChild(refreshBtn);
         bar.appendChild(discordBtn);
         div.appendChild(bar);
+        div.appendChild(defBox);
 
         if (info.attacker.id) pending.push({ id: info.attacker.id, span });
     });

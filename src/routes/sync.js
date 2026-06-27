@@ -371,6 +371,34 @@ router.post('/sync/alliance', requireAuth, (req, res) => {
     }
 });
 
+// --- FLEET ID BACKFILL ---
+// Alliance scans give fleet positions but not game fleet ids (those only appear on the
+// system map). The News refresh parses the relevant systems and posts the ids here so we
+// can build Game/Fleets/Launch deep-links. Matches existing fleet rows by owner+location.
+router.post('/sync/fleet-ids', requireAuth, (req, res) => {
+    const list = Array.isArray(req.body.fleets) ? req.body.fleets : [];
+    if (!list.length) return res.json({ success: true, updated: 0 });
+    try {
+        const upd = db.prepare(`
+            UPDATE fleets SET game_fleet_id = ?
+            WHERE owner_id = ? AND system_id = ? AND planet_index = ?
+        `);
+        let updated = 0;
+        const tx = db.transaction((rows) => {
+            for (const f of rows) {
+                if (!Number.isInteger(f.game_fleet_id) || !Number.isInteger(f.owner_id)) continue;
+                if (!Number.isInteger(f.system_id) || !Number.isInteger(f.planet_index)) continue;
+                updated += upd.run(f.game_fleet_id, f.owner_id, f.system_id, f.planet_index).changes;
+            }
+        });
+        tx(list);
+        res.json({ success: true, updated });
+    } catch (err) {
+        console.error('[DB Error] fleet-id backfill failed:', err.message);
+        res.status(500).json({ error: 'Fleet id sync failed' });
+    }
+});
+
 // --- GALAXY MASTER INDEX RECEIVER ---
 router.post('/sync/galaxy', requireAuth, (req, res) => {
     const { systems } = req.body;

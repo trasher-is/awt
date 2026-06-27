@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../database');
 const { requireAuth } = require('./_middleware');
-const { sendOrEditIncoming } = require('../discord_bot');
+const { sendOrEditIncoming, replyToIncoming } = require('../discord_bot');
 const { formatTime } = require('../utils/travel-calc');
 const { ONTIME_LIMIT, LATE_LIMIT, SOURCE_TAG, computeInterceptors } = require('../utils/interceptors');
 const router = express.Router();
@@ -52,7 +52,7 @@ router.get('/incoming/stats', requireAuth, (req, res) => {
     }
 });
 
-function buildAnnounce(data, stats) {
+function buildAnnounce(data, stats, result) {
     const L = [];
     const planet = data.target.planetName || 'Planet';
     L.push(`🚨 **Incoming Attack** — ${planet} \`[${data.target.systemId}] #${data.target.planetIndex}\``);
@@ -76,17 +76,17 @@ function buildAnnounce(data, stats) {
     const arr = parseInt(data.arrivalUnix, 10);
     if (Number.isInteger(arr) && arr > 0) L.push(`🕐 ~ <t:${arr}:f>`);
 
-    appendDefenders(L, data, arr);
+    appendDefenders(L, result, data.target);
 
     const now = Math.floor(Date.now() / 1000);
     L.push(`_updated <t:${now}:R>_`);
     return L.join('\n');
 }
 
-// Append the "who can defend in time" section, computed from the latest alliance fleet
-// positions (refreshed by the alliance scan before announcing).
-function appendDefenders(L, data, arrivalUnix) {
-    if (!data.target || data.target.systemId == null || data.target.planetIndex == null) return;
+// Run the interceptor analysis for an announce payload. Returns the computeInterceptors
+// result (or null if the target system isn't mapped / has no coords).
+function computeDefenders(data) {
+    if (!data.target || data.target.systemId == null || data.target.planetIndex == null) return null;
 
     // Defender = the targeted planet's current owner (an alliance member), so the
     // interceptor search is scoped to our alliance.
@@ -100,26 +100,42 @@ function appendDefenders(L, data, arrivalUnix) {
         if (row) defenderName = row.name;
     } catch (e) { /* fall back to active-users scope */ }
 
-    const nowUnix = Math.floor(Date.now() / 1000);
-    const result = computeInterceptors({
+    const arr = parseInt(data.arrivalUnix, 10);
+    return computeInterceptors({
         systemId: data.target.systemId,
         planetIndex: data.target.planetIndex,
         defenderName,
-        arrivalUnix: Number.isInteger(arrivalUnix) && arrivalUnix > 0 ? arrivalUnix : 0
-    }, nowUnix);
+        arrivalUnix: Number.isInteger(arr) && arr > 0 ? arr : 0
+    }, Math.floor(Date.now() / 1000));
+}
 
+// Game launch deep-link for an existing fleet -> the attack target. Only works for the
+// fleet's owner when logged in, and only when we know the fleet's id + the proxy domain.
+function launchUrl(a, target) {
+    if (!a.fleetId || !process.env.PROXY_DOMAIN || !target || target.systemId == null || target.planetIndex == null) return null;
+    return `https://${process.env.PROXY_DOMAIN}/Game/Fleets/Launch/${a.fleetId}?systemId=${target.systemId}&planetIndex=${target.planetIndex}`;
+}
+
+function defenderLine(a, extra, target) {
+    let s = `${SOURCE_TAG[a.source] || ''} **${a.name}**${a.mention ? ' ' + a.mention : ''} \`[${a.cv.toLocaleString()} CV]\` ➔ ETA ${formatTime(a.eta)}${extra || ''}`;
+    const url = launchUrl(a, target);
+    // Masked links ([text](url)) only render in embeds; this is a plain message (needed
+    // so @mentions ping), so use a bare <url> — clickable, with the preview suppressed.
+    if (url) s += ` · 🚀 <${url}>`;
+    return s;
+}
+
+// Append the "who can defend in time" section to the main alert.
+function appendDefenders(L, result, target) {
     if (!result) {
         L.push('\n⚠️ *Target system not mapped — cannot compute defenders.*');
         return;
     }
 
-    const line = (a, extra) =>
-        `${SOURCE_TAG[a.source] || ''} **${a.name}**${a.mention ? ' ' + a.mention : ''} \`[${a.cv.toLocaleString()} CV]\` ➔ ETA ${formatTime(a.eta)}${extra || ''}`;
-
     if (result.unknownTiming) {
         L.push('\n🛡️ **Closest defenders** *(arrival time unknown):*');
         if (!result.onTime.length) { L.push('❌ No allied defenders found.'); return; }
-        result.onTime.forEach(a => L.push('• ' + line(a, a.note ? ` *(${a.note})*` : '')));
+        result.onTime.forEach(a => L.push('• ' + defenderLine(a, a.note ? ` *(${a.note})*` : '', target)));
         return;
     }
 
@@ -128,43 +144,117 @@ function appendDefenders(L, data, arrivalUnix) {
         L.push('❌ No allied defender can intercept in time.');
     } else {
         result.onTime.slice(0, ONTIME_LIMIT).forEach(a =>
-            L.push('🟢 ' + line(a, ` *(spare ${formatTime(a.delta)}${a.note ? `, ${a.note}` : ''})*`)));
+            L.push('🟢 ' + defenderLine(a, ` *(spare ${formatTime(a.delta)}${a.note ? `, ${a.note}` : ''})*`, target)));
         if (result.onTime.length > ONTIME_LIMIT) L.push(`*...and ${result.onTime.length - ONTIME_LIMIT} more in time.*`);
     }
 
     if (result.late.length) {
         L.push('\n🟡 **Just missing it:**');
         result.late.slice(0, LATE_LIMIT).forEach(a =>
-            L.push('🟡 ' + line(a, ` *(late by ${formatTime(Math.abs(a.delta))}${a.note ? `, ${a.note}` : ''})*`)));
+            L.push('🟡 ' + defenderLine(a, ` *(late by ${formatTime(Math.abs(a.delta))}${a.note ? `, ${a.note}` : ''})*`, target)));
     }
 
     L.push('\n_🛰️ orbit · ✈️ in flight · 🏗️ build & launch_');
 }
 
+// The names that count as "able to arrive in time" right now (for change detection).
+function onTimeNames(result) {
+    if (!result) return [];
+    return result.onTime.map(a => a.name.toLowerCase()).sort();
+}
+
+// Reply body: only the defenders who can make it, with @mentions so they get pinged.
+// Returns null if there's no one to notify.
+function buildReply(result, planetLabel, target) {
+    if (!result || !result.onTime.length) return null;
+    const L = [`🟢 **Reinforcements available** for ${planetLabel} — can arrive in time:`];
+    result.onTime.slice(0, ONTIME_LIMIT).forEach(a => {
+        const spare = (!result.unknownTiming && a.delta != null) ? ` *(spare ${formatTime(a.delta)})*` : '';
+        L.push(defenderLine(a, spare, target));
+    });
+    return L.join('\n');
+}
+
 // --- ANNOUNCE / UPDATE AN INCOMING ON DISCORD ---
 // POST /hub-api/incoming/announce
 // Body: { fleetId, attacker:{id,name,tag}, target:{planetId,systemId,planetIndex,planetName}, cv, ships:{...}, arrivalText }
-router.post('/incoming/announce', requireAuth, async (req, res) => {
-    const data = req.body || {};
+// Core announce/update logic, shared by the HTTP route and the dev test harness.
+// Edits (or sends) the main alert, then posts a pinging reply when the on-time roster
+// gains someone. Returns { ok, edited, replied, error }.
+async function announceIncoming(data) {
     const fleetId = parseInt(data.fleetId, 10);
+    if (!Number.isInteger(fleetId) || fleetId <= 0) return { ok: false, error: 'Missing/invalid fleetId' };
+    if (!data.attacker || !data.attacker.name || !data.target) return { ok: false, error: 'Missing attacker/target' };
 
-    if (!Number.isInteger(fleetId) || fleetId <= 0) {
-        return res.status(400).json({ success: false, error: 'Missing/invalid fleetId' });
-    }
-    if (!data.attacker || !data.attacker.name || !data.target) {
-        return res.status(400).json({ success: false, error: 'Missing attacker/target' });
-    }
+    const stats = data.attacker.id ? getStatsByIds([data.attacker.id])[data.attacker.id] : null;
+    const defenders = computeDefenders(data);
+    const message = buildAnnounce(data, stats, defenders);
 
+    const sent = await sendOrEditIncoming(fleetId, message);
+    if (!sent.ok) return { ok: false, error: sent.error };
+
+    // Editing the main alert never pings anyone, so when the on-time roster GAINS someone
+    // (fleet built / TT recalc) we post a reply that mentions the full current list. On a
+    // brand-new alert (not an edit) the main message already pinged, so just record state.
+    let replied = false;
+    const current = onTimeNames(defenders);
     try {
-        const stats = data.attacker.id ? getStatsByIds([data.attacker.id])[data.attacker.id] : null;
-        const message = buildAnnounce(data, stats);
-        const result = await sendOrEditIncoming(fleetId, message);
-        if (!result.ok) return res.status(502).json({ success: false, error: result.error });
-        res.json({ success: true, edited: !!result.edited });
+        const prevRow = db.prepare(`SELECT last_ontime FROM incoming_alerts WHERE fleet_id = ?`).get(fleetId);
+        const prev = prevRow && prevRow.last_ontime ? prevRow.last_ontime.split(',').filter(Boolean) : [];
+        const prevSet = new Set(prev);
+        const newcomers = current.filter(n => !prevSet.has(n));
+
+        if (sent.edited && newcomers.length > 0) {
+            const planetLabel = `${data.target.planetName || 'Planet'} [${data.target.systemId}] #${data.target.planetIndex}`;
+            const reply = buildReply(defenders, planetLabel, data.target);
+            if (reply) replied = await replyToIncoming(sent.channelId, sent.messageId, reply);
+        }
+        db.prepare(`UPDATE incoming_alerts SET last_ontime = ? WHERE fleet_id = ?`).run(current.join(','), fleetId);
+    } catch (e) {
+        console.error('[Incoming] reply bookkeeping failed:', e.message);
+    }
+
+    return { ok: true, edited: !!sent.edited, replied };
+}
+
+// --- ANNOUNCE / UPDATE AN INCOMING ON DISCORD ---
+// POST /hub-api/incoming/announce
+// Body: { fleetId, attacker:{id,name,tag}, target:{planetId,systemId,planetIndex,planetName}, cv, ships:{...}, arrivalUnix }
+router.post('/incoming/announce', requireAuth, async (req, res) => {
+    try {
+        const r = await announceIncoming(req.body || {});
+        if (!r.ok) return res.status(r.error && r.error.startsWith('Missing') ? 400 : 502).json({ success: false, error: r.error });
+        res.json({ success: true, edited: r.edited, replied: r.replied });
     } catch (err) {
         console.error('[Incoming] announce failed:', err.message);
         res.status(500).json({ success: false, error: 'Announce failed' });
     }
 });
 
+// --- DEFENDER ANALYSIS (for inline display on the News page) ---
+// POST /hub-api/incoming/defenders  Body: { target:{systemId,planetIndex}, arrivalUnix }
+// Returns the on-time / late interceptor lists (no Discord mentions — page display only).
+router.post('/incoming/defenders', requireAuth, (req, res) => {
+    try {
+        const data = req.body || {};
+        const result = computeDefenders(data);
+        if (!result) return res.json({ success: true, mapped: false });
+        const slim = (a) => ({
+            name: a.name, cv: a.cv, eta: a.eta, delta: a.delta, source: a.source, note: a.note,
+            ownerId: a.ownerId, originSys: a.originSys, originIdx: a.originIdx, fleetId: a.fleetId
+        });
+        res.json({
+            success: true,
+            mapped: true,
+            unknownTiming: !!result.unknownTiming,
+            onTime: result.onTime.map(slim),
+            late: (result.late || []).map(slim)
+        });
+    } catch (err) {
+        console.error('[Incoming] defenders lookup failed:', err.message);
+        res.status(500).json({ success: false, error: 'Defender lookup failed' });
+    }
+});
+
 module.exports = router;
+module.exports.announceIncoming = announceIncoming;

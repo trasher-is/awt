@@ -386,6 +386,14 @@ function initDatabase() {
         )
     `);
 
+    // Comma-joined sorted names of defenders who could arrive in time at the last announce.
+    // When this set GAINS someone (fleet built / TT recalc), we post a reply that pings
+    // the defenders — edits alone never notify anyone.
+    try {
+        db.exec(`ALTER TABLE incoming_alerts ADD COLUMN last_ontime TEXT`);
+        console.log("[DB] Added last_ontime column to incoming_alerts table.");
+    } catch (e) {}
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

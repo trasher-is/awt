@@ -1216,6 +1216,7 @@ function initDiscordBot(token) {
     client.login(token).catch(err => {
         console.error('[Discord] Failed to connect:', err.message);
     });
+    return client;
 }
 
 // ----------------------------------------------------
@@ -1358,7 +1359,7 @@ async function sendOrEditIncoming(fleetId, content) {
         try {
             const msg = await channel.messages.fetch(existing.message_id);
             await msg.edit({ content: text });
-            return { ok: true, edited: true };
+            return { ok: true, edited: true, messageId: existing.message_id, channelId };
         } catch (err) {
             // Original gone (deleted/purged) — fall through and post a new one.
             console.warn('[Discord] Could not edit incoming alert, sending new:', err.message);
@@ -1368,11 +1369,33 @@ async function sendOrEditIncoming(fleetId, content) {
     try {
         const sent = await channel.send({ content: text });
         if (fleetId != null) record(sent.id);
-        return { ok: true, edited: false };
+        return { ok: true, edited: false, messageId: sent.id, channelId };
     } catch (err) {
         console.error('[Discord] Failed to send incoming alert:', err.message);
         return { ok: false, error: 'Failed to send message' };
     }
 }
 
-module.exports = { initDiscordBot, announceSystemChanges, sendIncomingAlert, sendOrEditIncoming };
+/**
+ * Post a reply to an existing message (used to ping newly-available defenders, since
+ * editing the main alert never notifies anyone). Best-effort, safe no-op on failure.
+ */
+async function replyToIncoming(channelId, messageId, content) {
+    if (!client.isReady() || !channelId || !messageId) return false;
+    let channel;
+    try {
+        channel = await client.channels.fetch(channelId);
+    } catch (err) { return false; }
+    if (!channel || typeof channel.send !== 'function') return false;
+
+    const text = content.length > 1990 ? content.slice(0, 1987) + '...' : content;
+    try {
+        await channel.send({ content: text, reply: { messageReference: messageId, failIfNotExists: false } });
+        return true;
+    } catch (err) {
+        console.error('[Discord] Failed to reply to incoming alert:', err.message);
+        return false;
+    }
+}
+
+module.exports = { initDiscordBot, announceSystemChanges, sendIncomingAlert, sendOrEditIncoming, replyToIncoming };

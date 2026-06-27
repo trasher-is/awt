@@ -1,11 +1,11 @@
 import { parseArrivalToISO } from '../utils/fleet-time.js';
 
-export async function scrapeSystem(systemId) {
-    console.log(`[Spy] Initiating scrape for System ID: ${systemId}`);
-    
-    const rows = document.querySelectorAll('#solarSystem > tbody > tr[data-planet-id]');
+// Pure parser: pull planets + fleets out of any system-map document (the live page or a
+// fetched-and-parsed one). Used by both the on-page scraper and the off-page "Update".
+export function extractSystemData(doc = document) {
+    const rows = doc.querySelectorAll('#solarSystem > tbody > tr[data-planet-id]');
     const planets = [];
-    const fleets = []; 
+    const fleets = [];
 
     rows.forEach(row => {
         try {
@@ -104,6 +104,35 @@ export async function scrapeSystem(systemId) {
             console.error(`[Spy] Failed to parse a planet row`, planetErr);
         }
     });
+
+    return { planets, fleets };
+}
+
+// Off-page refresh: fetch a system's map, parse it, and sync. Returns true on success.
+// Runs from the dashboard (e.g. travel-calc "Update" button); no game-page DOM needed.
+export async function scrapeSystemById(systemId) {
+    try {
+        const res = await fetch(`/Game/Map/SolarSystem/${systemId}`);
+        const html = await res.text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const { planets, fleets } = extractSystemData(doc);
+        if (planets.length === 0) return false;
+        const r = await fetch('/hub-api/sync/system', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ system_id: parseInt(systemId, 10), planets, fleets })
+        });
+        return r.ok;
+    } catch (err) {
+        console.error('[Spy] scrapeSystemById failed:', err);
+        return false;
+    }
+}
+
+export async function scrapeSystem(systemId) {
+    console.log(`[Spy] Initiating scrape for System ID: ${systemId}`);
+
+    const { planets, fleets } = extractSystemData(document);
 
     if (planets.length === 0) return;
 

@@ -6,7 +6,8 @@ const db = require('../database');
 const { calcTravelSeconds, formatTime } = require('./travel-calc');
 
 const ONTIME_LIMIT = 10;
-const LATE_LIMIT = 3;
+const LATE_LIMIT = 10;
+const LATE_WINDOW = 15 * 60; // only show "late" defenders missing it by < 15 min
 
 function cleanInt(str) {
     if (str == null) return 0;
@@ -44,8 +45,9 @@ function computeInterceptors(attack, nowUnix) {
         : `LOWER(p.name) IN (SELECT LOWER(game_name) FROM app_users WHERE is_active = 1)`;
 
     const fleets = db.prepare(`
-        SELECT f.planet_index, f.destroyers, f.cruisers, f.battleships, f.arrival_at,
-               p.name AS owner_name, p.energy, p.race_speed,
+        SELECT f.system_id AS origin_sys, f.planet_index, f.game_fleet_id,
+               f.destroyers, f.cruisers, f.battleships, f.arrival_at,
+               p.id AS owner_id, p.name AS owner_name, p.energy, p.race_speed,
                s.x AS sx, s.y AS sy
         FROM fleets f
         JOIN players p ON f.owner_id = p.id
@@ -69,12 +71,19 @@ function computeInterceptors(attack, nowUnix) {
     const timeUntilImpact = attack.arrivalUnix > 0 ? attack.arrivalUnix - nowUnix : null;
 
     const byPlayer = new Map();
-    const consider = (name, cv, eta, source, note) => {
+    const consider = (name, cv, eta, source, note, origin) => {
         if (cv <= 0 || eta == null || isNaN(eta)) return;
         const key = name.toLowerCase();
         const existing = byPlayer.get(key);
         if (!existing || eta < existing.eta) {
-            byPlayer.set(key, { name, cv, eta, source, note: note || '' });
+            byPlayer.set(key, {
+                name, cv, eta, source, note: note || '',
+                // Origin of an existing fleet, for building Game/Fleets/Launch links.
+                ownerId: origin ? origin.ownerId : null,
+                originSys: origin ? origin.originSys : null,
+                originIdx: origin ? origin.originIdx : null,
+                fleetId: origin ? origin.fleetId : null
+            });
         }
     };
 
@@ -83,10 +92,11 @@ function computeInterceptors(attack, nowUnix) {
         const travel = calcTravelSeconds(f.sx, f.sy, f.planet_index, target.x, target.y, attack.planetIndex, f.energy, f.race_speed, true);
         const landUnix = f.arrival_at ? Math.floor(Date.parse(f.arrival_at) / 1000) : 0;
         const landDelay = (landUnix && landUnix > nowUnix) ? (landUnix - nowUnix) : 0;
+        const origin = { ownerId: f.owner_id, originSys: f.origin_sys, originIdx: f.planet_index, fleetId: f.game_fleet_id || null };
         if (landDelay > 0) {
-            consider(f.owner_name, cv, landDelay + travel, 'flight', `lands in ${formatTime(landDelay)}`);
+            consider(f.owner_name, cv, landDelay + travel, 'flight', `lands in ${formatTime(landDelay)}`, origin);
         } else {
-            consider(f.owner_name, cv, travel, 'orbit', '');
+            consider(f.owner_name, cv, travel, 'orbit', '', origin);
         }
     }
 
@@ -120,7 +130,9 @@ function computeInterceptors(attack, nowUnix) {
 
     all.forEach(a => { a.delta = timeUntilImpact - a.eta; });
     const onTime = all.filter(a => a.delta >= 0).sort((a, b) => a.eta - b.eta);
-    const late = all.filter(a => a.delta < 0).sort((a, b) => b.delta - a.delta);
+    // Only surface "late" defenders who are *barely* missing it (< 15 min) — anyone
+    // further out is noise.
+    const late = all.filter(a => a.delta < 0 && a.delta > -LATE_WINDOW).sort((a, b) => b.delta - a.delta);
 
     return { unknownTiming: false, timeUntilImpact, onTime, late };
 }
