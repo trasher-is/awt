@@ -68,9 +68,9 @@ const tag = 'HNU';
 
 // Mirror the in-game forwarder's message shape.
 const content =
-    `**Incoming**: **Bloknat** [${tag}] (${cv.toLocaleString()}CV, ${tr.toLocaleString()}TR) ` +
+    `**Incoming**: **Lord** [${tag}] (${cv.toLocaleString()}CV, ${tr.toLocaleString()}TR) ` +
     `attacking **${defenderName}** on [${systemId}] ${systemName} #${planetIndex}. ` +
-    `Fleet: 5,000 Destroyers, 800 Cruisers, 120 Battleships arriving <t:${arrivalUnix}:R>`;
+    `Fleet: 1 DEATHSTAR arriving <t:${arrivalUnix}:R>`;
 
 const payload = { content };
 

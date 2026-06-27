@@ -1,18 +1,11 @@
 const express = require('express');
-const db = require('../database');
-const { calcTravelSeconds, formatTime } = require('../utils/travel-calc');
+const { formatTime } = require('../utils/travel-calc');
 const { sendIncomingAlert } = require('../discord_bot');
+const {
+    ONTIME_LIMIT, LATE_LIMIT, SOURCE_TAG,
+    cleanInt, computeInterceptors
+} = require('../utils/interceptors');
 const router = express.Router();
-
-// Maximum number of "late" responders to list after the on-time ones.
-const LATE_LIMIT = 3;
-// Maximum number of on-time responders to list.
-const ONTIME_LIMIT = 10;
-
-function cleanInt(str) {
-    if (str == null) return 0;
-    return parseInt(String(str).replace(/[,.\s]/g, ''), 10) || 0;
-}
 
 // Parse the forwarded game-notification text into structured attack data.
 function parseIncoming(text) {
@@ -59,118 +52,6 @@ function parseIncoming(text) {
     return data;
 }
 
-const cvOf = (f) => (f.destroyers || 0) * 3 + (f.cruisers || 0) * 24 + (f.battleships || 0) * 60;
-
-// Cost per CV in production points at a given economy level: destroyer = 3 CV for
-// round(30 * 0.99^eco) PP  →  cost_per_CV = 10 * 0.99^eco.
-const costPerCv = (economy) => 10 * Math.pow(0.99, economy || 0);
-
-function getPpPrice() {
-    try {
-        const row = db.prepare(`SELECT value FROM app_settings WHERE key = 'pp_price'`).get();
-        const v = row ? parseFloat(row.value) : NaN;
-        return (!isNaN(v) && v > 0) ? v : 0.91; // sensible default until /Game/Trade is scraped
-    } catch (err) {
-        return 0.91;
-    }
-}
-
-// Build the list of allied defenders that could reach the target, split into on-time and late.
-// Sources: fleets in orbit, fleets in flight (land then relaunch), and home-build potential.
-function computeInterceptors(attack, nowUnix) {
-    const target = db.prepare(`SELECT x, y FROM systems WHERE id = ?`).get(attack.systemId);
-    if (!target || target.x == null || target.y == null) return null;
-
-    const defender = db.prepare(`SELECT alliance_id FROM players WHERE name = ? COLLATE NOCASE`).get(attack.defenderName);
-    const allianceId = defender && defender.alliance_id ? defender.alliance_id : null;
-
-    // --- Candidate fleets (orbit + in flight) ---
-    const fleetWhere = allianceId
-        ? `p.alliance_id = @aid`
-        : `LOWER(p.name) IN (SELECT LOWER(game_name) FROM app_users WHERE is_active = 1)`;
-
-    const fleets = db.prepare(`
-        SELECT f.planet_index, f.destroyers, f.cruisers, f.battleships, f.arrival_at,
-               p.name AS owner_name, p.energy, p.race_speed,
-               s.x AS sx, s.y AS sy
-        FROM fleets f
-        JOIN players p ON f.owner_id = p.id
-        JOIN systems s ON f.system_id = s.id
-        WHERE ${fleetWhere} AND s.x IS NOT NULL AND s.y IS NOT NULL
-    `).all(allianceId ? { aid: allianceId } : {});
-
-    const ppPrice = getPpPrice();
-
-    // --- Candidate home-build launches ---
-    const homeWhere = allianceId
-        ? `p.alliance_id = @aid`
-        : `LOWER(p.name) IN (SELECT LOWER(game_name) FROM app_users WHERE is_active = 1)`;
-
-    const homes = db.prepare(`
-        SELECT p.name AS owner_name, p.energy, p.race_speed, p.economy,
-               COALESCE(p.home_planet_index, 1) AS launch_planet,
-               ams.production_points, ams.astro_dollars,
-               s.x AS sx, s.y AS sy
-        FROM players p
-        JOIN alliance_member_stats ams ON ams.player_id = p.id
-        JOIN systems s ON s.id = COALESCE(p.home_system_id, p.origin_system)
-        WHERE ${homeWhere} AND s.x IS NOT NULL AND s.y IS NOT NULL
-    `).all(allianceId ? { aid: allianceId } : {});
-
-    const timeUntilImpact = attack.arrivalUnix > 0 ? attack.arrivalUnix - nowUnix : null;
-
-    // Collect every candidate option, then keep each player's single best (lowest ETA).
-    const byPlayer = new Map();
-    const consider = (name, cv, eta, source, note) => {
-        if (cv <= 0 || eta == null || isNaN(eta)) return;
-        const key = name.toLowerCase();
-        const existing = byPlayer.get(key);
-        if (!existing || eta < existing.eta) {
-            byPlayer.set(key, { name, cv, eta, source, note: note || '' });
-        }
-    };
-
-    for (const f of fleets) {
-        const cv = cvOf(f);
-        // Alliance defence travel runs at 50% (isAlliance = true).
-        const travel = calcTravelSeconds(f.sx, f.sy, f.planet_index, target.x, target.y, attack.planetIndex, f.energy, f.race_speed, true);
-
-        // In-flight: must land first, then relaunch from the landing spot.
-        const landUnix = f.arrival_at ? Math.floor(Date.parse(f.arrival_at) / 1000) : 0;
-        const landDelay = (landUnix && landUnix > nowUnix) ? (landUnix - nowUnix) : 0;
-
-        if (landDelay > 0) {
-            consider(f.owner_name, cv, landDelay + travel, 'flight', `lands in ${formatTime(landDelay)}`);
-        } else {
-            consider(f.owner_name, cv, travel, 'orbit', '');
-        }
-    }
-
-    for (const h of homes) {
-        const pp = cleanInt(h.production_points);
-        const ad = cleanInt(h.astro_dollars);
-        const totalPp = pp + (ppPrice > 0 ? ad / ppPrice : 0);
-        const cv = Math.floor(totalPp / costPerCv(h.economy));
-        if (cv <= 0) continue;
-        const travel = calcTravelSeconds(h.sx, h.sy, h.launch_planet, target.x, target.y, attack.planetIndex, h.energy, h.race_speed, true);
-        consider(h.owner_name, cv, travel, 'build', 'build & launch');
-    }
-
-    const all = Array.from(byPlayer.values());
-    if (timeUntilImpact == null) {
-        all.sort((a, b) => a.eta - b.eta);
-        return { unknownTiming: true, onTime: all.slice(0, ONTIME_LIMIT), late: [] };
-    }
-
-    all.forEach(a => { a.delta = timeUntilImpact - a.eta; });
-    const onTime = all.filter(a => a.delta >= 0).sort((a, b) => a.eta - b.eta);
-    const late = all.filter(a => a.delta < 0).sort((a, b) => b.delta - a.delta); // least-late first
-
-    return { unknownTiming: false, timeUntilImpact, onTime, late };
-}
-
-const SOURCE_TAG = { orbit: '🛰️', flight: '✈️', build: '🏗️' };
-
 function buildMessage(attack, result) {
     const lines = [];
     lines.push('🚨 **Incoming Attack**');
@@ -194,7 +75,7 @@ function buildMessage(attack, result) {
         lines.push('\n🛡️ **Closest defenders** *(arrival time unknown):*');
         if (result.onTime.length === 0) lines.push('❌ No allied defenders found.');
         result.onTime.forEach(a => {
-            lines.push(`• ${SOURCE_TAG[a.source] || ''} **${a.name}** \`[${a.cv.toLocaleString()} CV]\` ➔ ETA ${formatTime(a.eta)}${a.note ? ` *(${a.note})*` : ''}`);
+            lines.push(`• ${SOURCE_TAG[a.source] || ''} **${a.name}**${a.mention ? ' ' + a.mention : ''} \`[${a.cv.toLocaleString()} CV]\` ➔ ETA ${formatTime(a.eta)}${a.note ? ` *(${a.note})*` : ''}`);
         });
         return lines.join('\n');
     }
@@ -204,7 +85,7 @@ function buildMessage(attack, result) {
         lines.push('❌ No allied defender can intercept in time.');
     } else {
         result.onTime.slice(0, ONTIME_LIMIT).forEach(a => {
-            lines.push(`🟢 ${SOURCE_TAG[a.source] || ''} **${a.name}** \`[${a.cv.toLocaleString()} CV]\` ➔ ETA ${formatTime(a.eta)} *(spare ${formatTime(a.delta)}${a.note ? `, ${a.note}` : ''})*`);
+            lines.push(`🟢 ${SOURCE_TAG[a.source] || ''} **${a.name}**${a.mention ? ' ' + a.mention : ''} \`[${a.cv.toLocaleString()} CV]\` ➔ ETA ${formatTime(a.eta)} *(spare ${formatTime(a.delta)}${a.note ? `, ${a.note}` : ''})*`);
         });
         if (result.onTime.length > ONTIME_LIMIT) {
             lines.push(`*...and ${result.onTime.length - ONTIME_LIMIT} more in time.*`);
@@ -214,7 +95,7 @@ function buildMessage(attack, result) {
     if (result.late.length > 0) {
         lines.push('\n🟡 **Just missing it:**');
         result.late.slice(0, LATE_LIMIT).forEach(a => {
-            lines.push(`🟡 ${SOURCE_TAG[a.source] || ''} **${a.name}** \`[${a.cv.toLocaleString()} CV]\` ➔ ETA ${formatTime(a.eta)} *(late by ${formatTime(Math.abs(a.delta))}${a.note ? `, ${a.note}` : ''})*`);
+            lines.push(`🟡 ${SOURCE_TAG[a.source] || ''} **${a.name}**${a.mention ? ' ' + a.mention : ''} \`[${a.cv.toLocaleString()} CV]\` ➔ ETA ${formatTime(a.eta)} *(late by ${formatTime(Math.abs(a.delta))}${a.note ? `, ${a.note}` : ''})*`);
         });
     }
 

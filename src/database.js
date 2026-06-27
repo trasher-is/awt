@@ -130,6 +130,13 @@ function initDatabase() {
         console.log("[DB] Added discord_name column to app_users table.");
     } catch (e) {}
 
+    // Numeric Discord user id (snowflake) for real @mentions. Backfilled automatically
+    // when a linked user runs any bot command — see discord_bot messageCreate handler.
+    try {
+        db.exec(`ALTER TABLE app_users ADD COLUMN discord_id TEXT`);
+        console.log("[DB] Added discord_id column to app_users table.");
+    } catch (e) {}
+
     try {
         db.exec(`ALTER TABLE players ADD COLUMN has_intel INTEGER DEFAULT 0`);
         console.log("[DB] Added has_intel column to players table.");
@@ -361,6 +368,20 @@ function initDatabase() {
         CREATE TABLE IF NOT EXISTS app_settings (
             key TEXT PRIMARY KEY,
             value TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    // --- DISCORD INCOMING ALERT TRACKING ---
+    // Maps a game attacking-fleet id to the Discord message announcing it, so the
+    // News-page "send to Discord" button can EDIT the existing alert (updated attacker
+    // intel) instead of spamming a new one each time. channel_id is stored so we send
+    // fresh if the configured incoming channel changed since the original post.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS incoming_alerts (
+            fleet_id INTEGER PRIMARY KEY,
+            channel_id TEXT,
+            message_id TEXT,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     `);

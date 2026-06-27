@@ -1,4 +1,5 @@
 import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth } from './page-injections.js';
+import { initNewsIncomingTools } from '../ui/news-incoming.js';
 
 export function initSpy() {
     let currentMapX = null;
@@ -543,6 +544,7 @@ export function initSpy() {
         }
         if (pathLower.includes('/game/news')) {
             initAllianceNewsAlerts();
+            initNewsIncomingTools();
         }
         if (pathLower.includes('/game/planets')) {
             initPlanetPopTimers();

@@ -63,6 +63,17 @@ client.on('messageCreate', async (message) => {
     const args = message.content.slice(1).trim().split(/ +/);
     const command = args.shift().toLowerCase();
 
+    // Passive backfill: remember this author's numeric Discord id against their linked
+    // Hub account so defender @mentions can ping them later. Matches on discord_name.
+    try {
+        const dn = message.author.username.toLowerCase();
+        db.prepare(`
+            UPDATE app_users SET discord_id = ?
+            WHERE (LOWER(discord_name) = ? OR LOWER(discord_name) = ?)
+              AND (discord_id IS NULL OR discord_id != ?)
+        `).run(message.author.id, dn, `@${dn}`, message.author.id);
+    } catch (e) { /* non-fatal */ }
+
     // ----------------------------------------------------
     // !help - DISPLAY ALL AVAILABLE COMMANDS
     // ----------------------------------------------------
@@ -481,44 +492,95 @@ client.on('messageCreate', async (message) => {
             WHERE f.system_id = ?
         `).all(sysId);
 
-        const embed = new EmbedBuilder()
-            .setTitle(`📡 System Intel: ${sys.name || 'Unknown'} #${sysId} (${sys.x || '--'} / ${sys.y || '--'})`)
-            .setColor('#22c55e');
+        const systemUrl = process.env.PROXY_DOMAIN
+            ? `https://${process.env.PROXY_DOMAIN}/Game/Map/SolarSystem/${sysId}`
+            : null;
 
-        let planetList = '';
-        planets.forEach(p => {
-            const owner = p.owner_name ? `[${p.ally_tag || '?'}] ${p.owner_name}` : '*Empty*';
-            const sbText = p.starbase > 0 ? ` | 🛰️ SB: ${p.starbase}` : '';
-            
-            const plan = plans.find(pl => pl.planet_index === p.planet_index);
-            const planText = plan ? ` | 📝 **Plan:** ${plan.note} *(by ${plan.author_name || 'Unknown'})*` : '';
-            
-            planetList += `**${p.planet_index}.** ${owner} (Pop: ${p.population || 0})${sbText}${planText}\n`;
-        });
+        // Monospace table: a header row + aligned columns. Every column except the last
+        // is padded to a fixed width (over-long cells truncated with …); the last column
+        // is free-width. NOTE: code blocks don't render <t:> timestamps or mentions, so
+        // fleet ETAs use a plain relative string instead.
+        const makeTable = (headers, widths, rows) => {
+            const line = (cells) => cells.map((c, i) => {
+                const s = String(c == null ? '' : c);
+                if (i === widths.length - 1) return s; // last column: no padding
+                return s.length > widths[i] ? s.slice(0, Math.max(1, widths[i] - 1)) + '…' : s.padEnd(widths[i]);
+            }).join(' ');
+            return '```\n' + [line(headers), ...rows.map(line)].join('\n') + '\n```';
+        };
 
-        if (planetList) embed.addFields({ name: 'Planets', value: planetList });
+        const shipStr = (f) => {
+            const parts = [];
+            if (f.transports) parts.push(`${f.transports}TR`);
+            if (f.colony_ships) parts.push(`${f.colony_ships}CS`);
+            if (f.destroyers) parts.push(`${f.destroyers}DS`);
+            if (f.cruisers) parts.push(`${f.cruisers}CR`);
+            if (f.battleships) parts.push(`${f.battleships}BS`);
+            return parts.join(' ');
+        };
+        const embeds = [];
 
-        const embeds = [embed];
-
-        if (fleets.length > 0) {
-            let fleetList = '';
-            fleets.forEach(f => {
-                const cv = (f.destroyers * 3) + (f.cruisers * 24) + (f.battleships * 60);
-                const owner = f.owner_name ? `[${f.ally_tag || '?'}] ${f.owner_name}` : '*Unknown*';
-                
-                fleetList += `Planet **${f.planet_index}**: ${owner} — CV **${cv.toLocaleString()}** (${f.arrival_time ? 'Moving: ' + f.arrival_time : 'Orbiting'})\n`;
+        // --- PLANETS (green) ---
+        if (planets.length > 0) {
+            const rows = planets.map(p => {
+                const plan = plans.find(pl => pl.planet_index === p.planet_index);
+                return [
+                    p.planet_index,
+                    p.owner_name ? (p.ally_tag || '?') : '',
+                    p.owner_name || '',
+                    p.population || 0,
+                    p.starbase || 0,
+                    plan ? '📝' : ''
+                ];
             });
-
-            if (fleetList) {
-                const fleetEmbed = new EmbedBuilder()
-                    .setTitle(`🚀 Fleets`)
-                    .setColor('#3b82f6') 
-                    .setDescription(fleetList);
-                embeds.push(fleetEmbed);
-            }
+            embeds.push(new EmbedBuilder().setColor('#22c55e').addFields({
+                name: '🪐 Planets',
+                value: makeTable(['#', 'tag', 'name', 'pop', 'sb', 'p'], [3, 4, 14, 4, 3, 0], rows)
+            }));
         }
 
-        return message.reply({ embeds: embeds });
+        // --- PLANS (amber) ---
+        if (plans.length > 0) {
+            const sorted = [...plans].sort((a, b) => (a.planet_index || 0) - (b.planet_index || 0));
+            const rows = sorted.map(pl => [pl.planet_index, pl.author_name || 'Unknown', pl.note]);
+            embeds.push(new EmbedBuilder().setColor('#f59e0b').addFields({
+                name: '📝 Plans',
+                value: makeTable(['#', 'name', 'plan'], [3, 14, 0], rows)
+            }));
+        }
+
+        // --- FLEETS (blue) ---
+        // Free-text lines (not a rigid table): ship lists vary a lot in length and a wide
+        // table wraps mid-column. Markdown rendering also lets in-flight ETAs use a live
+        // <t:> timestamp (code blocks can't render those).
+        if (fleets.length > 0) {
+            const sorted = [...fleets].sort((a, b) => (a.planet_index || 0) - (b.planet_index || 0));
+            let body = '';
+            sorted.forEach(f => {
+                const cv = (f.destroyers * 3) + (f.cruisers * 24) + (f.battleships * 60);
+                const owner = f.owner_name ? `[${f.ally_tag || '?'}] ${f.owner_name}` : 'Unknown';
+                let eta = '🛰️ orbit';
+                if (f.arrival_at) {
+                    const ts = Math.floor(Date.parse(f.arrival_at) / 1000);
+                    eta = !isNaN(ts) ? `➡️ <t:${ts}:R>` : '➡️ moving';
+                }
+                const ships = shipStr(f);
+                body += `**#${f.planet_index}** ${owner} — **${cv.toLocaleString()} CV** · ${eta}${ships ? `\n${ships}` : ''}\n`;
+            });
+            embeds.push(new EmbedBuilder().setColor('#3b82f6')
+                .addFields({ name: '🚀 Fleets', value: body }));
+        }
+
+        // Title + clickable link live on the first card.
+        const header = embeds[0] || new EmbedBuilder().setColor('#22c55e');
+        header.setTitle(`📡 ${sys.name || 'Unknown'} #${sysId} (${sys.x != null ? sys.x : '--'} / ${sys.y != null ? sys.y : '--'})`);
+        if (systemUrl) header.setURL(systemUrl);
+        if (embeds.length === 0) {
+            header.setDescription('*No planets, plans, or fleets recorded for this system.*');
+            embeds.push(header);
+        }
+
+        return message.reply({ embeds });
     }
 
     // ----------------------------------------------------
@@ -1250,4 +1312,67 @@ async function sendIncomingAlert(content) {
     }
 }
 
-module.exports = { initDiscordBot, announceSystemChanges, sendIncomingAlert };
+/**
+ * Send OR edit the incoming-attack alert tied to a specific game attacking-fleet id.
+ * The first call for a fleet posts a new message and records its id; later calls (e.g.
+ * after re-scanning the attacker's profile) edit that same message in place. Falls back
+ * to sending a fresh message if the original was deleted or the channel changed.
+ * Returns { ok, edited } so the caller can tell the user what happened.
+ */
+async function sendOrEditIncoming(fleetId, content) {
+    if (!client.isReady()) return { ok: false, error: 'Discord bot not ready' };
+    const channelId = getSettingValue('discord_incoming_channel');
+    if (!channelId) return { ok: false, error: 'No incoming channel configured' };
+
+    let channel;
+    try {
+        channel = await client.channels.fetch(channelId);
+    } catch (err) {
+        console.error('[Discord] Could not fetch incoming channel:', err.message);
+        return { ok: false, error: 'Incoming channel not found' };
+    }
+    if (!channel || typeof channel.send !== 'function') {
+        return { ok: false, error: 'Incoming channel not usable' };
+    }
+
+    // Discord hard-caps message content at 2000 chars.
+    const text = content.length > 1990 ? content.slice(0, 1987) + '...' : content;
+
+    const record = (msgId) => db.prepare(`
+        INSERT INTO incoming_alerts (fleet_id, channel_id, message_id) VALUES (?, ?, ?)
+        ON CONFLICT(fleet_id) DO UPDATE SET
+            channel_id = excluded.channel_id,
+            message_id = excluded.message_id,
+            updated_at = CURRENT_TIMESTAMP
+    `).run(fleetId, channelId, msgId);
+
+    // Try to edit the existing alert first (same fleet, same channel).
+    let existing = null;
+    try {
+        existing = fleetId != null
+            ? db.prepare(`SELECT message_id, channel_id FROM incoming_alerts WHERE fleet_id = ?`).get(fleetId)
+            : null;
+    } catch (err) { existing = null; }
+
+    if (existing && existing.message_id && existing.channel_id === channelId) {
+        try {
+            const msg = await channel.messages.fetch(existing.message_id);
+            await msg.edit({ content: text });
+            return { ok: true, edited: true };
+        } catch (err) {
+            // Original gone (deleted/purged) — fall through and post a new one.
+            console.warn('[Discord] Could not edit incoming alert, sending new:', err.message);
+        }
+    }
+
+    try {
+        const sent = await channel.send({ content: text });
+        if (fleetId != null) record(sent.id);
+        return { ok: true, edited: false };
+    } catch (err) {
+        console.error('[Discord] Failed to send incoming alert:', err.message);
+        return { ok: false, error: 'Failed to send message' };
+    }
+}
+
+module.exports = { initDiscordBot, announceSystemChanges, sendIncomingAlert, sendOrEditIncoming };

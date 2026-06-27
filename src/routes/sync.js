@@ -49,12 +49,6 @@ router.post('/sync/system', requireAuth, (req, res) => {
         DELETE FROM planets WHERE game_planet_id = ? AND (system_id != ? OR planet_index != ?)
     `);
 
-    // Prepared statement for the new fleets
-    const insertFleet = db.prepare(`
-        INSERT INTO fleets (game_fleet_id, owner_id, system_id, planet_index, transports, colony_ships, destroyers, cruisers, battleships, arrival_time, arrival_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
     // --- NEW: History Logging Prep ---
     const getOldPlanet = db.prepare(`SELECT owner_id, population FROM planets WHERE system_id = ? AND planet_index = ?`);
     const getPlayerName = db.prepare(`
@@ -143,29 +137,13 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 clearMovedPlanet.run(p.game_planet_id, system_id, p.planet_index);
             }
             upsertPlanet.run(p.game_planet_id, system_id, p.planet_index, finalOwnerId, finalPopulation, finalStarbase, finalHasFleet);
-
-            // Target fleet records cleanly: Only drop fleets on planets we have concrete vision over
-            if (!p.is_unknown) {
-                db.prepare(`DELETE FROM fleets WHERE system_id = ? AND planet_index = ?`).run(system_id, p.planet_index);
-            }
         }
 
-        // 2. Safely Process Fleets without wiping hidden tactical data
-        if (Array.isArray(fleetsData)) {
-            for (const f of fleetsData) {
-                const matchingPlanet = planetsData.find(p => p.planet_index === f.planet_index);
-
-                // If a fleet is reported on an obscured planet row, skip updating it (keeps historical fleet intact)
-                if (matchingPlanet && matchingPlanet.is_unknown) {
-                    continue;
-                }
-
-                if (f.owner_id) {
-                    db.prepare(`INSERT INTO players (id, name) VALUES (?, 'Unknown') ON CONFLICT(id) DO NOTHING`).run(f.owner_id);
-                }
-                insertFleet.run(f.game_fleet_id, f.owner_id, system_id, f.planet_index, f.transports, f.colony_ships, f.destroyers, f.cruisers, f.battleships, f.arrival_time || null, f.arrival_at || null);
-            }
-        }
+        // NOTE: Fleet positions are no longer derived from system scans. They are now
+        // sourced exclusively from the alliance scan (each member's own alliance page
+        // lists their stationed fleets), which gives complete, self-cleaning coverage —
+        // including offline members — instead of whatever happened to be visible in a
+        // browsed system. See /sync/alliance-stats. `fleetsData` is intentionally ignored.
     });
 
     try {
@@ -474,40 +452,64 @@ router.post('/sync/alliance-stats', requireAuth, (req, res) => {
         nextCultureAt = new Date(Date.now() + s.next_culture_seconds * 1000).toISOString();
     }
 
-    try {
-        db.prepare(`
-            INSERT INTO alliance_member_stats (
-                player_id, planets_text, next_culture_at, science_rate, culture_rate, production_rate,
-                astro_dollars, production_points, artefact, level_text, cv_limit_text,
-                economy, energy, mathematics, physics, population, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(player_id) DO UPDATE SET
-                planets_text=excluded.planets_text,
-                next_culture_at=excluded.next_culture_at,
-                science_rate=excluded.science_rate,
-                culture_rate=excluded.culture_rate,
-                production_rate=excluded.production_rate,
-                astro_dollars=excluded.astro_dollars,
-                production_points=excluded.production_points,
-                artefact=excluded.artefact,
-                level_text=excluded.level_text,
-                cv_limit_text=excluded.cv_limit_text,
-                economy=excluded.economy,
-                energy=excluded.energy,
-                mathematics=excluded.mathematics,
-                physics=excluded.physics,
-                population=excluded.population,
-                updated_at=CURRENT_TIMESTAMP
-        `).run(
-            s.player_id, s.planets_text, nextCultureAt, s.science_rate, s.culture_rate, s.production_rate,
-            s.astro_dollars, s.production_points, s.artefact, s.level_text, s.cv_limit_text,
-            s.economy, s.energy, s.mathematics, s.physics, s.population
-        );
+    const fleets = Array.isArray(s.fleets) ? s.fleets : null;
 
-        db.prepare(`
-            INSERT INTO players (id, name, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(id) DO UPDATE SET name=excluded.name, updated_at=CURRENT_TIMESTAMP
-        `).run(s.player_id, s.name);
+    try {
+        const tx = db.transaction(() => {
+            db.prepare(`
+                INSERT INTO alliance_member_stats (
+                    player_id, planets_text, next_culture_at, science_rate, culture_rate, production_rate,
+                    astro_dollars, production_points, artefact, level_text, cv_limit_text,
+                    economy, energy, mathematics, physics, population, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(player_id) DO UPDATE SET
+                    planets_text=excluded.planets_text,
+                    next_culture_at=excluded.next_culture_at,
+                    science_rate=excluded.science_rate,
+                    culture_rate=excluded.culture_rate,
+                    production_rate=excluded.production_rate,
+                    astro_dollars=excluded.astro_dollars,
+                    production_points=excluded.production_points,
+                    artefact=excluded.artefact,
+                    level_text=excluded.level_text,
+                    cv_limit_text=excluded.cv_limit_text,
+                    economy=excluded.economy,
+                    energy=excluded.energy,
+                    mathematics=excluded.mathematics,
+                    physics=excluded.physics,
+                    population=excluded.population,
+                    updated_at=CURRENT_TIMESTAMP
+            `).run(
+                s.player_id, s.planets_text, nextCultureAt, s.science_rate, s.culture_rate, s.production_rate,
+                s.astro_dollars, s.production_points, s.artefact, s.level_text, s.cv_limit_text,
+                s.economy, s.energy, s.mathematics, s.physics, s.population
+            );
+
+            db.prepare(`
+                INSERT INTO players (id, name, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO UPDATE SET name=excluded.name, updated_at=CURRENT_TIMESTAMP
+            `).run(s.player_id, s.name);
+
+            // Replace this member's stationed fleets so positions stay fresh and stale
+            // ones are dropped. Only touch fleets when the scrape actually carried a
+            // fleet array (avoids wiping data on a stats-only payload).
+            if (fleets) {
+                db.prepare(`DELETE FROM fleets WHERE owner_id = ?`).run(s.player_id);
+                const ins = db.prepare(`
+                    INSERT INTO fleets (owner_id, system_id, planet_index, transports, colony_ships, destroyers, cruisers, battleships, arrival_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `);
+                for (const f of fleets) {
+                    if (!Number.isInteger(f.system_id) || !Number.isInteger(f.planet_index)) continue;
+                    ins.run(
+                        s.player_id, f.system_id, f.planet_index,
+                        f.transports || 0, f.colony_ships || 0, f.destroyers || 0, f.cruisers || 0, f.battleships || 0,
+                        f.arrival_at || null
+                    );
+                }
+            }
+        });
+        tx();
 
         res.json({ success: true });
     } catch (err) {
