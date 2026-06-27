@@ -19,15 +19,24 @@ const SHIPS = [
     { name: 'Cruiser',    att: 8,  def: 16, cv: 24 },
     { name: 'Battleship', att: 36, def: 24, cv: 60 },
 ];
-// SB: cv = round(4·1.5^n)−4; att = def = floor(cv/2)
+// SB: cv = round(4·1.5^n)−4; att = def = floor(cv/2)  (confirmed: SB10 cv = 227)
 function sbCV(n)  { return n > 0 ? Math.round(4 * Math.pow(1.5, n)) - 4 : 0; }
 function sbHalf(n){ return Math.floor(sbCV(n) / 2); }
 
-const MATH_HP   = 0.153;  // HP per mathematics level
-const RACE_ATK  = 0.07;   // attack per race-attack level
-const RACE_DEF  = 0.11;   // HP per race-defense level
-const PHYS_WIN  = 0.005;  // win-chance shift per physics level diff (approx)
-const LVL_WIN   = 0.01;   // win-chance shift per player-level diff
+// Combat model reverse-engineered from the in-game Battle Calculator:
+//   lossFraction_own = ΣenemyCV / Σ(att + 2·def)_own   (uniform across ship types)
+//   Race defense divides your losses by (1 + 0.11·RD); it does NOT affect the enemy.
+//   Race attack, physics, player level do NOT change survivors — only win %.
+// Win % is a separate logistic on stat differences (see calcWin).
+const RACE_DEF  = 0.11;     // race-defense: your losses ÷ (1 + 0.11·RD)
+const MATH_TOUGH = 0.0015;  // small symmetric toughness gain per math level
+const TOUGH = i => SHIPS[i].att + 2 * SHIPS[i].def;   // per-ship "toughness"
+
+// Win-% logistic coefficients (fit to in-game samples).
+const WIN_RA    = 0.50;    // per race-attack level diff
+const WIN_LVL   = 0.069;   // per player-level diff (only if a full D/C/B fleet)
+const WIN_PHYS_A = 0.0792; // physics: S = A·(e^(K·|Δ|) − 1), signed
+const WIN_PHYS_K = 0.404;
 
 let playerCache = null;
 
@@ -38,6 +47,19 @@ function fmt(n) {
     return r % 1 === 0 ? String(r) : r.toFixed(2);
 }
 
+// Separate logistic win probability for the defender.
+function calcWin(d, a) {
+    const sgn = x => (x > 0 ? 1 : x < 0 ? -1 : 0);
+    const dphys = d.phys - a.phys;
+    let S = WIN_RA * (d.ra - a.ra);
+    S += sgn(dphys) * WIN_PHYS_A * (Math.exp(WIN_PHYS_K * Math.abs(dphys)) - 1);
+    // Player level only counts when the fleet fields all three ship types.
+    const dFull = d.fleet.every(n => n > 0), aFull = a.fleet.every(n => n > 0);
+    if (dFull && aFull) S += WIN_LVL * (d.lvl - a.lvl);
+    const winD = 1 / (1 + Math.exp(-S));
+    return { winD, winA: 1 - winD };
+}
+
 function calc() {
     const g = id => parseFloat(document.getElementById(id)?.value) || 0;
 
@@ -45,55 +67,41 @@ function calc() {
     const atkFleet = [g('bc-atk-d'), g('bc-atk-c'), g('bc-atk-b')];
     const sbLvl    = clamp(g('bc-def-sb'), 0, 50);
 
-    const defPhys = clamp(g('bc-def-phys'), 0, 30);
-    const defMath = clamp(g('bc-def-math'), 0, 30);
-    const defRA   = clamp(g('bc-def-ra'), -4, 4);
-    const defRD   = clamp(g('bc-def-rd'), -4, 4);
-    const defLvl  = Math.max(0, g('bc-def-lvl') | 0);
+    const def = { phys: clamp(g('bc-def-phys'),0,30), math: clamp(g('bc-def-math'),0,30),
+                  ra: clamp(g('bc-def-ra'),-4,4), rd: clamp(g('bc-def-rd'),-4,4),
+                  lvl: Math.max(0, g('bc-def-lvl')|0), fleet: defFleet };
+    const atk = { phys: clamp(g('bc-atk-phys'),0,30), math: clamp(g('bc-atk-math'),0,30),
+                  ra: clamp(g('bc-atk-ra'),-4,4), rd: clamp(g('bc-atk-rd'),-4,4),
+                  lvl: Math.max(0, g('bc-atk-lvl')|0), fleet: atkFleet };
 
-    const atkPhys = clamp(g('bc-atk-phys'), 0, 30);
-    const atkMath = clamp(g('bc-atk-math'), 0, 30);
-    const atkRA   = clamp(g('bc-atk-ra'), -4, 4);
-    const atkRD   = clamp(g('bc-atk-rd'), -4, 4);
-    const atkLvl  = Math.max(0, g('bc-atk-lvl') | 0);
+    // Enemy CV (offense) and own toughness Σ(att+2def), incl. starbase for the defender.
+    const cvOf  = f => f.reduce((s, n, i) => s + n * SHIPS[i].cv, 0);
+    const toughOf = f => f.reduce((s, n, i) => s + n * TOUGH(i), 0);
 
-    const sbA = sbHalf(sbLvl);  // starbase attack = defense
+    const sbCv    = sbCV(sbLvl);
+    const sbTough = sbLvl > 0 ? sbHalf(sbLvl) * 3 : 0; // att + 2·def with att=def=floor(cv/2)
 
-    // Effective attack & HP
-    const defAttack = (defFleet.reduce((s, n, i) => s + n * SHIPS[i].att, 0) + sbA) * (1 + RACE_ATK * defRA);
-    const atkAttack = (atkFleet.reduce((s, n, i) => s + n * SHIPS[i].att, 0))       * (1 + RACE_ATK * atkRA);
+    const enemyCVtoDef = cvOf(atkFleet);
+    const enemyCVtoAtk = cvOf(defFleet) + sbCv;
 
-    const defHP = (defFleet.reduce((s, n, i) => s + n * SHIPS[i].def, 0) + sbA)
-                  * (1 + RACE_DEF * defRD) * (1 + MATH_HP * defMath);
-    const atkHP = (atkFleet.reduce((s, n, i) => s + n * SHIPS[i].def, 0))
-                  * (1 + RACE_DEF * atkRD) * (1 + MATH_HP * atkMath);
+    const defTough = (toughOf(defFleet) + sbTough) * (1 + RACE_DEF * def.rd) * (1 + MATH_TOUGH * def.math);
+    const atkTough = toughOf(atkFleet) * (1 + RACE_DEF * atk.rd) * (1 + MATH_TOUGH * atk.math);
 
-    if (defHP === 0 && atkHP === 0) return null;
+    if (defTough === 0 && atkTough === 0) return null;
 
-    const fracDefKilled = defHP > 0 ? Math.min(1, atkAttack / defHP) : 1;
-    const fracAtkKilled = atkHP > 0 ? Math.min(1, defAttack / atkHP) : 1;
+    const fracDefKilled = defTough > 0 ? Math.min(1, enemyCVtoDef / defTough) : 1;
+    const fracAtkKilled = atkTough > 0 ? Math.min(1, enemyCVtoAtk / atkTough) : 1;
 
     const survDef = defFleet.map(n => n * (1 - fracDefKilled));
     const survAtk = atkFleet.map(n => n * (1 - fracAtkKilled));
     const survSB  = sbLvl > 0 ? (1 - fracDefKilled) : 0;
 
-    const initCVD = defFleet.reduce((s, n, i) => s + n * SHIPS[i].cv, 0) + sbCV(sbLvl);
-    const initCVA = atkFleet.reduce((s, n, i) => s + n * SHIPS[i].cv, 0);
-    const cvDefRemain = survDef.reduce((s, n, i) => s + n * SHIPS[i].cv, 0) + survSB * sbCV(sbLvl);
+    const initCVD = cvOf(defFleet) + sbCv;
+    const initCVA = cvOf(atkFleet);
+    const cvDefRemain = survDef.reduce((s, n, i) => s + n * SHIPS[i].cv, 0) + survSB * sbCv;
     const cvAtkRemain = survAtk.reduce((s, n, i) => s + n * SHIPS[i].cv, 0);
 
-    // Win probability: base on relative kill power, then shift by physics & player-level diffs.
-    let winD, winA;
-    const killA = defHP > 0 ? atkAttack / defHP : 999;   // how hard attacker hits defender
-    const killD = atkHP > 0 ? defAttack / atkHP : 999;   // how hard defender hits attacker
-    if (killA <= 0 && killD <= 0) { winD = 0.5; winA = 0.5; }
-    else {
-        let base = killA / (killA + killD);
-        base += PHYS_WIN * (atkPhys - defPhys);
-        base += LVL_WIN  * (atkLvl - defLvl);
-        winA = Math.max(0, Math.min(1, base));
-        winD = 1 - winA;
-    }
+    const { winD, winA } = calcWin(def, atk);
 
     return { defFleet, atkFleet, sbLvl, survDef, survAtk, survSB,
              initCVD, initCVA, cvDefRemain, cvAtkRemain, winD, winA };
@@ -163,7 +171,7 @@ function render() {
                 <span class="text-red-400 font-bold text-lg w-16 font-mono">${winBarA}%</span>
             </div>
             <div class="flex justify-between text-xs text-muted-foreground"><span>Defender</span><span>Attacker</span></div>
-            <div class="text-xs text-zinc-600 mt-1">Survivor counts match the game. Win % is approximate (physics &amp; level scaling still being calibrated).</div>
+            <div class="text-xs text-zinc-600 mt-1">Calibrated to the in-game calculator (±3%). Less exact with asymmetric mathematics or a starbase + fleet together.</div>
         </div>
     `;
 }
