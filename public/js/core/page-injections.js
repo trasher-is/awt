@@ -458,11 +458,9 @@ export function initStarbaseTimer() {
 // ---------------------------------------------------------------
 // PLAYER LEVEL (PL) AUTOGROWTH CALCULATOR (profile page)
 // PL grows twice a day (00:00 & 12:00 CET) by a % of current XP.
-// The % depends on the race's combat stats: SAD = Speed+Attack+Defence
-// (each -4..+4, so SAD ranges -12..+12). Growth% = (SAD + 12) * 0.0645,
-// i.e. +0% at SAD -12, ~0.774% at SAD 0, ~1.548% at SAD +12. (factor = (SAD+12)*0.000645)
-// Coefficient calibrated against low-noise observed gains (clean rows averaged ~0.0647%/unit);
-// it self-recalibrates as multi-update windows accumulate in awt-pl-hist (window.awtPLDump()).
+// Observed rate: +0.3% per update per point of SAD = Speed+Attack+Defence
+// (so SAD +4 ≈ +1.2%/upd). factor = SAD * 0.003 per update.
+// We just show the ETA to the next level.
 // ---------------------------------------------------------------
 let _plAggCache = null;
 
@@ -510,20 +508,6 @@ function nextPLUpdate() {
     const secsSinceMidnight = h * 3600 + m * 60 + s;
     const secsToNext = ((secsSinceMidnight < 43200) ? 43200 : 86400) - secsSinceMidnight;
     return new Date(now.getTime() + secsToNext * 1000);
-}
-
-// Monotonic index of the current 12h PL-update slot in Berlin wall-clock time.
-// Two readings in the same slot saw no update between them; a difference of N
-// means N update boundaries (00:00 / 12:00 Berlin) were crossed.
-function berlinSlotIndex(date) {
-    const parts = new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', hour12: false
-    }).formatToParts(date);
-    const g = t => parseInt(parts.find(p => p.type === t).value, 10);
-    // Treat Berlin wall-clock as if UTC purely to get a stable half-day counter.
-    const wall = Date.UTC(g('year'), g('month') - 1, g('day'), g('hour') % 24, g('minute'));
-    return Math.floor(wall / 43200000);
 }
 
 export async function initProfilePLGrowth() {
@@ -574,119 +558,24 @@ export async function initProfilePLGrowth() {
             return;
         }
 
+        // Observed: +0.3% per update per SAD point (SAD = Speed+Attack+Defence).
         const sad = speed + attack + defence;
-        const factor = Math.max(0, Math.min(24, sad + 12)) * 0.000645;   // (SAD+12)*0.0645%
-        const pct = (factor * 100);
+        const factor = Math.max(0, sad * 0.003);
 
         if (factor <= 0) {
-            placeholder.innerHTML = `<span style="color:#aaa;">PL ${currentXP.toLocaleString()} XP · SAD ${sad >= 0 ? '+' : ''}${sad} → <b style="color:#fff;">+0%</b> (no growth)</span>`;
+            placeholder.innerHTML = `<span style="color:#aaa;">PL ${currentXP.toLocaleString()} XP · SAD ${sad >= 0 ? '+' : ''}${sad} — no growth</span>`;
             return;
         }
 
-        const gainNext = currentXP * factor;
-        const xpAfter = currentXP + gainNext;
-        const remainAfter = target - xpAfter;
-
-        // Daily figures (2 updates/day): XP after a full day and the effective daily %.
-        const xpAfterDay = currentXP * Math.pow(1 + factor, 2);
-        const gainDay = xpAfterDay - currentXP;
-        const pctDay = (Math.pow(1 + factor, 2) - 1) * 100;
-
-        // Helper: how many updates from `xp` to reach `tgt`, compounding 1+factor.
-        const updatesToReach = (xp, tgt) => Math.ceil(Math.log(tgt / xp) / Math.log(1 + factor));
-
-        // Updates / ETA to the next level.
-        const updates = updatesToReach(currentXP, target);
-        const upd = nextPLUpdate();
+        // Updates to reach the next level, compounding (1 + factor) per update.
+        const updates = Math.ceil(Math.log(target / currentXP) / Math.log(1 + factor));
         // First growth lands at the next update; level-up after `updates` updates.
-        const finish = new Date(upd.getTime() + (updates - 1) * 43200 * 1000);
+        const finish = new Date(nextPLUpdate().getTime() + (updates - 1) * 43200 * 1000);
         const fmtDate = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
                              d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
 
-        // Levels gained over the next 7 and 30 days (each = 2 updates).
-        const levelsIn = (days) => {
-            const finalXP = currentXP * Math.pow(1 + factor, days * 2);
-            let lvl = currentLevel;
-            while (agg[lvl + 1] && finalXP >= agg[lvl + 1]) lvl++;
-            return lvl - currentLevel;
-        };
-
-        // --- Observed growth (localStorage) — measured vs predicted over a MULTI-update window ---
-        // Per-update integer XP rounding (±1 XP) swamps a single-update sample, so we hold the
-        // baseline anchored across several updates and measure the accumulated gain. Re-anchoring
-        // every update (the old behaviour) guaranteed maximum noise and a meaningless effSad.
-        const idMatch = window.location.pathname.match(/\/profile\/(\d+)/i);
-        const playerId = idMatch ? idMatch[1] : 'unknown';
-        const lsKey = `awt-pl-obs-${playerId}`;
-        const COEFF = 0.0645;          // %/unit; keep in sync with `factor` above
-        const WINDOW_UPDATES = 6;      // close & record a calibration window after this many updates
-        let observedHTML = '';
-        try {
-            const now = new Date();
-            const nowSlot = berlinSlotIndex(now);
-            const prev = JSON.parse(localStorage.getItem(lsKey) || 'null');
-            const sameRun = prev && Number.isFinite(prev.xp) && prev.sad === sad;
-
-            if (sameRun && currentXP > prev.xp) {
-                const updatesPassed = Math.max(1, nowSlot - prev.slot);
-                const measuredGain = currentXP - prev.xp;
-                const measuredPerUpd = Math.pow(currentXP / prev.xp, 1 / updatesPassed) - 1;
-                const measuredPct = measuredPerUpd * 100;
-                const effSad = measuredPct / COEFF - 12;           // back-solve SAD from rate
-                const predGain = prev.xp * (Math.pow(1 + factor, updatesPassed) - 1);
-                const off = Math.abs(measuredGain - predGain) > updatesPassed + 1;
-
-                // effSad amplifies %-noise ~16×; only show it once the window is long enough that
-                // ±1 XP rounding maps to <~0.5 SAD (base·updates ≳ 3200). Otherwise label it noisy.
-                const reliable = prev.xp * updatesPassed >= 3200;
-                observedHTML = `<div style="color:${off ? '#e0b' : '#6b9'};">measured: +${measuredPct.toFixed(3)}%/upd `
-                    + `(+${measuredGain} XP / ${updatesPassed} upd${reliable ? '' : ', noisy'})`
-                    + `${reliable ? ` ≈ SAD ${effSad >= 0 ? '+' : ''}${effSad.toFixed(1)}` : ''}`
-                    + `${off ? ` · formula +${pct.toFixed(2)}% (Δ${(measuredGain - predGain >= 0 ? '+' : '')}${(measuredGain - predGain).toFixed(1)} XP)` : ''}</div>`;
-
-                // Record a clean calibration row once the window is long enough, then re-anchor.
-                // Each row: level, SAD, base xp, measured %/upd, effective SAD, updates.
-                if (updatesPassed >= WINDOW_UPDATES) {
-                    try {
-                        const hKey = `awt-pl-hist-${playerId}`;
-                        const hist = JSON.parse(localStorage.getItem(hKey) || '[]');
-                        hist.push({ lvl: currentLevel, sad, base: Math.round(prev.xp),
-                                    pct: +measuredPct.toFixed(3), eff: +effSad.toFixed(1), upd: updatesPassed });
-                        while (hist.length > 60) hist.shift();
-                        localStorage.setItem(hKey, JSON.stringify(hist));
-                    } catch (_) {}
-                    localStorage.setItem(lsKey, JSON.stringify({ xp: currentXP, slot: nowSlot, sad }));
-                }
-                // else: keep the existing anchor so the window keeps accumulating.
-            } else if (!sameRun) {
-                // First sight, SAD changed, or an XP reset — (re)anchor a fresh window.
-                localStorage.setItem(lsKey, JSON.stringify({ xp: currentXP, slot: nowSlot, sad }));
-            }
-            // window.awtPLDump() -> console.table of every player's recorded history.
-            if (!window.awtPLDump) {
-                window.awtPLDump = () => {
-                    const rows = [];
-                    for (let i = 0; i < localStorage.length; i++) {
-                        const k = localStorage.key(i);
-                        if (!k.startsWith('awt-pl-hist-')) continue;
-                        const id = k.replace('awt-pl-hist-', '');
-                        (JSON.parse(localStorage.getItem(k) || '[]')).forEach(r => rows.push({ id, ...r }));
-                    }
-                    console.table(rows);
-                    return rows;
-                };
-            }
-        } catch (_) { /* localStorage may be unavailable; observation is best-effort */ }
-
-        placeholder.innerHTML = `
-            <div style="color:#aaa;">PL <span style="color:#fff;font-weight:bold;">${Math.round(currentXP).toLocaleString()}</span> XP
-                · SAD ${sad >= 0 ? '+' : ''}${sad} → <span style="color:#fff;font-weight:bold;">+${pct.toFixed(2)}%</span>/upd
-                <span style="color:#666;">(+${pctDay.toFixed(2)}%/day)</span></div>
-            <div style="color:#888;">next: +${gainNext.toFixed(1)} XP → ${Math.round(remainAfter).toLocaleString()} XP to lvl ${nextLevel}
-                <span style="color:#666;">· +${gainDay.toFixed(0)} XP/day</span></div>
-            <div style="color:#888;">lvl ${nextLevel} in ${updates} upd <span style="color:#666;">(${fmtDate(finish)})</span></div>
-            <div style="color:#888;">≈ +${levelsIn(7)} lvl in 7d · +${levelsIn(30)} lvl in 30d</div>
-            ${observedHTML}`;
+        placeholder.innerHTML = `<span style="color:#aaa;">PL → lvl ${nextLevel} in </span>`
+            + `<b style="color:#fff;">${updates} upd</b> <span style="color:#666;">(${fmtDate(finish)})</span>`;
     } catch (e) {
         console.error('[AWT] PL growth calc failed:', e);
         placeholder.remove();
