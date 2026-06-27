@@ -1,6 +1,9 @@
-require('dotenv').config();
-const express = require('express');
 const path = require('path');
+// Load .env from next to this file, NOT from process.cwd(). Under pm2 the working
+// directory can differ from the project root, which makes a bare config() read the
+// wrong (or no) .env and silently inject 0 vars. Anchoring to __dirname fixes that.
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+const express = require('express');
 const session = require('express-session');
 const SQLiteStore = require('connect-sqlite3')(session);
 
