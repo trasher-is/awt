@@ -109,8 +109,10 @@ function calc() {
 
     if (defTough === 0 && atkTough === 0) return null;
 
-    const fracDefKilled = defTough > 0 ? Math.min(1, enemyCVtoDef / defTough) : 1;
-    const fracAtkKilled = atkTough > 0 ? Math.min(1, enemyCVtoAtk / atkTough) : 1;
+    const rawDefKilled = defTough > 0 ? enemyCVtoDef / defTough : 99;
+    const rawAtkKilled = atkTough > 0 ? enemyCVtoAtk / atkTough : 99;
+    const fracDefKilled = Math.min(1, rawDefKilled);
+    const fracAtkKilled = Math.min(1, rawAtkKilled);
 
     const survDef = defFleet.map(n => n * (1 - fracDefKilled));
     const survAtk = atkFleet.map(n => n * (1 - fracAtkKilled));
@@ -121,9 +123,22 @@ function calc() {
     const cvDefRemain = survDef.reduce((s, n, i) => s + n * SHIPS[i].cv, 0) + survSB * sbCv;
     const cvAtkRemain = survAtk.reduce((s, n, i) => s + n * SHIPS[i].cv, 0);
 
-    // Win % weights the starbase slightly below its raw CV.
-    const winCVD = cvOf(defFleet) + WIN_SB_FACTOR * sbCv;
-    const { winD, winA } = calcWin(def, atk, winCVD, initCVA);
+    // A side that's overwhelmingly destroyed (≥1.5× overkill) is annihilated and cannot
+    // win on stats — the survivor decides. Only the contested (both-survive) case uses the
+    // stat/force logistic. Mutual annihilation goes to the defender (attack failed).
+    const ANNIHILATE = 1.25; // overkill beyond this = no survivors (between "leaves 1" and "wiped")
+    const atkGone = rawAtkKilled >= ANNIHILATE;
+    const defGone = rawDefKilled >= ANNIHILATE;
+    let winD, winA;
+    if (atkGone && !defGone) { winD = 1; }
+    else if (defGone && !atkGone) { winD = 0; }
+    else if (atkGone && defGone) { winD = 1; }
+    else {
+        // Win % weights the starbase slightly below its raw CV.
+        const winCVD = cvOf(defFleet) + WIN_SB_FACTOR * sbCv;
+        ({ winD } = calcWin(def, atk, winCVD, initCVA));
+    }
+    winA = 1 - winD;
 
     return { defFleet, atkFleet, sbLvl, survDef, survAtk, survSB,
              initCVD, initCVA, cvDefRemain, cvAtkRemain, winD, winA };
