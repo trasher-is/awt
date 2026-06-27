@@ -32,7 +32,11 @@ const RACE_DEF  = 0.11;     // race-defense: your losses ÷ (1 + 0.11·RD)
 const MATH_TOUGH = 0.0015;  // small symmetric toughness gain per math level
 const TOUGH = i => SHIPS[i].att + 2 * SHIPS[i].def;   // per-ship "toughness"
 
-// Win-% logistic coefficients (fit to in-game samples).
+// Win-% logistic coefficients (fit to in-game samples). Win % depends on FORCE RATIO
+// (initial CV) plus race-attack, physics and player level — NOT on race-defense or
+// mathematics (those change survivors only). A 1.5× CV lead is a guaranteed win.
+const WIN_FORCE = 15.25;   // logit weight on relative CV difference
+const WIN_SB_FACTOR = 0.94; // starbase counts ~0.94× its CV toward the win ratio
 const WIN_RA    = 0.50;    // per race-attack level diff
 const WIN_LVL   = 0.069;   // per player-level diff (only if a full D/C/B fleet)
 const WIN_PHYS_A = 0.0792; // physics: S = A·(e^(K·|Δ|) − 1), signed
@@ -47,11 +51,18 @@ function fmt(n) {
     return r % 1 === 0 ? String(r) : r.toFixed(2);
 }
 
-// Separate logistic win probability for the defender.
-function calcWin(d, a) {
+// Separate logistic win probability for the defender, driven by the initial CV ratio
+// plus stat differences. cvD / cvA are total combat values (defender incl. starbase).
+function calcWin(d, a, cvD, cvA) {
+    // A 1.5× combat-value lead is a guaranteed win.
+    if (cvA >= 1.5 * cvD && cvD >= 0) return { winD: 0, winA: 1 };
+    if (cvD >= 1.5 * cvA && cvA >= 0) return { winD: 1, winA: 0 };
+
     const sgn = x => (x > 0 ? 1 : x < 0 ? -1 : 0);
     const dphys = d.phys - a.phys;
-    let S = WIN_RA * (d.ra - a.ra);
+    const denom = cvD + cvA;
+    let S = denom > 0 ? WIN_FORCE * ((cvD - cvA) / denom) : 0;
+    S += WIN_RA * (d.ra - a.ra);
     S += sgn(dphys) * WIN_PHYS_A * (Math.exp(WIN_PHYS_K * Math.abs(dphys)) - 1);
     // Player level only counts when the fleet fields all three ship types.
     const dFull = d.fleet.every(n => n > 0), aFull = a.fleet.every(n => n > 0);
@@ -107,7 +118,9 @@ function calc() {
     const cvDefRemain = survDef.reduce((s, n, i) => s + n * SHIPS[i].cv, 0) + survSB * sbCv;
     const cvAtkRemain = survAtk.reduce((s, n, i) => s + n * SHIPS[i].cv, 0);
 
-    const { winD, winA } = calcWin(def, atk);
+    // Win % weights the starbase slightly below its raw CV.
+    const winCVD = cvOf(defFleet) + WIN_SB_FACTOR * sbCv;
+    const { winD, winA } = calcWin(def, atk, winCVD, initCVA);
 
     return { defFleet, atkFleet, sbLvl, survDef, survAtk, survSB,
              initCVD, initCVA, cvDefRemain, cvAtkRemain, winD, winA };
