@@ -81,11 +81,17 @@ function calc() {
     const sbCv    = sbCV(sbLvl);
     const sbTough = sbLvl > 0 ? sbHalf(sbLvl) * 3 : 0; // att + 2·def with att=def=floor(cv/2)
 
-    const enemyCVtoDef = cvOf(atkFleet);
-    const enemyCVtoAtk = cvOf(defFleet) + sbCv;
+    // Math threshold: a mathematics advantage of 6+ over the enemy grants +25% combat
+    // (both offense and toughness) to that side — the in-game "+6 → +25%" rule, which is
+    // why 20-vs-25 and 20-vs-26 differ so sharply.
+    const cmDef = 1 + 0.25 * ((def.math - atk.math) >= 6 ? 1 : 0);
+    const cmAtk = 1 + 0.25 * ((atk.math - def.math) >= 6 ? 1 : 0);
 
-    const defTough = (toughOf(defFleet) + sbTough) * (1 + RACE_DEF * def.rd) * (1 + MATH_TOUGH * def.math);
-    const atkTough = toughOf(atkFleet) * (1 + RACE_DEF * atk.rd) * (1 + MATH_TOUGH * atk.math);
+    const enemyCVtoDef = cvOf(atkFleet) * cmAtk;
+    const enemyCVtoAtk = (cvOf(defFleet) + sbCv) * cmDef;
+
+    const defTough = (toughOf(defFleet) + sbTough) * (1 + RACE_DEF * def.rd) * (1 + MATH_TOUGH * def.math) * cmDef;
+    const atkTough = toughOf(atkFleet) * (1 + RACE_DEF * atk.rd) * (1 + MATH_TOUGH * atk.math) * cmAtk;
 
     if (defTough === 0 && atkTough === 0) return null;
 
@@ -171,7 +177,7 @@ function render() {
                 <span class="text-red-400 font-bold text-lg w-16 font-mono">${winBarA}%</span>
             </div>
             <div class="flex justify-between text-xs text-muted-foreground"><span>Defender</span><span>Attacker</span></div>
-            <div class="text-xs text-zinc-600 mt-1">Calibrated to the in-game calculator (±3%). Less exact with asymmetric mathematics or a starbase + fleet together.</div>
+            <div class="text-xs text-zinc-600 mt-1">Calibrated to the in-game calculator (±3%). The losing side's survivors can read slightly high in a lopsided math mismatch, and a starbase + fleet together is approximate.</div>
         </div>
     `;
 }
