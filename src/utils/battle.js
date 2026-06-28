@@ -74,8 +74,14 @@ function winChance(allyFleet, ally, enemyFleet, enemy) {
     const dFull = allyFleet.every(n => n > 0), aFull = enemyFleet.every(n => n > 0);
     if (dFull && aFull) statS += WIN_LVL * (ally.lvl - enemy.lvl);
 
-    if (cvA >= 1.5 * cvD && statS <= 0) return 0;
-    if (cvD >= 1.5 * cvA && statS >= 0) return 1;
+    // 1.5× CV lead is a guaranteed win only for same-ship-type fights (CV ratio == attack
+    // ratio); mixed compositions fall through to the attack-aware logistic.
+    const pureIdx = f => { const nz = f.reduce((a, n, i) => (n > 0 ? a.concat(i) : a), []); return nz.length === 1 ? nz[0] : -1; };
+    const sameType = pureIdx(allyFleet) >= 0 && pureIdx(allyFleet) === pureIdx(enemyFleet);
+    if (sameType) {
+        if (cvA >= 1.5 * cvD && statS <= 0) return 0;
+        if (cvD >= 1.5 * cvA && statS >= 0) return 1;
+    }
 
     const attD = attOf(allyFleet), attA = attOf(enemyFleet);
     const denom = cvD + cvA, attDenom = attD + attA;

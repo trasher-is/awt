@@ -75,10 +75,17 @@ function calcWin(d, a, cvD, cvA, attD, attA) {
     const dFull = d.fleet.every(n => n > 0), aFull = a.fleet.every(n => n > 0);
     if (dFull && aFull) statS += WIN_LVL * (d.lvl - a.lvl);
 
-    // A 1.5× combat-value lead is a guaranteed win — UNLESS the trailing side's stats
-    // fight back (race attack etc. can overturn a force deficit).
-    if (cvA >= 1.5 * cvD && statS <= 0) return { winD: 0, winA: 1 };
-    if (cvD >= 1.5 * cvA && statS >= 0) return { winD: 1, winA: 0 };
+    // A 1.5× combat-value lead is a guaranteed win ONLY in a same-ship-type fight (e.g.
+    // D vs D), where CV ratio == attack ratio so the outcome is deterministic. For mixed
+    // compositions a CV lead can come from defense alone and does NOT guarantee a win, so
+    // we skip the shortcut and let the attack-aware logistic decide. (Stats can also
+    // overturn a force deficit, hence the statS sign guard.)
+    const pureIdx = f => { const nz = f.reduce((a, n, i) => (n > 0 ? a.concat(i) : a), []); return nz.length === 1 ? nz[0] : -1; };
+    const sameType = pureIdx(d.fleet) >= 0 && pureIdx(d.fleet) === pureIdx(a.fleet);
+    if (sameType) {
+        if (cvA >= 1.5 * cvD && statS <= 0) return { winD: 0, winA: 1 };
+        if (cvD >= 1.5 * cvA && statS >= 0) return { winD: 1, winA: 0 };
+    }
 
     const denom = cvD + cvA;
     const attDenom = attD + attA;
