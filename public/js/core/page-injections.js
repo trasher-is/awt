@@ -559,7 +559,9 @@ export async function initProfilePLGrowth() {
         }
 
         // Observed: +0.3% per update per SAD point (SAD = Speed+Attack+Defence).
-        const sad = speed + attack + defence;
+        // Negative stats don't contribute — each is floored at 0 before summing
+        // (so −4/−4/−4 counts as 0, not −12).
+        const sad = Math.max(0, speed) + Math.max(0, attack) + Math.max(0, defence);
         const factor = Math.max(0, sad * 0.003);
 
         if (factor <= 0) {
