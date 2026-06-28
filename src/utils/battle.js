@@ -56,8 +56,12 @@ function winChance(allyFleet, ally, enemyFleet, enemy) {
 
     const rawAlly = dT > 0 ? (cvOf(enemyFleet) * cmA) / dT : 99;
     const rawEnemy = aT > 0 ? (cvOf(allyFleet) * cmD) / aT : 99;
-    const enemyGone = rawEnemy >= ANNIHILATE;
-    const allyGone = rawAlly >= ANNIHILATE;
+    // A guaranteed win needs the loser annihilated AND the winner to meaningfully survive
+    // (loses <90%). Otherwise a near-mutual wipe snaps to 0/1 and one ship flips the result;
+    // those contested cases fall through to the stat/force logistic below.
+    const SURVIVES = 0.9;
+    const enemyGone = rawEnemy >= ANNIHILATE && rawAlly < SURVIVES;
+    const allyGone = rawAlly >= ANNIHILATE && rawEnemy < SURVIVES;
     if (enemyGone && !allyGone) return 1;
     if (allyGone && !enemyGone) return 0;
 

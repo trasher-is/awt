@@ -130,10 +130,17 @@ function calc() {
     // A clearly-annihilated side (≥1.25× overkill) can't win on stats. We only trust this
     // when it's NOT a starbase+fleet defense — that combined case isn't modelled reliably,
     // so there we fall back to the stat/force logistic.
+    // A guaranteed win is only declared when the LOSER is annihilated AND the winner
+    // actually survives (keeps >10% of its force). Without the survival check, a
+    // near-mutual wipe where one side crosses the overkill line a hair before the other
+    // snapped the result to 100%/0% — so removing a single enemy ship could swing the
+    // win chance from ~10% to 100%. When both sides are essentially destroyed it's a
+    // contested fight: fall through to the stat/force logistic instead.
     const ANNIHILATE = 1.25;
+    const SURVIVES = 0.9; // winner must lose less than 90% to count as a clear victor
     const sbCombined = sbLvl > 0 && defFleet.some(n => n > 0);
-    const atkGone = !sbCombined && rawAtkKilled >= ANNIHILATE;
-    const defGone = !sbCombined && rawDefKilled >= ANNIHILATE;
+    const atkGone = !sbCombined && rawAtkKilled >= ANNIHILATE && fracDefKilled < SURVIVES;
+    const defGone = !sbCombined && rawDefKilled >= ANNIHILATE && fracAtkKilled < SURVIVES;
     let winD, winA;
     if (atkGone && !defGone) { winD = 1; }
     else if (defGone && !atkGone) { winD = 0; }
