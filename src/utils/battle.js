@@ -10,9 +10,10 @@ const SHIPS = [
 const TOUGH = i => SHIPS[i].att + 2 * SHIPS[i].def;
 const RACE_DEF = 0.11;
 const MATH_TOUGH = 0.0015;
-const WIN_FORCE = 12.25;   // CV-ratio weight (12.25 + WIN_ATT 3.0 = old 15.25)
-const WIN_ATT = 3.0;       // attack-power ratio weight (decides mixed-composition fights)
-const WIN_RA = 0.50;        // per race-attack level diff (below the +6 threshold)
+// Force/attack enter the win logit as power laws (S grows faster than linear with ratio).
+const WIN_FORCE_W = 21.8;  const WIN_FORCE_P = 1.24;  // CV-ratio:  W·|FR|^P
+const WIN_ATT_W = 2.67;    const WIN_ATT_P = 0.914;   // attack-ratio: W·|AR|^P
+const WIN_RA = 0.55;        // per race-attack level diff (below the +6 threshold)
 const WIN_RA_BASE6 = 7.4;   // RA magnitude at a 6+ diff — effectively decisive in-game
 const WIN_RA_SLOPE = 0.5;
 const WIN_LVL = 0.069;
@@ -93,8 +94,10 @@ function winChance(allyFleet, ally, enemyFleet, enemy) {
 
     const attD = attOf(allyFleet), attA = attOf(enemyFleet);
     const denom = cvD + cvA, attDenom = attD + attA;
-    const S = (denom > 0 ? WIN_FORCE * ((cvD - cvA) / denom) : 0)
-            + (attDenom > 0 ? WIN_ATT * ((attD - attA) / attDenom) : 0)
+    const FR = denom > 0 ? (cvD - cvA) / denom : 0;
+    const AR = attDenom > 0 ? (attD - attA) / attDenom : 0;
+    const S = sgn(FR) * WIN_FORCE_W * Math.abs(FR) ** WIN_FORCE_P
+            + sgn(AR) * WIN_ATT_W * Math.abs(AR) ** WIN_ATT_P
             + statS;
     return 1 / (1 + Math.exp(-S));
 }

@@ -41,10 +41,14 @@ const TOUGH = i => SHIPS[i].att + 2 * SHIPS[i].def;   // per-ship "toughness"
 // same-ship-type fights (where attack ratio == CV ratio) are unchanged. For MIXED
 // compositions at equal CV the attack term decides the winner — matching in-game, where
 // 1000 destroyers (2000 atk) beats 125 cruisers (1000 atk) ~73% despite equal CV.
-const WIN_FORCE = 12.25;   // logit weight on relative CV difference
-const WIN_ATT   = 3.0;     // logit weight on relative ATTACK-power difference
+// Force and attack enter the win logit as POWER laws, not linearly: the in-game force
+// sweep (110/125/150 vs 100 destroyers) shows the effective weight rising with the ratio
+// (≈14 → 16 → 18), i.e. S grows faster than a straight line. CV ratio uses W·|FR|^P; the
+// attack-ratio term (which decides mixed-composition fights) is near-linear.
+const WIN_FORCE_W = 21.8;  const WIN_FORCE_P = 1.24;  // CV-ratio:  W·|FR|^P
+const WIN_ATT_W   = 2.67;  const WIN_ATT_P   = 0.914; // attack-ratio: W·|AR|^P
 const WIN_SB_FACTOR = 0.94; // starbase counts ~0.94× its CV toward the win ratio
-const WIN_RA    = 0.50;    // per race-attack level diff (below the +6 threshold)
+const WIN_RA    = 0.55;    // per race-attack level diff (below the +6 threshold)
 const WIN_RA_BASE6 = 7.4;  // RA magnitude at a 6+ diff — effectively decisive in-game
 const WIN_RA_SLOPE = 0.5;  // per RA level beyond +6
 const WIN_LVL   = 0.069;   // per player-level diff (only if a full D/C/B fleet)
@@ -97,8 +101,10 @@ function calcWin(d, a, cvD, cvA, attD, attA) {
 
     const denom = cvD + cvA;
     const attDenom = attD + attA;
-    const S = (denom > 0 ? WIN_FORCE * ((cvD - cvA) / denom) : 0)
-            + (attDenom > 0 ? WIN_ATT * ((attD - attA) / attDenom) : 0)
+    const FR = denom > 0 ? (cvD - cvA) / denom : 0;
+    const AR = attDenom > 0 ? (attD - attA) / attDenom : 0;
+    const S = sgn(FR) * WIN_FORCE_W * Math.abs(FR) ** WIN_FORCE_P
+            + sgn(AR) * WIN_ATT_W * Math.abs(AR) ** WIN_ATT_P
             + statS;
     const winD = 1 / (1 + Math.exp(-S));
     return { winD, winA: 1 - winD };
