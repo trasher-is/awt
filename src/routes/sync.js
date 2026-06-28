@@ -230,9 +230,17 @@ router.post('/sync/player', requireAuth, (req, res) => {
     const oldPlayer = db.prepare('SELECT logins, points, origin_system FROM players WHERE id = ?').get(p.id);
 
     const syncTransaction = db.transaction((player) => {
+        // A restart/origin-move purge wipes ALL of a player's planets galaxy-wide, so each
+        // trigger must fire ONLY on positively-parsed, contradicting data. A fog-of-war /
+        // partial profile scan (e.g. an enemy whose Origin row or ranking isn't visible)
+        // leaves these fields at their parser defaults (origin_system=null, points=0); those
+        // absences must NEVER be read as "moved" or "wiped", or we hollow out real systems.
         const loginsDropped = oldPlayer && player.logins > 0 && player.logins < oldPlayer.logins;
-        const originChanged = oldPlayer && oldPlayer.origin_system !== null && player.origin_system !== oldPlayer.origin_system;
-        const pointsNuked = oldPlayer && oldPlayer.points > 2000 && player.points < 100;
+        const originChanged = oldPlayer
+            && Number.isInteger(player.origin_system) && player.origin_system > 0
+            && Number.isInteger(oldPlayer.origin_system) && oldPlayer.origin_system > 0
+            && player.origin_system !== oldPlayer.origin_system;
+        const pointsNuked = oldPlayer && oldPlayer.points > 2000 && player.points > 0 && player.points < 100;
 
         if (loginsDropped || originChanged || pointsNuked) {
             console.log(`[SYSTEM] Verified Player ${player.id} restarted or moved origin! Purging ghost assets.`);
