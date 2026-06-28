@@ -82,7 +82,9 @@ function computeInterceptors(attack, nowUnix) {
                 ownerId: origin ? origin.ownerId : null,
                 originSys: origin ? origin.originSys : null,
                 originIdx: origin ? origin.originIdx : null,
-                fleetId: origin ? origin.fleetId : null
+                fleetId: origin ? origin.fleetId : null,
+                // Ship composition [D, C, B], for win-chance estimates.
+                ships: origin ? origin.ships : [Math.floor(cv / 3), 0, 0]
             });
         }
     };
@@ -92,7 +94,10 @@ function computeInterceptors(attack, nowUnix) {
         const travel = calcTravelSeconds(f.sx, f.sy, f.planet_index, target.x, target.y, attack.planetIndex, f.energy, f.race_speed, true);
         const landUnix = f.arrival_at ? Math.floor(Date.parse(f.arrival_at) / 1000) : 0;
         const landDelay = (landUnix && landUnix > nowUnix) ? (landUnix - nowUnix) : 0;
-        const origin = { ownerId: f.owner_id, originSys: f.origin_sys, originIdx: f.planet_index, fleetId: f.game_fleet_id || null };
+        const origin = {
+            ownerId: f.owner_id, originSys: f.origin_sys, originIdx: f.planet_index, fleetId: f.game_fleet_id || null,
+            ships: [f.destroyers || 0, f.cruisers || 0, f.battleships || 0]
+        };
         if (landDelay > 0) {
             consider(f.owner_name, cv, landDelay + travel, 'flight', `lands in ${formatTime(landDelay)}`, origin);
         } else {
@@ -107,7 +112,8 @@ function computeInterceptors(attack, nowUnix) {
         const cv = Math.floor(totalPp / costPerCv(h.economy));
         if (cv <= 0) continue;
         const travel = calcTravelSeconds(h.sx, h.sy, h.launch_planet, target.x, target.y, attack.planetIndex, h.energy, h.race_speed, true);
-        consider(h.owner_name, cv, travel, 'build', 'build & launch');
+        // Build potential has no fixed composition — approximate as all destroyers.
+        consider(h.owner_name, cv, travel, 'build', 'build & launch', { ships: [Math.floor(cv / 3), 0, 0] });
     }
 
     // Attach a real Discord mention where we know the player's numeric id (matched

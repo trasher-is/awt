@@ -4,6 +4,7 @@ const { requireAuth } = require('./_middleware');
 const { sendOrEditIncoming, replyToIncoming } = require('../discord_bot');
 const { formatTime } = require('../utils/travel-calc');
 const { ONTIME_LIMIT, LATE_LIMIT, SOURCE_TAG, computeInterceptors } = require('../utils/interceptors');
+const { winChance, resolveStats } = require('../utils/battle');
 const router = express.Router();
 
 // Build the compact attacker stat line shown both inline on the News page and in the
@@ -101,12 +102,41 @@ function computeDefenders(data) {
     } catch (e) { /* fall back to active-users scope */ }
 
     const arr = parseInt(data.arrivalUnix, 10);
-    return computeInterceptors({
+    const result = computeInterceptors({
         systemId: data.target.systemId,
         planetIndex: data.target.planetIndex,
         defenderName,
         arrivalUnix: Number.isInteger(arr) && arr > 0 ? arr : 0
     }, Math.floor(Date.now() / 1000));
+
+    if (result) attachWinChances(result, data);
+    return result;
+}
+
+const STAT_COLS = `race_attack, race_defense, physics, mathematics, science_level, level, has_intel, intel_updated_at`;
+
+// Attach each defender's chance to beat the incoming fleet (defender fleet vs attacker
+// fleet). Attacker race/sciences fall back to assumptions when unknown/stale.
+function attachWinChances(result, data) {
+    try {
+        const s = data.ships || {};
+        const enemyFleet = [s.destroyers || 0, s.cruisers || 0, s.battleships || 0];
+        const enemyRow = data.attacker && data.attacker.id
+            ? db.prepare(`SELECT ${STAT_COLS} FROM players WHERE id = ?`).get(data.attacker.id)
+            : null;
+        const enemyStats = resolveStats(enemyRow);
+
+        const statStmt = db.prepare(`SELECT ${STAT_COLS} FROM players WHERE LOWER(name) = ?`);
+        const all = [...result.onTime, ...(result.late || [])];
+        for (const d of all) {
+            const allyFleet = d.ships || [Math.floor(d.cv / 3), 0, 0];
+            const allyRow = statStmt.get(d.name.toLowerCase());
+            d.win = winChance(allyFleet, resolveStats(allyRow), enemyFleet, enemyStats);
+            d.winUnknown = enemyStats.unknown; // attacker race not scouted
+        }
+    } catch (e) {
+        console.error('[Incoming] win-chance calc failed:', e.message);
+    }
 }
 
 // Game launch deep-link for an existing fleet -> the attack target. Only works for the
@@ -116,8 +146,13 @@ function launchUrl(a, target) {
     return `https://${process.env.PROXY_DOMAIN}/Game/Fleets/Launch/${a.fleetId}?systemId=${target.systemId}&planetIndex=${target.planetIndex}`;
 }
 
+function winTag(a) {
+    if (a.win == null) return '';
+    return ` · 🎲 ${Math.round(a.win * 100)}%${a.winUnknown ? '?' : ''}`;
+}
+
 function defenderLine(a, extra, target) {
-    let s = `${SOURCE_TAG[a.source] || ''} **${a.name}**${a.mention ? ' ' + a.mention : ''} \`[${a.cv.toLocaleString()} CV]\` ➔ ETA ${formatTime(a.eta)}${extra || ''}`;
+    let s = `${SOURCE_TAG[a.source] || ''} **${a.name}**${a.mention ? ' ' + a.mention : ''} \`[${a.cv.toLocaleString()} CV]\` ➔ ETA ${formatTime(a.eta)}${winTag(a)}${extra || ''}`;
     const url = launchUrl(a, target);
     // Masked links ([text](url)) only render in embeds; this is a plain message (needed
     // so @mentions ping), so use a bare <url> — clickable, with the preview suppressed.
@@ -241,7 +276,8 @@ router.post('/incoming/defenders', requireAuth, (req, res) => {
         if (!result) return res.json({ success: true, mapped: false });
         const slim = (a) => ({
             name: a.name, cv: a.cv, eta: a.eta, delta: a.delta, source: a.source, note: a.note,
-            ownerId: a.ownerId, originSys: a.originSys, originIdx: a.originIdx, fleetId: a.fleetId
+            ownerId: a.ownerId, originSys: a.originSys, originIdx: a.originIdx, fleetId: a.fleetId,
+            win: a.win, winUnknown: a.winUnknown
         });
         res.json({
             success: true,

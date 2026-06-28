@@ -140,8 +140,9 @@ function launchLink(a, target) {
 
 function renderDefenderData(box, d, target) {
     if (!d.success || !d.mapped) { box.innerHTML = '<span style="opacity:.6">⚠️ Target system not mapped.</span>'; return; }
+    const winTag = (a) => a.win == null ? '' : ` · 🎲 ${Math.round(a.win * 100)}%${a.winUnknown ? '?' : ''}`;
     const row = (a, extra) =>
-        `<div>${SRC[a.source] || ''} <b>${a.name}</b> [${a.cv.toLocaleString()} CV] ➔ ${fmtTime(a.eta)}${extra}${launchLink(a, target)}</div>`;
+        `<div>${SRC[a.source] || ''} <b>${a.name}</b> [${a.cv.toLocaleString()} CV] ➔ ${fmtTime(a.eta)}${winTag(a)}${extra}${launchLink(a, target)}</div>`;
 
     let html = '';
     if (d.unknownTiming) {
