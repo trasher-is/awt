@@ -535,7 +535,7 @@ client.on('messageCreate', async (message) => {
             });
             embeds.push(new EmbedBuilder().setColor('#22c55e').addFields({
                 name: '🪐 Planets',
-                value: makeTable(['#', 'tag', 'name', 'pop', 'sb', 'p'], [3, 4, 14, 4, 3, 0], rows)
+                value: makeTable(['#', 'tag', 'name', 'p', 'sb', 'p'], [3, 4, 9, 3, 3, 0], rows)
             }));
         }
 
@@ -545,7 +545,7 @@ client.on('messageCreate', async (message) => {
             const rows = sorted.map(pl => [pl.planet_index, pl.author_name || 'Unknown', pl.note]);
             embeds.push(new EmbedBuilder().setColor('#f59e0b').addFields({
                 name: '📝 Plans',
-                value: makeTable(['#', 'name', 'plan'], [3, 14, 0], rows)
+                value: makeTable(['#', 'name', 'plan'], [3, 9, 0], rows)
             }));
         }
 
