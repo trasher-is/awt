@@ -1314,13 +1314,13 @@ async function sendIncomingAlert(content) {
 }
 
 /**
- * Send OR edit the incoming-attack alert tied to a specific game attacking-fleet id.
- * The first call for a fleet posts a new message and records its id; later calls (e.g.
- * after re-scanning the attacker's profile) edit that same message in place. Falls back
- * to sending a fresh message if the original was deleted or the channel changed.
- * Returns { ok, edited } so the caller can tell the user what happened.
+ * Send OR edit the incoming-attack alert for a given attack identity (alertKey =
+ * "system:planet:attacker"). The first call posts a new message and records its id;
+ * later calls — whether from the webhook auto-post or the News "announce" button —
+ * edit that SAME message. Falls back to a fresh message if the original was deleted or
+ * the channel changed. Returns { ok, edited, messageId, channelId }.
  */
-async function sendOrEditIncoming(fleetId, content) {
+async function sendOrEditIncoming(alertKey, content) {
     if (!client.isReady()) return { ok: false, error: 'Discord bot not ready' };
     const channelId = getSettingValue('discord_incoming_channel');
     if (!channelId) return { ok: false, error: 'No incoming channel configured' };
@@ -1340,18 +1340,18 @@ async function sendOrEditIncoming(fleetId, content) {
     const text = content.length > 1990 ? content.slice(0, 1987) + '...' : content;
 
     const record = (msgId) => db.prepare(`
-        INSERT INTO incoming_alerts (fleet_id, channel_id, message_id) VALUES (?, ?, ?)
-        ON CONFLICT(fleet_id) DO UPDATE SET
+        INSERT INTO incoming_msgs (alert_key, channel_id, message_id) VALUES (?, ?, ?)
+        ON CONFLICT(alert_key) DO UPDATE SET
             channel_id = excluded.channel_id,
             message_id = excluded.message_id,
             updated_at = CURRENT_TIMESTAMP
-    `).run(fleetId, channelId, msgId);
+    `).run(alertKey, channelId, msgId);
 
-    // Try to edit the existing alert first (same fleet, same channel).
+    // Try to edit the existing alert first (same attack, same channel).
     let existing = null;
     try {
-        existing = fleetId != null
-            ? db.prepare(`SELECT message_id, channel_id FROM incoming_alerts WHERE fleet_id = ?`).get(fleetId)
+        existing = alertKey != null
+            ? db.prepare(`SELECT message_id, channel_id FROM incoming_msgs WHERE alert_key = ?`).get(alertKey)
             : null;
     } catch (err) { existing = null; }
 
@@ -1368,7 +1368,7 @@ async function sendOrEditIncoming(fleetId, content) {
 
     try {
         const sent = await channel.send({ content: text });
-        if (fleetId != null) record(sent.id);
+        if (alertKey != null) record(sent.id);
         return { ok: true, edited: false, messageId: sent.id, channelId };
     } catch (err) {
         console.error('[Discord] Failed to send incoming alert:', err.message);

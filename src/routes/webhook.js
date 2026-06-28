@@ -1,10 +1,6 @@
 const express = require('express');
-const { formatTime } = require('../utils/travel-calc');
-const { sendIncomingAlert } = require('../discord_bot');
-const {
-    ONTIME_LIMIT, LATE_LIMIT, SOURCE_TAG,
-    cleanInt, computeInterceptors
-} = require('../utils/interceptors');
+const { cleanInt } = require('../utils/interceptors');
+const incoming = require('./incoming');
 const router = express.Router();
 
 // Parse the forwarded game-notification text into structured attack data.
@@ -52,55 +48,19 @@ function parseIncoming(text) {
     return data;
 }
 
-function buildMessage(attack, result) {
-    const lines = [];
-    lines.push('🚨 **Incoming Attack**');
-    lines.push(`⚔️ **Attacker:** ${attack.attackerName} [${attack.attackerTag}] — ${attack.cv.toLocaleString()} CV, ${attack.tr.toLocaleString()} TR`);
-
-    const ships = [];
-    if (attack.destroyers) ships.push(`${attack.destroyers.toLocaleString()} DS`);
-    if (attack.cruisers) ships.push(`${attack.cruisers.toLocaleString()} CR`);
-    if (attack.battleships) ships.push(`${attack.battleships.toLocaleString()} BS`);
-    if (ships.length) lines.push(`🛰️ **Fleet:** ${ships.join(', ')}`);
-
-    lines.push(`🎯 **Target:** ${attack.defenderName} — ${attack.systemName} #${attack.planetIndex} [${attack.systemId}]`);
-    if (attack.arrivalUnix > 0) lines.push(`🕐 **Arrival:** <t:${attack.arrivalUnix}:R>`);
-
-    if (!result) {
-        lines.push('\n⚠️ *Target system not in database — cannot compute interceptors.*');
-        return lines.join('\n');
-    }
-
-    if (result.unknownTiming) {
-        lines.push('\n🛡️ **Closest defenders** *(arrival time unknown):*');
-        if (result.onTime.length === 0) lines.push('❌ No allied defenders found.');
-        result.onTime.forEach(a => {
-            lines.push(`• ${SOURCE_TAG[a.source] || ''} **${a.name}**${a.mention ? ' ' + a.mention : ''} \`[${a.cv.toLocaleString()} CV]\` ➔ ETA ${formatTime(a.eta)}${a.note ? ` *(${a.note})*` : ''}`);
-        });
-        return lines.join('\n');
-    }
-
-    lines.push('\n🛡️ **Can defend in time:**');
-    if (result.onTime.length === 0) {
-        lines.push('❌ No allied defender can intercept in time.');
-    } else {
-        result.onTime.slice(0, ONTIME_LIMIT).forEach(a => {
-            lines.push(`🟢 ${SOURCE_TAG[a.source] || ''} **${a.name}**${a.mention ? ' ' + a.mention : ''} \`[${a.cv.toLocaleString()} CV]\` ➔ ETA ${formatTime(a.eta)} *(spare ${formatTime(a.delta)}${a.note ? `, ${a.note}` : ''})*`);
-        });
-        if (result.onTime.length > ONTIME_LIMIT) {
-            lines.push(`*...and ${result.onTime.length - ONTIME_LIMIT} more in time.*`);
-        }
-    }
-
-    if (result.late.length > 0) {
-        lines.push('\n🟡 **Just missing it:**');
-        result.late.slice(0, LATE_LIMIT).forEach(a => {
-            lines.push(`🟡 ${SOURCE_TAG[a.source] || ''} **${a.name}**${a.mention ? ' ' + a.mention : ''} \`[${a.cv.toLocaleString()} CV]\` ➔ ETA ${formatTime(a.eta)} *(late by ${formatTime(Math.abs(a.delta))}${a.note ? `, ${a.note}` : ''})*`);
-        });
-    }
-
-    lines.push('\n_🛰️ orbit · ✈️ in flight · 🏗️ build & launch_');
-    return lines.join('\n');
+// Map the parsed webhook text into the shared announceIncoming payload.
+function toAnnounceData(a) {
+    return {
+        attacker: { id: null, name: a.attackerName, tag: a.attackerTag },
+        target: {
+            systemId: a.systemId,
+            planetIndex: a.planetIndex,
+            planetName: `${a.systemName} #${a.planetIndex}`
+        },
+        cv: a.cv,
+        ships: { transports: a.tr, destroyers: a.destroyers, cruisers: a.cruisers, battleships: a.battleships },
+        arrivalUnix: a.arrivalUnix
+    };
 }
 
 function extractRaw(payload) {
@@ -112,43 +72,30 @@ function extractRaw(payload) {
 }
 
 // --- INCOMING ATTACK WEBHOOK (external; no session auth) ---
-// Pass ?preview=1 (or { "preview": true }) to get the assembled message back in the
-// HTTP response WITHOUT posting to Discord — handy for testing parsing + interceptors.
-router.post('/game-notifications', (req, res) => {
+// Auto-posts the incoming alert via the SAME path as the News "announce" button, so the
+// News-page refresh edits this very message. Pass ?preview=1 to get the parsed data back
+// without posting.
+router.post('/game-notifications', async (req, res) => {
     const payload = req.body || {};
     const preview = req.query.preview === '1' || req.query.preview === 'true' || payload.preview === true;
 
-    let attack = null, message = null, result = null;
+    let attack = null;
     try {
         const raw = extractRaw(payload);
-        if (raw.trim()) {
-            attack = parseIncoming(raw);
-            if (attack) {
-                const nowUnix = Math.floor(Date.now() / 1000);
-                result = computeInterceptors(attack, nowUnix);
-                message = buildMessage(attack, result);
-            }
-        }
+        if (raw.trim()) attack = parseIncoming(raw);
     } catch (err) {
-        console.error('[Webhook] Error processing game notification:', err);
+        console.error('[Webhook] Error parsing game notification:', err);
         if (preview) return res.status(500).json({ ok: false, error: err.message });
         return res.status(200).send('OK');
     }
 
     if (preview) {
-        return res.json({
-            ok: true,
-            parsed: attack,
-            matched: !!attack,
-            interceptors: result,
-            message: message
-        });
+        return res.json({ ok: true, matched: !!attack, parsed: attack, data: attack ? toAnnounceData(attack) : null });
     }
 
-    // Normal mode: acknowledge immediately, then dispatch to Discord.
     res.status(200).send('OK');
-    if (message) {
-        sendIncomingAlert(message).catch(err =>
+    if (attack) {
+        incoming.announceIncoming(toAnnounceData(attack)).catch(err =>
             console.error('[Webhook] Failed to dispatch incoming alert:', err.message)
         );
     }

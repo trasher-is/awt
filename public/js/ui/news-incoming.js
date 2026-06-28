@@ -121,11 +121,16 @@ function fmtTime(sec) {
 
 const SRC = { orbit: '🛰️', flight: '✈️', build: '🏗️' };
 
-async function fetchDefenders(target, arrivalUnix) {
+async function fetchDefenders(info, arrivalUnix) {
     const res = await fetch('/hub-api/incoming/defenders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target, arrivalUnix: arrivalUnix || 0 })
+        // Send the attacker + fleet too, so win chances are computed vs the real
+        // incoming fleet (not an empty one).
+        body: JSON.stringify({
+            target: info.target, arrivalUnix: arrivalUnix || 0,
+            attacker: info.attacker, ships: info.ships, cv: info.cv
+        })
     });
     return res.json();
 }
@@ -190,16 +195,17 @@ async function enrichFleetIds(d) {
     return true;
 }
 
-async function renderDefenders(box, target, arrivalUnix) {
+async function renderDefenders(box, info, arrivalUnix) {
     if (!box) return;
+    const target = info.target;
     box.style.display = 'block';
     box.innerHTML = '<span style="opacity:.6">Computing defenders…</span>';
     try {
-        let d = await fetchDefenders(target, arrivalUnix);
+        let d = await fetchDefenders(info, arrivalUnix);
         renderDefenderData(box, d, target);
         // Pull fresh fleet ids for launch links, then re-render with them.
         if (await enrichFleetIds(d)) {
-            d = await fetchDefenders(target, arrivalUnix);
+            d = await fetchDefenders(info, arrivalUnix);
             renderDefenderData(box, d, target);
         }
     } catch (e) {
@@ -232,7 +238,7 @@ async function refreshAttacker(info, span, arrivalUnix, defBox, btn) {
         toast(`${info.attacker.name} intel + ${n} members' fleets updated`);
 
         // 3. Show who can defend in time, right here on the page.
-        await renderDefenders(defBox, info.target, arrivalUnix);
+        await renderDefenders(defBox, info, arrivalUnix);
     } catch (err) {
         console.error('[News] attacker refresh failed:', err);
         toast('Refresh failed');

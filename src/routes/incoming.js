@@ -128,9 +128,13 @@ function attachWinChances(result, data) {
     try {
         const s = data.ships || {};
         const enemyFleet = [s.destroyers || 0, s.cruisers || 0, s.battleships || 0];
-        const enemyRow = data.attacker && data.attacker.id
-            ? db.prepare(`SELECT ${STAT_COLS} FROM players WHERE id = ?`).get(data.attacker.id)
-            : null;
+        let enemyRow = null;
+        if (data.attacker && data.attacker.id) {
+            enemyRow = db.prepare(`SELECT ${STAT_COLS} FROM players WHERE id = ?`).get(data.attacker.id);
+        }
+        if (!enemyRow && data.attacker && data.attacker.name) {
+            enemyRow = db.prepare(`SELECT ${STAT_COLS} FROM players WHERE LOWER(name) = ?`).get(data.attacker.name.toLowerCase());
+        }
         const enemyStats = resolveStats(enemyRow);
 
         const statStmt = db.prepare(`SELECT ${STAT_COLS} FROM players WHERE LOWER(name) = ?`);
@@ -217,22 +221,42 @@ function buildReply(result, planetLabel, target) {
     return L.join('\n');
 }
 
-// --- ANNOUNCE / UPDATE AN INCOMING ON DISCORD ---
-// POST /hub-api/incoming/announce
-// Body: { fleetId, attacker:{id,name,tag}, target:{planetId,systemId,planetIndex,planetName}, cv, ships:{...}, arrivalText }
-// Core announce/update logic, shared by the HTTP route and the dev test harness.
-// Edits (or sends) the main alert, then posts a pinging reply when the on-time roster
-// gains someone. Returns { ok, edited, replied, error }.
-async function announceIncoming(data) {
-    const fleetId = parseInt(data.fleetId, 10);
-    if (!Number.isInteger(fleetId) || fleetId <= 0) return { ok: false, error: 'Missing/invalid fleetId' };
-    if (!data.attacker || !data.attacker.name || !data.target) return { ok: false, error: 'Missing attacker/target' };
+// Stable identity for an incoming, shared by the webhook auto-post and the News announce
+// so both edit the same Discord message: "system:planet:attacker" (attacker lowercased).
+function alertKeyFor(data) {
+    const t = data.target || {};
+    const name = (data.attacker && data.attacker.name ? data.attacker.name : '').toLowerCase().trim();
+    return `${t.systemId}:${t.planetIndex}:${name}`;
+}
 
-    const stats = data.attacker.id ? getStatsByIds([data.attacker.id])[data.attacker.id] : null;
+// --- ANNOUNCE / UPDATE AN INCOMING ON DISCORD ---
+// Body: { attacker:{id,name,tag}, target:{systemId,planetIndex,planetName}, cv, ships:{...}, arrivalUnix }
+// Core announce/update logic, shared by the webhook auto-post, the News "announce" button,
+// and the dev test harness. Edits (or sends) the main alert keyed by the attack identity,
+// then posts a pinging reply when the on-time roster gains someone. Returns { ok, edited, replied }.
+async function announceIncoming(data) {
+    if (!data.attacker || !data.attacker.name || !data.target ||
+        data.target.systemId == null || data.target.planetIndex == null) {
+        return { ok: false, error: 'Missing attacker/target' };
+    }
+    const alertKey = alertKeyFor(data);
+
+    let stats = data.attacker.id ? getStatsByIds([data.attacker.id])[data.attacker.id] : null;
+    if (!stats) {
+        // Webhook only knows the attacker's name — resolve stats by name.
+        const row = db.prepare(`
+            SELECT p.id, p.name, p.level, p.has_intel, p.race_speed, p.race_attack, p.race_defense,
+                   p.physics, p.mathematics, p.energy, a.tag AS alliance_tag
+            FROM players p LEFT JOIN alliances a ON p.alliance_id = a.id
+            WHERE LOWER(p.name) = ?
+        `).get(data.attacker.name.toLowerCase());
+        if (row) stats = { ...row, statLine: statLine(row) };
+    }
+
     const defenders = computeDefenders(data);
     const message = buildAnnounce(data, stats, defenders);
 
-    const sent = await sendOrEditIncoming(fleetId, message);
+    const sent = await sendOrEditIncoming(alertKey, message);
     if (!sent.ok) return { ok: false, error: sent.error };
 
     // Editing the main alert never pings anyone, so when the on-time roster GAINS someone
@@ -241,7 +265,7 @@ async function announceIncoming(data) {
     let replied = false;
     const current = onTimeNames(defenders);
     try {
-        const prevRow = db.prepare(`SELECT last_ontime FROM incoming_alerts WHERE fleet_id = ?`).get(fleetId);
+        const prevRow = db.prepare(`SELECT last_ontime FROM incoming_msgs WHERE alert_key = ?`).get(alertKey);
         const prev = prevRow && prevRow.last_ontime ? prevRow.last_ontime.split(',').filter(Boolean) : [];
         const prevSet = new Set(prev);
         const newcomers = current.filter(n => !prevSet.has(n));
@@ -251,7 +275,7 @@ async function announceIncoming(data) {
             const reply = buildReply(defenders, planetLabel, data.target);
             if (reply) replied = await replyToIncoming(sent.channelId, sent.messageId, reply);
         }
-        db.prepare(`UPDATE incoming_alerts SET last_ontime = ? WHERE fleet_id = ?`).run(current.join(','), fleetId);
+        db.prepare(`UPDATE incoming_msgs SET last_ontime = ? WHERE alert_key = ?`).run(current.join(','), alertKey);
     } catch (e) {
         console.error('[Incoming] reply bookkeeping failed:', e.message);
     }

@@ -394,6 +394,19 @@ function initDatabase() {
         console.log("[DB] Added last_ontime column to incoming_alerts table.");
     } catch (e) {}
 
+    // Incoming alerts keyed by the attack identity (system:planet:attacker) rather than a
+    // game fleet id, so the auto-posted webhook message and the News-page "announce" both
+    // edit the SAME Discord message for a given incoming.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS incoming_msgs (
+            alert_key TEXT PRIMARY KEY,
+            channel_id TEXT,
+            message_id TEXT,
+            last_ontime TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {
