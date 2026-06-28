@@ -83,6 +83,7 @@ client.on('messageCreate', async (message) => {
             .setDescription('Here is a list of all available commands and how to use them:')
             .setColor('#10b981') // Green color
             .addFields(
+                { name: '`!link <hub name>`', value: 'Links your Discord account to your Hub account so you get @pinged on incoming alerts you can defend.\n*Example: `!link caveman`*' },
                 { name: '`!intels`', value: 'Opens an interactive text menu to browse tracked intelligence profiles.' },
                 { name: '`!sys <system_id>`', value: 'Displays intel for a specific solar system (Planets, Fleets, Plans).\n*Example: `!sys 123`*' },
                 { name: '`!intel <player_name>`', value: 'Displays detailed intelligence and stats for a specific player.\n*Example: `!intel PlayerOne`*' },
@@ -98,6 +99,28 @@ client.on('messageCreate', async (message) => {
             .setFooter({ text: 'AWT Intelligence Hub' });
 
         return message.reply({ embeds: [embed] });
+    }
+
+    // ----------------------------------------------------
+    // !link <hub/game name> - link this Discord account to a Hub account
+    // ----------------------------------------------------
+    if (command === 'link') {
+        const gameName = args.join(' ').trim();
+        if (!gameName) {
+            return message.reply('Usage: `!link <your in-game / Hub name>` — links your Discord so you get pinged on incoming alerts you can defend.');
+        }
+        const user = db.prepare(`SELECT id, game_name FROM app_users WHERE LOWER(game_name) = ?`).get(gameName.toLowerCase());
+        if (!user) {
+            return message.reply(`❌ No Hub account named **${gameName}**. Use your Hub login / in-game name (check spelling).`);
+        }
+        try {
+            db.prepare(`UPDATE app_users SET discord_id = ?, discord_name = ? WHERE id = ?`)
+                .run(message.author.id, message.author.username, user.id);
+            return message.reply(`✅ Linked **${user.game_name}** to <@${message.author.id}>. You'll now be pinged on incoming alerts when you can defend.`);
+        } catch (e) {
+            console.error('[Discord] !link failed:', e.message);
+            return message.reply('❌ Linking failed. Try again later.');
+        }
     }
 
     // ----------------------------------------------------
