@@ -109,7 +109,14 @@ function computeDefenders(data) {
         arrivalUnix: Number.isInteger(arr) && arr > 0 ? arr : 0
     }, Math.floor(Date.now() / 1000));
 
-    if (result) attachWinChances(result, data);
+    if (result) {
+        attachWinChances(result, data);
+        // Only surface defenders with a real shot (≥50%) — anything less is a gamble.
+        // Keep entries whose win couldn't be computed (null) so they aren't silently lost.
+        const worthIt = d => d.win == null || d.win >= 0.5;
+        result.onTime = result.onTime.filter(worthIt);
+        if (result.late) result.late = result.late.filter(worthIt);
+    }
     return result;
 }
 
