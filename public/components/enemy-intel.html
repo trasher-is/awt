@@ -40,23 +40,25 @@
             <thead>
                 <tr class="border-b border-border bg-zinc-900 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10">
                     <th class="sticky left-0 z-20 bg-zinc-900 px-2 py-1.5 cursor-pointer hover:bg-accent/40 select-none w-[110px]" data-sort-col="name" data-sort-type="string">Player <i class="fa-solid fa-sort ms-1 opacity-50"></i></th>
-                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="economy" data-sort-type="number">Eco <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 cursor-pointer hover:bg-accent/40 select-none" data-sort-col="idle_seconds" data-sort-type="number">Idle <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="total_planets" data-sort-type="number">Planets <i class="fa-solid fa-sort opacity-50"></i></th>
                     <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="calculated_prod" data-sort-type="number">~Prod/h <i class="fa-solid fa-sort opacity-50"></i></th>
-                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="trade_revenue" data-sort-type="number">TR% <i class="fa-solid fa-sort opacity-50"></i></th>
                     <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="cv_day" data-sort-type="number">~CV/Day <i class="fa-solid fa-sort opacity-50"></i></th>
                     <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="max_cv" data-sort-type="number">Max CV <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="race_speed" data-sort-type="number">Spd <i class="fa-solid fa-sort opacity-50"></i></th>
                     <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="race_attack" data-sort-type="number">Att <i class="fa-solid fa-sort opacity-50"></i></th>
                     <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="race_defense" data-sort-type="number">Def <i class="fa-solid fa-sort opacity-50"></i></th>
-                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="race_speed" data-sort-type="number">Spd <i class="fa-solid fa-sort opacity-50"></i></th>
                     <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="physics" data-sort-type="number">Phy <i class="fa-solid fa-sort opacity-50"></i></th>
                     <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="mathematics" data-sort-type="number">Math <i class="fa-solid fa-sort opacity-50"></i></th>
                     <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="energy" data-sort-type="number">Enrg <i class="fa-solid fa-sort opacity-50"></i></th>
-                    <th class="px-2 py-1.5 cursor-pointer hover:bg-accent/40 select-none" data-sort-col="idle_seconds" data-sort-type="number">Idle <i class="fa-solid fa-sort opacity-50"></i></th>
-                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="total_planets" data-sort-type="number">Planets <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="biology" data-sort-type="number">Bio <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="social" data-sort-type="number">Soc <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="calculated_science" data-sort-type="number">~Sci/h <i class="fa-solid fa-sort opacity-50"></i></th>
+                    <th class="px-2 py-1.5 text-right cursor-pointer hover:bg-accent/40 select-none" data-sort-col="intel_updated_at" data-sort-type="string">Last Intel <i class="fa-solid fa-sort opacity-50"></i></th>
                 </tr>
             </thead>
             <tbody id="enemy-intel-table-body" class="divide-y divide-border/40 bg-black text-xs font-mono">
-                <tr id="war-room-placeholder"><td colspan="14" class="text-center py-8 text-muted-foreground">Select an target alliance pill above to filter dataset matrices</td></tr>
+                <tr id="war-room-placeholder"><td colspan="16" class="text-center py-8 text-muted-foreground">Select an target alliance pill above to filter dataset matrices</td></tr>
             </tbody>
         </table>
     </div>

@@ -10,8 +10,9 @@ router.get('/intel/war-room/players', requireAuth, (req, res) => {
 
     try {
         const players = db.prepare(`
-            SELECT p.id, p.name, p.economy, p.social, p.physics, p.mathematics, p.energy, p.idle_time,
-                   p.race_attack, p.race_defense, p.race_speed, p.race_production, p.updated_at as player_scan_time,
+            SELECT p.id, p.name, p.economy, p.social, p.physics, p.mathematics, p.energy, p.biology, p.idle_time,
+                   p.race_attack, p.race_defense, p.race_speed, p.race_production, p.race_science,
+                   p.updated_at as player_scan_time, p.intel_updated_at,
                    p.total_population, p.total_factories, p.total_farms, p.total_cybernetics, p.total_labs,
                    p.trade_revenue, p.artefact,
                    p.level, p.culture_level, p.has_intel,

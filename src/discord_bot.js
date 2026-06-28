@@ -546,19 +546,17 @@ client.on('messageCreate', async (message) => {
         // --- PLANETS (green) ---
         if (planets.length > 0) {
             const rows = planets.map(p => {
-                const plan = plans.find(pl => pl.planet_index === p.planet_index);
                 return [
                     p.planet_index,
                     p.owner_name ? (p.ally_tag || '?') : '',
                     p.owner_name || '',
                     p.population || 0,
-                    p.starbase || 0,
-                    plan ? '📝' : ''
+                    p.starbase || 0
                 ];
             });
             embeds.push(new EmbedBuilder().setColor('#22c55e').addFields({
                 name: '🪐 Planets',
-                value: makeTable(['#', 'tag', 'name', 'p', 'sb', 'p'], [3, 4, 9, 3, 3, 0], rows)
+                value: makeTable(['#', 'tag', 'name', 'p', 'sb'], [3, 4, 9, 3, 0], rows)
             }));
         }
 

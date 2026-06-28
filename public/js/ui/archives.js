@@ -158,6 +158,14 @@ export async function openEnemyIntelPanel() {
     loadWarRoomAlliancesList();
 }
 
+// SQLite CURRENT_TIMESTAMP returns 'YYYY-MM-DD HH:MM:SS' in UTC with no zone marker.
+// new Date() would read that as local time, so we explicitly tag it as UTC before parsing.
+function parseSqliteUtc(ts) {
+    if (!ts) return null;
+    const d = new Date(ts.replace(' ', 'T') + 'Z');
+    return isNaN(d.getTime()) ? null : d;
+}
+
 function parseIdleStringToSeconds(idleStr) {
     if (!idleStr || idleStr === 'Unknown') return -1;
     if (/active|online/i.test(idleStr)) return 0;
@@ -214,8 +222,8 @@ function selectWarRoomAlliance(allianceId, tag, lastScanTime) {
     selectedAllianceId = allianceId;
     document.getElementById('btn-refresh-enemy-intel').removeAttribute('disabled');
     
-    if (lastScanTime) {
-        const d = new Date(lastScanTime);
+    const d = parseSqliteUtc(lastScanTime);
+    if (d) {
         document.getElementById('enemy-intel-last-scanned').innerText = `Last Scanned: ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
     } else {
         document.getElementById('enemy-intel-last-scanned').innerText = 'Last Scanned: N/A';
@@ -238,7 +246,7 @@ function artifactProdMultiplier(artefact) {
 async function loadWarRoomMatrixData() {
     if (!selectedAllianceId) return;
     const tbody = document.getElementById('enemy-intel-table-body');
-    tbody.innerHTML = `<tr><td colspan="14" class="text-center py-6 font-mono text-zinc-400"><i class="fa-solid fa-spinner fa-spin me-2 text-red-500"></i> Decrypting intelligence matrices from DB indexes...</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="16" class="text-center py-6 font-mono text-zinc-400"><i class="fa-solid fa-spinner fa-spin me-2 text-red-500"></i> Decrypting intelligence matrices from DB indexes...</td></tr>`;
 
     try {
         const res = await fetch(`/hub-api/intel/war-room/players?alliance_id=${selectedAllianceId}`);
@@ -266,13 +274,22 @@ async function loadWarRoomMatrixData() {
             const maxCv = pop * (social + 3) * 10;
             const idleSecs = parseIdleStringToSeconds(p.idle_time);
 
-            return { ...p, calculated_prod: estimatedProd, cv_day: cvDay, max_cv: maxCv, idle_seconds: idleSecs };
+            // ~Science/h = (labs + population) base, scaled by the race science trait
+            // and trade revenue %, mirroring the production formula.
+            //   race_science: -4..+4, each step = 4%  ->  1 + race_science*0.04
+            //   trade_revenue: stored as % (e.g. 49 = +49%)  ->  1 + tr/100
+            const labs = p.total_labs || 0;
+            const sciBase = labs + pop;
+            const sciMult = 1 + (p.race_science || 0) * 0.04;
+            const estimatedScience = sciBase * sciMult * trMult;
+
+            return { ...p, calculated_prod: estimatedProd, calculated_science: estimatedScience, cv_day: cvDay, max_cv: maxCv, idle_seconds: idleSecs };
         });
 
         if (warRoomSortCol) executeWarRoomSortingRoutine();
         else renderWarRoomTable(warRoomData);
     } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="14" class="text-center py-6 text-red-500 font-bold">API Sync Failure Exception Event: ${err.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="16" class="text-center py-6 text-red-500 font-bold">API Sync Failure Exception Event: ${err.message}</td></tr>`;
     }
 }
 
@@ -281,7 +298,7 @@ function renderWarRoomTable(data) {
     tbody.innerHTML = '';
 
     if(data.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="14" class="text-center py-6 text-zinc-500">No scanned player rows mapped to this target index loop</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="16" class="text-center py-6 text-zinc-500">No scanned player rows mapped to this target index loop</td></tr>`;
         return;
     }
 
@@ -297,21 +314,41 @@ function renderWarRoomTable(data) {
         }
 
         const q = '<span class="text-zinc-600 font-bold">?</span>';
+
+        // Planets vs culture level. culture_level is parsed/stored for every player
+        // regardless of intel, so it's always shown (not masked). Planets below the
+        // culture level means the player can build more planets -> flag it red.
+        const planets = p.total_planets || 0;
+        const culture = p.culture_level || 0;
+        const planetsBelow = culture > 0 && planets < culture;
+        const planetsCls = planetsBelow ? 'text-rose-500 font-bold' : 'text-zinc-400 font-bold';
+        const planetsCell = `<span title="Culture level: ${culture}">${planets} / ${culture || '?'}</span>`;
+
+        // Last intel timestamp (UTC in DB -> browser-local display).
+        const intelDate = parseSqliteUtc(p.intel_updated_at);
+        const lastIntel = intelDate
+            ? `<span title="${intelDate.toLocaleString()}">${intelDate.toLocaleDateString()}</span>`
+            : '<span class="text-zinc-600">never</span>';
+
         const tr = document.createElement('tr');
         tr.className = "hover:bg-zinc-900/40 transition-colors border-b border-zinc-900/60";
         tr.innerHTML = `
             <td class="sticky left-0 z-10 bg-black px-2 py-1 font-bold text-foreground break-words leading-tight w-[110px] border-r border-zinc-800"><a href="/Game/Players/Profile/${p.id}" target="_blank" class="hover:underline hover:text-red-400">${p.name}</a></td>
-            <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : p.economy}</td>
+            <td class="px-2 py-1"><span class="px-1.5 py-0.5 rounded text-[11px] font-mono tracking-wide whitespace-nowrap" style="${idleStyle}">${p.idle_time || 'Unknown'}</span></td>
+            <td class="px-2 py-1 text-right ${planetsCls}">${planetsCell}</td>
             <td class="px-2 py-1 text-right text-emerald-400 font-bold">${Math.round(p.calculated_prod).toLocaleString()}</td>
-            <td class="px-2 py-1 text-right text-primary">${isUnknown ? q : (p.trade_revenue || 0) + '%'}</td>
             <td class="px-2 py-1 text-right text-amber-400 font-bold">${isUnknown ? q : p.cv_day.toLocaleString()}</td>
             <td class="px-2 py-1 text-right text-cyan-400">${isUnknown ? q : p.max_cv.toLocaleString()}</td>
-            <td class="px-2 py-1 text-right">${formatRaceModifier(p.race_attack, isUnknown)}</td><td class="px-2 py-1 text-right">${formatWarRoomModifier(p.race_defense, isUnknown)}</td><td class="px-2 py-1 text-right">${formatRaceModifier(p.race_speed, isUnknown)}</td>
+            <td class="px-2 py-1 text-right">${formatRaceModifier(p.race_speed, isUnknown)}</td>
+            <td class="px-2 py-1 text-right">${formatRaceModifier(p.race_attack, isUnknown)}</td>
+            <td class="px-2 py-1 text-right">${formatWarRoomModifier(p.race_defense, isUnknown)}</td>
             <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : (p.physics || 0)}</td>
             <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : (p.mathematics || 0)}</td>
             <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : (p.energy || 0)}</td>
-            <td class="px-2 py-1"><span class="px-1.5 py-0.5 rounded text-[11px] font-mono tracking-wide whitespace-nowrap" style="${idleStyle}">${p.idle_time || 'Unknown'}</span></td>
-            <td class="px-2 py-1 text-right text-zinc-400 font-bold">${p.total_planets || 0} / ${isUnknown ? '?' : (p.culture_level || '?')}</td>
+            <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : (p.biology || 0)}</td>
+            <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : (p.social || 0)}</td>
+            <td class="px-2 py-1 text-right text-violet-400 font-bold">${Math.round(p.calculated_science).toLocaleString()}</td>
+            <td class="px-2 py-1 text-right text-zinc-400">${lastIntel}</td>
         `;
         tbody.appendChild(tr);
     });
