@@ -111,9 +111,9 @@ function computeDefenders(data) {
 
     if (result) {
         attachWinChances(result, data);
-        // Only surface defenders with a real shot (≥50%) — anything less is a gamble.
+        // Only surface defenders with a real shot (≥25%) — anything less is a gamble.
         // Keep entries whose win couldn't be computed (null) so they aren't silently lost.
-        const worthIt = d => d.win == null || d.win >= 0.5;
+        const worthIt = d => d.win == null || d.win >= 0.25;
         result.onTime = result.onTime.filter(worthIt);
         if (result.late) result.late = result.late.filter(worthIt);
     }
