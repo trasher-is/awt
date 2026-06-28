@@ -56,20 +56,23 @@ function fmt(n) {
 // Separate logistic win probability for the defender, driven by the initial CV ratio
 // plus stat differences. cvD / cvA are total combat values (defender incl. starbase).
 function calcWin(d, a, cvD, cvA) {
-    // A 1.5× combat-value lead is a guaranteed win.
-    if (cvA >= 1.5 * cvD && cvD >= 0) return { winD: 0, winA: 1 };
-    if (cvD >= 1.5 * cvA && cvA >= 0) return { winD: 1, winA: 0 };
-
     const sgn = x => (x > 0 ? 1 : x < 0 ? -1 : 0);
     const dphys = d.phys - a.phys;
-    const denom = cvD + cvA;
-    let S = denom > 0 ? WIN_FORCE * ((cvD - cvA) / denom) : 0;
-    S += WIN_RA * (d.ra - a.ra);
     const adp = Math.abs(dphys);
-    S += sgn(dphys) * (WIN_PHYS_LIN * adp + WIN_PHYS_BRACKET * Math.floor(adp / 6));
-    // Player level only counts when the fleet fields all three ship types.
+
+    // Stat advantage (race attack, physics, player level) for the defender.
+    let statS = WIN_RA * (d.ra - a.ra);
+    statS += sgn(dphys) * (WIN_PHYS_LIN * adp + WIN_PHYS_BRACKET * Math.floor(adp / 6));
     const dFull = d.fleet.every(n => n > 0), aFull = a.fleet.every(n => n > 0);
-    if (dFull && aFull) S += WIN_LVL * (d.lvl - a.lvl);
+    if (dFull && aFull) statS += WIN_LVL * (d.lvl - a.lvl);
+
+    // A 1.5× combat-value lead is a guaranteed win — UNLESS the trailing side's stats
+    // fight back (race attack etc. can overturn a force deficit).
+    if (cvA >= 1.5 * cvD && statS <= 0) return { winD: 0, winA: 1 };
+    if (cvD >= 1.5 * cvA && statS >= 0) return { winD: 1, winA: 0 };
+
+    const denom = cvD + cvA;
+    const S = (denom > 0 ? WIN_FORCE * ((cvD - cvA) / denom) : 0) + statS;
     const winD = 1 / (1 + Math.exp(-S));
     return { winD, winA: 1 - winD };
 }
@@ -126,13 +129,16 @@ function calc() {
     // A side that's overwhelmingly destroyed (≥1.5× overkill) is annihilated and cannot
     // win on stats — the survivor decides. Only the contested (both-survive) case uses the
     // stat/force logistic. Mutual annihilation goes to the defender (attack failed).
-    const ANNIHILATE = 1.25; // overkill beyond this = no survivors (between "leaves 1" and "wiped")
-    const atkGone = rawAtkKilled >= ANNIHILATE;
-    const defGone = rawDefKilled >= ANNIHILATE;
+    // A clearly-annihilated side (≥1.25× overkill) can't win on stats. We only trust this
+    // when it's NOT a starbase+fleet defense — that combined case isn't modelled reliably,
+    // so there we fall back to the stat/force logistic.
+    const ANNIHILATE = 1.25;
+    const sbCombined = sbLvl > 0 && defFleet.some(n => n > 0);
+    const atkGone = !sbCombined && rawAtkKilled >= ANNIHILATE;
+    const defGone = !sbCombined && rawDefKilled >= ANNIHILATE;
     let winD, winA;
     if (atkGone && !defGone) { winD = 1; }
     else if (defGone && !atkGone) { winD = 0; }
-    else if (atkGone && defGone) { winD = 1; }
     else {
         // Win % weights the starbase slightly below its raw CV.
         const winCVD = cvOf(defFleet) + WIN_SB_FACTOR * sbCv;
