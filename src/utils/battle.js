@@ -14,7 +14,7 @@ const WIN_FORCE = 15.25;
 const WIN_RA = 0.50;
 const WIN_LVL = 0.069;
 const WIN_PHYS_LIN = 0.1034;
-const WIN_PHYS_BRACKET = 2.95;
+const WIN_PHYS_BRACKET = 1.475; // halved from 2.95 to match in-game +6-physics samples
 const ANNIHILATE = 1.25;
 
 const cvOf = f => f[0] * 3 + f[1] * 24 + f[2] * 60;

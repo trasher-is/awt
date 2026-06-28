@@ -42,7 +42,9 @@ const WIN_LVL   = 0.069;   // per player-level diff (only if a full D/C/B fleet)
 // Physics: small per-level term plus a big jump for every full 6-level bracket
 // (the in-game "+6 physics" threshold). Signed by the difference.
 const WIN_PHYS_LIN    = 0.1034;
-const WIN_PHYS_BRACKET = 2.95;
+// Per full 6-level physics bracket. Halved from 2.95 after in-game samples showed a +6
+// physics edge does NOT overcome a 1.5x force lead (150-vs-100 +6phy is still ~75% def).
+const WIN_PHYS_BRACKET = 1.475;
 
 let playerCache = null;
 
