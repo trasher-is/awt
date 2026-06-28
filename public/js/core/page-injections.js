@@ -558,12 +558,10 @@ export async function initProfilePLGrowth() {
             return;
         }
 
-        // SAD = Speed + Attack + Defence (raw sum, range −12..+12). Growth scales with SAD
-        // shifted so the minimum (−12, i.e. −4/−4/−4) gives zero growth; everything above
-        // grows. Rate calibrated from observed data: +4 SAD ≈ 1.41%/update (a level-7
-        // player went 4%→11% over two updates), anchored to 0 at SAD −12.
+        // SAD = Speed + Attack + Defence (raw sum, range −12..+12). Growth is linear across
+        // the range: −12 → 0% per update, +12 → 2.4% per update (0.1% per SAD point).
         const sad = speed + attack + defence;
-        const factor = Math.max(0, (sad + 12) * 0.00088);
+        const factor = Math.max(0, (sad + 12) * 0.001);
 
         if (factor <= 0) {
             placeholder.innerHTML = `<span style="color:#aaa;">PL ${currentXP.toLocaleString()} XP · SAD ${sad >= 0 ? '+' : ''}${sad} — no growth</span>`;
