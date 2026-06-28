@@ -33,9 +33,16 @@ const MATH_TOUGH = 0.0015;  // small symmetric toughness gain per math level
 const TOUGH = i => SHIPS[i].att + 2 * SHIPS[i].def;   // per-ship "toughness"
 
 // Win-% logistic coefficients (fit to in-game samples). Win % depends on FORCE RATIO
-// (initial CV) plus race-attack, physics and player level — NOT on race-defense or
-// mathematics (those change survivors only). A 1.5× CV lead is a guaranteed win.
-const WIN_FORCE = 15.25;   // logit weight on relative CV difference
+// (initial CV) and ATTACK RATIO, plus race-attack, physics and player level — NOT on
+// race-defense or mathematics (those change survivors only). A 1.5× CV lead is a
+// guaranteed win.
+//
+// The CV (12.25) and attack (3.0) weights sum to the old single 15.25 force weight, so
+// same-ship-type fights (where attack ratio == CV ratio) are unchanged. For MIXED
+// compositions at equal CV the attack term decides the winner — matching in-game, where
+// 1000 destroyers (2000 atk) beats 125 cruisers (1000 atk) ~73% despite equal CV.
+const WIN_FORCE = 12.25;   // logit weight on relative CV difference
+const WIN_ATT   = 3.0;     // logit weight on relative ATTACK-power difference
 const WIN_SB_FACTOR = 0.94; // starbase counts ~0.94× its CV toward the win ratio
 const WIN_RA    = 0.50;    // per race-attack level diff
 const WIN_LVL   = 0.069;   // per player-level diff (only if a full D/C/B fleet)
@@ -57,7 +64,7 @@ function fmt(n) {
 
 // Separate logistic win probability for the defender, driven by the initial CV ratio
 // plus stat differences. cvD / cvA are total combat values (defender incl. starbase).
-function calcWin(d, a, cvD, cvA) {
+function calcWin(d, a, cvD, cvA, attD, attA) {
     const sgn = x => (x > 0 ? 1 : x < 0 ? -1 : 0);
     const dphys = d.phys - a.phys;
     const adp = Math.abs(dphys);
@@ -74,7 +81,10 @@ function calcWin(d, a, cvD, cvA) {
     if (cvD >= 1.5 * cvA && statS >= 0) return { winD: 1, winA: 0 };
 
     const denom = cvD + cvA;
-    const S = (denom > 0 ? WIN_FORCE * ((cvD - cvA) / denom) : 0) + statS;
+    const attDenom = attD + attA;
+    const S = (denom > 0 ? WIN_FORCE * ((cvD - cvA) / denom) : 0)
+            + (attDenom > 0 ? WIN_ATT * ((attD - attA) / attDenom) : 0)
+            + statS;
     const winD = 1 / (1 + Math.exp(-S));
     return { winD, winA: 1 - winD };
 }
@@ -95,6 +105,7 @@ function calc() {
 
     // Enemy CV (offense) and own toughness Σ(att+2def), incl. starbase for the defender.
     const cvOf  = f => f.reduce((s, n, i) => s + n * SHIPS[i].cv, 0);
+    const attOf = f => f.reduce((s, n, i) => s + n * SHIPS[i].att, 0);
     const toughOf = f => f.reduce((s, n, i) => s + n * TOUGH(i), 0);
 
     const sbCv    = sbCV(sbLvl);
@@ -147,9 +158,12 @@ function calc() {
     if (atkGone && !defGone) { winD = 1; }
     else if (defGone && !atkGone) { winD = 0; }
     else {
-        // Win % weights the starbase slightly below its raw CV.
+        // Win % weights the starbase slightly below its raw CV. Attack power uses the
+        // starbase's att stat (att = def = floor(cv/2)).
         const winCVD = cvOf(defFleet) + WIN_SB_FACTOR * sbCv;
-        ({ winD } = calcWin(def, atk, winCVD, initCVA));
+        const attD = attOf(defFleet) + (sbLvl > 0 ? sbHalf(sbLvl) : 0);
+        const attA = attOf(atkFleet);
+        ({ winD } = calcWin(def, atk, winCVD, initCVA, attD, attA));
     }
     winA = 1 - winD;
 

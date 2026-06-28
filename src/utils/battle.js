@@ -10,7 +10,8 @@ const SHIPS = [
 const TOUGH = i => SHIPS[i].att + 2 * SHIPS[i].def;
 const RACE_DEF = 0.11;
 const MATH_TOUGH = 0.0015;
-const WIN_FORCE = 15.25;
+const WIN_FORCE = 12.25;   // CV-ratio weight (12.25 + WIN_ATT 3.0 = old 15.25)
+const WIN_ATT = 3.0;       // attack-power ratio weight (decides mixed-composition fights)
 const WIN_RA = 0.50;
 const WIN_LVL = 0.069;
 const WIN_PHYS_LIN = 0.1034;
@@ -18,6 +19,7 @@ const WIN_PHYS_BRACKET = 1.475; // halved from 2.95 to match in-game +6-physics 
 const ANNIHILATE = 1.25;
 
 const cvOf = f => f[0] * 3 + f[1] * 24 + f[2] * 60;
+const attOf = f => f[0] * SHIPS[0].att + f[1] * SHIPS[1].att + f[2] * SHIPS[2].att;
 const toughOf = f => f[0] * TOUGH(0) + f[1] * TOUGH(1) + f[2] * TOUGH(2);
 
 // Resolve a player's combat stats with the agreed fallbacks:
@@ -75,8 +77,11 @@ function winChance(allyFleet, ally, enemyFleet, enemy) {
     if (cvA >= 1.5 * cvD && statS <= 0) return 0;
     if (cvD >= 1.5 * cvA && statS >= 0) return 1;
 
-    const denom = cvD + cvA;
-    const S = (denom > 0 ? WIN_FORCE * ((cvD - cvA) / denom) : 0) + statS;
+    const attD = attOf(allyFleet), attA = attOf(enemyFleet);
+    const denom = cvD + cvA, attDenom = attD + attA;
+    const S = (denom > 0 ? WIN_FORCE * ((cvD - cvA) / denom) : 0)
+            + (attDenom > 0 ? WIN_ATT * ((attD - attA) / attDenom) : 0)
+            + statS;
     return 1 / (1 + Math.exp(-S));
 }
 
