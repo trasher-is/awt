@@ -98,11 +98,11 @@ function calc() {
     const sbCv    = sbCV(sbLvl);
     const sbTough = sbLvl > 0 ? sbHalf(sbLvl) * 3 : 0; // att + 2·def with att=def=floor(cv/2)
 
-    // Math threshold: a mathematics advantage of 6+ over the enemy grants +25% combat
-    // (both offense and toughness) to that side — the in-game "+6 → +25%" rule, which is
-    // why 20-vs-25 and 20-vs-26 differ so sharply.
-    const cmDef = 1 + 0.25 * ((def.math - atk.math) >= 6 ? 1 : 0);
-    const cmAtk = 1 + 0.25 * ((atk.math - def.math) >= 6 ? 1 : 0);
+    // Math threshold: a mathematics advantage of 6+ over the enemy grants +12.5% combat
+    // (both offense and toughness) to that side — the in-game "+6 math" bracket bonus.
+    const MATH_BRACKET = 0.125;
+    const cmDef = 1 + MATH_BRACKET * ((def.math - atk.math) >= 6 ? 1 : 0);
+    const cmAtk = 1 + MATH_BRACKET * ((atk.math - def.math) >= 6 ? 1 : 0);
 
     const enemyCVtoDef = cvOf(atkFleet) * cmAtk;
     const enemyCVtoAtk = (cvOf(defFleet) + sbCv) * cmDef;
@@ -123,8 +123,6 @@ function calc() {
 
     const initCVD = cvOf(defFleet) + sbCv;
     const initCVA = cvOf(atkFleet);
-    const cvDefRemain = survDef.reduce((s, n, i) => s + n * SHIPS[i].cv, 0) + survSB * sbCv;
-    const cvAtkRemain = survAtk.reduce((s, n, i) => s + n * SHIPS[i].cv, 0);
 
     // A side that's overwhelmingly destroyed (≥1.5× overkill) is annihilated and cannot
     // win on stats — the survivor decides. Only the contested (both-survive) case uses the
@@ -145,6 +143,22 @@ function calc() {
         ({ winD } = calcWin(def, atk, winCVD, initCVA));
     }
     winA = 1 - winD;
+
+    // In-game rule: the winning side is never fully wiped — you always keep at least one
+    // ship in a battle you win. If proportional losses would zero out the winner's fleet,
+    // leave a single ship of their largest stack standing.
+    const ensureSurvivor = (fleet, surv) => {
+        if (!fleet.some(n => n > 0)) return;            // had no ships to begin with
+        if (surv.reduce((s, n) => s + n, 0) >= 1) return; // already keeps a ship
+        let idx = 0;
+        fleet.forEach((n, i) => { if (n > fleet[idx]) idx = i; });
+        surv[idx] = 1;
+    };
+    if (winD >= winA) ensureSurvivor(defFleet, survDef);
+    else ensureSurvivor(atkFleet, survAtk);
+
+    const cvDefRemain = survDef.reduce((s, n, i) => s + n * SHIPS[i].cv, 0) + survSB * sbCv;
+    const cvAtkRemain = survAtk.reduce((s, n, i) => s + n * SHIPS[i].cv, 0);
 
     return { defFleet, atkFleet, sbLvl, survDef, survAtk, survSB,
              initCVD, initCVA, cvDefRemain, cvAtkRemain, winD, winA };

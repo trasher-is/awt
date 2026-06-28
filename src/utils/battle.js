@@ -46,8 +46,9 @@ function resolveStats(p) {
 
 // Probability (0..1) that the ally fleet beats the enemy fleet. Fleets are [D, C, B].
 function winChance(allyFleet, ally, enemyFleet, enemy) {
-    const cmD = 1 + 0.25 * ((ally.math - enemy.math) >= 6 ? 1 : 0);
-    const cmA = 1 + 0.25 * ((enemy.math - ally.math) >= 6 ? 1 : 0);
+    // +6 math bracket grants +12.5% combat to that side.
+    const cmD = 1 + 0.125 * ((ally.math - enemy.math) >= 6 ? 1 : 0);
+    const cmA = 1 + 0.125 * ((enemy.math - ally.math) >= 6 ? 1 : 0);
 
     const dT = toughOf(allyFleet) * (1 + RACE_DEF * ally.rd) * (1 + MATH_TOUGH * ally.math) * cmD;
     const aT = toughOf(enemyFleet) * (1 + RACE_DEF * enemy.rd) * (1 + MATH_TOUGH * enemy.math) * cmA;
