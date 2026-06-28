@@ -12,10 +12,15 @@ const RACE_DEF = 0.11;
 const MATH_TOUGH = 0.0015;
 const WIN_FORCE = 12.25;   // CV-ratio weight (12.25 + WIN_ATT 3.0 = old 15.25)
 const WIN_ATT = 3.0;       // attack-power ratio weight (decides mixed-composition fights)
-const WIN_RA = 0.50;
+const WIN_RA = 0.50;        // per race-attack level diff (below the +6 threshold)
+const WIN_RA_BASE6 = 7.4;   // RA magnitude at a 6+ diff — effectively decisive in-game
+const WIN_RA_SLOPE = 0.5;
 const WIN_LVL = 0.069;
+// Physics: linear below a +6 diff (0.1034/level), then a big jump to BASE6 at +6 and
+// ~0.30/level beyond — calibrated to 1000-D-vs-1000-D equal-CV in-game samples.
 const WIN_PHYS_LIN = 0.1034;
-const WIN_PHYS_BRACKET = 1.475; // halved from 2.95 to match in-game +6-physics samples
+const WIN_PHYS_BASE6 = 2.94;
+const WIN_PHYS_SLOPE = 0.30;
 const ANNIHILATE = 1.25;
 
 const cvOf = f => f[0] * 3 + f[1] * 24 + f[2] * 60;
@@ -70,7 +75,10 @@ function winChance(allyFleet, ally, enemyFleet, enemy) {
     const cvD = cvOf(allyFleet), cvA = cvOf(enemyFleet);
     const sgn = x => (x > 0 ? 1 : x < 0 ? -1 : 0);
     const dp = ally.phys - enemy.phys, adp = Math.abs(dp);
-    let statS = WIN_RA * (ally.ra - enemy.ra) + sgn(dp) * (WIN_PHYS_LIN * adp + WIN_PHYS_BRACKET * Math.floor(adp / 6));
+    const dra = ally.ra - enemy.ra, adra = Math.abs(dra);
+    const raMag = adra < 6 ? WIN_RA * adra : WIN_RA_BASE6 + WIN_RA_SLOPE * (adra - 6);
+    const physMag = adp < 6 ? WIN_PHYS_LIN * adp : WIN_PHYS_BASE6 + WIN_PHYS_SLOPE * (adp - 6);
+    let statS = sgn(dra) * raMag + sgn(dp) * physMag;
     const dFull = allyFleet.every(n => n > 0), aFull = enemyFleet.every(n => n > 0);
     if (dFull && aFull) statS += WIN_LVL * (ally.lvl - enemy.lvl);
 

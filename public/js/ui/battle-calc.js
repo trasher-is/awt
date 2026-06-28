@@ -44,14 +44,17 @@ const TOUGH = i => SHIPS[i].att + 2 * SHIPS[i].def;   // per-ship "toughness"
 const WIN_FORCE = 12.25;   // logit weight on relative CV difference
 const WIN_ATT   = 3.0;     // logit weight on relative ATTACK-power difference
 const WIN_SB_FACTOR = 0.94; // starbase counts ~0.94× its CV toward the win ratio
-const WIN_RA    = 0.50;    // per race-attack level diff
+const WIN_RA    = 0.50;    // per race-attack level diff (below the +6 threshold)
+const WIN_RA_BASE6 = 7.4;  // RA magnitude at a 6+ diff — effectively decisive in-game
+const WIN_RA_SLOPE = 0.5;  // per RA level beyond +6
 const WIN_LVL   = 0.069;   // per player-level diff (only if a full D/C/B fleet)
-// Physics: small per-level term plus a big jump for every full 6-level bracket
-// (the in-game "+6 physics" threshold). Signed by the difference.
-const WIN_PHYS_LIN    = 0.1034;
-// Per full 6-level physics bracket. Halved from 2.95 after in-game samples showed a +6
-// physics edge does NOT overcome a 1.5x force lead (150-vs-100 +6phy is still ~75% def).
-const WIN_PHYS_BRACKET = 1.475;
+// Physics win effect (calibrated to 1000-D-vs-1000-D equal-CV in-game samples):
+//   diff < 6 : small linear term (0.1034/level) — confirmed exact at diff 4 & 5.
+//   diff >=6 : big jump to BASE6 at exactly +6, then ~0.30/level beyond.
+// Signed by the physics difference.
+const WIN_PHYS_LIN   = 0.1034;
+const WIN_PHYS_BASE6 = 2.94;
+const WIN_PHYS_SLOPE = 0.30;
 
 let playerCache = null;
 
@@ -70,8 +73,13 @@ function calcWin(d, a, cvD, cvA, attD, attA) {
     const adp = Math.abs(dphys);
 
     // Stat advantage (race attack, physics, player level) for the defender.
-    let statS = WIN_RA * (d.ra - a.ra);
-    statS += sgn(dphys) * (WIN_PHYS_LIN * adp + WIN_PHYS_BRACKET * Math.floor(adp / 6));
+    // Race attack: linear below a 6-level diff, then a decisive jump at 6+.
+    const dra = d.ra - a.ra, adra = Math.abs(dra);
+    const raMag = adra < 6 ? WIN_RA * adra : WIN_RA_BASE6 + WIN_RA_SLOPE * (adra - 6);
+    let statS = sgn(dra) * raMag;
+    // Physics: linear below a 6-level diff, then a big jump at 6+.
+    const physMag = adp < 6 ? WIN_PHYS_LIN * adp : WIN_PHYS_BASE6 + WIN_PHYS_SLOPE * (adp - 6);
+    statS += sgn(dphys) * physMag;
     const dFull = d.fleet.every(n => n > 0), aFull = a.fleet.every(n => n > 0);
     if (dFull && aFull) statS += WIN_LVL * (d.lvl - a.lvl);
 
