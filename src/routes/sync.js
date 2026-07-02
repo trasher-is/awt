@@ -107,11 +107,11 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 finalOwnerId = oldP.owner_id;
             }
 
-            if (oldP) {
-                // Owner Change only. (Population-drop events were removed — they fired
-                // alongside every ownership change and just added noise to the history.)
-                // Skip event creation if this is an obscured shadow scan.
-                if (!p.is_unknown && oldP.owner_id !== finalOwnerId) {
+            if (oldP && !p.is_unknown) {
+                // Skip all event creation on obscured shadow scans (guarded above).
+                if (oldP.owner_id !== finalOwnerId) {
+                    // OWNER CHANGE — takes precedence; a pop drop that comes with a new
+                    // owner is really just the conquest, already captured here.
                     logEvent.run(system_id, p.planet_index, 1, oldP.owner_id, finalOwnerId); // 1 = OWNER_CHANGE
                     announceEvents.push({
                         planet_index: p.planet_index,
@@ -121,6 +121,21 @@ router.post('/sync/system', requireAuth, (req, res) => {
                             ? (p.owner.alliance_tag ? `[${p.owner.alliance_tag}] ${p.owner.name}` : p.owner.name)
                             : nameOf(finalOwnerId)
                     });
+                } else if (finalOwnerId != null) {
+                    // POP DROP — same owner, population fell (attack/siege). Any decrease
+                    // counts (20→19, 5→1); only fired for an owned planet so empty slots
+                    // don't generate noise.
+                    const oldPop = Number(oldP.population);
+                    const newPop = Number(finalPopulation);
+                    if (Number.isFinite(oldPop) && Number.isFinite(newPop) && newPop < oldPop) {
+                        logEvent.run(system_id, p.planet_index, 2, oldPop, newPop); // 2 = POP_DROP
+                        announceEvents.push({
+                            planet_index: p.planet_index,
+                            type: 'POP_DROP',
+                            old_pop: oldPop,
+                            new_pop: newPop
+                        });
+                    }
                 }
             }
 
