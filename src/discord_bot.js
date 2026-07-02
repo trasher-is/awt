@@ -1296,18 +1296,14 @@ function getAnnounceChannelId() {
     return getSettingValue('discord_announce_channel');
 }
 
-/**
- * Announce planet events detected for a single system to the configured channel.
- * `events` is an array of { planet_index, type, old_owner, new_owner, old_pop, new_pop }.
- * Safe no-op if the bot isn't ready, no channel is configured, or there are no events.
- */
-async function announceSystemChanges(system, events) {
-    if (!Array.isArray(events) || events.length === 0) return;
-    if (!client.isReady()) return;
+function getPopdropChannelId() {
+    return getSettingValue('discord_popdrop_channel');
+}
 
-    const channelId = getAnnounceChannelId();
-    if (!channelId) return;
-
+// Send one system-change embed to a channel. Best-effort, safe no-op if the channel
+// isn't configured / usable. `color` distinguishes owner-change vs pop-drop embeds.
+async function sendSystemEmbed(channelId, title, lines, color) {
+    if (!channelId || !lines.length) return;
     let channel;
     try {
         channel = await client.channels.fetch(channelId);
@@ -1317,30 +1313,39 @@ async function announceSystemChanges(system, events) {
     }
     if (!channel || typeof channel.send !== 'function') return;
 
-    const sysLabel = `${system.name ? system.name + ' ' : ''}#${system.id}${(system.x != null && system.y != null) ? ` (${system.x}/${system.y})` : ''}`;
-
-    const lines = events.map(e => {
-        if (e.type === 'OWNER_CHANGE') {
-            return `🪐 **Planet ${e.planet_index}**: ${e.old_owner || 'Empty'} → **${e.new_owner || 'Empty'}**`;
-        }
-        if (e.type === 'POP_DROP') {
-            return `📉 **Planet ${e.planet_index}**: population ${e.old_pop} → ${e.new_pop}`;
-        }
-        return null;
-    }).filter(Boolean);
-
-    if (lines.length === 0) return;
-
-    const embed = new EmbedBuilder()
-        .setTitle(`🛰️ System Change: ${sysLabel}`)
-        .setDescription(lines.join('\n'))
-        .setColor('#f59e0b');
-
+    const embed = new EmbedBuilder().setTitle(title).setDescription(lines.join('\n')).setColor(color);
     try {
         await channel.send({ embeds: [embed] });
     } catch (err) {
         console.error('[Discord] Failed to send system change announcement:', err.message);
     }
+}
+
+/**
+ * Announce planet events detected for a single system. Owner changes go to the
+ * "System Change" channel (discord_announce_channel); population drops go to their own
+ * "Population Drop" channel (discord_popdrop_channel) so they can be routed separately.
+ * `events` is an array of { planet_index, type, old_owner, new_owner, old_pop, new_pop }.
+ * Each channel is independent — leaving one empty disables just that stream.
+ */
+async function announceSystemChanges(system, events) {
+    if (!Array.isArray(events) || events.length === 0) return;
+    if (!client.isReady()) return;
+
+    const sysLabel = `${system.name ? system.name + ' ' : ''}#${system.id}${(system.x != null && system.y != null) ? ` (${system.x}/${system.y})` : ''}`;
+
+    const ownerLines = events
+        .filter(e => e.type === 'OWNER_CHANGE')
+        .map(e => `🪐 **Planet ${e.planet_index}**: ${e.old_owner || 'Empty'} → **${e.new_owner || 'Empty'}**`);
+
+    const popLines = events
+        .filter(e => e.type === 'POP_DROP')
+        .map(e => `📉 **Planet ${e.planet_index}**: population ${e.old_pop} → ${e.new_pop}`);
+
+    await Promise.all([
+        sendSystemEmbed(getAnnounceChannelId(), `🛰️ System Change: ${sysLabel}`, ownerLines, '#f59e0b'),
+        sendSystemEmbed(getPopdropChannelId(), `📉 Population Drop: ${sysLabel}`, popLines, '#ef4444')
+    ]);
 }
 
 /**

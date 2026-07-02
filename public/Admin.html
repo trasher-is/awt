@@ -148,16 +148,29 @@
             </div>
 
             <div class="bg-card border border-border rounded-lg p-4 shadow-sm">
-                <h3 class="font-bold text-foreground mb-1"><i class="fa-brands fa-discord text-[#5865F2] mr-1"></i> System Change Announcer</h3>
-                <p class="text-xs text-muted-foreground mb-3">Planet owner changes and population drops detected during a full galaxy scan are posted to this channel. Leave empty to disable. Use <code>!getid</code> in a channel to get its ID.</p>
+                <h3 class="font-bold text-foreground mb-1"><i class="fa-brands fa-discord text-[#5865F2] mr-1"></i> Owner Change Announcer</h3>
+                <p class="text-xs text-muted-foreground mb-3">Planet <strong>owner changes</strong> detected during a full galaxy scan are posted to this channel. Leave empty to disable. Use <code>!getid</code> in a channel to get its ID.</p>
                 <div class="flex flex-col md:flex-row gap-2 md:items-end">
                     <div class="flex-1">
-                        <label class="text-xs text-muted-foreground mb-1 block">Announcement Channel ID</label>
+                        <label class="text-xs text-muted-foreground mb-1 block">Owner Change Channel ID</label>
                         <input type="text" id="discordChannelId" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm font-mono" placeholder="e.g. 123456789012345678">
                     </div>
                     <button onclick="saveDiscordChannel()" class="h-9 px-4 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Save</button>
                 </div>
                 <span id="discordChannelStatus" class="text-xs text-muted-foreground mt-2 block"></span>
+            </div>
+
+            <div class="bg-card border border-border rounded-lg p-4 shadow-sm">
+                <h3 class="font-bold text-foreground mb-1"><i class="fa-solid fa-arrow-trend-down text-red-400 mr-1"></i> Population Drop Announcer</h3>
+                <p class="text-xs text-muted-foreground mb-3">Planet <strong>population drops</strong> (same owner, population fell — attacks/sieges) are posted to this channel, separate from owner changes. Leave empty to disable. Use <code>!getid</code> in a channel to get its ID.</p>
+                <div class="flex flex-col md:flex-row gap-2 md:items-end">
+                    <div class="flex-1">
+                        <label class="text-xs text-muted-foreground mb-1 block">Population Drop Channel ID</label>
+                        <input type="text" id="popdropChannelId" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm font-mono" placeholder="e.g. 123456789012345678">
+                    </div>
+                    <button onclick="savePopdropChannel()" class="h-9 px-4 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Save</button>
+                </div>
+                <span id="popdropChannelStatus" class="text-xs text-muted-foreground mt-2 block"></span>
             </div>
 
             <div class="bg-card border border-border rounded-lg p-4 shadow-sm">
@@ -286,6 +299,7 @@
                 const data = await res.json();
                 if (data.success) {
                     document.getElementById('discordChannelId').value = data.settings.discord_announce_channel || '';
+                    document.getElementById('popdropChannelId').value = data.settings.discord_popdrop_channel || '';
                     document.getElementById('incomingChannelId').value = data.settings.discord_incoming_channel || '';
                     document.getElementById('blockedChannels').value = data.settings.discord_blocked_channels || '';
                 }
@@ -317,6 +331,10 @@
 
         function saveDiscordChannel() {
             return saveSetting('discord_announce_channel', 'discordChannelId', 'discordChannelStatus');
+        }
+
+        function savePopdropChannel() {
+            return saveSetting('discord_popdrop_channel', 'popdropChannelId', 'popdropChannelStatus');
         }
 
         function saveIncomingChannel() {
