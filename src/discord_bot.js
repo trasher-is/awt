@@ -1,6 +1,7 @@
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const db = require('./database');
 const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
+const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require('./utils/covering');
 
 const client = new Client({
     intents: [
@@ -12,6 +13,44 @@ const client = new Client({
 
 client.on('clientReady', () => {
     console.log(`[Discord] Tactical Bot active and logged in as ${client.user.tag}`);
+});
+
+// The "🛡️ I cover this" button attached to every incoming alert. customId carries the
+// attack identity so a click can be routed back to the right incoming (well under the
+// 100-char customId cap — alertKey is "system:planet:attacker").
+function coverButtonRow(alertKey) {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`cover:${alertKey}`)
+            .setLabel('I cover this')
+            .setEmoji('🛡️')
+            .setStyle(ButtonStyle.Success)
+    );
+}
+
+// Handle "I cover this" button clicks: toggle the clicker into/out of the covering roster
+// and edit the alert in place so everyone sees who has defence on the way. Uses the
+// clicker's linked Hub name when available, else their Discord username.
+client.on('interactionCreate', async (interaction) => {
+    try {
+        if (!interaction.isButton() || !interaction.customId.startsWith('cover:')) return;
+        const alertKey = interaction.customId.slice('cover:'.length);
+
+        let name = interaction.user.username;
+        try {
+            const row = db.prepare(`SELECT game_name FROM app_users WHERE discord_id = ?`).get(interaction.user.id);
+            if (row && row.game_name) name = row.game_name;
+        } catch (e) { /* fall back to Discord username */ }
+
+        toggleCovering(alertKey, name);
+        const content = applyCoverLine(interaction.message.content, renderCoverLine(getCovering(alertKey)));
+        // interaction.update edits the message the button lives on AND acknowledges the
+        // click, so the whole channel sees the updated roster with no extra ping.
+        await interaction.update({ content, components: [coverButtonRow(alertKey)] });
+    } catch (e) {
+        console.error('[Discord] cover button failed:', e.message);
+        try { await interaction.reply({ content: '⚠️ Could not register your cover — try again.', flags: MessageFlags.Ephemeral }); } catch (_) {}
+    }
 });
 
 function parseTimerInput(input) {
@@ -1376,10 +1415,12 @@ async function sendOrEditIncoming(alertKey, content) {
             : null;
     } catch (err) { existing = null; }
 
+    const components = alertKey != null ? [coverButtonRow(alertKey)] : [];
+
     if (existing && existing.message_id && existing.channel_id === channelId) {
         try {
             const msg = await channel.messages.fetch(existing.message_id);
-            await msg.edit({ content: text });
+            await msg.edit({ content: text, components });
             return { ok: true, edited: true, messageId: existing.message_id, channelId };
         } catch (err) {
             // Original gone (deleted/purged) — fall through and post a new one.
@@ -1388,12 +1429,42 @@ async function sendOrEditIncoming(alertKey, content) {
     }
 
     try {
-        const sent = await channel.send({ content: text });
+        const sent = await channel.send({ content: text, components });
         if (alertKey != null) record(sent.id);
         return { ok: true, edited: false, messageId: sent.id, channelId };
     } catch (err) {
         console.error('[Discord] Failed to send incoming alert:', err.message);
         return { ok: false, error: 'Failed to send message' };
+    }
+}
+
+/**
+ * Re-render just the "Covering:" line on an existing incoming alert (used when a defender
+ * claims/retracts from the News panel — the Discord button path edits itself). Reads the
+ * current roster from the DB. Best-effort, safe no-op if the message is gone.
+ */
+async function updateIncomingCover(alertKey) {
+    if (!client.isReady() || alertKey == null) return false;
+    let row;
+    try {
+        row = db.prepare(`SELECT message_id, channel_id FROM incoming_msgs WHERE alert_key = ?`).get(alertKey);
+    } catch (e) { return false; }
+    if (!row || !row.message_id || !row.channel_id) return false;
+
+    let channel;
+    try {
+        channel = await client.channels.fetch(row.channel_id);
+    } catch (err) { return false; }
+    if (!channel || typeof channel.messages?.fetch !== 'function') return false;
+
+    try {
+        const msg = await channel.messages.fetch(row.message_id);
+        const content = applyCoverLine(msg.content, renderCoverLine(getCovering(alertKey)));
+        await msg.edit({ content, components: [coverButtonRow(alertKey)] });
+        return true;
+    } catch (err) {
+        console.warn('[Discord] Could not update cover line:', err.message);
+        return false;
     }
 }
 
@@ -1419,4 +1490,4 @@ async function replyToIncoming(channelId, messageId, content) {
     }
 }
 
-module.exports = { initDiscordBot, announceSystemChanges, sendIncomingAlert, sendOrEditIncoming, replyToIncoming };
+module.exports = { initDiscordBot, announceSystemChanges, sendIncomingAlert, sendOrEditIncoming, replyToIncoming, updateIncomingCover };

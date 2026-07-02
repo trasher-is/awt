@@ -109,11 +109,29 @@ function computeInterceptors(attack, nowUnix) {
         const pp = cleanInt(h.production_points);
         const ad = cleanInt(h.astro_dollars);
         const totalPp = pp + (ppPrice > 0 ? ad / ppPrice : 0);
-        const cv = Math.floor(totalPp / costPerCv(h.economy));
-        if (cv <= 0) continue;
+        // Affordable CV from PP + A$ (A$ valued in PP), given ship costs at this Eco.
+        const totalCv = Math.floor(totalPp / costPerCv(h.economy));
+        if (totalCv <= 0) continue;
+        // Suggest a full D/C/B fleet: 1 Cruiser (24 CV) + 1 Battleship (60 CV) + the max
+        // Destroyers (3 CV each) affordable from what's left. 1C+1B is the minimum for a
+        // "full" fleet so the defender's player level counts in the win-chance formula.
+        // Can't afford the 1C+1B core? Fall back to all-destroyers.
+        let ships, cv, note;
+        const CORE_CV = 24 + 60;
+        if (totalCv >= CORE_CV) {
+            const nD = Math.floor((totalCv - CORE_CV) / 3);
+            ships = [nD, 1, 1];
+            cv = nD * 3 + CORE_CV;
+            note = `build & launch: ${nD}D 1C 1B`;
+        } else {
+            const nD = Math.floor(totalCv / 3);
+            if (nD <= 0) continue;
+            ships = [nD, 0, 0];
+            cv = nD * 3;
+            note = `build & launch: ${nD}D`;
+        }
         const travel = calcTravelSeconds(h.sx, h.sy, h.launch_planet, target.x, target.y, attack.planetIndex, h.energy, h.race_speed, true);
-        // Build potential has no fixed composition — approximate as all destroyers.
-        consider(h.owner_name, cv, travel, 'build', 'build & launch', { ships: [Math.floor(cv / 3), 0, 0] });
+        consider(h.owner_name, cv, travel, 'build', note, { ships });
     }
 
     // Attach a real Discord mention where we know the player's numeric id (matched

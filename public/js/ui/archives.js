@@ -289,7 +289,7 @@ async function loadWarRoomMatrixData() {
         if (warRoomSortCol) executeWarRoomSortingRoutine();
         else renderWarRoomTable(warRoomData);
     } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="16" class="text-center py-6 text-red-500 font-bold">API Sync Failure Exception Event: ${err.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="17" class="text-center py-6 text-red-500 font-bold">API Sync Failure Exception Event: ${err.message}</td></tr>`;
     }
 }
 
@@ -298,7 +298,7 @@ function renderWarRoomTable(data) {
     tbody.innerHTML = '';
 
     if(data.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="16" class="text-center py-6 text-zinc-500">No scanned player rows mapped to this target index loop</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="17" class="text-center py-6 text-zinc-500">No scanned player rows mapped to this target index loop</td></tr>`;
         return;
     }
 
@@ -337,6 +337,7 @@ function renderWarRoomTable(data) {
             <td class="px-2 py-1"><span class="px-1.5 py-0.5 rounded text-[11px] font-mono tracking-wide whitespace-nowrap" style="${idleStyle}">${p.idle_time || 'Unknown'}</span></td>
             <td class="px-2 py-1 text-right ${planetsCls}">${planetsCell}</td>
             <td class="px-2 py-1 text-right text-emerald-400 font-bold">${Math.round(p.calculated_prod).toLocaleString()}</td>
+            <td class="px-2 py-1 text-right text-teal-300">${isUnknown ? q : (p.trade_revenue || 0) + '%'}</td>
             <td class="px-2 py-1 text-right text-amber-400 font-bold">${isUnknown ? q : p.cv_day.toLocaleString()}</td>
             <td class="px-2 py-1 text-right text-cyan-400">${isUnknown ? q : p.max_cv.toLocaleString()}</td>
             <td class="px-2 py-1 text-right">${formatRaceModifier(p.race_speed, isUnknown)}</td>

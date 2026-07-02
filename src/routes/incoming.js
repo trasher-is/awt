@@ -1,10 +1,11 @@
 const express = require('express');
 const db = require('../database');
 const { requireAuth } = require('./_middleware');
-const { sendOrEditIncoming, replyToIncoming } = require('../discord_bot');
+const { sendOrEditIncoming, replyToIncoming, updateIncomingCover } = require('../discord_bot');
 const { formatTime } = require('../utils/travel-calc');
 const { ONTIME_LIMIT, LATE_LIMIT, SOURCE_TAG, computeInterceptors } = require('../utils/interceptors');
 const { winChance, resolveStats } = require('../utils/battle');
+const { toggleCovering, getCovering, renderCoverLine } = require('../utils/covering');
 const router = express.Router();
 
 // Build the compact attacker stat line shown both inline on the News page and in the
@@ -53,7 +54,7 @@ router.get('/incoming/stats', requireAuth, (req, res) => {
     }
 });
 
-function buildAnnounce(data, stats, result) {
+function buildAnnounce(data, stats, result, alertKey) {
     const L = [];
     const planet = data.target.planetName || 'Planet';
     L.push(`🚨 **Incoming Attack** — ${planet} \`[${data.target.systemId}] #${data.target.planetIndex}\``);
@@ -78,6 +79,10 @@ function buildAnnounce(data, stats, result) {
     if (Number.isInteger(arr) && arr > 0) L.push(`🕐 ~ <t:${arr}:f>`);
 
     appendDefenders(L, result, data.target);
+
+    // "Covering:" roster — who has clicked "I cover this" (News panel or Discord button).
+    const coverLine = renderCoverLine(alertKey != null ? getCovering(alertKey) : []);
+    if (coverLine) L.push('\n' + coverLine);
 
     const now = Math.floor(Date.now() / 1000);
     L.push(`_updated <t:${now}:R>_`);
@@ -254,7 +259,7 @@ async function announceIncoming(data) {
     }
 
     const defenders = computeDefenders(data);
-    const message = buildAnnounce(data, stats, defenders);
+    const message = buildAnnounce(data, stats, defenders, alertKey);
 
     const sent = await sendOrEditIncoming(alertKey, message);
     if (!sent.ok) return { ok: false, error: sent.error };
@@ -315,11 +320,37 @@ router.post('/incoming/defenders', requireAuth, (req, res) => {
             mapped: true,
             unknownTiming: !!result.unknownTiming,
             onTime: result.onTime.map(slim),
-            late: (result.late || []).map(slim)
+            late: (result.late || []).map(slim),
+            covering: getCovering(alertKeyFor(data))
         });
     } catch (err) {
         console.error('[Incoming] defenders lookup failed:', err.message);
         res.status(500).json({ success: false, error: 'Defender lookup failed' });
+    }
+});
+
+// --- "I COVER THIS" — claim/retract defence of an incoming ---
+// POST /hub-api/incoming/cover  Body: { attacker:{name}, target:{systemId,planetIndex} }
+// Toggles the logged-in user into the covering roster and re-renders the Discord alert's
+// "Covering:" line. Returns the updated roster so the News panel can reflect it.
+router.post('/incoming/cover', requireAuth, async (req, res) => {
+    try {
+        const data = req.body || {};
+        if (!data.attacker || !data.attacker.name || !data.target ||
+            data.target.systemId == null || data.target.planetIndex == null) {
+            return res.status(400).json({ success: false, error: 'Missing attacker/target' });
+        }
+        const name = req.session.gameName;
+        if (!name) return res.status(401).json({ success: false, error: 'No session name' });
+
+        const alertKey = alertKeyFor(data);
+        const { covering, added } = toggleCovering(alertKey, name);
+        // Best-effort: push the new roster onto the existing Discord alert (if one exists).
+        await updateIncomingCover(alertKey);
+        res.json({ success: true, covering, added });
+    } catch (err) {
+        console.error('[Incoming] cover toggle failed:', err.message);
+        res.status(500).json({ success: false, error: 'Cover toggle failed' });
     }
 });
 

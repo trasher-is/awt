@@ -407,6 +407,14 @@ function initDatabase() {
         )
     `);
 
+    // Newline-joined names of defenders who clicked "I cover this" (on the News panel or
+    // the Discord alert button). Rendered as a "Covering:" line on the incoming message so
+    // everyone can see who has defence on the way.
+    try {
+        db.exec(`ALTER TABLE incoming_msgs ADD COLUMN covering TEXT`);
+        console.log("[DB] Added covering column to incoming_msgs table.");
+    } catch (e) {}
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

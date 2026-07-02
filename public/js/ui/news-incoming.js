@@ -195,7 +195,7 @@ async function enrichFleetIds(d) {
     return true;
 }
 
-async function renderDefenders(box, info, arrivalUnix) {
+async function renderDefenders(box, info, arrivalUnix, coverEl) {
     if (!box) return;
     const target = info.target;
     box.style.display = 'block';
@@ -203,17 +203,19 @@ async function renderDefenders(box, info, arrivalUnix) {
     try {
         let d = await fetchDefenders(info, arrivalUnix);
         renderDefenderData(box, d, target);
+        if (d.success) renderCovering(coverEl, d.covering);
         // Pull fresh fleet ids for launch links, then re-render with them.
         if (await enrichFleetIds(d)) {
             d = await fetchDefenders(info, arrivalUnix);
             renderDefenderData(box, d, target);
+            if (d.success) renderCovering(coverEl, d.covering);
         }
     } catch (e) {
         box.innerHTML = '<span style="opacity:.6">Defender lookup failed.</span>';
     }
 }
 
-async function refreshAttacker(info, span, arrivalUnix, defBox, btn) {
+async function refreshAttacker(info, span, arrivalUnix, defBox, btn, coverEl) {
     btn.disabled = true;
     const old = btn.textContent;
     btn.textContent = '⏳';
@@ -238,10 +240,49 @@ async function refreshAttacker(info, span, arrivalUnix, defBox, btn) {
         toast(`${info.attacker.name} intel + ${n} members' fleets updated`);
 
         // 3. Show who can defend in time, right here on the page.
-        await renderDefenders(defBox, info, arrivalUnix);
+        await renderDefenders(defBox, info, arrivalUnix, coverEl);
     } catch (err) {
         console.error('[News] attacker refresh failed:', err);
         toast('Refresh failed');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = old;
+    }
+}
+
+function renderCovering(el, names) {
+    if (!el) return;
+    if (names && names.length) {
+        el.style.display = 'block';
+        el.innerHTML = `🛡️ <b>Covering:</b> ${names.map(n => `<b>${n}</b>`).join(', ')}`;
+    } else {
+        el.style.display = 'none';
+        el.innerHTML = '';
+    }
+}
+
+// Claim (or retract) defence of this incoming. Toggles the logged-in user in the covering
+// roster server-side, which also re-renders the Discord alert's "Covering:" line.
+async function coverThis(info, coverEl, btn) {
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = '⏳';
+    try {
+        const resp = await fetch('/hub-api/incoming/cover', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ attacker: info.attacker, target: info.target })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            renderCovering(coverEl, data.covering);
+            toast(data.added ? "You're covering this incoming" : 'You stopped covering this incoming');
+        } else {
+            toast('Cover: ' + (data.error || 'failed'));
+        }
+    } catch (err) {
+        console.error('[News] cover failed:', err);
+        toast('Cover request failed');
     } finally {
         btn.disabled = false;
         btn.textContent = old;
@@ -325,16 +366,25 @@ export function initNewsIncomingTools() {
         defBox.className = 'aw-defenders';
         defBox.style.cssText = 'display:none;margin-top:6px;padding:6px 8px;border-left:3px solid #3b82f6;background:rgba(30,58,138,0.25);font-size:0.9em;line-height:1.5;';
 
+        // Covering roster ("I cover this" claimants), shown above the defender box.
+        const coverEl = document.createElement('div');
+        coverEl.className = 'aw-covering';
+        coverEl.style.cssText = 'display:none;margin-top:6px;padding:4px 8px;border-left:3px solid #22c55e;background:rgba(22,101,52,0.25);font-size:0.9em;line-height:1.5;color:#bbf7d0;';
+
         // Action buttons.
         const bar = document.createElement('span');
         bar.style.cssText = 'display:inline-block;margin-left:4px;white-space:nowrap;';
         const refreshBtn = makeBtn('🔄', 'Re-scan attacker + alliance fleets, then show who can defend');
         const discordBtn = makeBtn('📣', 'Send / update Discord incoming alert');
-        refreshBtn.addEventListener('click', () => refreshAttacker(info, span, arrivalUnix, defBox, refreshBtn));
+        const coverBtn = makeBtn('🛡️ Cover', 'I cover this — tell everyone defence is on the way (click again to retract)');
+        refreshBtn.addEventListener('click', () => refreshAttacker(info, span, arrivalUnix, defBox, refreshBtn, coverEl));
         discordBtn.addEventListener('click', () => announce(info, arrivalUnix, discordBtn));
+        coverBtn.addEventListener('click', () => coverThis(info, coverEl, coverBtn));
         bar.appendChild(refreshBtn);
         bar.appendChild(discordBtn);
+        bar.appendChild(coverBtn);
         div.appendChild(bar);
+        div.appendChild(coverEl);
         div.appendChild(defBox);
 
         if (info.attacker.id) pending.push({ id: info.attacker.id, span });
