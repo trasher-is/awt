@@ -415,6 +415,35 @@ function initDatabase() {
         console.log("[DB] Added covering column to incoming_msgs table.");
     } catch (e) {}
 
+    // Personal task/reminder notes (per-user, private). due_at is optional — a note with
+    // no due date is a plain checklist item; one with a due date participates in the
+    // overdue/red styling, the sidebar countdown badge, and (if remind_15 is set) the
+    // 15-minutes-before Discord mention reminder.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS user_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            due_at TEXT,
+            remind_15 INTEGER DEFAULT 0,
+            reminded_at TEXT,
+            done INTEGER DEFAULT 0,
+            done_at TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(owner_id) REFERENCES app_users(id) ON DELETE CASCADE
+        )
+    `);
+
+    // Who assigned the note — set to the creator's own id for a normal personal note, or
+    // to a teammate's id when a note was created "for" someone else. A note shared with N
+    // recipients is stored as N independent rows (one per owner_id), all sharing the same
+    // author_id, so each recipient's copy/reminder/done-state is fully independent while
+    // still showing "from <author>" on the ones that weren't self-authored.
+    try {
+        db.exec(`ALTER TABLE user_notes ADD COLUMN author_id INTEGER`);
+        console.log("[DB] Added author_id column to user_notes table.");
+    } catch (e) {}
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

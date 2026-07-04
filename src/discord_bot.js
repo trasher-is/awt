@@ -13,6 +13,8 @@ const client = new Client({
 
 client.on('clientReady', () => {
     console.log(`[Discord] Tactical Bot active and logged in as ${client.user.tag}`);
+    checkNoteReminders().catch(() => {});
+    setInterval(() => checkNoteReminders().catch(err => console.error('[Discord] Reminder check failed:', err.message)), 60 * 1000);
 });
 
 // The "🛡️ I cover this" button attached to every incoming alert. customId carries the
@@ -1298,6 +1300,63 @@ function getAnnounceChannelId() {
 
 function getPopdropChannelId() {
     return getSettingValue('discord_popdrop_channel');
+}
+
+function getReminderChannelId() {
+    return getSettingValue('discord_reminder_channel');
+}
+
+// ----------------------------------------------------
+// PERSONAL NOTE REMINDERS — "remind 15 min before" mention
+// ----------------------------------------------------
+// Polled every minute. Picks up notes that are due within 15 minutes (or already
+// overdue, e.g. after downtime) and haven't been reminded yet, and pings the owner in
+// the configured channel. Best-effort: a note is marked reminded regardless of whether
+// the mention could actually be sent (no channel configured / no linked Discord id /
+// send failed), so a bad config never causes it to resend forever once fixed.
+async function checkNoteReminders() {
+    let pending;
+    try {
+        pending = db.prepare(`
+            SELECT n.id, n.text, n.due_at, u.discord_id, u.game_name, a.game_name AS author_name
+            FROM user_notes n
+            JOIN app_users u ON u.id = n.owner_id
+            LEFT JOIN app_users a ON a.id = n.author_id AND a.id != n.owner_id
+            WHERE n.done = 0 AND n.remind_15 = 1 AND n.reminded_at IS NULL AND n.due_at IS NOT NULL
+        `).all();
+    } catch (err) {
+        console.error('[Discord] Reminder lookup failed:', err.message);
+        return;
+    }
+    // due_at is stored as a full ISO string (toISOString()), which SQLite can't compare
+    // against datetime('now') (space-separated, no ms) as text — so the 15-minute window
+    // is filtered here in JS instead, on parsed Date values.
+    const due = pending.filter(n => new Date(n.due_at).getTime() - Date.now() <= 15 * 60 * 1000);
+    if (!due.length) return;
+
+    const markSent = db.prepare(`UPDATE user_notes SET reminded_at = CURRENT_TIMESTAMP WHERE id = ?`);
+    const channelId = getReminderChannelId();
+    let channel = null;
+    if (client.isReady() && channelId) {
+        try { channel = await client.channels.fetch(channelId); } catch (err) {
+            console.error('[Discord] Could not fetch reminder channel:', err.message);
+        }
+    }
+
+    for (const note of due) {
+        try {
+            if (channel && typeof channel.send === 'function') {
+                const unix = Math.floor(new Date(note.due_at).getTime() / 1000);
+                const who = note.discord_id ? `<@${note.discord_id}>` : `**${note.game_name}**`;
+                const from = note.author_name ? ` _(assigned by ${note.author_name})_` : '';
+                await channel.send({ content: `⏰ **Reminder** ${who} — ${note.text}${from}\n🕐 Due <t:${unix}:R>` });
+            }
+        } catch (err) {
+            console.error('[Discord] Failed to send note reminder:', err.message);
+        } finally {
+            markSent.run(note.id);
+        }
+    }
 }
 
 // Send one system-change embed to a channel. Best-effort, safe no-op if the channel

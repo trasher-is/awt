@@ -256,7 +256,7 @@ router.get('/admin/settings', requireAdmin, (req, res) => {
 
 router.post('/admin/settings', requireAdmin, (req, res) => {
     const { key, value } = req.body;
-    const allowedKeys = ['discord_announce_channel', 'discord_popdrop_channel', 'discord_incoming_channel', 'discord_blocked_channels'];
+    const allowedKeys = ['discord_announce_channel', 'discord_popdrop_channel', 'discord_incoming_channel', 'discord_reminder_channel', 'discord_blocked_channels'];
     if (!allowedKeys.includes(key)) return res.status(400).json({ error: 'Unknown setting key' });
 
     try {
