@@ -7,9 +7,10 @@ const express = require('express');
 const session = require('express-session');
 const SQLiteStore = require('connect-sqlite3')(session);
 
-const db = require('./src/database'); 
+const db = require('./src/database');
 const apiRoutes = require('./src/routes/api');
 const proxyMiddleware = require('./src/proxy');
+const redzoneProxy = require('./src/redzone-proxy');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,6 +18,17 @@ const PORT = process.env.PORT || 3000;
 const { initDiscordBot } = require('./src/discord_bot');
 
 const fs = require('fs');
+
+// --- REDZONE SUBDOMAIN (rz.<host>) ---
+// First middleware of all: anything arriving on the rz.* subdomain is an open, login-free
+// reverse proxy to redzone.astrowars.games (see src/redzone-proxy.js). Handled before
+// sessions/static/auth so redzone traffic never touches the awt session or the astrowars
+// proxy — the two games stay fully separated by hostname. The injected QoL script loads by
+// absolute URL from the main host, so its request lands on the normal (non-rz) stack below.
+app.use((req, res, next) => {
+    if ((req.headers.host || '').toLowerCase().startsWith('rz.')) return redzoneProxy(req, res, next);
+    next();
+});
 
 app.get('/api/admin/logs', (req, res) => {
     // 1. Set a default fallback path
@@ -80,6 +92,10 @@ const requireAuth = (req, res, next) => {
     if (req.session && req.session.userId) return next();
     res.redirect('/hub-assets/login.html'); 
 };
+
+// Short shareable shortcut: /rz -> the redzone subdomain (the actual open proxy). No
+// auth — it's just a redirect to a public entry point.
+app.get('/rz', (req, res) => res.redirect('https://rz.37.27.17.97.nip.io/'));
 
 // --- 4. PROTECTED ROUTES ---
 app.get('/dashboard', requireAuth, (req, res) => {

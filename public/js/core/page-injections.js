@@ -58,13 +58,7 @@ export async function initScienceCultureCalc() {
         if (th.innerText.includes('Culture')) {
             const matchText = th.innerText.match(/\+([^/]+)\/h/);
             if (matchText) {
-                let cleanStr = matchText[1].trim().replace(/\s/g, '');
-                if ((/\d+[\.,]\d{1,2}$/).test(cleanStr)) {
-                    cleanStr = cleanStr.replace(/[\.,]/g, m => m === cleanStr.charAt(cleanStr.length - 2) || m === cleanStr.charAt(cleanStr.length - 3) ? '.' : '');
-                } else {
-                    cleanStr = cleanStr.replace(/[\.,]/g, '');
-                }
-                production = parseFloat(cleanStr) || 0;
+                production = parseLocaleNumber(matchText[1]);
             }
         }
     });
@@ -187,14 +181,30 @@ const SCIENCES = [
 ];
 const _pointsTableCache = {};
 
-// "$2 865,73" / "1 234" / "49,5" -> number (comma is the decimal separator here)
+// Locale-agnostic number parse. The game renders numbers in either "1,039.5" (comma
+// thousands, dot decimal) or "1.039,5" / "49,5" (dot thousands, comma decimal) depending
+// on locale — so which separator is the decimal can't be hard-coded. Rule: when both
+// separators appear, the LAST one is the decimal; when only one appears once, it's the
+// decimal unless it sits in thousands position (followed by exactly 3 digits). Mirrors
+// trade.js's parseLocaleNumber. The old version assumed comma=decimal, which turned a
+// rate like "1,039.5/h" into 1.0395 — ~1000x too slow, giving absurd ETAs (e.g. 186 days
+// instead of ~5h) once a rate crossed 1,000 and gained a thousands separator.
 function parseLocaleNumber(str) {
-    if (!str) return 0;
-    let t = String(str).replace(/[^\d.,]/g, '').trim();
-    if (!t) return 0;
-    if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
-    else t = t.replace(/\.(?=\d{3}\b)/g, '');   // dots as thousands separators
-    const v = parseFloat(t);
+    if (str == null) return 0;
+    let s = String(str).replace(/[^\d.,]/g, '');
+    if (!s) return 0;
+    const nComma = (s.match(/,/g) || []).length;
+    const nDot = (s.match(/\./g) || []).length;
+    let dec = null;
+    if (nComma && nDot) {
+        dec = s.lastIndexOf(',') > s.lastIndexOf('.') ? ',' : '.';
+    } else if (nComma === 1 || nDot === 1) {
+        const sep = nComma ? ',' : '.';
+        if (s.length - s.lastIndexOf(sep) - 1 !== 3) dec = sep;
+    }
+    if (dec) s = s.split(dec === ',' ? '.' : ',').join('').replace(dec, '.');
+    else s = s.replace(/[.,]/g, '');
+    const v = parseFloat(s);
     return isNaN(v) ? 0 : v;
 }
 
