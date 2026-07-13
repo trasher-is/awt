@@ -112,15 +112,22 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 if (oldP.owner_id !== finalOwnerId) {
                     // OWNER CHANGE — takes precedence; a pop drop that comes with a new
                     // owner is really just the conquest, already captured here.
-                    logEvent.run(system_id, p.planet_index, 1, oldP.owner_id, finalOwnerId); // 1 = OWNER_CHANGE
-                    announceEvents.push({
-                        planet_index: p.planet_index,
-                        type: 'OWNER_CHANGE',
-                        old_owner: nameOf(oldP.owner_id),
-                        new_owner: p.owner
-                            ? (p.owner.alliance_tag ? `[${p.owner.alliance_tag}] ${p.owner.name}` : p.owner.name)
-                            : nameOf(finalOwnerId)
-                    });
+                    logEvent.run(system_id, p.planet_index, 1, oldP.owner_id, finalOwnerId); // 1 = OWNER_CHANGE (history)
+                    // Announce genuine transitions to Discord, but NOT "Empty -> owner":
+                    // those are low-value new colonies, and while the planets table heals
+                    // from the old null-purge corruption every re-detected owner would look
+                    // like one and flood the channel. Conquests (X->Y) and losses (X->Empty)
+                    // still announce; the history event above is recorded regardless.
+                    if (oldP.owner_id != null) {
+                        announceEvents.push({
+                            planet_index: p.planet_index,
+                            type: 'OWNER_CHANGE',
+                            old_owner: nameOf(oldP.owner_id),
+                            new_owner: p.owner
+                                ? (p.owner.alliance_tag ? `[${p.owner.alliance_tag}] ${p.owner.name}` : p.owner.name)
+                                : nameOf(finalOwnerId)
+                        });
+                    }
                 } else if (finalOwnerId != null) {
                     // POP DROP — same owner, population fell (attack/siege). Any decrease
                     // counts (20→19, 5→1); only fired for an owned planet so empty slots
@@ -245,22 +252,32 @@ router.post('/sync/player', requireAuth, (req, res) => {
     const oldPlayer = db.prepare('SELECT logins, points, origin_system FROM players WHERE id = ?').get(p.id);
 
     const syncTransaction = db.transaction((player) => {
-        // A restart/origin-move purge wipes ALL of a player's planets galaxy-wide, so each
-        // trigger must fire ONLY on positively-parsed, contradicting data. A fog-of-war /
-        // partial profile scan (e.g. an enemy whose Origin row or ranking isn't visible)
-        // leaves these fields at their parser defaults (origin_system=null, points=0); those
-        // absences must NEVER be read as "moved" or "wiped", or we hollow out real systems.
-        const loginsDropped = oldPlayer && player.logins > 0 && player.logins < oldPlayer.logins;
+        // Restart detection. Planet ownership is NEVER touched here — that belongs to
+        // system scans (authoritative, logged, fog-of-war guarded); nulling planets from a
+        // profile heuristic was what corrupted 1200+ rows and spammed Discord. This block
+        // only resets a genuinely-restarted player's own stale profile stats.
+        //
+        // Two signals mark a real restart, matching how the game actually behaves:
+        //   • Origin moved between two VISIBLE coordinates. A restart relocates the home
+        //     system, but a fog-of-war scan that just can't see Origin leaves it null — so
+        //     require BOTH old and new origin to be real systems (>0) and different. Never
+        //     N/A -> value or value -> N/A (those are visibility changes, not restarts).
+        //   • Logins collapsed. The login counter only ever climbs, so a large drop (e.g.
+        //     500 -> 2) can only be a fresh account. Require a big relative fall from a
+        //     meaningful base, so ordinary parser jitter (500 -> 498) never counts.
+        // Points are deliberately NOT a signal: players lose points normally when their
+        // planets get pop-killed, so a points crash does not imply a restart.
         const originChanged = oldPlayer
             && Number.isInteger(player.origin_system) && player.origin_system > 0
             && Number.isInteger(oldPlayer.origin_system) && oldPlayer.origin_system > 0
             && player.origin_system !== oldPlayer.origin_system;
-        const pointsNuked = oldPlayer && oldPlayer.points > 2000 && player.points > 0 && player.points < 100;
+        const loginsReset = oldPlayer
+            && oldPlayer.logins >= 10 && player.logins > 0
+            && player.logins < oldPlayer.logins * 0.5;
 
-        if (loginsDropped || originChanged || pointsNuked) {
-            console.log(`[SYSTEM] Verified Player ${player.id} restarted or moved origin! Purging ghost assets.`);
+        if (originChanged || loginsReset) {
+            console.log(`[SYSTEM] Player ${player.id} restart detected (${originChanged ? 'origin moved' : 'logins reset'}); resetting stale profile stats.`);
 
-            db.prepare(`UPDATE planets SET owner_id = NULL, population = 0, starbase = 0, has_fleet = 0, is_sieged = 0 WHERE owner_id = ?`).run(player.id);
             db.prepare(`DELETE FROM fleets WHERE owner_id = ?`).run(player.id);
             db.prepare(`
                 UPDATE players SET

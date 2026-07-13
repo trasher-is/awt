@@ -25,10 +25,17 @@ const fs = require('fs');
 // sessions/static/auth so redzone traffic never touches the awt session or the astrowars
 // proxy — the two games stay fully separated by hostname. The injected QoL script loads by
 // absolute URL from the main host, so its request lands on the normal (non-rz) stack below.
+//
+// EXCEPTION: /rzhub/* is NOT proxied — it's the awt-served backend for the shared system
+// planner (password-gated). Leaving it same-origin with the rz pages keeps the unlock
+// cookie first-party. It's mounted just below and reachable regardless of host.
 app.use((req, res, next) => {
-    if ((req.headers.host || '').toLowerCase().startsWith('rz.')) return redzoneProxy(req, res, next);
+    const host = (req.headers.host || '').toLowerCase();
+    if (host.startsWith('rz.') && !req.path.startsWith('/rzhub/')) return redzoneProxy(req, res, next);
     next();
 });
+
+app.use('/rzhub', express.json(), require('./src/routes/rzhub'));
 
 app.get('/api/admin/logs', (req, res) => {
     // 1. Set a default fallback path

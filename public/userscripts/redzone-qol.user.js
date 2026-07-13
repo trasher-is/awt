@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Astro Wars Redzone — QoL Timers & Calculators
 // @namespace    https://37.27.17.97.nip.io/userscripts/
-// @version      1.6.0
+// @version      1.8.0
 // @description  Population timer, science/culture research-queue timers, culture level calculator, and an interactive science level calculator for redzone.astrowars.games. Pure client-side — no login, no backend, reads only the current page's own DOM plus the game's own /Info/* tables.
 // @match        *://redzone.astrowars.games/*
 // @updateURL    https://37.27.17.97.nip.io/userscripts/redzone-qol.user.js
@@ -469,6 +469,116 @@
     }
 
     // -----------------------------------------------------------------
+    // SYSTEM PLANNER — /Game/Map/SolarSystem/<id>
+    // A shared, communal per-planet planning note, injected as an extra "Plan" column in
+    // the system table. Everyone who enters the shared password sees and edits the SAME
+    // notes (stored server-side in rz_plans, keyed by the game's global data-planet-id).
+    // Gated by a "SHOW PLANS" button + password; a long-lived cookie means you enter it
+    // once. Backend is awt at /rzhub/* — same-origin on the rz proxy, so it's unavailable
+    // when the script runs via Tampermonkey on the game's own domain (column is removed).
+    async function initSystemPlanner() {
+        if (!window.location.pathname.toLowerCase().includes('/game/map/solarsystem/')) return;
+        const table = document.getElementById('solarSystem');
+        if (!table || table.getAttribute('data-rz-planner') === '1') return;
+        table.setAttribute('data-rz-planner', '1');
+
+        const rows = [...table.querySelectorAll('tbody tr[data-planet-id]')];
+        if (!rows.length) return;
+        const planetIds = rows.map(r => r.getAttribute('data-planet-id')).filter(Boolean);
+
+        const headRow = table.querySelector('thead tr');
+        const th = document.createElement('th');
+        th.className = 'rz-plan-th copy-none';
+        th.textContent = 'Plan';
+        if (headRow) headRow.appendChild(th);
+
+        // One disabled input per row up front; unlock (fill + enable) once authorized.
+        const inputs = {};
+        rows.forEach(tr => {
+            const pid = tr.getAttribute('data-planet-id');
+            const td = document.createElement('td');
+            td.className = 'rz-plan-cell copy-none';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.placeholder = '🔒';
+            input.disabled = true;
+            input.style.cssText = 'width:130px;background:#222;color:#eee;border:1px solid #555;border-radius:4px;padding:2px 6px;font-size:12px;';
+            // Rows navigate to the planet page on any non-link click — stop that at the input.
+            ['click', 'mousedown', 'dblclick'].forEach(ev => input.addEventListener(ev, e => e.stopPropagation()));
+            let saveTimer = null;
+            input.addEventListener('input', () => {
+                input.style.borderColor = input.value.trim() ? '#22c55e' : '#555';
+                clearTimeout(saveTimer);
+                saveTimer = setTimeout(() => savePlan(pid, input.value), 500);
+            });
+            td.appendChild(input);
+            tr.appendChild(td);
+            inputs[pid] = input;
+        });
+
+        async function savePlan(pid, text) {
+            try {
+                await fetch('/rzhub/plans', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ planetId: parseInt(pid, 10), text })
+                });
+            } catch (e) { /* transient — the next edit retries */ }
+        }
+
+        // Returns true if authorized (and fills/enables the inputs), false if locked (401).
+        async function loadPlans() {
+            const res = await fetch('/rzhub/plans?planetIds=' + planetIds.join(','), { credentials: 'same-origin' });
+            if (res.status === 401) return false;
+            if (!res.ok) throw new Error('rzhub unavailable');
+            const data = await res.json();
+            if (!data.success) return false;
+            Object.entries(inputs).forEach(([pid, input]) => {
+                input.value = (data.plans && data.plans[pid]) || '';
+                input.disabled = false;
+                input.placeholder = 'plan…';
+                input.style.borderColor = input.value ? '#22c55e' : '#555';
+            });
+            return true;
+        }
+
+        function showLoginButton() {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = 'SHOW PLANS';
+            btn.style.cssText = 'padding:2px 8px;font-size:11px;cursor:pointer;border:1px solid #555;border-radius:4px;background:#333;color:#eee;white-space:nowrap;';
+            btn.addEventListener('click', async () => {
+                const pw = prompt('Password to show / edit shared plans:');
+                if (pw == null) return;
+                try {
+                    const res = await fetch('/rzhub/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ password: pw })
+                    });
+                    if (!res.ok) { alert('Wrong password'); return; }
+                    btn.remove();
+                    th.textContent = 'Plan';
+                    await loadPlans();
+                } catch (e) { alert('Login failed — try again.'); }
+            });
+            th.textContent = '';
+            th.appendChild(btn);
+        }
+
+        try {
+            if (!(await loadPlans())) showLoginButton();
+        } catch (e) {
+            // /rzhub not reachable (running on the game's own domain, not the rz proxy) —
+            // drop the column rather than leave dead locked inputs.
+            th.remove();
+            Object.values(inputs).forEach(i => { const td = i.closest('td'); if (td) td.remove(); });
+        }
+    }
+
+    // -----------------------------------------------------------------
     // DISPATCH — this game does a full page reload on basically every action/navigation
     // (confirmed — not the SPA-with-in-place-DOM-patching behavior the original
     // astrowars.games appears to have), which means Tampermonkey's @run-at document-idle
@@ -493,6 +603,8 @@
         try { await initScienceLevelCalculator(); } catch (e) { }
         await yieldToMain();
         try { initScienceTimers(); } catch (e) { }
+        await yieldToMain();
+        try { await initSystemPlanner(); } catch (e) { }
     }
 
     runAll();

@@ -444,6 +444,18 @@ function initDatabase() {
         console.log("[DB] Added author_id column to user_notes table.");
     } catch (e) {}
 
+    // Shared, login-gated planning notes for the redzone (rz.*) proxy — one note per
+    // planet, visible to everyone who entered the shared password. Keyed by the game's
+    // own global planet id (data-planet-id). Not per-user: it's a communal scratchpad, so
+    // no owner column. See src/routes/rzhub.js.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS rz_plans (
+            planet_id INTEGER PRIMARY KEY,
+            text TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {
