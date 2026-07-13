@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Astro Wars Redzone — QoL Timers & Calculators
 // @namespace    https://37.27.17.97.nip.io/userscripts/
-// @version      1.5.0
+// @version      1.6.0
 // @description  Population timer, science/culture research-queue timers, culture level calculator, and an interactive science level calculator for redzone.astrowars.games. Pure client-side — no login, no backend, reads only the current page's own DOM plus the game's own /Info/* tables.
 // @match        *://redzone.astrowars.games/*
 // @updateURL    https://37.27.17.97.nip.io/userscripts/redzone-qol.user.js
@@ -162,17 +162,29 @@
         // You research one science at a time, so all six sciences share the Science rate.
         const labels = sci.name === 'Culture' ? ['Culture', 'Cul'] : ['Science', 'Sci'];
         const rateRe = new RegExp('(?:' + labels.join('|') + ')\\s*\\+([\\d.,\\s\\u00a0]+)\\/h', 'i');
-        let rate = 0;
+        let rate = 0, bonusPct = 0;
         document.querySelectorAll('th, td').forEach(el => {
             if (rate) return;
             const mm = (el.innerText || '').match(rateRe);
-            if (mm) { rate = parseLocaleNumber(mm[1]); }
+            if (!mm) return;
+            rate = parseLocaleNumber(mm[1]);
+            // The same header carries a "+X%" bonus badge (research/culture modifier, e.g.
+            // "+38.6%" after the flask icon). The displayed rate ALREADY includes it, so we
+            // read it to back out the pre-bonus base growth (see baseGrowth) for the what-if
+            // inputs. Prefer the .bonus badge; fall back to a "+N%" match in the header text.
+            const bonusEl = el.querySelector('.bonus');
+            const bm = ((bonusEl && bonusEl.innerText) || el.innerText || '').match(/\+\s*([\d.,]+)\s*%/);
+            if (bm) bonusPct = parseLocaleNumber(bm[1]);
         });
 
         const timer = row.querySelector('.timer-active');
         const timerSecs = timer ? (parseInt(timer.getAttribute('data-value'), 10) || 0) : 0;
 
-        return { level, rate, timerSecs, researching: !!timer };
+        // Base growth = displayed rate with the % bonus removed. One extra research building
+        // adds 1 to this base; the bonus (and any what-if extra %) then re-multiplies it.
+        const baseGrowth = bonusPct > -100 ? rate / (1 + bonusPct / 100) : rate;
+
+        return { level, rate, bonusPct, baseGrowth, timerSecs, researching: !!timer };
     }
 
     // -----------------------------------------------------------------
@@ -326,14 +338,20 @@
             return;
         }
 
+        const inStyle = 'background:#222;color:#eee;border:1px solid #555;border-radius:4px;padding:4px 6px;';
         box.innerHTML = `
             <div style="font-weight:bold;color:#fff;margin-bottom:8px;">🔬 Research Time Calculator</div>
             <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-                <select id="hub-sci-select" style="background:#222;color:#eee;border:1px solid #555;border-radius:4px;padding:4px 6px;">
+                <select id="hub-sci-select" style="${inStyle}">
                     ${available.map(s => `<option value="${s.name}">${s.name} (lvl ${s.state.level})</option>`).join('')}
                 </select>
                 <span style="color:#888;">to level</span>
-                <input id="hub-sci-target" type="number" min="1" style="width:70px;background:#222;color:#eee;border:1px solid #555;border-radius:4px;padding:4px 6px;" placeholder="30">
+                <input id="hub-sci-target" type="number" min="1" style="width:70px;${inStyle}" placeholder="30">
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px;">
+                <span style="color:#888;">what if:</span>
+                <input id="hub-sci-buildings" type="number" min="0" style="width:110px;${inStyle}" placeholder="+ buildings" title="Extra research buildings — each adds 1 to base growth (before the % bonus).">
+                <input id="hub-sci-extra" type="number" min="0" step="any" style="width:90px;${inStyle}" placeholder="+ %" title="Extra % bonus stacked on top of the current one (e.g. artifact/event), applied multiplicatively.">
             </div>
             <div id="hub-sci-result" style="margin-top:8px;color:#aaa;min-height:18px;"></div>
         `;
@@ -343,6 +361,8 @@
 
         const selEl = box.querySelector('#hub-sci-select');
         const targetEl = box.querySelector('#hub-sci-target');
+        const buildingsEl = box.querySelector('#hub-sci-buildings');
+        const extraEl = box.querySelector('#hub-sci-extra');
         const resultEl = box.querySelector('#hub-sci-result');
 
         const compute = async () => {
@@ -355,26 +375,37 @@
             if (target <= st.level) { resultEl.innerHTML = `<span style="color:#9c9;">Already at level ${st.level}.</span>`; return; }
             if (st.rate <= 0) { resultEl.innerHTML = '<span style="color:#e88;">No research rate detected for this science.</span>'; return; }
 
+            // What-if inputs: extra buildings add to base growth (1 each), extra % stacks
+            // multiplicatively on top of the current bonus. With both blank, effRate == the
+            // live rate, so the result matches the plain calculation.
+            const buildings = parseInt(buildingsEl.value, 10) || 0;
+            const extraPct = parseFloat(extraEl.value) || 0;
+            const effRate = (st.baseGrowth + buildings) * (1 + st.bonusPct / 100) * (1 + extraPct / 100);
+            const modified = buildings !== 0 || extraPct !== 0;
+            if (effRate <= 0) { resultEl.innerHTML = '<span style="color:#e88;">Effective rate is zero.</span>'; return; }
+
             try {
                 const url = name === 'Culture' ? '/Info/CultureTable' : '/Info/ScienceTable';
                 const table = await getPointsTable(url);
 
                 let total = 0;
                 let startK = st.level + 1;
-                if (st.researching) { total += st.timerSecs; startK = st.level + 2; }
+                // The in-progress research timer is measured at the CURRENT rate; scale it to
+                // the effective rate so it stays consistent when the what-if inputs change.
+                if (st.researching) { total += st.timerSecs * (st.rate / effRate); startK = st.level + 2; }
 
                 const missing = [];
                 for (let k = startK; k <= target; k++) {
                     const pts = table[k];
                     if (pts == null || isNaN(pts)) { missing.push(k); continue; }
-                    total += (pts / st.rate) * 3600;
+                    total += (pts / effRate) * 3600;
                 }
 
                 const finish = new Date(Date.now() + total * 1000);
                 const dateStr = finish.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
                                 finish.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
                 let html = `<span style="color:#aaa;">Lvl ${st.level} → ${target}:</span> <span style="color:#fff;font-weight:bold;">${formatDuration(total)}</span> <span style="color:#888;">(${dateStr})</span>`;
-                html += `<br><span style="color:#666;font-size:11px;">rate ${st.rate.toLocaleString()}/h${st.researching ? ' · current research counted' : ''}</span>`;
+                html += `<br><span style="color:#666;font-size:11px;">rate ${Math.round(effRate).toLocaleString()}/h${modified ? ` (was ${Math.round(st.rate).toLocaleString()})` : ''}${st.researching ? ' · current research counted' : ''}</span>`;
                 if (missing.length) html += `<br><span style="color:#c96;font-size:11px;">No cost data for level(s): ${missing.join(', ')}</span>`;
                 resultEl.innerHTML = html;
             } catch (e) {
@@ -384,6 +415,8 @@
 
         selEl.addEventListener('change', compute);
         targetEl.addEventListener('input', compute);
+        buildingsEl.addEventListener('input', compute);
+        extraEl.addEventListener('input', compute);
     }
 
     // -----------------------------------------------------------------
