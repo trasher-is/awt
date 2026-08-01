@@ -6,25 +6,43 @@
 // Mounted at /rzhub on the rz subdomain (same-origin with the proxied game pages, so the
 // cookie is first-party and reliable on mobile). See server.js host routing.
 const express = require('express');
+const crypto = require('crypto');
 const db = require('../database');
 const router = express.Router();
 
 // Shared password + the opaque token stored in the cookie once you've entered it. Low
 // security stakes (it's game planning notes behind a password everyone on the team knows);
 // the token just needs to be non-obvious so it can't be trivially forged by hand.
-const RZ_PASSWORD = 'BigBadaNap';
-const RZ_TOKEN = 'rzp_1f4c9a7e6b2d48f0a3c15e9d7b60community';
+//
+// Both now come from the environment. The literals below are kept only as defaults so
+// this change does not invalidate anyone's existing unlock cookie — but they are public
+// (they were committed to git), so set RZ_PASSWORD in .env to actually rotate. Once it
+// is set the token is derived from it, meaning a password change also invalidates every
+// cookie handed out under the old one.
+const RZ_PASSWORD = process.env.RZ_PASSWORD || 'BigBadaNap';
+const RZ_TOKEN = process.env.RZ_PASSWORD
+    ? 'rzp_' + crypto.createHmac('sha256', process.env.RZ_PASSWORD).update('rzplans').digest('hex').slice(0, 32)
+    : 'rzp_1f4c9a7e6b2d48f0a3c15e9d7b60community';
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // ~1 year — "log in once"
+
+// Constant-time compare so neither the password nor the cookie token can be recovered
+// byte-by-byte from response timing.
+function safeEqual(a, b) {
+    const bufA = Buffer.from(String(a));
+    const bufB = Buffer.from(String(b));
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+}
 
 function isAuthed(req) {
     const m = (req.headers.cookie || '').match(/(?:^|;\s*)rzplans=([^;]+)/);
-    return !!m && m[1] === RZ_TOKEN;
+    return !!m && safeEqual(m[1], RZ_TOKEN);
 }
 
 // POST /rzhub/login  { password } -> sets the unlock cookie
 router.post('/login', (req, res) => {
     const pw = (req.body && req.body.password) || '';
-    if (pw !== RZ_PASSWORD) return res.status(403).json({ success: false, error: 'Wrong password' });
+    if (!safeEqual(pw, RZ_PASSWORD)) return res.status(403).json({ success: false, error: 'Wrong password' });
     res.setHeader('Set-Cookie', `rzplans=${RZ_TOKEN}; Max-Age=${COOKIE_MAX_AGE}; Path=/; SameSite=Lax; HttpOnly`);
     res.json({ success: true });
 });
