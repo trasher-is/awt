@@ -1,26 +1,14 @@
-// Travel calculator panel logic — called from archives.js after the panel is injected.
-// Mirrors the server formula in src/utils/travel-calc.js (verified exact to 0s).
+// Travel calculator panel — called from archives.js after the panel is injected.
+//
+// This file no longer carries its own copy of the formula. It used to mirror the server
+// one by hand, which is how a panel and a Discord alert could quote different times for
+// the same route. Both now run ../utils/travel-model.js; the side-effect import below
+// runs that file and puts its API on globalThis.
 
 import { esc } from '../utils/escape.js';
+import '../utils/travel-model.js';
 
-function calcTravelSeconds(sx, sy, sp, ex, ey, ep, energy, speed, alliance) {
-    const mod = Math.pow(0.91, energy) / (1 + 0.11 * speed);
-    const planetTerm = Math.sqrt(Math.abs(sp - ep) + 1);
-    let t;
-    if (sx === ex && sy === ey) {
-        t = 1200 + 14400 * planetTerm * mod;              // same system, 20-min min
-    } else {
-        const dist = Math.hypot(ex - sx, ey - sy);
-        t = 2700 + (36000 * dist + 3600 * planetTerm) * mod; // deep space, 45-min min
-    }
-    t = Math.floor(t);
-    return alliance ? Math.floor(t * 0.5) : t;
-}
-
-function fmt(sec) {
-    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
-    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-}
+const { calcTravelSeconds, formatTime: fmt, systemDistance } = globalThis.AWTravelModel;
 
 let sysCache = null, playerCache = null;
 
@@ -36,7 +24,7 @@ function render() {
     document.getElementById('tc-time').textContent = fmt(secs);
 
     const sameSys = (sx === ex && sy === ey);
-    const dist = sameSys ? 0 : Math.hypot(ex - sx, ey - sy);
+    const dist = sameSys ? 0 : systemDistance(sx, sy, ex, ey);
     const meta = sameSys
         ? `Same system · ${Math.abs(sp - ep)} planet slots apart`
         : `Deep space · distance ${dist.toFixed(2)}`;
