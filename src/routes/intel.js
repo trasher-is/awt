@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../database');
 const { requireAuth } = require('./_middleware');
+const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
 const router = express.Router();
 
 // --- GET ENEMY DATA MATRIX FOR CHOSEN ALLIANCE ---
@@ -324,7 +325,9 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
 // for the client-side Trade Agreement scheduler.
 router.get('/intel/trade-analysis', requireAuth, (req, res) => {
     try {
-        const toInt = (s) => parseInt(String(s == null ? '' : s).replace(/[^\d]/g, ''), 10) || 0;
+        // This inline toInt stripped every non-digit, so "1,5" read as 15 and a decimal
+        // rate silently became ten times itself. Same shared parser as everywhere else.
+        const toInt = parseLocaleInt;
 
         const rows = db.prepare(`
             SELECT p.name,

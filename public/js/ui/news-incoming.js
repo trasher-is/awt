@@ -10,6 +10,8 @@
 import { extractPlayerData } from '../scrapers/player-parser.js';
 import { runAllianceFleetScan } from '../scrapers/alliance-parser.js';
 import { esc } from '../utils/escape.js';
+import '../utils/game-rate-limit.js';
+const { gameFetch } = globalThis.AWGameRate;
 
 function toast(msg) {
     try {
@@ -179,7 +181,7 @@ async function enrichFleetIds(d) {
     const ids = [];
     for (const sysId of systems) {
         try {
-            const html = await (await fetch(`/Game/Map/SolarSystem/${sysId}`)).text();
+            const html = await (await gameFetch(`/Game/Map/SolarSystem/${sysId}`)).text();
             const doc = new DOMParser().parseFromString(html, 'text/html');
             const { fleets } = extractSystemData(doc);
             fleets.forEach(f => {
@@ -223,7 +225,7 @@ async function refreshAttacker(info, span, arrivalUnix, defBox, btn, coverEl) {
     try {
         // 1. Re-scrape the attacker's profile for fresh race/science/level intel.
         toast(`Scanning ${info.attacker.name}...`);
-        const resp = await fetch(`/Game/Players/Profile/${info.attacker.id}`);
+        const resp = await gameFetch(`/Game/Players/Profile/${info.attacker.id}`);
         const html = await resp.text();
         const doc = new DOMParser().parseFromString(html, 'text/html');
         const p = extractPlayerData(info.attacker.id, doc);

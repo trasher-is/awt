@@ -20,27 +20,10 @@ function getTraders() {
     return rows.map(r => r.name.toLowerCase());
 }
 
-// Locale-agnostic: handles both "1 234,56" (comma decimal) and "1,234.56" (dot
-// decimal), plus space/NBSP thousands. Both separators present -> the later one
-// is the decimal; a single separator with exactly 3 trailing digits is thousands.
-function parseLocaleNumber(str) {
-    if (str == null) return 0;
-    let s = String(str).replace(/[^\d.,\-]/g, '');
-    if (!s) return 0;
-    const nComma = (s.match(/,/g) || []).length;
-    const nDot = (s.match(/\./g) || []).length;
-    let dec = null;
-    if (nComma && nDot) {
-        dec = s.lastIndexOf(',') > s.lastIndexOf('.') ? ',' : '.';
-    } else if (nComma === 1 || nDot === 1) {
-        const sep = nComma ? ',' : '.';
-        if (s.length - s.lastIndexOf(sep) - 1 !== 3) dec = sep;
-    }
-    if (dec) s = s.split(dec === ',' ? '.' : ',').join('').replace(dec, '.');
-    else s = s.replace(/[.,]/g, '');
-    const v = parseFloat(s);
-    return isNaN(v) ? 0 : v;
-}
+// This file's parseLocaleNumber was the only correct one of the three the project had;
+// it now lives in the shared module so interceptors.js and intel.js use it too, along
+// with every browser scraper.
+const { parseLocaleNumber } = require('../../public/js/utils/parse-number.js');
 
 // Current alliance members (those we have stats for), with trader flag and wealth.
 //   hoarded_au — A$ value of artifacts + supply units held (from /Game/Trade scrape)

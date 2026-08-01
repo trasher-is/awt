@@ -1,4 +1,6 @@
 import { esc } from '../utils/escape.js';
+import '../utils/game-rate-limit.js';
+const { gameFetch } = globalThis.AWGameRate;
 
 export function initPlanetPopTimers() {
     if (!window.location.pathname.toLowerCase().includes('/game/planets')) return;
@@ -92,7 +94,7 @@ export async function initScienceCultureCalc() {
         const currentSeconds = timer ? parseInt(timer.getAttribute('data-value'), 10) : 0;
 
         try {
-            const res = await fetch('/Info/CultureTable');
+            const res = await gameFetch('/Info/CultureTable');
             const html = await res.text();
             const doc = new DOMParser().parseFromString(html, 'text/html');
             const infoRows = doc.querySelectorAll('table tbody tr');
@@ -516,7 +518,7 @@ let _plAggCache = null;
 // Build {level: aggregatedXP} from /Info/PlayerLevelTable (cols: Level, XP, Aggregated).
 async function getPLAggregatedTable() {
     if (_plAggCache) return _plAggCache;
-    const res = await fetch('/Info/PlayerLevelTable');
+    const res = await gameFetch('/Info/PlayerLevelTable');
     const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
     const map = {};
     doc.querySelectorAll('table tbody tr').forEach(r => {

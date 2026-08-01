@@ -1,5 +1,12 @@
 // public/js/ui/archives.js
 import { esc } from '../utils/escape.js';
+import '../utils/battle-model.js';   // side-effect import: cvOf, so CV is defined once
+import '../utils/parse-number.js';   // side-effect import: locale-aware sorting
+import '../utils/game-rate-limit.js';
+const { gameFetch } = globalThis.AWGameRate;
+
+const { cvOf } = globalThis.AWBattleModel;
+const { compareNumeric } = globalThis.AWNumber;
 
 let rawDbPlayers = [], dbSortCol = 'points', dbSortAsc = false;
 let rawDbSystems = [], sysDbSortCol = 'id', sysDbSortAsc = true;
@@ -118,7 +125,7 @@ export async function openFleetDatabasePanel() {
         const res = await fetch('/hub-api/intel/fleets_db');
         const data = await res.json();
         if (data.success) { 
-            rawDbFleets = data.fleets.map(f => ({...f, cv: (f.destroyers * 3) + (f.cruisers * 24) + (f.battleships * 60)})); 
+            rawDbFleets = data.fleets.map(f => ({ ...f, cv: cvOf(f) }));
             renderFleetTable(); 
         }
     } catch (err) { document.getElementById('flt-db-table-body').innerHTML = '<tr><td colspan="11" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
@@ -394,7 +401,7 @@ async function refreshActiveWarAlliance() {
 
     try {
         // 1. Load the alliance profile directly from the AstroWars game
-        const res = await fetch(`/Game/Alliance/Profile/${selectedAllianceId}`);
+        const res = await gameFetch(`/Game/Alliance/Profile/${selectedAllianceId}`);
         if (!res.ok) throw new Error('Failed to fetch game alliance profile data');
         
         const html = await res.text();
@@ -499,7 +506,7 @@ export async function triggerAllianceStatsUpdate() {
     
     if (typeof window.showToast === 'function') window.showToast('Fetching alliance member list...');
     try {
-        const res = await fetch('/Game/Alliance');
+        const res = await gameFetch('/Game/Alliance');
         const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
         const memberLinks = Array.from(doc.querySelectorAll('a[href*="/Game/Alliance/Member/"]'));
         if (memberLinks.length === 0) {
@@ -516,7 +523,7 @@ export async function triggerAllianceStatsUpdate() {
                 const idMatch = targetUrl.match(/\/Member\/(\d+)/);
                 if (!idMatch) continue;
 
-                const mRes = await fetch(targetUrl);
+                const mRes = await gameFetch(targetUrl);
                 const mDoc = new DOMParser().parseFromString(await mRes.text(), 'text/html');
                 const tds = Array.from(mDoc.querySelectorAll('td'));
                 const name = mDoc.querySelector('a[href*="/Game/Players/Profile/"]')?.innerText.trim();
@@ -686,12 +693,17 @@ function renderFleetTable() {
 function renderAllyStatsTable() {
     let filtered = [...rawDbAllyStats];
     filtered.sort((a, b) => {
-        let v1 = a[allyStatsSortCol] ?? 0, v2 = b[allyStatsSortCol] ?? 0;
+        const v1 = a[allyStatsSortCol] ?? 0, v2 = b[allyStatsSortCol] ?? 0;
+        // These columns hold localised number TEXT. Stripping every non-digit read
+        // "999.9" as 9999 and sorted it above "1,000" (1000). The shared parser knows
+        // which separator is the decimal point.
         if (['science_rate', 'culture_rate', 'production_rate', 'astro_dollars', 'production_points'].includes(allyStatsSortCol)) {
-            v1 = parseInt(v1.toString().replace(/[^\d-]/g, ''), 10) || 0;
-            v2 = parseInt(v2.toString().replace(/[^\d-]/g, ''), 10) || 0;
-        } else if (typeof v1 === 'string') { v1 = v1.toLowerCase(); v2 = v2.toLowerCase(); }
-        return v1 < v2 ? (allyStatsSortAsc ? -1 : 1) : (v1 > v2 ? (allyStatsSortAsc ? 1 : -1) : 0);
+            const cmp = compareNumeric(v1, v2);
+            return allyStatsSortAsc ? cmp : -cmp;
+        }
+        const s1 = typeof v1 === 'string' ? v1.toLowerCase() : v1;
+        const s2 = typeof v2 === 'string' ? v2.toLowerCase() : v2;
+        return s1 < s2 ? (allyStatsSortAsc ? -1 : 1) : (s1 > s2 ? (allyStatsSortAsc ? 1 : -1) : 0);
     });
 
     const formatCultureCountdown = (isoStr) => {
@@ -817,13 +829,13 @@ async function refreshTradeAgreements() {
     const orig = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Scanning alliance...'; }
     try {
-        const doc = new DOMParser().parseFromString(await (await fetch('/Game/Alliance')).text(), 'text/html');
+        const doc = new DOMParser().parseFromString(await (await gameFetch('/Game/Alliance')).text(), 'text/html');
         const memberLinks = Array.from(doc.querySelectorAll('a[href*="/Game/Alliance/Member/"]'));
         const tradePairs = [];
         for (const link of memberLinks) {
             try {
                 if (!/\/Member\/(\d+)/.test(link.href)) continue;
-                const mDoc = new DOMParser().parseFromString(await (await fetch(link.href)).text(), 'text/html');
+                const mDoc = new DOMParser().parseFromString(await (await gameFetch(link.href)).text(), 'text/html');
                 const name = mDoc.querySelector('a[href*="/Game/Players/Profile/"]')?.innerText.trim();
                 if (!name) continue;
                 parseTradePartners(mDoc).forEach(partner => tradePairs.push([name, partner]));

@@ -9,10 +9,11 @@ const ONTIME_LIMIT = 10;
 const LATE_LIMIT = 10;
 const LATE_WINDOW = 15 * 60; // only show "late" defenders missing it by < 15 min
 
-function cleanInt(str) {
-    if (str == null) return 0;
-    return parseInt(String(str).replace(/[,.\s]/g, ''), 10) || 0;
-}
+// cleanInt used to strip '.' and ',' unconditionally, so "1.5" read as 15 and
+// "1,5" read as 15 — while trade.js parsed the same columns correctly. One parser now,
+// shared with the browser. The export name stays so webhook.js keeps working.
+const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
+const cleanInt = parseLocaleInt;
 
 // CV comes from the shared battle model — it used to be a fourth hand-written copy of
 // D*3 + C*24 + B*60.

@@ -1,21 +1,56 @@
 import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth } from './page-injections.js';
 import { initNewsIncomingTools } from '../ui/news-incoming.js';
+import '../utils/game-rate-limit.js';
+const { gameFetch } = globalThis.AWGameRate;
 
 export function initSpy() {
     let currentMapX = null;
     let currentMapY = null;
     let verifiedPlayerName = null;
     let knownSysIdsCache = null;
-    let alliedSysIdsCache = null; 
+    let alliedSysIdsCache = null;
     let alliedPlayerNamesCache = new Set();
     let isFetchingSystems = false;
     let simulatedSystemId = null;
     let lastScrapedUrl = null;
 
+    // Counters, so "is this actually cheaper?" has an answer instead of an opinion.
+    // Readable from the console as window.__awtSpyStats.
+    const spyStats = {
+        startedAt: Date.now(),
+        viewPasses: 0,        // times the per-view hooks ran
+        layoutReads: 0,       // times the map scale was actually measured (reflow)
+        mutationBursts: 0,    // observer callbacks that survived the debounce
+        mutationsIgnored: 0,  // callbacks suppressed as our own injections
+        navigations: 0,
+        get perSecond() { return +(this.viewPasses / ((Date.now() - this.startedAt) / 1000)).toFixed(3); }
+    };
+    if (typeof window !== 'undefined') window.__awtSpyStats = spyStats;
+
+    // A token that changes when the visible view changes. Used to invalidate cached
+    // layout measurements and to skip repeat work for a view already processed.
+    const viewToken = () => window.location.pathname + window.location.search;
+
+    // Layout reads are cached per view. This function reads offsetLeft/offsetTop inside a
+    // nested loop, which forces a reflow every time, and injectMapIndicators() calls it up
+    // to twice per pass. The scale only changes when the view changes or the window is
+    // resized, so compute it once and reuse it until one of those happens.
+    let mapScaleCache = { token: null, value: null };
+    function invalidateLayoutCache() { mapScaleCache = { token: null, value: null }; }
+
     function calculateMapScaleFromOffset() {
+        const token = viewToken();
+        if (mapScaleCache.token === token) return mapScaleCache.value;
+        const value = computeMapScaleFromOffset();
+        mapScaleCache = { token, value };
+        return value;
+    }
+
+    function computeMapScaleFromOffset() {
+        spyStats.layoutReads++;
         const nodes = Array.from(document.querySelectorAll('.map-planet'));
         if (nodes.length < 2) return null;
-        
+
         for (let i = 0; i < nodes.length; i++) {
             const spanA = nodes[i].querySelector('span');
             if (!spanA) continue;
@@ -303,7 +338,7 @@ export function initSpy() {
     async function backgroundIdentityCheck() {
         if (verifiedPlayerName) return; 
         try {
-            const response = await fetch('/Game/Players');
+            const response = await gameFetch('/Game/Players');
             const html = await response.text();
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
@@ -383,7 +418,12 @@ export function initSpy() {
         
         try {
             window.parent.postMessage({ type: 'GAME_CONTEXT', payload: contextPayload }, window.location.origin);
-        } catch (e) {}
+        } catch (e) {
+            // Was a bare catch {}. The parent frame can legitimately be gone (the tab is
+            // closing) so this must not throw, but a persistent failure here means the
+            // dashboard has stopped receiving context and should not be invisible.
+            console.warn('[Spy] Could not post context to the parent frame:', e.message);
+        }
 
         const currentFullUrl = window.location.href; 
         if (currentFullUrl !== lastScrapedUrl) {
@@ -430,20 +470,24 @@ export function initSpy() {
 
     sendContext();
 
+    // These two were already patched, but only to catch map coordinate changes; the
+    // 200 ms interval was what noticed every other navigation. They now drive the view
+    // hooks as well, which is what let the interval go.
+    //
+    // extractCoords() is still called first because it updates currentMapX/currentMapY,
+    // which sendContext() reads.
     const originalReplaceState = history.replaceState;
-    history.replaceState = function(state, title, url) {
+    history.replaceState = function (state, title, url) {
         originalReplaceState.apply(this, arguments);
-        if (url && typeof url === 'string') {
-            if (extractCoords(url)) sendContext();
-        }
+        if (url && typeof url === 'string') extractCoords(url);
+        onNavigate();
     };
 
     const originalPushState = history.pushState;
-    history.pushState = function(state, title, url) {
+    history.pushState = function (state, title, url) {
         originalPushState.apply(this, arguments);
-        if (url && typeof url === 'string') {
-            if (extractCoords(url)) sendContext();
-        }
+        if (url && typeof url === 'string') extractCoords(url);
+        onNavigate();
     };
 
     function updateTabTitle() {
@@ -529,40 +573,112 @@ export function initSpy() {
         }
     }
 
-    let lastUrl = window.location.pathname + window.location.search;
-    setInterval(() => {
-        const currentUrl = window.location.pathname + window.location.search;
-        const pathLower = currentUrl.toLowerCase();
+    // ─── VIEW HOOKS ───────────────────────────────────────────────────────────
+    // This used to be a setInterval(..., 200) running for the entire life of the game
+    // frame: five passes per second, forever, each one cloning a node and reading
+    // innerText, reading offsetLeft/offsetTop, and on the map iterating every
+    // .map-planet — all layout-forcing. The same lesson is already recorded in
+    // public/userscripts/redzone-qol.user.js, where a loop like this was removed for
+    // causing hangs; it never made it back here.
+    //
+    // Nothing in that loop needed polling. Two events cover it:
+    //   • navigation — history.pushState/replaceState (already patched below for
+    //     coordinates, now driving everything) plus popstate and hashchange;
+    //   • content appearing after navigation — a MutationObserver, which sees every DOM
+    //     change rather than sampling for one five times a second.
+    //
+    // There is no interval left at all.
 
+    let lastUrl = viewToken();
+
+    // Our own injections mutate the DOM. Without this guard the observer would react to
+    // its own output and spin.
+    let injecting = false;
+
+    function runViewHooks() {
+        if (injecting) return;
+        injecting = true;
+        spyStats.viewPasses++;
+        try {
+            const pathLower = viewToken().toLowerCase();
+
+            if (pathLower.includes('/game/map')) {
+                injectMapIndicators();
+            }
+            if (pathLower.includes('/game/news')) {
+                initAllianceNewsAlerts();
+                initNewsIncomingTools();
+            }
+            if (pathLower.includes('/game/planets')) {
+                initPlanetPopTimers();
+            }
+            if (pathLower.includes('/game/science')) {
+                initScienceCultureCalc();
+                initScienceTimers();
+                initScienceLevelCalculator();
+            }
+            if (pathLower.includes('/game/planets/planet/')) {
+                initStarbaseTimer();
+            }
+            if (pathLower.includes('/game/players/profile/')) {
+                initProfilePLGrowth();
+            }
+
+            updateTabTitle();
+        } catch (err) {
+            console.error('[Spy] View hook failed:', err);
+        } finally {
+            // Release on the next frame: the hooks above append nodes synchronously, and
+            // the observer callback for those appends is delivered afterwards. Clearing
+            // the flag immediately would let our own output trigger another pass.
+            requestAnimationFrame(() => { injecting = false; });
+        }
+    }
+
+    function onNavigate() {
+        const currentUrl = viewToken();
         if (currentUrl !== lastUrl) {
             lastUrl = currentUrl;
+            spyStats.navigations++;
+            invalidateLayoutCache();
             sendContext();
         }
+        runViewHooks();
+    }
 
-        if (pathLower.includes('/game/map')) {
-            injectMapIndicators();
-        }
-        if (pathLower.includes('/game/news')) {
-            initAllianceNewsAlerts();
-            initNewsIncomingTools();
-        }
-        if (pathLower.includes('/game/planets')) {
-            initPlanetPopTimers();
-        }
-        if (pathLower.includes('/game/science')) {
-            initScienceCultureCalc();
-            initScienceTimers();
-            initScienceLevelCalculator();
-        }
-        if (pathLower.includes('/game/planets/planet/')) {
-            initStarbaseTimer();
-        }
-        if (pathLower.includes('/game/players/profile/')) {
-            initProfilePLGrowth();
-        }
+    window.addEventListener('popstate', onNavigate);
+    window.addEventListener('hashchange', onNavigate);
+    // A resize changes pixel geometry without changing the URL, so the cached map scale
+    // has to go even though the view did not.
+    window.addEventListener('resize', () => { invalidateLayoutCache(); scheduleViewHooks(); });
 
-        updateTabTitle();
-    }, 200);
+    // Debounced observer. The game renders asynchronously, so the interesting DOM arrives
+    // some time after the navigation event; a trailing debounce lets a burst of mutations
+    // settle into one pass.
+    let hookTimer = null;
+    function scheduleViewHooks(delay = 150) {
+        clearTimeout(hookTimer);
+        hookTimer = setTimeout(() => { hookTimer = null; onNavigate(); }, delay);
+    }
+
+    const observer = new MutationObserver((records) => {
+        if (injecting) { spyStats.mutationsIgnored++; return; }
+        // Ignore mutations that are only our own markers being added or removed.
+        const OURS = /^(aw-|awt-|custom-)/;
+        const relevant = records.some(r => {
+            if (r.type === 'attributes') return r.attributeName !== 'data-hub-tagged';
+            const nodes = [...r.addedNodes, ...r.removedNodes];
+            if (nodes.length === 0) return true;
+            return nodes.some(n => !(n.classList && [...n.classList].some(c => OURS.test(c))));
+        });
+        if (!relevant) { spyStats.mutationsIgnored++; return; }
+        spyStats.mutationBursts++;
+        scheduleViewHooks();
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+
+    // First pass for the view we loaded into.
+    runViewHooks();
 
     window.addEventListener('message', (event) => {
         if (event.origin !== window.location.origin) return;
