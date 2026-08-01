@@ -4,8 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Alliance Hub - Command Center</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Pinned: the unversioned URL served whatever the CDN considered current, so a new
+         major release would have broken this page with no change on our side. No SRI
+         here because this endpoint tailors its response (plugins/config query). -->
+    <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+          integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous">
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -447,6 +451,44 @@
         }
 
         // --- 3. USER MANAGEMENT MANAGEMENT ---
+
+        // Values rendered below come from the database - idle_time is scraped from the
+        // game, so another player chooses it - and this page is built with innerHTML.
+        // Anything interpolated has to be escaped or it becomes markup on this origin,
+        // with an admin session attached.
+        function esc(value) {
+            if (value === null || value === undefined) return '';
+            return String(value).replace(/[&<>"'`]/g, ch => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;'
+            })[ch]);
+        }
+
+        // The row actions used to be inline onclick attributes carrying the user's name
+        // as a JS string literal inside an HTML attribute - two nested contexts, so a
+        // single apostrophe in a name broke out and ran as code. They are data attributes
+        // now, read back through the dataset, and these listeners are attached once
+        // because loadUsers() replaces only the rows inside this element.
+        const userTable = document.getElementById('userTableBody');
+        userTable.addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-action]');
+            if (!btn) return;
+            const id = Number(btn.dataset.id);
+            const name = btn.dataset.name || '';
+            if (btn.dataset.action === 'edit-name') editName(id, name);
+            else if (btn.dataset.action === 'change-password') changePassword(id, name);
+            else if (btn.dataset.action === 'delete-user') deleteUser(id, name);
+            else if (btn.dataset.action === 'toggle-user') toggleUser(id);
+        });
+        userTable.addEventListener('change', (e) => {
+            const select = e.target.closest('select[data-action="change-role"]');
+            if (select) changeRole(Number(select.dataset.id), select.value);
+        });
+        // blur does not bubble, so this listener has to capture.
+        userTable.addEventListener('blur', (e) => {
+            const input = e.target.closest('input[data-action="update-discord"]');
+            if (input) updateDiscord(Number(input.dataset.id), input.value);
+        }, true);
+
         async function loadUsers() {
             const res = await fetch('/hub-api/admin/users');
             const data = await res.json();
@@ -458,27 +500,27 @@
                 const isMasterAdmin = u.game_name === 'admin';
                 const statusBadge = u.is_active ? '<span class="text-[10px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded uppercase font-bold tracking-wider">Active</span>' : '<span class="text-[10px] bg-red-500/20 text-red-500 px-2 py-0.5 rounded uppercase font-bold tracking-wider">Banned</span>';
                 
-                const roleSelect = isMasterAdmin ? 
-                    `<span class="text-xs text-muted-foreground uppercase tracking-widest font-bold">Admin</span>` : 
-                    `<select onchange="changeRole(${u.id}, this.value)" class="text-xs bg-transparent border border-border rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-ring">
+                const roleSelect = isMasterAdmin ?
+                    `<span class="text-xs text-muted-foreground uppercase tracking-widest font-bold">Admin</span>` :
+                    `<select data-action="change-role" data-id="${u.id}" class="text-xs bg-transparent border border-border rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-ring">
                         <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option>
                         <option value="user"  ${u.role === 'user' ? 'selected' : ''}>User</option>
                     </select>`;
 
-                const editBtn = isMasterAdmin ? '' : `<button onclick="editName(${u.id}, '${u.game_name}')" class="text-xs text-muted-foreground hover:text-foreground transition-colors" title="Edit Name"><i class="fa-solid fa-pen"></i></button>`;
-                const passBtn = `<button onclick="changePassword(${u.id}, '${u.game_name}')" class="text-xs text-muted-foreground hover:text-foreground transition-colors" title="Change Password"><i class="fa-solid fa-key"></i></button>`;
-                const toggleBtn = isMasterAdmin ? `<button disabled class="text-xs opacity-30 cursor-not-allowed text-red-500"><i class="fa-solid fa-ban"></i></button>` : `<button onclick="toggleUser(${u.id})" class="text-xs hover:underline text-${u.is_active ? 'red-500' : 'green-500'}" title="${u.is_active ? 'Ban' : 'Unban'}"><i class="fa-solid fa-${u.is_active ? 'ban' : 'check'}"></i></button>`;
-                const deleteBtn = isMasterAdmin ? '' : `<button onclick="deleteUser(${u.id}, '${u.game_name}')" class="text-xs text-destructive hover:text-destructive/80 transition-colors" title="Delete User"><i class="fa-solid fa-trash"></i></button>`;
+                const editBtn = isMasterAdmin ? '' : `<button data-action="edit-name" data-id="${u.id}" data-name="${esc(u.game_name)}" class="text-xs text-muted-foreground hover:text-foreground transition-colors" title="Edit Name"><i class="fa-solid fa-pen"></i></button>`;
+                const passBtn = `<button data-action="change-password" data-id="${u.id}" data-name="${esc(u.game_name)}" class="text-xs text-muted-foreground hover:text-foreground transition-colors" title="Change Password"><i class="fa-solid fa-key"></i></button>`;
+                const toggleBtn = isMasterAdmin ? `<button disabled class="text-xs opacity-30 cursor-not-allowed text-red-500"><i class="fa-solid fa-ban"></i></button>` : `<button data-action="toggle-user" data-id="${u.id}" class="text-xs hover:underline text-${u.is_active ? 'red-500' : 'green-500'}" title="${u.is_active ? 'Ban' : 'Unban'}"><i class="fa-solid fa-${u.is_active ? 'ban' : 'check'}"></i></button>`;
+                const deleteBtn = isMasterAdmin ? '' : `<button data-action="delete-user" data-id="${u.id}" data-name="${esc(u.game_name)}" class="text-xs text-destructive hover:text-destructive/80 transition-colors" title="Delete User"><i class="fa-solid fa-trash"></i></button>`;
 
                 return `
                     <tr class="hover:bg-muted/30 transition-colors">
-                        <td class="py-3 font-medium">${u.game_name}</td>
+                        <td class="py-3 font-medium">${esc(u.game_name)}</td>
                         <td class="py-3">
-                            <input type="text" value="${u.discord_name || ''}" placeholder="None" onblur="updateDiscord(${u.id}, this.value)" class="bg-transparent border-b border-border/50 focus:border-primary outline-none text-xs w-32 pb-0.5">
+                            <input type="text" value="${esc(u.discord_name || '')}" placeholder="None" data-action="update-discord" data-id="${u.id}" class="bg-transparent border-b border-border/50 focus:border-primary outline-none text-xs w-32 pb-0.5">
                         </td>
                         <td class="py-3">${roleSelect}</td>
                         <td class="py-3">${statusBadge}</td>
-                        <td class="py-3 font-mono text-xs text-muted-foreground">${u.idle_time || '-'}</td>
+                        <td class="py-3 font-mono text-xs text-muted-foreground">${esc(u.idle_time || '-')}</td>
                         <td class="py-3 text-right flex gap-3 justify-end items-center">
                             ${editBtn}
                             ${passBtn}

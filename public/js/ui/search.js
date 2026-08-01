@@ -1,4 +1,5 @@
 import { loadPlayerIntel } from './player-intel.js';
+import { esc } from '../utils/escape.js';
 
 let searchTimeout = null;
 
@@ -34,7 +35,7 @@ async function executeSearch(type) {
         if (type === 'player') {
             resultsContainer.innerHTML = data.results.map(p => `
                 <button data-player-id="${p.id}" class="btn-search-player text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-s transition-colors flex justify-between items-center shadow-sm">
-                    <span class="truncate font-medium">${p.alliance_tag ? `<span class="text-muted-foreground font-normal">[${p.alliance_tag}]</span> ` : ''}${p.name}</span>
+                    <span class="truncate font-medium">${p.alliance_tag ? `<span class="text-muted-foreground font-normal">[${esc(p.alliance_tag)}]</span> ` : ''}${esc(p.name)}</span>
                     <span class="text-s text-muted-foreground font-mono">#${p.id}</span>
                 </button>`).join('');
 
@@ -53,7 +54,7 @@ async function executeSearch(type) {
         } else if (type === 'system') {
             resultsContainer.innerHTML = data.results.map(s => `
                 <button data-path="/Game/Map/SolarSystem/${s.id}" class="btn-search-system text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-s transition-colors flex justify-between items-center shadow-sm">
-                    <span class="truncate font-medium">${s.name}</span>
+                    <span class="truncate font-medium">${esc(s.name)}</span>
                     <span class="text-s text-muted-foreground font-mono">#${s.id} (${s.x}/${s.y})</span>
                 </button>`).join('');
 

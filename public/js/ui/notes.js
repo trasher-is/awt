@@ -4,6 +4,8 @@
 // that has "remind 15m before" checked. The Discord mention for the same reminder
 // is sent server-side (src/discord_bot.js checkNoteReminders) — independent of
 // whether this tab is even open.
+import { esc } from '../utils/escape.js';
+
 let notesCache = [];
 const alertedIds = new Set(); // notes already popped up this session — avoid re-nagging every poll
 let recipients = []; // active members this user can assign a note to: [{id, game_name}]
@@ -51,7 +53,7 @@ function showReminderPopup(note) {
             <div class="flex items-center gap-2 text-yellow-400 font-bold text-sm uppercase tracking-wide">
                 <i class="fa-solid fa-bell"></i> Reminder
             </div>
-            <div class="text-foreground text-sm break-words">${note.text.replace(/</g, '&lt;')}</div>
+            <div class="text-foreground text-sm break-words">${esc(note.text)}</div>
             <div class="text-muted-foreground text-xs font-mono">Due ${new Date(note.due_at).toLocaleString()}</div>
             <div class="flex gap-2 mt-2">
                 <button data-act="done" class="flex-1 h-9 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90">Mark done</button>
@@ -93,8 +95,8 @@ function renderList() {
         <div class="bg-card border ${overdue ? 'border-red-500' : 'border-border'} rounded-lg p-3 flex items-start gap-2">
             <input type="checkbox" data-act="done" data-id="${n.id}" class="mt-1 w-4 h-4 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer shrink-0" title="Mark done">
             <div class="flex-1 min-w-0">
-                <div class="text-sm text-foreground break-words">${n.text.replace(/</g, '&lt;')}</div>
-                ${n.author_name ? `<div class="text-[10px] text-sky-400 mt-0.5"><i class="fa-solid fa-user-check"></i> assigned by ${n.author_name}</div>` : ''}
+                <div class="text-sm text-foreground break-words">${esc(n.text)}</div>
+                ${n.author_name ? `<div class="text-[10px] text-sky-400 mt-0.5"><i class="fa-solid fa-user-check"></i> assigned by ${esc(n.author_name)}</div>` : ''}
                 ${due ? `<div class="text-xs font-mono mt-1 ${overdue ? 'text-red-400 font-bold' : 'text-muted-foreground'}">
                     <i class="fa-solid fa-clock"></i> ${dueLabel} ${n.remind_15 ? '<i class="fa-solid fa-bell ml-1" title="Reminder set"></i>' : ''}
                 </div>` : ''}
@@ -137,7 +139,7 @@ function renderRecipientPicker() {
     list.innerHTML = recipients.map(u => `
         <label class="flex items-center gap-2 text-xs text-foreground cursor-pointer select-none py-0.5">
             <input type="checkbox" data-recipient value="${u.id}" ${u.id === selfId ? 'checked' : ''} class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
-            ${u.game_name.replace(/</g, '&lt;')}${u.id === selfId ? ' <span class="text-muted-foreground">(you)</span>' : ''}
+            ${esc(u.game_name)}${u.id === selfId ? ' <span class="text-muted-foreground">(you)</span>' : ''}
         </label>`).join('');
 }
 

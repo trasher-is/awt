@@ -1,3 +1,5 @@
+import { esc } from '../utils/escape.js';
+
 export function initPlanetPopTimers() {
     if (!window.location.pathname.toLowerCase().includes('/game/planets')) return;
 
@@ -298,7 +300,7 @@ export async function initScienceLevelCalculator() {
             <div style="font-weight:bold;color:#fff;margin-bottom:6px;">🔬 Research Calculator — no sciences detected</div>
             <div style="color:#c96;font-size:11px;line-height:1.5;">
                 tables: ${tables} · rows: ${rows}<br>
-                first cells: ${firstCells.length ? firstCells.join(' | ') : '(none)'}
+                first cells: ${firstCells.length ? esc(firstCells.join(' | ')) : '(none)'}
             </div>`;
         const clk = document.querySelector('[data-clock]');
         ((clk && clk.closest('div')) || document.body || document.documentElement).appendChild(box);
@@ -420,12 +422,16 @@ export async function initAllianceNewsAlerts() {
             const rowHTML = `
                 <tr class="custom-alliance-broadcast-row" style="border-left: 3px solid #1e3a8a; background-color: rgba(121, 53, 14, 0.47);">
                     <td class="msg player-incoming unread" style="vertical-align: top; white-space: nowrap; background-color: rgba(77, 41, 7, 0.85) !important;">
-                        ${b.display_time}
+                        ${esc(b.display_time)}
                         <br>
-                        <b>(<span>${b.author_name}</span>)</b>
+                        <b>(<span>${esc(b.author_name)}</span>)</b>
                     </td>
                     <td class="black text-left" style="vertical-align: top; padding: 6px 12px; background-color: transparent !important;">
-                        <div><b>${b.title}</b> ${b.message}</div>
+                        <!-- message is intentionally NOT escaped: the admin panel labels this
+                             field "HTML Tags Supported" and it is written by admins only, who
+                             can already change passwords and wipe the database. Everything
+                             around it is plain text and is escaped. -->
+                        <div><b>${esc(b.title)}</b> ${b.message}</div>
                     </td>
                 </tr>
             `;

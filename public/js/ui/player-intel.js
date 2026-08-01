@@ -1,5 +1,6 @@
 // public/js/ui/player-intel.js
 import { navToIframe } from './search.js';
+import { esc } from '../utils/escape.js';
 
 let playerHeatmapChartInstance = null;
 
@@ -13,10 +14,10 @@ export async function loadPlayerIntel(playerId) {
             const p = data.player;
             const playerLabel = document.getElementById('ui-player-id');
             if (playerLabel) {
-                const allyTag = p.alliance_tag ? `[${p.alliance_tag}] ` : '';
+                const allyTag = p.alliance_tag ? `[${esc(p.alliance_tag)}] ` : '';
                 playerLabel.innerHTML = `
                     <span class="text-muted-foreground font-bold">${allyTag}</span>
-                    <a href="#" data-player-profile="${p.id}" class="text-blue-400 hover:underline font-semibold">${p.name || 'Unknown'}</a>
+                    <a href="#" data-player-profile="${p.id}" class="text-blue-400 hover:underline font-semibold">${esc(p.name || 'Unknown')}</a>
                     <span class="text-xs text-muted-foreground ml-1">(#${p.id})</span>
                 `;
                 const profileLink = playerLabel.querySelector('[data-player-profile]');
@@ -46,7 +47,7 @@ export async function loadPlayerIntel(playerId) {
                         <div class="text-s text-muted-foreground font-bold uppercase tracking-wider mb-1">Economy</div>
                         ${row('Trade Revenue', (p.trade_revenue || 0).toLocaleString())}
                         ${row('Eco Bonus', `+${p.eco_bonus || 0}%`)}
-                        ${row('Artefact', p.artefact || 'None')}
+                        ${row('Artefact', esc(p.artefact || 'None'))}
                     </div>
                     <div class="flex flex-col gap-1 bg-card border border-border p-2 rounded shadow-sm">
                         <div class="text-s text-muted-foreground font-bold uppercase tracking-wider mb-1">Race Modifiers</div>
@@ -77,7 +78,7 @@ export async function loadPlayerIntel(playerId) {
                         ${row('Ranking', p.ranking ? `#${p.ranking}` : '-')}
                         ${row('Level (PL)', p.level || '-')}
                         ${row('Planets', `${p.planet_count || 0} of ${p.has_intel ? p.culture_level : '--'}`)}
-                        ${row('Status', p.idle_time || 'Unknown')}
+                        ${row('Status', esc(p.idle_time || 'Unknown'))}
                     </div>
                     ${intelBlocks}
                 </div>`;
@@ -133,7 +134,7 @@ function renderPlayerPlanets(p, systems) {
 
     list.innerHTML = systems.map(s => `
         <button data-system-path="/Game/Map/SolarSystem/${s.id}" class="btn-player-planet text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1 text-s transition-colors flex justify-between items-center shadow-sm">
-            <span class="truncate font-medium">${s.name || `System #${s.id}`}</span>
+            <span class="truncate font-medium">${esc(s.name || `System #${s.id}`)}</span>
             <span class="text-s text-muted-foreground font-mono">${s.x}/${s.y}</span>
         </button>`).join('');
 

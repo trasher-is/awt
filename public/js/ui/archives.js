@@ -1,4 +1,6 @@
 // public/js/ui/archives.js
+import { esc } from '../utils/escape.js';
+
 let rawDbPlayers = [], dbSortCol = 'points', dbSortAsc = false;
 let rawDbSystems = [], sysDbSortCol = 'id', sysDbSortAsc = true;
 let rawDbPlanets = [], plnDbSortCol = 'system_id', plnDbSortAsc = true;
@@ -212,7 +214,7 @@ async function loadWarRoomAlliancesList() {
                 : 'bg-zinc-900 text-zinc-300 border-border hover:bg-zinc-800 hover:text-white'
             }`;
             btn.addEventListener('click', () => selectWarRoomAlliance(a.id, a.tag, a.last_scan_time));
-            btn.innerHTML = `<span>[${a.tag}]</span><span class="px-1 py-0.25 bg-black/40 rounded text-[10px] text-muted-foreground border border-white/5">${a.active_members_count}</span>`;
+            btn.innerHTML = `<span>[${esc(a.tag)}]</span><span class="px-1 py-0.25 bg-black/40 rounded text-[10px] text-muted-foreground border border-white/5">${a.active_members_count}</span>`;
             pillsBox.appendChild(btn);
         });
     } catch (err) {}
@@ -289,7 +291,7 @@ async function loadWarRoomMatrixData() {
         if (warRoomSortCol) executeWarRoomSortingRoutine();
         else renderWarRoomTable(warRoomData);
     } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="17" class="text-center py-6 text-red-500 font-bold">API Sync Failure Exception Event: ${err.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="17" class="text-center py-6 text-red-500 font-bold">API Sync Failure Exception Event: ${esc(err.message)}</td></tr>`;
     }
 }
 
@@ -333,8 +335,8 @@ function renderWarRoomTable(data) {
         const tr = document.createElement('tr');
         tr.className = "hover:bg-zinc-900/40 transition-colors border-b border-zinc-900/60";
         tr.innerHTML = `
-            <td class="sticky left-0 z-10 bg-black px-2 py-1 font-bold text-foreground break-words leading-tight w-[110px] border-r border-zinc-800"><a href="/Game/Players/Profile/${p.id}" target="_blank" class="hover:underline hover:text-red-400">${p.name}</a></td>
-            <td class="px-2 py-1"><span class="px-1.5 py-0.5 rounded text-[11px] font-mono tracking-wide whitespace-nowrap" style="${idleStyle}">${p.idle_time || 'Unknown'}</span></td>
+            <td class="sticky left-0 z-10 bg-black px-2 py-1 font-bold text-foreground break-words leading-tight w-[110px] border-r border-zinc-800"><a href="/Game/Players/Profile/${p.id}" target="_blank" class="hover:underline hover:text-red-400">${esc(p.name)}</a></td>
+            <td class="px-2 py-1"><span class="px-1.5 py-0.5 rounded text-[11px] font-mono tracking-wide whitespace-nowrap" style="${idleStyle}">${esc(p.idle_time || 'Unknown')}</span></td>
             <td class="px-2 py-1 text-right ${planetsCls}">${planetsCell}</td>
             <td class="px-2 py-1 text-right text-emerald-400 font-bold">${Math.round(p.calculated_prod).toLocaleString()}</td>
             <td class="px-2 py-1 text-right text-teal-300">${isUnknown ? q : (p.trade_revenue || 0) + '%'}</td>
@@ -612,8 +614,8 @@ function renderPlayerTable() {
         const sci = (color) => stale ? 'text-zinc-500' : color;
         return `
         <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3 font-medium text-foreground sticky left-0 z-10 bg-card"><a href="/Game/Players/Profile/${p.id}" target="_blank" class="hover:underline hover:text-primary">${p.name || 'Unknown'}</a></td>
-            <td class="p-3 text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : '-'}</td>
+            <td class="p-3 font-medium text-foreground sticky left-0 z-10 bg-card"><a href="/Game/Players/Profile/${p.id}" target="_blank" class="hover:underline hover:text-primary">${esc(p.name || 'Unknown')}</a></td>
+            <td class="p-3 text-aw-warning">${p.alliance_tag ? `[${esc(p.alliance_tag)}]` : '-'}</td>
             <td class="p-3">${p.level || 0}</td>
             <td class="p-3 text-blue-300">${p.science_level || 0}</td>
             <td class="p-3 text-purple-300">${p.culture_level || 0}</td>
@@ -636,7 +638,7 @@ function renderPlayerTable() {
             <td class="p-3 ${sci('text-orange-400')}">${gated(p.mathematics)}</td>
             <td class="p-3 ${sci('text-blue-400')}">${gated(p.physics)}</td>
             <td class="p-3 ${sci('text-pink-400')}">${gated(p.social)}</td>
-            <td class="p-3 border-l border-border">${intel ? (p.artefact || '-') : q0}</td>
+            <td class="p-3 border-l border-border">${intel ? esc(p.artefact || '-') : q0}</td>
             <td class="p-3 text-muted-foreground border-l border-border">${fmtIntelDate(p.intel_updated_at)}</td>
         </tr>`;
     }).join('');
@@ -651,7 +653,7 @@ function renderSystemTable() {
     const tbody = document.getElementById('sys-db-table-body'); if (!tbody) return;
     tbody.innerHTML = f.map(s => `
         <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3 font-mono">${s.id}</td><td class="p-3 font-medium text-foreground">${s.name || 'Unknown'}</td><td>${s.x}</td><td>${s.y}</td><td class="p-3 border-l border-border text-aw-ally">${s.planet_count || 0}</td><td class="p-3 text-aw-enemy">${s.fleet_count || 0}</td><td class="p-3 border-l border-border text-muted-foreground">${new Date(s.updated_at).toLocaleString()}</td>
+            <td class="p-3 font-mono">${s.id}</td><td class="p-3 font-medium text-foreground">${esc(s.name || 'Unknown')}</td><td>${s.x}</td><td>${s.y}</td><td class="p-3 border-l border-border text-aw-ally">${s.planet_count || 0}</td><td class="p-3 text-aw-enemy">${s.fleet_count || 0}</td><td class="p-3 border-l border-border text-muted-foreground">${new Date(s.updated_at).toLocaleString()}</td>
         </tr>`).join('');
 }
 
@@ -664,7 +666,7 @@ function renderPlanetTable() {
     const tbody = document.getElementById('pln-db-table-body'); if (!tbody) return;
     tbody.innerHTML = f.map(p => `
         <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3 font-mono">${p.system_id}</td><td>${p.system_name || 'Unknown'}</td><td class="p-3 font-medium text-foreground">#${p.planet_index}</td><td class="p-3 border-l border-border">${p.owner_name || 'Empty'}</td><td class="p-3 text-aw-warning">${p.alliance_tag ? `[${p.alliance_tag}]` : '-'}</td><td class="p-3 border-l border-border text-primary">${(p.population || 0).toLocaleString()}</td><td class="p-3 text-aw-warning">${p.starbase || 0}</td><td class="p-3 border-l border-border text-muted-foreground">${new Date(p.updated_at).toLocaleString()}</td>
+            <td class="p-3 font-mono">${p.system_id}</td><td>${esc(p.system_name || 'Unknown')}</td><td class="p-3 font-medium text-foreground">#${p.planet_index}</td><td class="p-3 border-l border-border">${esc(p.owner_name || 'Empty')}</td><td class="p-3 text-aw-warning">${p.alliance_tag ? `[${esc(p.alliance_tag)}]` : '-'}</td><td class="p-3 border-l border-border text-primary">${(p.population || 0).toLocaleString()}</td><td class="p-3 text-aw-warning">${p.starbase || 0}</td><td class="p-3 border-l border-border text-muted-foreground">${new Date(p.updated_at).toLocaleString()}</td>
         </tr>`).join('');
 }
 
@@ -677,7 +679,7 @@ function renderFleetTable() {
     const tbody = document.getElementById('flt-db-table-body'); if (!tbody) return;
     tbody.innerHTML = f.map(f => `
         <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3">${f.system_name || 'Unknown'}</td><td class="p-3 font-medium text-foreground">#${f.planet_index}</td><td class="p-3 border-l border-border">${f.owner_name || 'Unknown'}</td><td class="p-3 text-aw-warning">${f.alliance_tag ? `[${f.alliance_tag}]` : '-'}</td><td class="p-3 border-l border-border text-gray-400">${f.transports || 0}</td><td class="p-3 text-gray-400">${f.colony_ships || 0}</td><td class="p-3 text-red-400 border-l border-border">${f.destroyers || 0}</td><td class="p-3 text-red-400">${f.cruisers || 0}</td><td class="p-3 text-red-400">${f.battleships || 0}</td><td class="p-3 text-aw-warning border-l border-border font-bold">${(f.cv || 0).toLocaleString()}</td><td class="p-3 border-l border-border ${f.arrival_time && f.arrival_time !== '-' ? 'text-red-400 font-bold' : 'text-muted-foreground'}">${f.arrival_time || 'Stationed'}</td>
+            <td class="p-3">${esc(f.system_name || 'Unknown')}</td><td class="p-3 font-medium text-foreground">#${f.planet_index}</td><td class="p-3 border-l border-border">${esc(f.owner_name || 'Unknown')}</td><td class="p-3 text-aw-warning">${f.alliance_tag ? `[${esc(f.alliance_tag)}]` : '-'}</td><td class="p-3 border-l border-border text-gray-400">${f.transports || 0}</td><td class="p-3 text-gray-400">${f.colony_ships || 0}</td><td class="p-3 text-red-400 border-l border-border">${f.destroyers || 0}</td><td class="p-3 text-red-400">${f.cruisers || 0}</td><td class="p-3 text-red-400">${f.battleships || 0}</td><td class="p-3 text-aw-warning border-l border-border font-bold">${(f.cv || 0).toLocaleString()}</td><td class="p-3 border-l border-border ${f.arrival_time && f.arrival_time !== '-' ? 'text-red-400 font-bold' : 'text-muted-foreground'}">${esc(f.arrival_time || 'Stationed')}</td>
         </tr>`).join('');
 }
 
@@ -714,7 +716,7 @@ function renderAllyStatsTable() {
     
     tbody.innerHTML = filtered.map(s => `
         <tr class="hover:bg-accent/50 transition-colors border-b border-border/60">
-            <td class="sticky left-0 z-10 bg-black px-2 py-1 font-medium text-foreground break-words leading-tight w-[110px] border-r border-zinc-800">${s.player_name || 'Unknown'}</td><td class="px-2 py-1 text-right text-muted-foreground">${s.player_id}</td><td class="px-2 py-1 text-aw-ally font-semibold">${s.planets_text || '-'}</td><td class="px-2 py-1 font-semibold text-yellow-500 whitespace-nowrap">${formatCultureCountdown(s.next_culture_at)}</td><td class="px-2 py-1 text-right text-blue-400 font-semibold">${s.science_rate || '-'}</td><td class="px-2 py-1 text-right text-purple-400 font-semibold">${s.culture_rate || '-'}</td><td class="px-2 py-1 text-right text-orange-400 font-semibold">${s.production_rate || '-'}</td><td class="px-2 py-1 text-right text-emerald-400">${s.astro_dollars || '-'}</td><td class="px-2 py-1 text-right text-slate-300">${s.production_points || '-'}</td><td class="px-2 py-1 text-pink-400 font-semibold">${s.artefact || 'None'}</td><td class="px-2 py-1 text-sky-400">${s.level_text || '-'}</td><td class="px-2 py-1 text-red-400">${s.cv_limit_text || '-'}</td><td class="px-2 py-1 text-right text-amber-500 font-bold">${s.economy}</td><td class="px-2 py-1 text-right text-cyan-400 font-bold">${s.energy}</td><td class="px-2 py-1 text-right text-indigo-400 font-bold">${s.mathematics}</td><td class="px-2 py-1 text-right text-violet-400 font-bold">${s.physics}</td><td class="px-2 py-1 text-right text-foreground font-bold bg-white/5">${s.population}</td>
+            <td class="sticky left-0 z-10 bg-black px-2 py-1 font-medium text-foreground break-words leading-tight w-[110px] border-r border-zinc-800">${esc(s.player_name || 'Unknown')}</td><td class="px-2 py-1 text-right text-muted-foreground">${s.player_id}</td><td class="px-2 py-1 text-aw-ally font-semibold">${esc(s.planets_text || '-')}</td><td class="px-2 py-1 font-semibold text-yellow-500 whitespace-nowrap">${formatCultureCountdown(s.next_culture_at)}</td><td class="px-2 py-1 text-right text-blue-400 font-semibold">${esc(s.science_rate || '-')}</td><td class="px-2 py-1 text-right text-purple-400 font-semibold">${esc(s.culture_rate || '-')}</td><td class="px-2 py-1 text-right text-orange-400 font-semibold">${esc(s.production_rate || '-')}</td><td class="px-2 py-1 text-right text-emerald-400">${esc(s.astro_dollars || '-')}</td><td class="px-2 py-1 text-right text-slate-300">${esc(s.production_points || '-')}</td><td class="px-2 py-1 text-pink-400 font-semibold">${esc(s.artefact || 'None')}</td><td class="px-2 py-1 text-sky-400">${esc(s.level_text || '-')}</td><td class="px-2 py-1 text-red-400">${esc(s.cv_limit_text || '-')}</td><td class="px-2 py-1 text-right text-amber-500 font-bold">${s.economy}</td><td class="px-2 py-1 text-right text-cyan-400 font-bold">${s.energy}</td><td class="px-2 py-1 text-right text-indigo-400 font-bold">${s.mathematics}</td><td class="px-2 py-1 text-right text-violet-400 font-bold">${s.physics}</td><td class="px-2 py-1 text-right text-foreground font-bold bg-white/5">${s.population}</td>
         </tr>`).join('');
 }
 
@@ -854,7 +856,7 @@ function renderTaBoard() {
     if (adminBox) {
         adminBox.classList.toggle('hidden', !isAdmin);
         if (isAdmin) {
-            const opts = members.map(m => `<option value="${m.name}">${m.name}${m.isTrader ? ' (T)' : ''}</option>`).join('');
+            const opts = members.map(m => `<option value="${esc(m.name)}">${esc(m.name)}${m.isTrader ? ' (T)' : ''}</option>`).join('');
             const selA = document.getElementById('ta-admin-a'), selB = document.getElementById('ta-admin-b');
             if (selA && !selA.dataset.filled) { selA.innerHTML = opts; selB.innerHTML = opts; selA.dataset.filled = '1'; selB.dataset.filled = '1'; }
         }
@@ -873,7 +875,7 @@ function renderTaBoard() {
         confirmList.innerHTML = pendingForMe.map(t => {
             const other = t.player_a.toLowerCase() === meLower ? t.player_b : t.player_a;
             return `<div class="flex items-center justify-between bg-zinc-950 border border-yellow-700/50 rounded-md px-3 py-2">
-                <span class="text-sm text-foreground"><b>${other}</b> proposed a trade agreement with you</span>
+                <span class="text-sm text-foreground"><b>${esc(other)}</b> proposed a trade agreement with you</span>
                 <span class="flex gap-2">
                     <button data-ta-confirm="${t.id}" class="h-8 px-3 rounded-md bg-green-700 hover:bg-green-600 text-white text-xs font-medium">Confirm</button>
                     <button data-ta-cancel="${t.id}" class="h-8 px-3 rounded-md border border-border hover:bg-secondary text-xs">Decline</button>
@@ -892,7 +894,7 @@ function renderTaBoard() {
         <th class="bg-zinc-900 px-2 py-1 text-muted-foreground border border-border/40">TAs</th>`;
     members.forEach(p => {
         const t = p.isTrader ? 'text-yellow-400' : 'text-muted-foreground';
-        html += `<th class="bg-zinc-900 px-1 py-1 border border-border/40 ${t}" title="${p.name}">${taShort(p.name)}</th>`;
+        html += `<th class="bg-zinc-900 px-1 py-1 border border-border/40 ${t}" title="${esc(p.name)}">${esc(taShort(p.name))}</th>`;
     });
     // Trailing wealth columns: a spacer, then hoarded A$ and visible A$ (+PP).
     html += `<th class="bg-black border-0" style="min-width:14px"></th>`;
@@ -906,7 +908,7 @@ function renderTaBoard() {
         const c1 = taCount(p1.name.toLowerCase(), agreements);
         const full1 = c1 >= maxTas;
         html += `<tr>
-            <td class="sticky left-0 bg-black px-2 py-1 font-semibold text-foreground border border-border/40 whitespace-nowrap">${p1.name}${p1.isTrader ? ' <span class="text-yellow-400">T</span>' : ''}</td>
+            <td class="sticky left-0 bg-black px-2 py-1 font-semibold text-foreground border border-border/40 whitespace-nowrap">${esc(p1.name)}${p1.isTrader ? ' <span class="text-yellow-400">T</span>' : ''}</td>
             <td class="px-2 py-1 text-center border border-border/40 ${full1 ? 'text-green-400 font-bold' : 'text-muted-foreground'}">${c1}/${maxTas}</td>`;
         members.forEach(p2 => {
             html += taCell(p1, p2, { me: meLower, isAdmin, maxTas, traderSet, agreements, full1 });
@@ -941,18 +943,18 @@ function taCell(p1, p2, ctx) {
     const canAct = ctx.isAdmin || meInPair;
 
     if (ta) {
-        let bg = '#a16207', label = 'P', title = `Proposed by ${ta.initiator}`;
+        let bg = '#a16207', label = 'P', title = `Proposed by ${esc(ta.initiator)}`;
         if (ta.status === 'confirmed') { bg = '#15803d'; label = '✓'; title = 'Confirmed' + (ta.is_admin_set ? ' (admin)' : ''); }
         else if (ta.status === 'done') { bg = '#1d4ed8'; label = '★'; title = 'Done'; }
         const clickable = canAct && ta.status !== 'done';
-        return `<td class="${cls}"><button ${clickable ? `data-ta-pair="1" data-ta-a="${p1.name}" data-ta-b="${p2.name}"` : 'disabled'} title="${title}${clickable ? ' — click to remove' : ''}" style="width:100%;min-height:28px;border:none;background:${bg};color:#fff;font-weight:bold;cursor:${clickable ? 'pointer' : 'default'}">${label}</button></td>`;
+        return `<td class="${cls}"><button ${clickable ? `data-ta-pair="1" data-ta-a="${esc(p1.name)}" data-ta-b="${esc(p2.name)}"` : 'disabled'} title="${title}${clickable ? ' — click to remove' : ''}" style="width:100%;min-height:28px;border:none;background:${bg};color:#fff;font-weight:bold;cursor:${clickable ? 'pointer' : 'default'}">${label}</button></td>`;
     }
 
     // empty cell
     const p2Full = taCount(p2.name.toLowerCase(), ctx.agreements) >= ctx.maxTas;
     const blocked = ctx.full1 || p2Full;
     if (canAct && !blocked) {
-        return `<td class="${cls}"><button data-ta-pair="1" data-ta-a="${p1.name}" data-ta-b="${p2.name}" title="${ctx.isAdmin && !( [p1.name.toLowerCase(),p2.name.toLowerCase()].includes(ctx.me)) ? 'Set pairing (admin)' : 'Propose'}" style="width:100%;min-height:28px;border:none;background:transparent;color:#555;font-weight:bold;cursor:pointer">+</button></td>`;
+        return `<td class="${cls}"><button data-ta-pair="1" data-ta-a="${esc(p1.name)}" data-ta-b="${esc(p2.name)}" title="${ctx.isAdmin && !( [p1.name.toLowerCase(),p2.name.toLowerCase()].includes(ctx.me)) ? 'Set pairing (admin)' : 'Propose'}" style="width:100%;min-height:28px;border:none;background:transparent;color:#555;font-weight:bold;cursor:pointer">+</button></td>`;
     }
     return `<td class="${cls}" style="background:#0d0d0d"></td>`;
 }
@@ -1123,14 +1125,14 @@ function computeAndRenderTradeSchedule(globalPlayers, ppPrice, config) {
     }
     const cell = (item, index) => {
         if (!item) return '<td></td><td></td>';
-        let pair = `<span>${item.p1}</span> <i class="fa-solid fa-right-left text-muted-foreground mx-2"></i> <span>${item.p2}</span>`;
+        let pair = `<span>${esc(item.p1)}</span> <i class="fa-solid fa-right-left text-muted-foreground mx-2"></i> <span>${esc(item.p2)}</span>`;
         if (item.is_trader) pair = `<span class="text-yellow-400 font-bold">${pair}</span>`;
         return `<td class="p-3 text-muted-foreground font-mono">${index + 1}</td><td class="p-3 font-medium text-foreground">${pair} <span class="text-xs text-muted-foreground ml-1">(${formatTaHours(item.time)})</span></td>`;
     };
     let rows = '';
     for (let i = 0; i < schedule.length; i += 2) rows += `<tr class="hover:bg-accent/40">${cell(schedule[i], i)}${cell(schedule[i + 1], i + 1)}</tr>`;
     let footer = '';
-    if (missingPlayers.size > 0) footer = `<tr><td colspan="4" class="text-center py-2 text-aw-warning bg-yellow-950/30 text-xs">⚠️ No alliance-stats data for: ${Array.from(missingPlayers).join(', ')}</td></tr>`;
+    if (missingPlayers.size > 0) footer = `<tr><td colspan="4" class="text-center py-2 text-aw-warning bg-yellow-950/30 text-xs">⚠️ No alliance-stats data for: ${esc(Array.from(missingPlayers).join(', '))}</td></tr>`;
     tbody.innerHTML = rows + footer;
 }
 
