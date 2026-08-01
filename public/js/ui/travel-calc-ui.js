@@ -7,6 +7,7 @@
 
 import { esc } from '../utils/escape.js';
 import '../utils/travel-model.js';
+import '../utils/battle-model.js';   // side-effect import: cvOf for the system view
 
 const { calcTravelSeconds, formatTime: fmt, systemDistance } = globalThis.AWTravelModel;
 
@@ -109,7 +110,7 @@ function wirePlayerSearch() {
     input.addEventListener('blur', () => setTimeout(() => drop.classList.add('hidden'), 150));
 }
 
-const cvOf = (f) => (f.destroyers || 0) * 3 + (f.cruisers || 0) * 24 + (f.battleships || 0) * 60;
+const { cvOf } = globalThis.AWBattleModel;
 
 async function renderSystemView(sysId) {
     const box = document.getElementById('tc-system-view');

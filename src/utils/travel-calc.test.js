@@ -120,6 +120,42 @@ if (uiImports && !uiHasOwnFormula && serverShares) {
     failed = true;
 }
 
+// Structural identity is necessary but not sufficient: exercise the thing over a grid so
+// a future divergence shows up as numbers, not as a missing import. The browser reaches
+// the formula through globalThis.AWTravelModel, the server through require — this walks
+// both handles across the whole input space the panel can produce.
+const browserHandle = globalThis.AWTravelModel;
+const serverHandle = require('./travel-calc');
+let gridChecked = 0, gridBad = 0, gridWorst = null;
+for (let sx = -60; sx <= 60; sx += 17) {
+    for (let sy = -60; sy <= 60; sy += 19) {
+        for (let ex = -60; ex <= 60; ex += 23) {
+            for (let ey = -60; ey <= 60; ey += 29) {
+                for (const sp of [1, 6, 12]) {
+                    for (const ep of [1, 7, 12]) {
+                        for (const energy of [0, 9, 27, 45]) {
+                            for (const speed of [-4, -1, 0, 2, 4]) {
+                                for (const allied of [false, true]) {
+                                    const a = browserHandle.calcTravelSeconds(sx, sy, sp, ex, ey, ep, energy, speed, allied);
+                                    const b = serverHandle.calcTravelSeconds(sx, sy, sp, ex, ey, ep, energy, speed, allied);
+                                    gridChecked++;
+                                    if (a !== b) { gridBad++; if (!gridWorst) gridWorst = { sx, sy, sp, ex, ey, ep, energy, speed, allied, a, b }; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+if (gridBad === 0) {
+    console.log(`✅ client and server agree on all ${gridChecked.toLocaleString()} grid routes`);
+} else {
+    console.log(`❌ client and server disagree on ${gridBad} of ${gridChecked} routes, e.g. ${JSON.stringify(gridWorst)}`);
+    failed = true;
+}
+
 // ─── 4. COVERAGE ──────────────────────────────────────────────────────────────
 console.log('\n── Coverage: where there is no ground truth ' + '─'.repeat(32));
 const sameSystem = CASES.filter(c => c.from[0] === c.to[0] && c.from[1] === c.to[1]);

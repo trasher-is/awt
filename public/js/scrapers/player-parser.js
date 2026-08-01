@@ -1,5 +1,20 @@
-// Pure data collection logic that can target any window, iframe, or virtual DOM element
-export function extractPlayerData(playerId, doc = document) {
+// Pure data collection logic that can target any window, iframe, or virtual DOM element.
+//
+// Field lookups go through the shared scrape helpers rather than one hard-coded English
+// string each, and every lookup is counted. A member whose game interface is not English
+// used to sync a profile full of zeros with no complaint; now the miss ratio is reported.
+// Numbers go through the shared locale-aware parser — the old inline regexes dropped the
+// non-breaking space the game uses as a thousands separator, which made points and
+// ranking come back empty.
+import '../utils/scrape-report.js';
+import '../utils/parse-number.js';
+import '../utils/game-rate-limit.js';
+const { gameFetch } = globalThis.AWGameRate;
+
+const { ScrapeReport, LABELS, labelledValue, headerIndex, matchesLabel } = globalThis.AWScrape;
+const { parseLocaleInt, parseLocaleNumber } = globalThis.AWNumber;
+
+export function extractPlayerData(playerId, doc = document, report = new ScrapeReport('player profile')) {
     const p = {
         id: parseInt(playerId, 10), name: null, alliance_id: null, alliance_tag: null,
         country: null, local_time: null, idle_time: null, origin_system: null,
@@ -44,85 +59,77 @@ export function extractPlayerData(playerId, doc = document) {
         p.alliance_id = parseInt(allyLink.getAttribute('href').split('/').pop(), 10);
     }
 
-    const getRowVal = (labelMatch, exact = false) => {
-        const rows = doc.querySelectorAll('table tbody tr');
-        for (let row of rows) {
-            const cells = row.querySelectorAll('th, td');
-            if (cells.length >= 2) {
-                const labelText = cells[0].innerText.trim();
-                if (exact ? labelText === labelMatch : labelText.includes(labelMatch)) {
-                    const valText = cells[1].innerText.trim();
-                    if (labelMatch === 'Economy' && exact && valText.includes('%')) {
-                        continue;
-                    }
-                    return valText;
-                }
-            }
-        }
-        return null;
+    // One lookup helper, counted. `which` names the field so a miss is reportable rather
+    // than an indistinguishable empty string.
+    const getRowVal = (which, synonyms, { exact = false, accept = null, optional = false } = {}) => {
+        const hit = labelledValue(doc, synonyms, { exact, accept });
+        if (!optional) report.label(hit.found, which);
+        return hit.found ? hit.value : null;
     };
 
-    p.local_time = getRowVal('Local Time');
-    p.idle_time = getRowVal('Idle');
-    p.joined = getRowVal('Joined'); 
-    p.logins = parseInt(getRowVal('Logins'), 10) || 0; 
-    
-    // Optional extraction loops if visible on public views
-    p.cv_limit = parseInt(getRowVal('CV Limit'), 10) || 0;
-    p.cv_used = parseInt(getRowVal('CV Used'), 10) || 0;
+    p.local_time = getRowVal('local time', LABELS.localTime);
+    p.idle_time = getRowVal('idle', LABELS.idle);
+    p.joined = getRowVal('joined', LABELS.joined);
+    p.logins = parseLocaleInt(getRowVal('logins', LABELS.logins));
+
+    // Only shown on some views, so a miss here is not evidence of a broken scrape.
+    p.cv_limit = parseLocaleInt(getRowVal('cv limit', LABELS.cvLimit, { optional: true }));
+    p.cv_used = parseLocaleInt(getRowVal('cv used', LABELS.cvUsed, { optional: true }));
 
     const countryImg = doc.querySelector('img[src^="/img/country/"]');
     if (countryImg) {
         p.country = countryImg.getAttribute('alt') || countryImg.getAttribute('title');
     }
 
-    const originRow = Array.from(doc.querySelectorAll('table tbody tr')).find(row => {
-        const cells = row.querySelectorAll('th, td');
-        return cells.length > 0 && cells[0].innerText.trim() === 'Origin';
-    });
+    // Origin is read from the link, not the label's neighbouring text — the system id is
+    // in the href, which no translation can change.
+    const originHit = labelledValue(doc, LABELS.origin, { exact: true });
+    report.label(!!originHit.found, 'origin');
+    const originLink = (originHit.cell && originHit.cell.querySelector)
+        ? originHit.cell.querySelector('a[href^="/Game/Map/SolarSystem/"]')
+        : doc.querySelector('table tbody tr a[href^="/Game/Map/SolarSystem/"]');
+    if (originLink) p.origin_system = parseInt(originLink.getAttribute('href').split('/').pop(), 10);
 
-    if (originRow) {
-        const originLink = originRow.querySelector('a[href^="/Game/Map/SolarSystem/"]');
-        p.origin_system = originLink ? parseInt(originLink.getAttribute('href').split('/').pop(), 10) : null;
-    }
+    const lvlStr = getRowVal('player level', LABELS.playerLevel);
+    if (lvlStr) p.level = parseLocaleInt(lvlStr.split('-')[0]);
 
-    const lvlStr = getRowVal('Player Level');
-    if (lvlStr) p.level = parseInt(lvlStr.split('-')[0].trim(), 10) || 0;
+    p.science_level = parseLocaleInt(getRowVal('science level', LABELS.scienceLevel));
+    p.culture_level = parseLocaleInt(getRowVal('culture level', LABELS.cultureLevel));
 
-    p.science_level = parseInt(getRowVal('Science Level'), 10) || 0;
-    p.culture_level = parseInt(getRowVal('Culture Level'), 10) || 0;
-
-    const rankStr = getRowVal('Ranking');
+    const rankStr = getRowVal('ranking', LABELS.ranking);
     if (rankStr) {
-        const rMatch = rankStr.match(/#(\d+)\s*\(([\d,\.\s]+)\)/);
+        // "#123 (4 567 890)" — the digits and the bracket are language-independent, but
+        // the thousands separator is not, so the numbers go through the shared parser.
+        const rMatch = rankStr.match(/#\s*([\d\s.,]+?)\s*\(([^)]+)\)/);
         if (rMatch) {
-            p.ranking = parseInt(rMatch[1].replace(/[^\d]/g, ''), 10);
-            p.points = parseInt(rMatch[2].replace(/[^\d]/g, ''), 10);
+            p.ranking = parseLocaleInt(rMatch[1]);
+            p.points = parseLocaleInt(rMatch[2]);
+        } else {
+            report.problem('ranking did not match the "#rank (points)" shape', rankStr.slice(0, 40));
         }
     }
 
     if (p.has_intel === 1) {
-        p.biology = parseInt(getRowVal('Biology', true), 10) || 0;
-        p.economy = parseInt(getRowVal('Economy', true), 10) || 0;
-        p.energy = parseInt(getRowVal('Energy', true), 10) || 0;
-        p.mathematics = parseInt(getRowVal('Mathematics', true), 10) || 0;
-        p.physics = parseInt(getRowVal('Physics', true), 10) || 0;
-        p.social = parseInt(getRowVal('Social', true), 10) || 0;
+        // "Economy" the science level and "Economy Bonus" the percentage share a prefix,
+        // so the exact match plus a no-percent guard keeps them apart.
+        const noPercent = v => !v.includes('%');
+        p.biology = parseLocaleInt(getRowVal('biology', LABELS.biology, { exact: true }));
+        p.economy = parseLocaleInt(getRowVal('economy', LABELS.economy, { exact: true, accept: noPercent }));
+        p.energy = parseLocaleInt(getRowVal('energy', LABELS.energy, { exact: true }));
+        p.mathematics = parseLocaleInt(getRowVal('mathematics', LABELS.mathematics, { exact: true }));
+        p.physics = parseLocaleInt(getRowVal('physics', LABELS.physics, { exact: true }));
+        p.social = parseLocaleInt(getRowVal('social', LABELS.social, { exact: true }));
 
-        const ecoBonusStr = getRowVal('Economy Bonus');
-        if (ecoBonusStr) p.eco_bonus = parseInt(ecoBonusStr.replace(/[^\d+-]/g, ''), 10) || 0;
+        const ecoBonusStr = getRowVal('economy bonus', LABELS.economyBonus, { optional: true });
+        if (ecoBonusStr) p.eco_bonus = parseLocaleInt(ecoBonusStr);
 
-        const tradeStr = getRowVal('Trade Revenue');
-        if (tradeStr) p.trade_revenue = parseInt(tradeStr.replace(/[^\d]/g, ''), 10) || 0;
-        
-        const artefactRows = doc.querySelectorAll('.ir-summary tr');
-        artefactRows.forEach(row => {
-            const tds = row.querySelectorAll('td');
-            if (tds.length >= 2 && tds[0]?.innerText.includes('Artefact')) {
-                const rawText = tds[1].innerText.trim();
-                p.artefact = rawText === 'N/A' ? null : (rawText.split(/\s+/)[0] || null);
-            }
-        });
+        const tradeStr = getRowVal('trade revenue', LABELS.tradeRevenue, { optional: true });
+        if (tradeStr) p.trade_revenue = parseLocaleInt(tradeStr);
+
+        const artefactHit = labelledValue(doc.querySelector('.ir-summary') || doc, LABELS.artefact, { exact: false });
+        if (artefactHit.found) {
+            p.artefact = artefactHit.value === 'N/A' ? null : (artefactHit.value.split(/\s+/)[0] || null);
+        }
 
         const parseRace = (text) => parseInt(text.match(/([+-]\d+)\s*$/)?.[1] || "0", 10);
         doc.querySelectorAll('.race-summary tbody td').forEach(td => {
@@ -141,24 +148,41 @@ export function extractPlayerData(playerId, doc = document) {
 
     const planetRows = doc.querySelectorAll('tr[data-planet-id]');
     if (planetRows.length > 0) {
+        // Population used to be read as tds[2]. One inserted column and every planet's
+        // population became whatever now sits in slot 2 — a plausible number, stored
+        // without complaint. Ask the table's own header where the column is instead.
+        const planetTable = planetRows[0].closest ? planetRows[0].closest('table') : null;
+        let popIdx = headerIndex(planetTable, LABELS.population);
+        if (popIdx < 0) {
+            popIdx = 2;
+            report.problem('no Population header on the planets table — falling back to column 2', '');
+        }
+
         const parsedPlanets = [];
         planetRows.forEach(row => {
-            const game_planet_id = parseInt(row.getAttribute('data-planet-id'), 10);
-            const link = row.querySelector('a[href^="/Game/Map/SolarSystem/"]');
-            let system_id = null;
-            let planet_index = null;
+            report.tryRow(() => {
+                const game_planet_id = parseInt(row.getAttribute('data-planet-id'), 10);
+                const link = row.querySelector('a[href^="/Game/Map/SolarSystem/"]');
+                let system_id = null;
+                let planet_index = null;
 
-            if (link) {
-                const href = link.getAttribute('href');
-                const matches = href.match(/\/SolarSystem\/(\d+)\/(\d+)/);
-                if (matches) {
-                    system_id = parseInt(matches[1], 10);
-                    planet_index = parseInt(matches[2], 10);
+                if (link) {
+                    const href = link.getAttribute('href');
+                    const matches = href.match(/\/SolarSystem\/(\d+)\/(\d+)/);
+                    if (matches) {
+                        system_id = parseInt(matches[1], 10);
+                        planet_index = parseInt(matches[2], 10);
+                    }
                 }
-            }
-            const tds = row.querySelectorAll('td');
-            const pop = tds[2] ? parseInt(tds[2].innerText.trim(), 10) : 0;
-            parsedPlanets.push({ game_planet_id, system_id, planet_index, pop });
+                if (system_id == null) {
+                    report.problem('planet row without a SolarSystem link', `planet ${game_planet_id}`);
+                    return false;
+                }
+                const tds = row.querySelectorAll('td');
+                const pop = tds[popIdx] ? parseLocaleInt(tds[popIdx].innerText) : 0;
+                parsedPlanets.push({ game_planet_id, system_id, planet_index, pop });
+                return true;
+            }, 'planet row');
         });
 
         if (parsedPlanets.length > 0) {
@@ -185,14 +209,16 @@ export function extractPlayerData(playerId, doc = document) {
     //   Sum row -> [ "Sum", "<owned> of <total>", <total population>, <total starbase> ].
     // Prefer these over the Statistic-history fetch, which can be empty/redacted.
     const sumRow = Array.from(doc.querySelectorAll('table tfoot tr'))
-        .find(r => r.cells && r.cells[0] && r.cells[0].innerText.trim() === 'Sum');
+        .find(r => r.cells && r.cells[0] && matchesLabel(r.cells[0].innerText, LABELS.sum));
     if (sumRow && sumRow.cells.length >= 3) {
         const ownedMatch = sumRow.cells[1] ? sumRow.cells[1].innerText.match(/\d+/) : null;
-        if (ownedMatch) p.total_planets = parseInt(ownedMatch[0], 10) || p.total_planets;
-        const popDigits = sumRow.cells[2] ? sumRow.cells[2].innerText.replace(/[^\d]/g, '') : '';
-        if (popDigits) p.total_population = parseInt(popDigits, 10) || p.total_population;
+        if (ownedMatch) p.total_planets = parseLocaleInt(ownedMatch[0]) || p.total_planets;
+        const popCell = sumRow.cells[2] ? sumRow.cells[2].innerText : '';
+        const pop = parseLocaleInt(popCell);
+        if (pop) p.total_population = pop || p.total_population;
     }
 
+    p.scrapeReport = report;
     return p;
 }
 
@@ -213,16 +239,18 @@ export function buildSecuredStatsUrl(playerId) {
 
 export async function scrapePlayer(playerId) {
     console.log(`[Spy] Initiating deep profile parse sequence for Player ID: ${playerId}`);
-    
+
     // 1. Gather baseline profile parameters synchronously
-    const p = extractPlayerData(playerId, document);
+    const report = new ScrapeReport(`player ${playerId}`);
+    const p = extractPlayerData(playerId, document, report);
+    delete p.scrapeReport;   // never send the instrumentation to the server
 
     // 2. Background execute fetch over custom-calculated safe historical index boundaries
     const statsUrl = buildSecuredStatsUrl(playerId);
     console.log(`[Spy] Fetching infrastructure history matrix via endpoint: ${statsUrl}`);
     
     try {
-        const statsResponse = await fetch(statsUrl);
+        const statsResponse = await gameFetch(statsUrl);
         if (statsResponse.ok) {
             const htmlText = await statsResponse.text();
             
@@ -273,8 +301,14 @@ export async function scrapePlayer(playerId) {
         });
         
         if (response.ok) {
-            console.log(`[Spy] Player Profile '${p.name}' synced successfully.`);
-            window.parent.postMessage({ type: 'SHOW_TOAST', payload: `Player ${p.name} Complete Profile Synced` }, window.location.origin);
+            // Report BEFORE claiming success. A profile that parsed nothing used to sync a
+            // row of zeros and show the same green toast as a good one.
+            const result = report.finish();
+            const label = result.ok
+                ? `Player ${p.name} Complete Profile Synced`
+                : `⚠️ Player ${p.name}: ${result.line}`;
+            console.log(`[Spy] Player Profile '${p.name}' synced. ${result.line}`);
+            window.parent.postMessage({ type: 'SHOW_TOAST', payload: label }, window.location.origin);
             const header = document.querySelector('th[colspan="2"] span');
             if (header && !header.querySelector('.aw-synced')) {
                 header.innerHTML += ' <span class="badge bg-success ms-2 aw-synced" style="font-size: 0.6em; vertical-align: middle; background-color: #22c55e !important; color: #fff;"><i class="bi bi-cloud-check"></i> Hub Synced</span>';

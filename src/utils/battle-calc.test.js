@@ -94,14 +94,10 @@ const FINGERPRINTS = [
     { name: 'stale math-HP 0.153',   re: /(?<![.\w])0\.153(?![\d])/ },
 ];
 
-// Two display-only copies of the CV sum are knowingly left in place. They are reported as
-// a warning rather than a failure so that this branch touches a file set that is disjoint
-// from the route-planner and travel-calibration branches and can therefore be merged in
-// any order without conflicts. Deleting an entry from this list is the follow-up.
-const KNOWN_DUPLICATES = {
-    'public/js/ui/archives.js': 'display-only CV sum; file is owned by the route-planner branch',
-    'public/js/ui/travel-calc-ui.js': 'display-only CV sum; file is owned by the travel-calibration branch'
-};
+// Was an allowlist of two display-only CV copies that the branch split could not reach.
+// Both now import the shared model, so the list is empty and any new entry in this scan
+// is a genuine failure. Keep it empty.
+const KNOWN_DUPLICATES = {};
 
 const ROOTS = [path.join(__dirname, '..'), path.join(__dirname, '..', '..', 'public')];
 const SKIP_DIRS = new Set(['node_modules', '.git', 'components']);
