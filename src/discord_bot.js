@@ -5,6 +5,7 @@ const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require
 // The battle model — the same physical file the dashboard calculator imports, so
 // !battle and the web calculator cannot drift apart again. See docs/battle-model.md.
 const battleModel = require('../public/js/utils/battle-model.js');
+const { buildCommands, suggestPlayers, suggestSystems, isEphemeral } = require('./discord-commands');
 
 const client = new Client({
     intents: [
@@ -16,8 +17,15 @@ const client = new Client({
 
 client.on('clientReady', () => {
     console.log(`[Discord] Tactical Bot active and logged in as ${client.user.tag}`);
-    checkNoteReminders().catch(() => {});
-    setInterval(() => checkNoteReminders().catch(err => console.error('[Discord] Reminder check failed:', err.message)), 60 * 1000);
+    // Run both checks immediately on connect: anything that came due while the process
+    // was down fires now rather than waiting for the first tick.
+    const tick = () => {
+        checkNoteReminders().catch(err => console.error('[Discord] Reminder check failed:', err.message));
+        checkDueTimers().catch(err => console.error('[Discord] Timer check failed:', err.message));
+    };
+    tick();
+    setInterval(tick, 60 * 1000);
+    registerSlashCommands().catch(err => console.error('[Discord] Slash command registration failed:', err.message));
 });
 
 // The "🛡️ I cover this" button attached to every incoming alert. customId carries the
@@ -58,6 +66,161 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
+// ─── ACCOUNT LINKING ──────────────────────────────────────────────────────────
+// !link used to take a Hub account NAME and bind the caller's Discord id to it. That
+// proved nothing: anyone could claim any unlinked account by typing someone else's name.
+// It mattered because the linked id decides who gets @mentioned on incoming alerts and
+// who !plan records notes as.
+//
+// It is now a challenge/response. The code is minted in the Hub panel, where the person
+// is already authenticated, and spent here — so completing a link requires holding both
+// sides. Codes are single-use and expire in ten minutes.
+//
+// Existing links keep working untouched: this only governs how NEW ones are made.
+async function handleLink({ code, userId, username, tag, reply }) {
+    const already = db.prepare(`SELECT game_name FROM app_users WHERE discord_id = ?`).get(userId);
+
+    if (!code) {
+        if (already) {
+            return reply(`ℹ️ You are already linked to **${already.game_name}**. To move the link, ask an admin to clear it first.`);
+        }
+        return reply(
+            '🔗 **Linking your Discord to your Hub account**\n' +
+            '1. Open the Hub and click **Link Discord** in the sidebar.\n' +
+            '2. It shows a one-time code, valid for 10 minutes.\n' +
+            '3. Come back here and run `!link <code>` (or `/link code:<code>`).\n\n' +
+            'The code is what proves the Hub account is yours — a name alone never did.'
+        );
+    }
+
+    // Sweep expired rows so a stale code can never be spent.
+    try { db.prepare(`DELETE FROM discord_link_codes WHERE expires_at < datetime('now')`).run(); } catch (_) {}
+
+    const normalised = String(code).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const row = db.prepare(`
+        SELECT c.code, c.user_id, c.used_at, c.expires_at, u.game_name, u.discord_id
+        FROM discord_link_codes c
+        JOIN app_users u ON u.id = c.user_id
+        WHERE c.code = ?
+    `).get(normalised);
+
+    if (!row) {
+        console.warn(`[Discord] !link refused: ${tag} (${userId}) presented an unknown code.`);
+        return reply('❌ That code is not valid. Generate a fresh one in the Hub — codes expire after 10 minutes.');
+    }
+    if (row.used_at) {
+        console.warn(`[Discord] !link refused: ${tag} (${userId}) reused a spent code for '${row.game_name}'.`);
+        return reply('❌ That code has already been used. Generate a fresh one in the Hub.');
+    }
+    if (new Date(row.expires_at).getTime() < Date.now()) {
+        return reply('❌ That code has expired. Generate a fresh one in the Hub.');
+    }
+    if (row.discord_id && row.discord_id !== userId) {
+        console.warn(`[Discord] !link refused: ${tag} (${userId}) held a valid code for '${row.game_name}', already linked to ${row.discord_id}.`);
+        return reply(`❌ **${row.game_name}** is already linked to another Discord account. An admin has to clear it first.`);
+    }
+    if (already && already.game_name !== row.game_name) {
+        return reply(`❌ Your Discord account is already linked to **${already.game_name}**. One Discord account per Hub account — ask an admin if you need it moved.`);
+    }
+    if (row.discord_id === userId) {
+        db.prepare(`UPDATE discord_link_codes SET used_at = CURRENT_TIMESTAMP, used_by_discord_id = ? WHERE code = ?`).run(userId, normalised);
+        return reply(`ℹ️ **${row.game_name}** is already linked to you. Nothing to do.`);
+    }
+
+    try {
+        const link = db.transaction(() => {
+            db.prepare(`UPDATE app_users SET discord_id = ?, discord_name = ? WHERE id = ?`).run(userId, username, row.user_id);
+            db.prepare(`UPDATE discord_link_codes SET used_at = CURRENT_TIMESTAMP, used_by_discord_id = ? WHERE code = ?`).run(userId, normalised);
+        });
+        link();
+        console.log(`[Discord] !link: Hub account '${row.game_name}' linked to ${tag} (${userId}) with a verified code.`);
+        return reply(`✅ Linked **${row.game_name}** to <@${userId}>. You'll now be pinged on incoming alerts when you can defend.`);
+    } catch (e) {
+        console.error('[Discord] !link failed:', e.message);
+        return reply('❌ Linking failed. Try again later.');
+    }
+}
+
+// ─── TIMERS ───────────────────────────────────────────────────────────────────
+// These used to be a bare setTimeout: a restart or a deploy dropped every pending one,
+// and the acknowledgement said so rather than fixing it. They now live in the
+// discord_timers table and are polled by the same minute-resolution scheduler that
+// already drives note reminders, so a timer that came due while the bot was down fires
+// on the next tick instead of vanishing.
+//
+// setTimeout also takes a 32-bit delay, so anything past ~24.8 days overflowed and fired
+// immediately. The 14-day cap that guarded against that is kept — a stored due time has
+// no such limit, but a two-week ping is already at the edge of useful.
+const MAX_TIMER_MS = 14 * 24 * 60 * 60 * 1000;
+
+// One shared implementation, called by both the ! command and the slash command.
+async function handleTimer({ input, userId, channelId, reply }) {
+    if (!input) {
+        return reply('❌ Usage: `!timer 10mins` or `!timer 1 hour 8 mins`');
+    }
+    const delayMs = parseTimerInput(input);
+    if (!delayMs) {
+        return reply('❌ Invalid format. Use simple relative timings like `10mins`, `1h 8m`, or `1 hour 5 minutes`.');
+    }
+    if (delayMs > MAX_TIMER_MS) {
+        return reply('❌ That is too far out. The longest timer is **14 days**.');
+    }
+
+    const dueAt = new Date(Date.now() + delayMs);
+    try {
+        db.prepare(`
+            INSERT INTO discord_timers (discord_user_id, channel_id, label, due_at)
+            VALUES (?, ?, ?, ?)
+        `).run(userId, channelId, String(input).slice(0, 200), dueAt.toISOString());
+    } catch (err) {
+        console.error('[Discord] Could not store timer:', err.message);
+        return reply('❌ Could not save that timer. Try again.');
+    }
+
+    const unix = Math.floor(dueAt.getTime() / 1000);
+    // The resolution is honest: the scheduler ticks once a minute, so say so rather than
+    // implying second accuracy the storage does not provide.
+    return reply(`⏰ Timer set for <t:${unix}:t> (<t:${unix}:R>). It survives a bot restart; the check runs once a minute, so expect it within a minute of that time.`);
+}
+
+// Polled from the same minute tick as note reminders. Anything due — including anything
+// that came due while the process was not running — fires here.
+async function checkDueTimers() {
+    let due;
+    try {
+        due = db.prepare(`
+            SELECT id, discord_user_id, channel_id, label, due_at
+            FROM discord_timers
+            WHERE fired_at IS NULL AND due_at <= ?
+            ORDER BY due_at ASC
+            LIMIT 50
+        `).all(new Date().toISOString());
+    } catch (err) {
+        console.error('[Discord] Timer lookup failed:', err.message);
+        return;
+    }
+    if (!due.length) return;
+
+    const markFired = db.prepare(`UPDATE discord_timers SET fired_at = CURRENT_TIMESTAMP WHERE id = ?`);
+    for (const t of due) {
+        try {
+            const channel = await client.channels.fetch(t.channel_id);
+            if (channel && typeof channel.send === 'function') {
+                const late = Date.now() - new Date(t.due_at).getTime();
+                // If the bot was down, say so instead of pretending it was on time.
+                const lateNote = late > 120000 ? ` _(fired ${Math.round(late / 60000)} min late — the bot was not running)_` : '';
+                await channel.send(`🔔 <@${t.discord_user_id}> **TIME IS UP!** Your timer for "${t.label}" has finished.${lateNote}`);
+            }
+        } catch (err) {
+            // A deleted channel must not stop the rest of the queue, and must not leave
+            // this row to be retried forever.
+            console.error(`[Discord] Timer ${t.id} ping failed:`, err.message);
+        } finally {
+            markFired.run(t.id);
+        }
+    }
+}
+
 function parseTimerInput(input) {
     const cleanInput = input.trim().toLowerCase();
     let durationMs = 0;
@@ -95,7 +258,9 @@ function garble() {
     return `🛰️ ${pick(bursts)}— ${sym(3)} ${pick(techno)} ${sym(3)} …${pick(bursts)}… ${pick(bursts)}`;
 }
 
-client.on('messageCreate', async (message) => {
+// Extracted from the client.on('messageCreate') callback so the slash-command layer can
+// reach exactly the same code. One implementation, two entry points.
+async function handleMessage(message) {
     if (message.author.bot) return;
     if (!message.content.startsWith('!')) return;
 
@@ -107,16 +272,12 @@ client.on('messageCreate', async (message) => {
     const args = message.content.slice(1).trim().split(/ +/);
     const command = args.shift().toLowerCase();
 
-    // Passive backfill: remember this author's numeric Discord id against their linked
-    // Hub account so defender @mentions can ping them later. Matches on discord_name.
-    try {
-        const dn = message.author.username.toLowerCase();
-        db.prepare(`
-            UPDATE app_users SET discord_id = ?
-            WHERE (LOWER(discord_name) = ? OR LOWER(discord_name) = ?)
-              AND (discord_id IS NULL OR discord_id != ?)
-        `).run(message.author.id, dn, `@${dn}`, message.author.id);
-    } catch (e) { /* non-fatal */ }
+    // REMOVED: a passive backfill used to sit here, writing this author's numeric Discord
+    // id onto any Hub account whose stored discord_name matched their username. That is
+    // an automatic link with no proof at all — weaker than the !link it sat beside, and
+    // it silently defeated the one-time-code challenge, because anyone who set their
+    // Discord username to a member's recorded name got linked by typing any command.
+    // Linking now happens only through a code minted in the Hub. See handleLink().
 
     // ----------------------------------------------------
     // !help - DISPLAY ALL AVAILABLE COMMANDS
@@ -149,45 +310,13 @@ client.on('messageCreate', async (message) => {
     // !link <hub/game name> - link this Discord account to a Hub account
     // ----------------------------------------------------
     if (command === 'link') {
-        const gameName = args.join(' ').trim();
-        if (!gameName) {
-            return message.reply('Usage: `!link <your in-game / Hub name>` — links your Discord so you get pinged on incoming alerts you can defend.');
-        }
-        const user = db.prepare(`SELECT id, game_name, discord_id FROM app_users WHERE LOWER(game_name) = ?`).get(gameName.toLowerCase());
-        if (!user) {
-            return message.reply(`❌ No Hub account named **${gameName}**. Use your Hub login / in-game name (check spelling).`);
-        }
-
-        // This command proves nothing about who you are: it takes a name and binds the
-        // caller's Discord id to it. Whoever ran it first won, and running it again
-        // silently took the account over - which matters because the linked id decides
-        // who gets @mentioned on incoming alerts and who !plan writes notes as.
-        //
-        // Without a challenge/response flow (which needs somewhere to keep a pending
-        // code) the best available guarantee is that a link can only be *created*, never
-        // quietly reassigned. Changing one is now an admin action in the Hub panel.
-        if (user.discord_id && user.discord_id !== message.author.id) {
-            console.warn(`[Discord] !link refused: ${message.author.tag} (${message.author.id}) tried to take over Hub account '${user.game_name}', already linked to ${user.discord_id}.`);
-            return message.reply(`❌ **${user.game_name}** is already linked to another Discord account. If that is wrong, ask an admin to clear it in the Hub admin panel first.`);
-        }
-        if (user.discord_id === message.author.id) {
-            return message.reply(`ℹ️ **${user.game_name}** is already linked to you. Nothing to do.`);
-        }
-
-        const existing = db.prepare(`SELECT game_name FROM app_users WHERE discord_id = ?`).get(message.author.id);
-        if (existing) {
-            return message.reply(`❌ Your Discord account is already linked to **${existing.game_name}**. One Discord account per Hub account — ask an admin if you need it moved.`);
-        }
-
-        try {
-            db.prepare(`UPDATE app_users SET discord_id = ?, discord_name = ? WHERE id = ?`)
-                .run(message.author.id, message.author.username, user.id);
-            console.log(`[Discord] !link: Hub account '${user.game_name}' linked to ${message.author.tag} (${message.author.id}).`);
-            return message.reply(`✅ Linked **${user.game_name}** to <@${message.author.id}>. You'll now be pinged on incoming alerts when you can defend.`);
-        } catch (e) {
-            console.error('[Discord] !link failed:', e.message);
-            return message.reply('❌ Linking failed. Try again later.');
-        }
+        return handleLink({
+            code: args.join(' ').trim(),
+            userId: message.author.id,
+            username: message.author.username,
+            tag: message.author.tag,
+            reply: (text) => message.reply(text),
+        });
     }
 
     // ----------------------------------------------------
@@ -203,35 +332,12 @@ client.on('messageCreate', async (message) => {
 
     if (message.content.startsWith('!timer ')) {
         const args = message.content.slice(7).trim(); // Strip away "!timer "
-        
-        if (!args) {
-            return message.reply("❌ Usage: `!timer 10mins` or `!timer 1 hour 8 mins`");
-        }
-
-        const delayMs = parseTimerInput(args);
-
-        if (!delayMs) {
-            return message.reply("❌ Invalid format. Use simple relative timings like `10mins`, `1h 8m`, or `1 hour 5 minutes`.");
-        }
-
-        // setTimeout takes a 32-bit delay: anything above ~24.8 days overflows and fires
-        // immediately, so a "!timer 60 days" would have pinged straight away.
-        const MAX_TIMER_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
-        if (delayMs > MAX_TIMER_MS) {
-            return message.reply('❌ That is too far out. The longest timer is **14 days**.');
-        }
-
-        // Acknowledge the timer
-        const minutesTotal = Math.round(delayMs / 60000);
-        await message.reply(`⏰ Timer set! I will ping you here in **${minutesTotal} minutes**. (Timers live in memory — a bot restart clears them.)`);
-
-        // Wait and execute the ping
-        setTimeout(() => {
-            // If the channel is gone by then, the rejected promise would otherwise be
-            // unhandled and take the process down under Node's default behaviour.
-            message.reply(`🔔 <@${message.author.id}> **TIME IS UP!** Your timer for "${args}" has finished.`)
-                .catch(err => console.error('[Discord] Timer ping failed:', err.message));
-        }, delayMs);
+        return handleTimer({
+            input: args,
+            userId: message.author.id,
+            channelId: message.channel.id,
+            reply: (text) => message.reply(text),
+        });
     }
 
     // ----------------------------------------------------
@@ -1207,17 +1313,24 @@ client.on('messageCreate', async (message) => {
         const defFleet = [defParts[0] || 0, defParts[1] || 0, defParts[2] || 0];
         const atkFleet = [atkParts[0] || 0, atkParts[1] || 0, atkParts[2] || 0];
 
-        const sim = battleModel.simulate(battleModel.normalizeInputs({
+        const battleInputs = battleModel.normalizeInputs({
             defFleet, atkFleet, sbLevel,
             def: { phys: defPhys, math: defMath, ra: defRaceAtk, rd: defRaceDef, lvl: defLevel },
             atk: { phys: atkPhys, math: atkMath, ra: atkRaceAtk, rd: atkRaceDef, lvl: atkLevel }
-        }));
+        });
+        const sim = battleModel.simulate(battleInputs);
+        if (sim) { sim.defStats = battleInputs.def; sim.atkStats = battleInputs.atk; }
         if (!sim) {
             return message.reply('❌ Both fleets are empty.');
         }
         const { survDef, survAtk, survSB, initCVD, initCVA, winD, winA } = sim;
 
-        // Format helpers
+        // Format helpers. The win chance is printed as a RANGE: the model is a regression
+        // fit whose worst recorded error is ±4 points, so a figure like "47.3%" claims a
+        // precision it does not have. Same helper as the web calculator, so the two
+        // surfaces cannot describe their confidence differently either.
+        const bandDef = battleModel.winBand(winD, { sbLevel, defFleet, def: sim.defStats, atk: sim.atkStats });
+        const bandAtk = battleModel.winBand(winA, { sbLevel, defFleet, def: sim.defStats, atk: sim.atkStats });
         const pct = n => (n * 100).toFixed(1) + '%';
         const fmt = n => n % 1 === 0 ? n.toString() : n.toFixed(2).replace(/\.?0+$/, '');
         const shipLine = (fleet, surv, label) => {
@@ -1267,14 +1380,158 @@ client.on('messageCreate', async (message) => {
                     inline: true,
                 },
                 {
-                    name: '🎲 Outcome',
-                    value: `Defender wins: **${pct(winD)}**\nAttacker wins: **${pct(winA)}**`,
+                    name: '🎲 Estimated outcome',
+                    value: `Defender wins: **${bandDef.text}**\nAttacker wins: **${bandAtk.text}**` +
+                           (bandDef.caveats.length ? `\n\n⚠️ Wider than usual — ${bandDef.caveats.join('; ')}.` : ''),
                     inline: false,
                 }
             )
-            .setFooter({ text: 'Same model as the Hub battle calculator. Calibrated to in-game samples (±3%); a starbase defending alongside a fleet is approximate.' });
+            .setFooter({ text: `Ranges, not readings: the model's worst recorded error is ±${battleModel.uncertainty.BASE_ERROR_PP} points. Survivor counts come from a separate formula with no test coverage. Same model as the Hub calculator.` });
 
         return message.reply({ embeds: [embed] });
+    }
+}
+
+// A command that throws used to become an unhandled rejection and the bot just went
+// quiet. Now the caller is told, and the reason reaches the log.
+client.on('messageCreate', (message) => {
+    handleMessage(message).catch(err => {
+        console.error(`[Discord] Command failed: ${message.content.slice(0, 60)}`, err);
+        message.reply('⚠️ That command hit an error. It has been logged.').catch(() => {});
+    });
+});
+
+// ─── SLASH COMMANDS ───────────────────────────────────────────────────────────
+// Registered PER GUILD rather than globally: guild commands appear immediately, global
+// ones take up to an hour to propagate, which makes them painful to iterate on.
+async function registerSlashCommands() {
+    if (!client.isReady()) return;
+    const commands = buildCommands().map(c => c.toJSON());
+    let ok = 0;
+    for (const [, guild] of client.guilds.cache) {
+        try {
+            await guild.commands.set(commands);
+            ok++;
+        } catch (err) {
+            console.error(`[Discord] Could not register slash commands in ${guild.name}:`, err.message);
+        }
+    }
+    console.log(`[Discord] Slash commands registered in ${ok}/${client.guilds.cache.size} guild(s).`);
+}
+
+// Turn an interaction into the message-shaped object handleMessage() expects, so a slash
+// command runs the SAME code as its ! twin instead of a parallel implementation.
+function interactionAsMessage(interaction, content) {
+    let replied = false;
+    return {
+        content,
+        author: interaction.user,
+        channel: interaction.channel,
+        member: interaction.member,
+        guild: interaction.guild,
+        async reply(payload) {
+            const body = typeof payload === 'string' ? { content: payload } : payload;
+            if (!replied) {
+                replied = true;
+                if (interaction.deferred) return interaction.editReply(body);
+                return interaction.reply(body);
+            }
+            return interaction.followUp(body);
+        },
+    };
+}
+
+// Map a slash invocation onto the equivalent ! string. The mapping lives in one place so
+// the two entry points cannot drift.
+function slashToPrefix(interaction) {
+    const name = interaction.commandName;
+    const sub = interaction.options.getSubcommand(false);
+    const s = (key) => interaction.options.getString(key);
+    const i = (key) => interaction.options.getInteger(key);
+
+    if (name === 'help') return '!help';
+    if (name === 'intel') {
+        if (sub === 'player') return `!intel ${s('player')}`;
+        if (sub === 'system') return `!sys ${s('system')}`;
+        if (sub === 'bio') return '!bio';
+        if (sub === 'alliance') return '!intels';
+    }
+    if (name === 'calc') {
+        if (sub === 'travel') {
+            const parts = ['!tt', s('from'), s('to')];
+            if (i('energy') != null) parts.push(String(i('energy')));
+            if (i('speed') != null) parts.push(String(i('speed')));
+            return parts.join(' ');
+        }
+        if (sub === 'distance') return `!dist ${s('from')} ${s('to')}`;
+        if (sub === 'battle') {
+            const flags = [];
+            if (i('starbase') != null) flags.push(`--sb ${i('starbase')}`);
+            if (s('defender_player')) flags.push(`--def ${s('defender_player')}`);
+            if (s('attacker_player')) flags.push(`--atk ${s('attacker_player')}`);
+            return `!battle ${s('defender')} vs ${s('attacker')} ${flags.join(' ')}`.trim();
+        }
+    }
+    if (name === 'plan') {
+        if (sub === 'add') return `!plan ${s('system')} ${i('planet')} ${s('note')}`;
+        if (sub === 'list') return `!sys ${s('system')}`;
+    }
+    if (name === 'scan') {
+        if (sub === 'holes') return '!holes';
+        if (sub === 'vision') return `!vision ${s('system')}`;
+        if (sub === 'ghosts') return `!ghosts ${s('system')} ${i('planet')} ${s('tag')}`;
+    }
+    return null;
+}
+
+client.on('interactionCreate', async (interaction) => {
+    try {
+        if (interaction.isAutocomplete()) {
+            const focused = interaction.options.getFocused(true);
+            const isSystem = /system|from|to/.test(focused.name);
+            const choices = isSystem ? suggestSystems(focused.value) : suggestPlayers(focused.value);
+            return interaction.respond(choices);
+        }
+        if (!interaction.isChatInputCommand()) return;
+
+        const sub = interaction.options.getSubcommand(false);
+        const ephemeral = isEphemeral(interaction.commandName, sub);
+
+        // Per-command handling for the two that have their own shared implementation.
+        if (interaction.commandName === 'timer') {
+            await interaction.deferReply({ flags: ephemeral ? MessageFlags.Ephemeral : undefined });
+            return handleTimer({
+                input: interaction.options.getString('when'),
+                userId: interaction.user.id,
+                channelId: interaction.channelId,
+                reply: (text) => interaction.editReply(typeof text === 'string' ? { content: text } : text),
+            });
+        }
+        if (interaction.commandName === 'link') {
+            // Always ephemeral: a link code should not be readable by the channel.
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+            return handleLink({
+                code: interaction.options.getString('code') || '',
+                userId: interaction.user.id,
+                username: interaction.user.username,
+                tag: interaction.user.tag,
+                reply: (text) => interaction.editReply(typeof text === 'string' ? { content: text } : text),
+            });
+        }
+
+        const asPrefix = slashToPrefix(interaction);
+        if (!asPrefix) {
+            return interaction.reply({ content: '⚠️ That command is not wired up yet.', flags: MessageFlags.Ephemeral });
+        }
+        await interaction.deferReply({ flags: ephemeral ? MessageFlags.Ephemeral : undefined });
+        await handleMessage(interactionAsMessage(interaction, asPrefix));
+    } catch (err) {
+        console.error('[Discord] Interaction failed:', err);
+        const body = { content: '⚠️ That command hit an error. It has been logged.', flags: MessageFlags.Ephemeral };
+        try {
+            if (interaction.deferred || interaction.replied) await interaction.followUp(body);
+            else await interaction.reply(body);
+        } catch (_) { /* the interaction token can expire; nothing more to do */ }
     }
 });
 
@@ -1562,4 +1819,10 @@ async function replyToIncoming(channelId, messageId, content) {
     }
 }
 
-module.exports = { initDiscordBot, announceSystemChanges, sendIncomingAlert, sendOrEditIncoming, replyToIncoming, updateIncomingCover };
+module.exports = {
+    initDiscordBot, announceSystemChanges, sendIncomingAlert, sendOrEditIncoming,
+    replyToIncoming, updateIncomingCover,
+    // Exported for the tests: these are the pieces with real logic in them, and they run
+    // without a Discord connection.
+    handleTimer, checkDueTimers, handleLink, parseTimerInput, slashToPrefix, registerSlashCommands,
+};

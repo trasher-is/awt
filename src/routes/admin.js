@@ -132,6 +132,30 @@ router.post('/admin/users/:id/discord', requireAdmin, (req, res) => {
     }
 });
 
+// Clear a Discord link. Linking is now a one-time-code challenge that only the account
+// holder can complete, and a link can never be reassigned from Discord — so this is the
+// only way to move one, e.g. when a member changes Discord account or someone linked the
+// wrong Hub account before the code flow existed.
+router.delete('/admin/users/:id/discord', requireAdmin, (req, res) => {
+    try {
+        const user = db.prepare(`SELECT game_name, discord_id, discord_name FROM app_users WHERE id = ?`).get(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        if (!user.discord_id && !user.discord_name) {
+            return res.json({ success: true, changed: false, message: 'That account has no Discord link.' });
+        }
+        db.transaction(() => {
+            db.prepare(`UPDATE app_users SET discord_id = NULL, discord_name = NULL WHERE id = ?`).run(req.params.id);
+            // Any pending link codes for this account are void once an admin intervenes.
+            db.prepare(`DELETE FROM discord_link_codes WHERE user_id = ?`).run(req.params.id);
+        })();
+        console.log(`[Admin] Discord link cleared for '${user.game_name}' (was ${user.discord_id || user.discord_name}).`);
+        res.json({ success: true, changed: true });
+    } catch (err) {
+        console.error('[Admin] Failed to clear Discord link:', err);
+        res.status(500).json({ error: 'Failed to clear the Discord link' });
+    }
+});
+
 // Toggle Active Status (Ban/Unban)
 router.post('/admin/users/:id/toggle', requireAdmin, (req, res) => {
     try {

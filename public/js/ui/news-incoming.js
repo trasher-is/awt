@@ -146,7 +146,14 @@ function launchLink(a, target) {
 
 function renderDefenderData(box, d, target) {
     if (!d.success || !d.mapped) { box.innerHTML = '<span style="opacity:.6">⚠️ Target system not mapped.</span>'; return; }
-    const winTag = (a) => a.win == null ? '' : ` · 🎲 ${Math.round(a.win * 100)}%${a.winUnknown ? '?' : ''}`;
+    // A range, not a reading. These numbers decide whether someone commits a real fleet,
+    // and a single percentage from a regression fit overstates what is known. The band is
+    // computed server-side (see src/routes/incoming.js) so this panel and the Discord
+    // alert cannot quote different confidence for the same fight.
+    const winTag = (a) => {
+        if (a.win == null || !a.winBand) return '';
+        return ` · 🎲 ${esc(a.winBand)}${a.winUnknown ? ' (attacker race unscouted)' : ''}`;
+    };
     const row = (a, extra) =>
         `<div>${SRC[a.source] || ''} <b>${esc(a.name)}</b> [${a.cv.toLocaleString()} CV] ➔ ${fmtTime(a.eta)}${winTag(a)}${extra}${launchLink(a, target)}</div>`;
 
