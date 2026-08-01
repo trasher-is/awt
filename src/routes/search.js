@@ -45,11 +45,34 @@ router.post('/plans', requireAuth, (req, res) => {
 });
 
 // Delete a plan
+// Plans are attributed - author_id is stored on insert and the author's name is shown
+// in the UI - but the delete used to remove every row for the coordinate regardless of
+// who wrote it, so any logged-in account could wipe another member's notes. Deletion is
+// now limited to the author, with admins still able to clear anything and orphaned rows
+// (author since deleted, so author_id is NULL) removable by anyone.
 router.delete('/plans/:systemId/:planetIndex', requireAuth, (req, res) => {
     try {
-        db.prepare(`DELETE FROM planet_plans WHERE system_id = ? AND planet_index = ?`)
-          .run(req.params.systemId, req.params.planetIndex);
-        res.json({ success: true });
+        const { systemId, planetIndex } = req.params;
+        const isAdmin = req.session.role === 'admin';
+
+        const result = isAdmin
+            ? db.prepare(`DELETE FROM planet_plans WHERE system_id = ? AND planet_index = ?`)
+                .run(systemId, planetIndex)
+            : db.prepare(`
+                DELETE FROM planet_plans
+                WHERE system_id = ? AND planet_index = ? AND (author_id = ? OR author_id IS NULL)
+              `).run(systemId, planetIndex, req.session.userId);
+
+        if (result.changes === 0) {
+            const stillThere = db.prepare(
+                `SELECT 1 FROM planet_plans WHERE system_id = ? AND planet_index = ?`
+            ).get(systemId, planetIndex);
+            if (stillThere) {
+                return res.status(403).json({ error: 'That plan was written by someone else. Ask them or an admin to remove it.' });
+            }
+        }
+
+        res.json({ success: true, deleted: result.changes });
     } catch (err) {
         console.error("[DB Error] Failed to delete plan:", err);
         res.status(500).json({ error: 'Failed to delete plan' });

@@ -298,7 +298,12 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
                     heatmap[parseInt(row.hour, 10)] = row.count;
                 }
             });
-        } catch (err) {}
+        } catch (err) {
+            // The heatmap is optional decoration on the profile, so a failure here must
+            // not fail the whole response - but it should still be visible in the log
+            // rather than leaving the caller with a silently empty chart.
+            console.error('[DB Error] Login heatmap unavailable:', err.message);
+        }
 
         res.json({
             success: true,
@@ -448,9 +453,16 @@ router.get('/intel/takeover/:systemId', requireAuth, (req, res) => {
 });
 
 // --- UPDATE PLANET TAKEOVER NODE ---
+// NOTE ON ACCESS: this board is intentionally communal - any logged-in member can
+// reassign any planet, the same way the redzone planner is a shared scratchpad. It is
+// a war-room whiteboard, not per-user data, so it is not restricted to the person named
+// in assigned_name. What is fixed here is the reporting: failures used to be returned as
+// an opaque message and never logged.
 router.post('/intel/takeover', requireAuth, (req, res) => {
     const { system_id, planet_index, assigned_name, pipeline_status, target_arrival_time } = req.body;
-    if (!system_id || !planet_index) return res.status(400).json({ error: 'Missing parameters' });
+    if (!Number.isInteger(Number(system_id)) || !Number.isInteger(Number(planet_index))) {
+        return res.status(400).json({ error: 'system_id and planet_index must be integers' });
+    }
 
     try {
         db.prepare(`
@@ -465,7 +477,8 @@ router.post('/intel/takeover', requireAuth, (req, res) => {
 
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to balance metrics adjustment sequence' });
+        console.error('[DB Error] Failed to update takeover node:', err);
+        res.status(500).json({ error: 'Failed to update the takeover board' });
     }
 });
 
