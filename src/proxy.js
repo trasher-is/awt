@@ -168,9 +168,16 @@ const proxyOptions = {
     selfHandleResponse: true, 
     on: {
         proxyReq: (proxyReq, req, res) => {
-            const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-            proxyReq.setHeader('X-Forwarded-For', clientIp);
-            proxyReq.setHeader('X-Real-IP', clientIp);
+            // The inbound X-Forwarded-For is supplied by the caller. Echoing it verbatim
+            // let anyone present an arbitrary address to the game, so a rate limit or ban
+            // upstream would land on whoever's IP they chose. Append the address we
+            // actually observed rather than replacing the chain with theirs, and take
+            // X-Real-IP from req.ip, which Express derives using the app's trust proxy
+            // setting instead of from a raw header.
+            const observed = req.socket.remoteAddress || '';
+            const forwarded = req.headers['x-forwarded-for'];
+            proxyReq.setHeader('X-Forwarded-For', forwarded ? `${forwarded}, ${observed}` : observed);
+            proxyReq.setHeader('X-Real-IP', req.ip || observed);
         },
         proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
             res.removeHeader('x-frame-options');
