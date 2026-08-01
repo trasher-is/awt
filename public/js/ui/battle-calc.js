@@ -22,10 +22,14 @@ function fmt(n) {
 
 // Read the panel inputs and hand them to the shared model. Clamping happens inside
 // normalizeInputs() so the Discord !battle command applies exactly the same ranges.
+// The normalised inputs are kept so render() can ask winBand() how wide the uncertainty
+// is for this particular fight.
+let lastInputs = { def: {}, atk: {} };
+
 function calc() {
     const g = id => parseFloat(document.getElementById(id)?.value) || 0;
 
-    return M.simulate(M.normalizeInputs({
+    lastInputs = M.normalizeInputs({
         defFleet: [g('bc-def-d'), g('bc-def-c'), g('bc-def-b')],
         atkFleet: [g('bc-atk-d'), g('bc-atk-c'), g('bc-atk-b')],
         sbLevel: g('bc-def-sb'),
@@ -33,7 +37,8 @@ function calc() {
                ra: g('bc-def-ra'), rd: g('bc-def-rd'), lvl: g('bc-def-lvl') },
         atk: { phys: g('bc-atk-phys'), math: g('bc-atk-math'),
                ra: g('bc-atk-ra'), rd: g('bc-atk-rd'), lvl: g('bc-atk-lvl') }
-    }));
+    });
+    return M.simulate(lastInputs);
 }
 
 function render() {
@@ -68,8 +73,16 @@ function render() {
     </div>` : '';
 
     const winColor = r.winD > 0.65 ? '#22c55e' : r.winA > 0.65 ? '#ef4444' : '#f59e0b';
+    // Bar width still uses the point estimate — it is a picture, not a claim. The NUMBER
+    // is a range, because the model is a regression fit and "47.3%" implies a precision
+    // it does not have.
     const winBarD  = (r.winD * 100).toFixed(1);
     const winBarA  = (r.winA * 100).toFixed(1);
+    const bandD = M.winBand(r.winD, { sbLevel: r.sbLvl, defFleet: r.defFleet, def: lastInputs.def, atk: lastInputs.atk });
+    const bandA = M.winBand(r.winA, { sbLevel: r.sbLvl, defFleet: r.defFleet, def: lastInputs.def, atk: lastInputs.atk });
+    const caveatText = bandD.caveats.length
+        ? ` This estimate is wider than usual because ${bandD.caveats.join(', and ')}.`
+        : '';
 
     el.innerHTML = `
         <div class="grid grid-cols-2 gap-4 w-full">
@@ -94,16 +107,20 @@ function render() {
             </div>
         </div>
         <div class="border-t border-border pt-4 flex flex-col gap-2 w-full">
-            <div class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Win probability</div>
+            <div class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Estimated win chance</div>
             <div class="flex items-center gap-3">
-                <span class="text-emerald-400 font-bold text-lg w-16 text-right font-mono">${winBarD}%</span>
+                <span class="text-emerald-400 font-bold text-lg w-24 text-right font-mono">${bandD.text}</span>
                 <div class="flex-1 h-3 bg-zinc-800 rounded overflow-hidden">
                     <div class="h-full rounded transition-all duration-300" style="width:${winBarD}%;background:${winColor}"></div>
                 </div>
-                <span class="text-red-400 font-bold text-lg w-16 font-mono">${winBarA}%</span>
+                <span class="text-red-400 font-bold text-lg w-24 font-mono">${bandA.text}</span>
             </div>
             <div class="flex justify-between text-xs text-muted-foreground"><span>Defender</span><span>Attacker</span></div>
-            <div class="text-xs text-zinc-600 mt-1">Calibrated to the in-game calculator (±3%). The losing side's survivors can read slightly high in a lopsided math mismatch, and a starbase + fleet together is approximate.</div>
+            <div class="text-xs text-zinc-600 mt-1">
+                A range, not a reading. The model is fitted to in-game samples and its worst
+                recorded error is ±${M.uncertainty.BASE_ERROR_PP} points, so that is the width shown.${caveatText}
+                Survivor counts above come from a separate formula that currently has no test coverage at all.
+            </div>
         </div>
     `;
 }

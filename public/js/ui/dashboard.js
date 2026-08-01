@@ -50,6 +50,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('open-battle-calc-btn')?.addEventListener('click', openBattleCalcPanel);
     document.getElementById('open-travel-calc-btn')?.addEventListener('click', openTravelCalcPanel);
     document.getElementById('open-route-planner-btn')?.addEventListener('click', openRoutePlannerPanel);
+    document.getElementById('link-discord-btn')?.addEventListener('click', requestDiscordLinkCode);
     document.getElementById('notes-trigger')?.addEventListener('click', toggleNotesPanel);
     initNotes();
 
@@ -147,7 +148,37 @@ async function initWrapper() {
     } catch (err) {}
 }
 
-async function logout() { 
+// The Hub half of the Discord link challenge. You are already logged in here, which is
+// the proof "!link <name>" never had — that command took a name and bound whoever typed
+// it, so anyone could claim any unlinked account.
+async function requestDiscordLinkCode() {
+    const box = document.getElementById('link-discord-box');
+    const codeEl = document.getElementById('link-discord-code');
+    const noteEl = document.getElementById('link-discord-note');
+    if (!box || !codeEl) return;
+
+    box.classList.remove('hidden');
+    codeEl.textContent = '…';
+    noteEl.textContent = '';
+    try {
+        const res = await fetch('/hub-api/link-code', { method: 'POST' });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
+        if (d.alreadyLinked) {
+            codeEl.textContent = '—';
+            noteEl.textContent = d.message;
+            return;
+        }
+        codeEl.textContent = `!link ${d.code}`;
+        const mins = Math.round((d.expiresInSeconds || 600) / 60);
+        noteEl.textContent = `Or /link code:${d.code} — expires in ${mins} minutes, single use.`;
+    } catch (err) {
+        codeEl.textContent = '—';
+        noteEl.textContent = err.message;
+    }
+}
+
+async function logout() {
     await fetch('/hub-api/logout', { method: 'POST' }); 
     window.location.href = '/hub-assets/login.html'; 
 }

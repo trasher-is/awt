@@ -254,11 +254,65 @@
         return r ? r.winD : 0.5;
     }
 
+    // ─── HOW SURE ARE WE? ─────────────────────────────────────────────────────
+    // The win percentage is a regression fit, and printing it as "47.3%" claims a
+    // precision it does not have. These numbers come from the calibration's own reported
+    // error, not from a guess:
+    //
+    //   * BASE_ERROR_PP — the worst absolute error over the 24 in-game samples the model
+    //     was fitted to (commit 2cc1467: "mean abs error 0.97%, max 4.0%"), rounded up.
+    //   * The extra terms cover the two cases the calibration explicitly called
+    //     "known-approximate": a starbase defending alongside a fleet, and strongly
+    //     asymmetric mathematics, which the game appears to resolve iteratively.
+    //
+    // src/utils/battle-calc.test.js asserts BASE_ERROR_PP is not smaller than the worst
+    // error the fixtures actually show, so the stated confidence can never drift below
+    // the measured one.
+    const BASE_ERROR_PP = 4.0;
+    const STARBASE_WITH_FLEET_EXTRA_PP = 6.0;
+    const ASYMMETRIC_MATH_EXTRA_PP = 5.0;
+
+    /**
+     * Turn a raw probability into an honest range.
+     *   winBand(0.473, { sbLevel: 0, defFleet, atkFleet, def, atk })
+     *     -> { low: 43, high: 51, text: '43–51%', marginPp: 4, caveats: [] }
+     * `text` is what every surface should print instead of a bare percentage.
+     */
+    function winBand(winD, context = {}) {
+        const pct = Math.max(0, Math.min(100, winD * 100));
+        const caveats = [];
+        let margin = BASE_ERROR_PP;
+
+        const defFleet = toFleet(context.defFleet);
+        const sbLvl = Math.max(0, context.sbLevel || 0);
+        if (sbLvl > 0 && defFleet.some(n => n > 0)) {
+            margin += STARBASE_WITH_FLEET_EXTRA_PP;
+            caveats.push('a starbase defending alongside a fleet is not modelled reliably');
+        }
+        const dMath = ((context.def && context.def.math) || 0) - ((context.atk && context.atk.math) || 0);
+        if (Math.abs(dMath) >= 6) {
+            margin += ASYMMETRIC_MATH_EXTRA_PP;
+            caveats.push('a mathematics gap this large is only approximated');
+        }
+
+        const low = Math.max(0, Math.round(pct - margin));
+        const high = Math.min(100, Math.round(pct + margin));
+
+        // A band that has hit a wall should not read as certainty. "0-4%" is honest;
+        // "0%" would not be.
+        return {
+            point: pct,
+            low, high, marginPp: margin, caveats,
+            text: low === high ? `${low}%` : `${low}–${high}%`,
+        };
+    }
+
     return {
         SHIPS, TOUGH, sbCV, sbHalf,
         cvOf, attOf, toughOf, toFleet,
         clampScience, clampRace, clampStarbase, clampLevel, normalizeInputs,
-        resolveStats, simulate, winChance,
+        resolveStats, simulate, winChance, winBand,
+        uncertainty: { BASE_ERROR_PP, STARBASE_WITH_FLEET_EXTRA_PP, ASYMMETRIC_MATH_EXTRA_PP },
         constants: {
             RACE_DEF, MATH_TOUGH, MATH_BRACKET,
             WIN_FORCE_W, WIN_FORCE_P, WIN_ATT_W, WIN_ATT_P, WIN_SB_FACTOR,

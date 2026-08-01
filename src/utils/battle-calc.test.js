@@ -60,6 +60,16 @@ for (const c of fixtures.winChance) {
 }
 console.log(`\nWorst win-% error: ${worst.toFixed(2)} pp on "${worstId}"  (gate: ${GATE_PP} pp)`);
 
+// The stated confidence must never be narrower than the measured error, or the UI would
+// be claiming more precision than the fixtures support.
+const stated = model.uncertainty.BASE_ERROR_PP;
+if (stated >= worst) {
+    console.log(`✅ the ±${stated} pp band the UI shows is no narrower than the measured error`);
+} else {
+    console.log(`❌ the UI states ±${stated} pp but the fixtures show ${worst.toFixed(2)} pp — widen BASE_ERROR_PP`);
+    failed = true;
+}
+
 // ─── 2. STARBASE CV table (exact) ─────────────────────────────────────────────
 console.log('\n── Starbase CV table (exact match required) ' + '─'.repeat(33));
 let sbBad = 0;

@@ -422,6 +422,39 @@ function initDatabase() {
         )
     `);
 
+    // --- DISCORD TIMERS ---
+    // !timer used to be a bare setTimeout in process memory, so a restart or a deploy
+    // silently dropped every pending one. Rows here are polled by the same minute-
+    // resolution scheduler that already drives note reminders, which also means a timer
+    // that came due while the bot was down fires on the next tick instead of vanishing.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS discord_timers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            discord_user_id TEXT NOT NULL,
+            channel_id TEXT NOT NULL,
+            label TEXT,
+            due_at DATETIME NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            fired_at DATETIME
+        )
+    `);
+
+    // --- DISCORD ACCOUNT LINK CODES ---
+    // !link could previously claim any unlinked Hub account by name, proving nothing.
+    // A code is minted in the Hub panel, where the person is already authenticated, and
+    // spent in Discord — so the pairing is only possible for someone who holds both.
+    // Codes are single-use and short-lived; used/expired rows are swept on read.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS discord_link_codes (
+            code TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME NOT NULL,
+            used_at DATETIME,
+            used_by_discord_id TEXT
+        )
+    `);
+
     // --- SHARED ROUTE PLANS ---
     // A planned multi-leg fleet movement (start -> jump -> target), visible to the rest
     // of the alliance. Same attribution model as planet_plans and rz_plans: the author is
@@ -476,6 +509,8 @@ function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_player_logins_player ON player_logins(player_id);
         CREATE INDEX IF NOT EXISTS idx_players_alliance     ON players(alliance_id);
         CREATE INDEX IF NOT EXISTS idx_planet_plans_system  ON planet_plans(system_id, planet_index);
+        CREATE INDEX IF NOT EXISTS idx_discord_timers_due   ON discord_timers(fired_at, due_at);
+        CREATE INDEX IF NOT EXISTS idx_link_codes_user      ON discord_link_codes(user_id);
         CREATE INDEX IF NOT EXISTS idx_routes_author        ON routes(author_id);
         CREATE INDEX IF NOT EXISTS idx_routes_expires       ON routes(expires_at);
         CREATE INDEX IF NOT EXISTS idx_route_legs_route     ON route_legs(route_id, leg_index);
