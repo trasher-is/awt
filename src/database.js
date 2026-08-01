@@ -422,6 +422,46 @@ function initDatabase() {
         )
     `);
 
+    // --- SHARED ROUTE PLANS ---
+    // A planned multi-leg fleet movement (start -> jump -> target), visible to the rest
+    // of the alliance. Same attribution model as planet_plans and rz_plans: the author is
+    // recorded, and only the author or an admin may change or delete a row.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS routes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            author_id INTEGER REFERENCES app_users(id) ON DELETE SET NULL,
+            title TEXT,
+            note TEXT,
+            planned_start_at DATETIME,
+            energy INTEGER DEFAULT 0,
+            race_speed INTEGER DEFAULT 0,
+            is_alliance_move INTEGER DEFAULT 0,
+            biology INTEGER DEFAULT 0,
+            visibility TEXT DEFAULT 'alliance',
+            expires_at DATETIME,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    // One row per hop. leg_index is 0-based and dense; travel_seconds is computed
+    // server-side from the shared formula at save time so every viewer sees the same
+    // number regardless of their own energy or race.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS route_legs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            route_id INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+            leg_index INTEGER NOT NULL,
+            from_system_id INTEGER,
+            from_planet_index INTEGER,
+            to_system_id INTEGER,
+            to_planet_index INTEGER,
+            travel_seconds INTEGER DEFAULT 0,
+            distance REAL DEFAULT 0,
+            bio_needed INTEGER DEFAULT 0
+        )
+    `);
+
     // --- INDEXES ---
     // Every query below filters on a non-primary-key column that had no index, so each
     // one was a full table scan. planet_events and player_logins are append-only history
@@ -436,6 +476,9 @@ function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_player_logins_player ON player_logins(player_id);
         CREATE INDEX IF NOT EXISTS idx_players_alliance     ON players(alliance_id);
         CREATE INDEX IF NOT EXISTS idx_planet_plans_system  ON planet_plans(system_id, planet_index);
+        CREATE INDEX IF NOT EXISTS idx_routes_author        ON routes(author_id);
+        CREATE INDEX IF NOT EXISTS idx_routes_expires       ON routes(expires_at);
+        CREATE INDEX IF NOT EXISTS idx_route_legs_route     ON route_legs(route_id, leg_index);
     `);
 
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
