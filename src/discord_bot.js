@@ -150,13 +150,36 @@ client.on('messageCreate', async (message) => {
         if (!gameName) {
             return message.reply('Usage: `!link <your in-game / Hub name>` — links your Discord so you get pinged on incoming alerts you can defend.');
         }
-        const user = db.prepare(`SELECT id, game_name FROM app_users WHERE LOWER(game_name) = ?`).get(gameName.toLowerCase());
+        const user = db.prepare(`SELECT id, game_name, discord_id FROM app_users WHERE LOWER(game_name) = ?`).get(gameName.toLowerCase());
         if (!user) {
             return message.reply(`❌ No Hub account named **${gameName}**. Use your Hub login / in-game name (check spelling).`);
         }
+
+        // This command proves nothing about who you are: it takes a name and binds the
+        // caller's Discord id to it. Whoever ran it first won, and running it again
+        // silently took the account over - which matters because the linked id decides
+        // who gets @mentioned on incoming alerts and who !plan writes notes as.
+        //
+        // Without a challenge/response flow (which needs somewhere to keep a pending
+        // code) the best available guarantee is that a link can only be *created*, never
+        // quietly reassigned. Changing one is now an admin action in the Hub panel.
+        if (user.discord_id && user.discord_id !== message.author.id) {
+            console.warn(`[Discord] !link refused: ${message.author.tag} (${message.author.id}) tried to take over Hub account '${user.game_name}', already linked to ${user.discord_id}.`);
+            return message.reply(`❌ **${user.game_name}** is already linked to another Discord account. If that is wrong, ask an admin to clear it in the Hub admin panel first.`);
+        }
+        if (user.discord_id === message.author.id) {
+            return message.reply(`ℹ️ **${user.game_name}** is already linked to you. Nothing to do.`);
+        }
+
+        const existing = db.prepare(`SELECT game_name FROM app_users WHERE discord_id = ?`).get(message.author.id);
+        if (existing) {
+            return message.reply(`❌ Your Discord account is already linked to **${existing.game_name}**. One Discord account per Hub account — ask an admin if you need it moved.`);
+        }
+
         try {
             db.prepare(`UPDATE app_users SET discord_id = ?, discord_name = ? WHERE id = ?`)
                 .run(message.author.id, message.author.username, user.id);
+            console.log(`[Discord] !link: Hub account '${user.game_name}' linked to ${message.author.tag} (${message.author.id}).`);
             return message.reply(`✅ Linked **${user.game_name}** to <@${message.author.id}>. You'll now be pinged on incoming alerts when you can defend.`);
         } catch (e) {
             console.error('[Discord] !link failed:', e.message);
@@ -188,13 +211,23 @@ client.on('messageCreate', async (message) => {
             return message.reply("❌ Invalid format. Use simple relative timings like `10mins`, `1h 8m`, or `1 hour 5 minutes`.");
         }
 
+        // setTimeout takes a 32-bit delay: anything above ~24.8 days overflows and fires
+        // immediately, so a "!timer 60 days" would have pinged straight away.
+        const MAX_TIMER_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
+        if (delayMs > MAX_TIMER_MS) {
+            return message.reply('❌ That is too far out. The longest timer is **14 days**.');
+        }
+
         // Acknowledge the timer
         const minutesTotal = Math.round(delayMs / 60000);
-        await message.reply(`⏰ Timer set! I will ping you here in **${minutesTotal} minutes**.`);
+        await message.reply(`⏰ Timer set! I will ping you here in **${minutesTotal} minutes**. (Timers live in memory — a bot restart clears them.)`);
 
         // Wait and execute the ping
         setTimeout(() => {
-            message.reply(`🔔 <@${message.author.id}> **TIME IS UP!** Your timer for "${args}" has finished.`);
+            // If the channel is gone by then, the rejected promise would otherwise be
+            // unhandled and take the process down under Node's default behaviour.
+            message.reply(`🔔 <@${message.author.id}> **TIME IS UP!** Your timer for "${args}" has finished.`)
+                .catch(err => console.error('[Discord] Timer ping failed:', err.message));
         }, delayMs);
     }
 
