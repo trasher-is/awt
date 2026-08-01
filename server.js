@@ -20,6 +20,7 @@ const { initDiscordBot } = require('./src/discord_bot');
 const fs = require('fs');
 const crypto = require('crypto');
 const { rateLimit } = require('./src/utils/rate-limit');
+const { gameTrafficGate } = require('./src/utils/game-traffic');
 
 // Behind a TLS terminator every request arrives from the same socket address. Without
 // this, req.ip is the proxy for everyone — the rate limiters below would throttle all
@@ -141,6 +142,35 @@ app.use('/hub-api/login', rateLimit({
     max: process.env.LOGIN_MAX === undefined ? 15 : Number(process.env.LOGIN_MAX)
 }));
 
+// --- GAME TRAFFIC BUDGET ---
+// Everything the scrapers fetch is a relative path on this origin, so every automated
+// request to the game passes through this process. That makes the hub the only place the
+// five-per-second agreement with the game's administrator can actually be enforced — the
+// browser-side gate in public/js/utils/game-rate-limit.js is the first line, not the
+// floor. See src/utils/game-traffic.js for what counts and why it waits rather than fails.
+const gameGate = gameTrafficGate({
+    maxPerSecond: process.env.GAME_MAX_PER_SECOND === undefined ? 5 : Number(process.env.GAME_MAX_PER_SECOND),
+    maxWaitMs: process.env.GAME_MAX_WAIT_MS === undefined ? 8000 : Number(process.env.GAME_MAX_WAIT_MS),
+});
+
+// A ceiling on ALL proxied traffic, marked or not, per member. One game page pulls dozens
+// of assets, so this is deliberately loose — it exists to stop a runaway loop that bypassed
+// gameFetch entirely, not to shape normal browsing. PROXY_MAX=0 disables it.
+const proxyCeiling = rateLimit({
+    windowMs: 60 * 1000,
+    max: process.env.PROXY_MAX === undefined ? 900 : Number(process.env.PROXY_MAX),
+    message: 'Too many requests to the game from this account. Slow down and try again shortly.',
+    keyOf: req => (req.session && req.session.userId ? `u${req.session.userId}` : null),
+});
+
+// Read-only view of what the gate has been doing — for the admin panel, and for the day
+// someone asks us to show that the agreement is being kept. Registered before the /hub-api
+// router so it is unambiguously this file's endpoint, not one of the domain routers'.
+app.get('/hub-api/admin/game-traffic', (req, res) => {
+    if (!req.session || req.session.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    res.json({ success: true, gate: gameGate.snapshot() });
+});
+
 app.use('/hub-api', apiRoutes);
 
 // External game-notification webhook (no session auth — called by the in-game forwarder).
@@ -173,7 +203,7 @@ app.get('/admin', requireAuth, (req, res) => {
 });
 
 // Force all direct browser navigation into the Wrapper g
-app.use('/', requireAuth, (req, res, next) => {
+app.use('/', requireAuth, proxyCeiling, gameGate, (req, res, next) => {
     // If the browser is requesting a full page document directly (not an iframe or fetch request)
     if (req.headers['sec-fetch-dest'] === 'document') {
         
