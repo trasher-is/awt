@@ -14,6 +14,8 @@
 //   Race defense: +11% HP per level.
 //   Mathematics: scales HP (survivors). Physics & player level: win probability only.
 
+import { esc } from '../utils/escape.js';
+
 const SHIPS = [
     { name: 'Destroyer',  att: 2,  def: 1,  cv: 3  },
     { name: 'Cruiser',    att: 8,  def: 16, cv: 24 },
@@ -308,7 +310,7 @@ function setupPlayerSearch(inputId, dropdownId, prefix) {
         dropdown.innerHTML = matches.map(p => {
             const intel = p.has_intel ? `<span class="text-zinc-500 ml-auto">L${p.level||0} phy${p.physics||0}</span>` : '';
             return `<button data-pid="${p.id}" class="bc-player-pick w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-zinc-800 text-left transition-colors">
-                <span class="text-foreground font-medium truncate">${p.name}</span>
+                <span class="text-foreground font-medium truncate">${esc(p.name)}</span>
                 ${intel}
             </button>`;
         }).join('');
