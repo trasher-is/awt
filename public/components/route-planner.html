@@ -1,0 +1,120 @@
+<div id="route-planner-panel" class="fixed top-0 right-0 h-full w-full md:w-[calc(100%-3.5rem)] bg-black border-l border-border transform translate-x-full transition-transform duration-300 z-40 flex flex-col shadow-2xl overflow-hidden">
+
+    <div class="h-14 border-b border-border flex items-center justify-between px-4 md:px-6 bg-zinc-900 shrink-0">
+        <div class="flex items-center gap-3 min-w-0">
+            <div class="w-8 h-8 rounded-md bg-white/5 flex items-center justify-center shrink-0">
+                <i class="fa-solid fa-map-location-dot text-base text-violet-400"></i>
+            </div>
+            <div class="min-w-0">
+                <h2 class="font-bold text-foreground tracking-wide truncate">Route Planner</h2>
+                <p class="text-sm text-muted-foreground hidden sm:block">Start → jump → target, with per-leg travel times</p>
+            </div>
+        </div>
+        <button id="close-route-planner-btn" class="w-8 h-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors shrink-0">
+            <i class="fa-solid fa-xmark text-base"></i>
+        </button>
+    </div>
+
+    <div class="flex-1 overflow-auto bg-black p-3 md:p-6">
+        <div class="max-w-3xl mx-auto flex flex-col gap-4 md:gap-6">
+
+            <!-- WAYPOINTS -->
+            <div class="bg-zinc-900 border border-border rounded-lg p-3 md:p-4 flex flex-col gap-3">
+                <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-2 text-violet-400 font-semibold text-sm uppercase tracking-wider">
+                        <i class="fa-solid fa-diagram-project"></i> Waypoints
+                    </div>
+                    <button id="rp-add-stop" class="h-7 px-3 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors">
+                        <i class="fa-solid fa-plus mr-1"></i> Add stop
+                    </button>
+                </div>
+                <div id="rp-waypoints" class="flex flex-col gap-2"></div>
+                <p class="text-xs text-muted-foreground">
+                    The first row is where the fleet starts, the last is the target. Anything between them is a jump.
+                </p>
+            </div>
+
+            <!-- FLEET PARAMETERS -->
+            <div class="bg-zinc-900 border border-border rounded-lg p-3 md:p-4 flex flex-col gap-3">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                    <div class="text-amber-400 font-semibold text-sm uppercase tracking-wider">
+                        <i class="fa-solid fa-gauge-high"></i> Fleet
+                    </div>
+                    <div class="relative">
+                        <input type="text" id="rp-player-input" placeholder="Fill from player…" autocomplete="off"
+                            class="h-7 w-44 sm:w-56 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+                        <div id="rp-player-dropdown" class="hidden absolute top-8 right-0 z-50 w-56 bg-zinc-900 border border-border rounded shadow-xl max-h-48 overflow-y-auto"></div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div class="flex flex-col gap-1"><label class="text-xs text-muted-foreground">Energy</label>
+                        <input type="number" id="rp-energy" min="0" max="100" value="0" class="rp-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                    <div class="flex flex-col gap-1"><label class="text-xs text-muted-foreground">Race speed</label>
+                        <input type="number" id="rp-speed" min="-4" max="4" value="0" class="rp-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                    <div class="flex flex-col gap-1"><label class="text-xs text-muted-foreground">Biology</label>
+                        <input type="number" id="rp-biology" min="0" max="100" value="0" class="rp-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                    <label class="flex items-center gap-2 h-9 mt-auto text-sm text-muted-foreground cursor-pointer">
+                        <input type="checkbox" id="rp-alliance" class="rp-in w-4 h-4 rounded border-border bg-transparent cursor-pointer">
+                        Allied (½)
+                    </label>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs text-muted-foreground">Planned start (your local time)</label>
+                        <input type="datetime-local" id="rp-start" class="rp-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500">
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs text-muted-foreground">Title</label>
+                        <input type="text" id="rp-title" maxlength="120" placeholder="e.g. Hit on Vega #4"
+                            class="rp-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500">
+                    </div>
+                </div>
+            </div>
+
+            <!-- RESULT -->
+            <div class="bg-zinc-900 border border-border rounded-lg p-3 md:p-4 flex flex-col gap-3">
+                <div class="flex items-baseline justify-between gap-2 flex-wrap">
+                    <div class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total travel time</div>
+                    <div id="rp-total" class="text-3xl md:text-4xl font-bold font-mono text-foreground">--:--:--</div>
+                </div>
+                <div id="rp-legs" class="flex flex-col gap-2"></div>
+                <div id="rp-error" class="hidden text-xs text-red-400"></div>
+                <div id="rp-arrival" class="text-xs text-muted-foreground"></div>
+            </div>
+
+            <!-- SAVE / SHARE -->
+            <div class="bg-zinc-900 border border-border rounded-lg p-3 md:p-4 flex flex-col gap-3">
+                <div class="flex flex-col gap-1">
+                    <label class="text-xs text-muted-foreground">Note for the alliance (optional)</label>
+                    <textarea id="rp-note" maxlength="1000" rows="2" placeholder="Bring transports, I have no eco left"
+                        class="w-full rounded border border-input bg-zinc-950 px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-zinc-500"></textarea>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <label class="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer mr-auto">
+                        <input type="checkbox" id="rp-shared" checked class="w-4 h-4 rounded border-border bg-transparent cursor-pointer">
+                        Share with the alliance
+                    </label>
+                    <button id="rp-reset" class="h-9 px-3 rounded border border-input bg-zinc-950 text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">New</button>
+                    <button id="rp-save" class="h-9 px-4 rounded bg-violet-600 hover:bg-violet-500 text-sm font-semibold text-white transition-colors">
+                        <i class="fa-solid fa-floppy-disk mr-1"></i> Save route
+                    </button>
+                </div>
+                <div id="rp-save-msg" class="text-xs text-muted-foreground"></div>
+            </div>
+
+            <!-- SHARED ROUTES -->
+            <div class="bg-zinc-900 border border-border rounded-lg p-3 md:p-4 flex flex-col gap-3">
+                <div class="flex items-center justify-between">
+                    <div class="text-emerald-400 font-semibold text-sm uppercase tracking-wider">
+                        <i class="fa-solid fa-users"></i> Alliance routes
+                    </div>
+                    <button id="rp-refresh" class="text-xs text-emerald-400 hover:underline">Refresh</button>
+                </div>
+                <div id="rp-shared-list" class="flex flex-col gap-2">
+                    <div class="text-xs text-muted-foreground">Loading…</div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>

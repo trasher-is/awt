@@ -10,7 +10,8 @@ import {
     openAllianceStatsPanel,
     openTradeAgreementsPanel,
     openBattleCalcPanel,
-    openTravelCalcPanel
+    openTravelCalcPanel,
+    openRoutePlannerPanel
 } from './archives.js';
 import { runMassScan, runPlayerScan } from '../scrapers/mass-scanner.js';
 import { initNotes, toggleNotesPanel } from './notes.js';
@@ -48,6 +49,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('open-fleets-db-btn')?.addEventListener('click', openFleetDatabasePanel);
     document.getElementById('open-battle-calc-btn')?.addEventListener('click', openBattleCalcPanel);
     document.getElementById('open-travel-calc-btn')?.addEventListener('click', openTravelCalcPanel);
+    document.getElementById('open-route-planner-btn')?.addEventListener('click', openRoutePlannerPanel);
     document.getElementById('notes-trigger')?.addEventListener('click', toggleNotesPanel);
     initNotes();
 
