@@ -1,4 +1,5 @@
 import { esc } from '../utils/escape.js';
+import '../utils/battle-model.js';   // side-effect import: puts the model on globalThis
 
 let localSystemId = null;
 
@@ -60,7 +61,7 @@ export async function loadPlans(sysId) {
         `).join('');
 
         document.getElementById('intel-fleets-list').innerHTML = data.fleets.length ? data.fleets.map(f => {
-            const cv = (f.destroyers * 3) + (f.cruisers * 24) + (f.battleships * 60);
+            const cv = globalThis.AWBattleModel.cvOf(f);
             const statBadge = (f.arrival_time && f.arrival_time !== '-') ? `<span class="text-s bg-red-500/20 text-red-400 px-1 rounded ml-1">Transit: ${esc(f.arrival_time)}</span>` : '';
             return `
                 <div class="flex justify-between items-center py-0.5 text-s">

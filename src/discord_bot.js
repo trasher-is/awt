@@ -2,6 +2,9 @@ const { Client, GatewayIntentBits, EmbedBuilder, ButtonBuilder, ActionRowBuilder
 const db = require('./database');
 const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
 const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require('./utils/covering');
+// The battle model — the same physical file the dashboard calculator imports, so
+// !battle and the web calculator cannot drift apart again. See docs/battle-model.md.
+const battleModel = require('../public/js/utils/battle-model.js');
 
 const client = new Client({
     intents: [
@@ -652,7 +655,7 @@ client.on('messageCreate', async (message) => {
             const sorted = [...fleets].sort((a, b) => (a.planet_index || 0) - (b.planet_index || 0));
             let body = '';
             sorted.forEach(f => {
-                const cv = (f.destroyers * 3) + (f.cruisers * 24) + (f.battleships * 60);
+                const cv = battleModel.cvOf(f);
                 const owner = f.owner_name ? `[${f.ally_tag || '?'}] ${f.owner_name}` : 'Unknown';
                 let eta = '🛰️ orbit';
                 if (f.arrival_at) {
@@ -1128,19 +1131,12 @@ client.on('messageCreate', async (message) => {
     //          --atk PlayerName  (auto-fill attacker mods from DB)
     // ----------------------------------------------------
     if (command === 'battle') {
-        // Model validated against the in-game battle calculator.
-        // Each ship has ATTACK and DEFENSE stats; CV = att + def.
-        const SHIP_ATTACK = [2, 8, 36];   // [D, C, B]
-        const SHIP_DEF    = [1, 16, 24];  // [D, C, B] — used as HP
-        const SHIP_CV     = [3, 24, 60];  // att + def
-        const SHIP_NAME   = ['Destroyer', 'Cruiser', 'Battleship'];
-        // SB: cv = round(4 × 1.5^n) − 4; att = def = floor(cv/2)
-        // Confirmed: lvl1=2, 2=5, 3=10, 4=16, 5=26, 6=42, 7=64, 15=1748, 20=13297, 30≈767k
-        const sbCV   = n => n > 0 ? Math.round(4 * Math.pow(1.5, n)) - 4 : 0;
-        const sbHalf = n => Math.floor(sbCV(n) / 2);
-        // Per-level coefficients (validated): race atk +7% attack, race def +11% HP,
-        // mathematics +15.3% HP. Physics & player level shift win chance ~1%/level.
-        const MATH_HP = 0.153, RACE_ATK = 0.07, RACE_DEF = 0.11, PHYS_WIN = 0.005, LVL_WIN = 0.01;
+        // The model is NOT defined here any more. Until this was fixed the handler carried
+        // its own copy, frozen a day before the dashboard was recalibrated against in-game
+        // samples, so !battle and the web calculator answered the same fight differently
+        // (19.1 pp apart on average, up to 66.7 pp). Both now call battleModel.simulate().
+        const { SHIPS, sbCV } = battleModel;
+        const SHIP_NAME = SHIPS.map(s => s.name);
 
         const rawArgs = args.join(' ');
 
@@ -1154,17 +1150,21 @@ client.on('messageCreate', async (message) => {
             return m ? m[1].trim() : null;
         };
 
-        const sbLevel  = Math.max(0, Math.min(50, optParse('--sb',  0)));
-        let defPhys    = Math.max(0, Math.min(10, optParse('--dp',  0)));
-        let atkPhys    = Math.max(0, Math.min(10, optParse('--ap',  0)));
-        let defRaceAtk = Math.max(-4, Math.min(4, optParse('--dra', 0)));
-        let atkRaceAtk = Math.max(-4, Math.min(4, optParse('--ara', 0)));
-        let defRaceDef = Math.max(-4, Math.min(4, optParse('--drd', 0)));
-        let atkRaceDef = Math.max(-4, Math.min(4, optParse('--ard', 0)));
-        let defMath    = Math.max(0, Math.min(10, optParse('--dm',  0)));
-        let atkMath    = Math.max(0, Math.min(10, optParse('--am',  0)));
-        let defLevel   = Math.max(0, optParse('--dl', 0));
-        let atkLevel   = Math.max(0, optParse('--al', 0));
+        // Ranges come from the model, not from here. This handler used to cap science at
+        // 10 while the web calculator capped it at 30, so `--dp 20` reached the model as
+        // two different numbers depending on where you asked.
+        const { clampScience: sci, clampRace: race, clampStarbase: sb, clampLevel: lvl } = battleModel;
+        const sbLevel  = sb(optParse('--sb',  0));
+        let defPhys    = sci(optParse('--dp',  0));
+        let atkPhys    = sci(optParse('--ap',  0));
+        let defRaceAtk = race(optParse('--dra', 0));
+        let atkRaceAtk = race(optParse('--ara', 0));
+        let defRaceDef = race(optParse('--drd', 0));
+        let atkRaceDef = race(optParse('--ard', 0));
+        let defMath    = sci(optParse('--dm',  0));
+        let atkMath    = sci(optParse('--am',  0));
+        let defLevel   = lvl(optParse('--dl', 0));
+        let atkLevel   = lvl(optParse('--al', 0));
         const defPlayerName = strParse('--def');
         const atkPlayerName = strParse('--atk');
 
@@ -1173,22 +1173,22 @@ client.on('messageCreate', async (message) => {
         if (defPlayerName) {
             const p = db.prepare(`SELECT name, level, physics, mathematics, race_attack, race_defense FROM players WHERE name LIKE ?`).get(defPlayerName);
             if (p) {
-                defPhys    = Math.max(0, Math.min(10, p.physics || 0));
-                defMath    = Math.max(0, Math.min(10, p.mathematics || 0));
-                defRaceAtk = Math.max(-4, Math.min(4, p.race_attack || 0));
-                defRaceDef = Math.max(-4, Math.min(4, p.race_defense || 0));
-                defLevel   = Math.max(0, p.level || 0);
+                defPhys    = sci(p.physics || 0);
+                defMath    = sci(p.mathematics || 0);
+                defRaceAtk = race(p.race_attack || 0);
+                defRaceDef = race(p.race_defense || 0);
+                defLevel   = lvl(p.level || 0);
                 defPlayerLabel = p.name;
             }
         }
         if (atkPlayerName) {
             const p = db.prepare(`SELECT name, level, physics, mathematics, race_attack, race_defense FROM players WHERE name LIKE ?`).get(atkPlayerName);
             if (p) {
-                atkPhys    = Math.max(0, Math.min(10, p.physics || 0));
-                atkMath    = Math.max(0, Math.min(10, p.mathematics || 0));
-                atkRaceAtk = Math.max(-4, Math.min(4, p.race_attack || 0));
-                atkRaceDef = Math.max(-4, Math.min(4, p.race_defense || 0));
-                atkLevel   = Math.max(0, p.level || 0);
+                atkPhys    = sci(p.physics || 0);
+                atkMath    = sci(p.mathematics || 0);
+                atkRaceAtk = race(p.race_attack || 0);
+                atkRaceDef = race(p.race_defense || 0);
+                atkLevel   = lvl(p.level || 0);
                 atkPlayerLabel = p.name;
             }
         }
@@ -1207,40 +1207,15 @@ client.on('messageCreate', async (message) => {
         const defFleet = [defParts[0] || 0, defParts[1] || 0, defParts[2] || 0];
         const atkFleet = [atkParts[0] || 0, atkParts[1] || 0, atkParts[2] || 0];
 
-        const sbA = sbHalf(sbLevel);  // starbase attack = defense
-        // Effective attack = (Σ att·n + SBatt) × (1 + 0.07·raceAtk)
-        const def_attack = (defFleet.reduce((s, n, i) => s + n * SHIP_ATTACK[i], 0) + sbA) * (1 + RACE_ATK * defRaceAtk);
-        const atk_attack = (atkFleet.reduce((s, n, i) => s + n * SHIP_ATTACK[i], 0))       * (1 + RACE_ATK * atkRaceAtk);
-        // Effective HP = (Σ def·n + SBdef) × (1 + 0.11·raceDef) × (1 + 0.153·math)
-        const def_hp = (defFleet.reduce((s, n, i) => s + n * SHIP_DEF[i], 0) + sbA)
-                       * (1 + RACE_DEF * defRaceDef) * (1 + MATH_HP * defMath);
-        const atk_hp = (atkFleet.reduce((s, n, i) => s + n * SHIP_DEF[i], 0))
-                       * (1 + RACE_DEF * atkRaceDef) * (1 + MATH_HP * atkMath);
-
-        if (def_hp === 0 && atk_hp === 0) {
+        const sim = battleModel.simulate(battleModel.normalizeInputs({
+            defFleet, atkFleet, sbLevel,
+            def: { phys: defPhys, math: defMath, ra: defRaceAtk, rd: defRaceDef, lvl: defLevel },
+            atk: { phys: atkPhys, math: atkMath, ra: atkRaceAtk, rd: atkRaceDef, lvl: atkLevel }
+        }));
+        if (!sim) {
             return message.reply('❌ Both fleets are empty.');
         }
-
-        // Fraction killed on each side (simultaneous fire)
-        const fracDefKilled = def_hp > 0 ? Math.min(1, atk_attack / def_hp) : 1;
-        const fracAtkKilled = atk_hp > 0 ? Math.min(1, def_attack / atk_hp) : 1;
-
-        const survDef = defFleet.map(n => n * (1 - fracDefKilled));
-        const survAtk = atkFleet.map(n => n * (1 - fracAtkKilled));
-        const survSB  = sbLevel > 0 ? (1 - fracDefKilled) : 0;
-
-        // Initial / remaining CV
-        const initCVD = defFleet.reduce((s, n, i) => s + n * SHIP_CV[i], 0) + sbCV(sbLevel);
-        const initCVA = atkFleet.reduce((s, n, i) => s + n * SHIP_CV[i], 0);
-
-        // Win probability: relative kill power, shifted by physics & player-level diffs.
-        const killA = def_hp > 0 ? atk_attack / def_hp : 999;
-        const killD = atk_hp > 0 ? def_attack / atk_hp : 999;
-        let winA = killA / (killA + killD);
-        winA += PHYS_WIN * (atkPhys - defPhys);
-        winA += LVL_WIN  * (atkLevel - defLevel);
-        winA = Math.max(0, Math.min(1, winA));
-        let winD = 1 - winA;
+        const { survDef, survAtk, survSB, initCVD, initCVA, winD, winA } = sim;
 
         // Format helpers
         const pct = n => (n * 100).toFixed(1) + '%';
@@ -1257,8 +1232,8 @@ client.on('messageCreate', async (message) => {
             return parts.length ? parts.join('\n') : '*No ships*';
         };
 
-        const defCVRemain = survDef.reduce((s, n, i) => s + n * SHIP_CV[i], 0) + (sbLevel > 0 ? survSB * sbCV(sbLevel) : 0);
-        const atkCVRemain = survAtk.reduce((s, n, i) => s + n * SHIP_CV[i], 0);
+        const defCVRemain = sim.cvDefRemain;
+        const atkCVRemain = sim.cvAtkRemain;
 
         const defLabel = defPlayerLabel ? `Defender (${defPlayerLabel})` : 'Defender';
         const atkLabel = atkPlayerLabel ? `Attacker (${atkPlayerLabel})` : 'Attacker';
@@ -1297,7 +1272,7 @@ client.on('messageCreate', async (message) => {
                     inline: false,
                 }
             )
-            .setFooter({ text: 'Survivor counts are exact. Win % uses approximate formula (±2%).' });
+            .setFooter({ text: 'Same model as the Hub battle calculator. Calibrated to in-game samples (±3%); a starbase defending alongside a fleet is approximate.' });
 
         return message.reply({ embeds: [embed] });
     }
