@@ -1,0 +1,126 @@
+{
+  "_readme": [
+    "Ground truth for the battle model. Every entry here is a REAL in-game observation,",
+    "not a model output. Never edit a number in this file to make a test pass — the whole",
+    "point is that the model is fitted to these, not the other way round.",
+    "",
+    "Provenance: the model was recalibrated against 24 in-game samples on 2026-06-27/28",
+    "(commits fb2013f, eabbe83, 2758b16, 807eecf, 0910caa, d029342, 50d6c8c, 7853be9,",
+    "7289025, 62232a3, 243bdfe, 2cc1467). The raw samples were never committed — only",
+    "summary numbers inside the commit messages survived. The entries below are the ones",
+    "whose INPUTS are stated unambiguously enough to be replayed. The remaining ~15",
+    "samples are unrecoverable: their win percentages are quoted but the fleets and stats",
+    "behind them are not. Collect them again (see docs/battle-model.md) rather than",
+    "guessing.",
+    "",
+    "confidence: 'observed' = the game reported this number for these exact inputs.",
+    "Anything less than 'observed' does not belong in this file."
+  ],
+
+  "gate": {
+    "winChanceMaxErrorPp": 1.5,
+    "_note": "Worst error across the current fixtures is 0.37 pp (physics diff 10). The gate sits just above that so a real regression fails the build while normal float noise does not. Tighten it as better samples arrive."
+  },
+
+  "winChance": [
+    {
+      "id": "phys-diff-4",
+      "desc": "1000 destroyers each side, defender 4 physics behind",
+      "source": "commit 243bdfe — 1000-D-vs-1000-D equal-CV sweep, 'diff4=39.8%'",
+      "confidence": "observed",
+      "def": { "fleet": [1000, 0, 0], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "atk": { "fleet": [1000, 0, 0], "physics": 4, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "observedDefenderWinPct": 39.8
+    },
+    {
+      "id": "phys-diff-5",
+      "desc": "1000 destroyers each side, defender 5 physics behind",
+      "source": "commit 243bdfe — 'diff5=37.4%'",
+      "confidence": "observed",
+      "def": { "fleet": [1000, 0, 0], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "atk": { "fleet": [1000, 0, 0], "physics": 5, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "observedDefenderWinPct": 37.4
+    },
+    {
+      "id": "phys-diff-6-threshold",
+      "desc": "1000 destroyers each side, defender 6 physics behind — the bracket threshold",
+      "source": "commit 243bdfe — 'real jumps to ~5% (diff6)'",
+      "confidence": "observed",
+      "def": { "fleet": [1000, 0, 0], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "atk": { "fleet": [1000, 0, 0], "physics": 6, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "observedDefenderWinPct": 5.0
+    },
+    {
+      "id": "phys-diff-10",
+      "desc": "1000 destroyers each side, defender 10 physics behind",
+      "source": "commit 243bdfe — 'keeps dropping (diff10=1.2%)'",
+      "confidence": "observed",
+      "def": { "fleet": [1000, 0, 0], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "atk": { "fleet": [1000, 0, 0], "physics": 10, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "observedDefenderWinPct": 1.2
+    },
+    {
+      "id": "race-attack-minus4-vs-plus4",
+      "desc": "1000 destroyers each side, race attack -4 against +4 — decisive in-game",
+      "source": "commit 243bdfe — 'a 6+ diff is effectively decisive in-game (-4 vs +4 => ~0%)'",
+      "confidence": "observed",
+      "def": { "fleet": [1000, 0, 0], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": -4, "raceDefense": 0, "level": 0 },
+      "atk": { "fleet": [1000, 0, 0], "physics": 0, "mathematics": 0, "raceAttack": 4, "raceDefense": 0, "level": 0 },
+      "observedDefenderWinPct": 0.0
+    },
+    {
+      "id": "composition-1000d-vs-125c",
+      "desc": "1000 destroyers (2000 attack) against 125 cruisers (1000 attack) at equal CV",
+      "source": "commit 7289025 — 'in-game 72.66'; the attack-ratio term exists because of this sample",
+      "confidence": "observed",
+      "def": { "fleet": [1000, 0, 0], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "atk": { "fleet": [0, 125, 0], "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "observedDefenderWinPct": 72.66
+    },
+    {
+      "id": "player-level-diff-1",
+      "desc": "equal full D/C/B fleets, defender 1 player level behind",
+      "source": "commit 243bdfe — 'player level: 48.2/46.5/32.0% for diff 1/2/11'",
+      "confidence": "observed",
+      "_composition_note": "The sample's exact fleet is not recorded, only that both sides were full D/C/B (the level term needs that). With identical fleets the force and attack ratios are both zero, so the answer is the same for any equal full composition that avoids annihilation — 100/100/100 is a representative stand-in, not a guess at the original numbers.",
+      "def": { "fleet": [100, 100, 100], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "atk": { "fleet": [100, 100, 100], "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 1 },
+      "observedDefenderWinPct": 48.2
+    },
+    {
+      "id": "player-level-diff-2",
+      "desc": "equal full D/C/B fleets, defender 2 player levels behind",
+      "source": "commit 243bdfe",
+      "confidence": "observed",
+      "def": { "fleet": [100, 100, 100], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "atk": { "fleet": [100, 100, 100], "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 2 },
+      "observedDefenderWinPct": 46.5
+    },
+    {
+      "id": "player-level-diff-11",
+      "desc": "equal full D/C/B fleets, defender 11 player levels behind",
+      "source": "commit 243bdfe",
+      "confidence": "observed",
+      "def": { "fleet": [100, 100, 100], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "atk": { "fleet": [100, 100, 100], "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 11 },
+      "observedDefenderWinPct": 32.0
+    }
+  ],
+
+  "starbaseCv": {
+    "_source": "commit db73cd5 ('Confirmed: lvl1=2, 2=5, 3=10, 4=16, 5=26, 6=42, 7=64, 15=1748, 20=13297') and public/js/ui/battle-calc.js ('confirmed: SB10 cv = 227'). These are exact integers read off the game, so the test demands an exact match.",
+    "levels": { "1": 2, "2": 5, "3": 10, "4": 16, "5": 26, "6": 42, "7": 64, "10": 227, "15": 1748, "20": 13297 }
+  },
+
+  "survivors": {
+    "_status": "EMPTY — no ground truth.",
+    "_note": [
+      "Not an oversight. The survivor half of the model (lossFraction = ΣenemyCV / Σ(att+2·def))",
+      "was reverse-engineered from in-game samples in commit fb2013f, but not one of those",
+      "samples was written down. So the numbers the UI and the bot present as survivor counts",
+      "currently have ZERO regression coverage, while the win percentages have nine fixtures.",
+      "This is the single biggest gap in the harness. docs/battle-model.md explains how to fill it."
+    ],
+    "cases": []
+  }
+}

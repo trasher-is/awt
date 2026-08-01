@@ -14,7 +14,9 @@ function cleanInt(str) {
     return parseInt(String(str).replace(/[,.\s]/g, ''), 10) || 0;
 }
 
-const cvOf = (f) => (f.destroyers || 0) * 3 + (f.cruisers || 0) * 24 + (f.battleships || 0) * 60;
+// CV comes from the shared battle model — it used to be a fourth hand-written copy of
+// D*3 + C*24 + B*60.
+const { cvOf, SHIPS } = require('./battle');
 
 // Cost per CV in production points at a given economy level: destroyer = 3 CV for
 // round(30 * 0.99^eco) PP  ->  cost_per_CV = 10 * 0.99^eco.
@@ -117,19 +119,19 @@ function computeInterceptors(attack, nowUnix) {
         // "full" fleet so the defender's player level counts in the win-chance formula.
         // Can't afford the 1C+1B core? Fall back to all-destroyers.
         let ships, cv, note;
-        const CORE_CV = 24 + 60;
+        const D_CV = SHIPS[0].cv;
+        const CORE_CV = cvOf([0, 1, 1]);
         if (totalCv >= CORE_CV) {
-            const nD = Math.floor((totalCv - CORE_CV) / 3);
+            const nD = Math.floor((totalCv - CORE_CV) / D_CV);
             ships = [nD, 1, 1];
-            cv = nD * 3 + CORE_CV;
             note = `build & launch: ${nD}D 1C 1B`;
         } else {
-            const nD = Math.floor(totalCv / 3);
+            const nD = Math.floor(totalCv / D_CV);
             if (nD <= 0) continue;
             ships = [nD, 0, 0];
-            cv = nD * 3;
             note = `build & launch: ${nD}D`;
         }
+        cv = cvOf(ships);
         const travel = calcTravelSeconds(h.sx, h.sy, h.launch_planet, target.x, target.y, attack.planetIndex, h.energy, h.race_speed, true);
         consider(h.owner_name, cv, travel, 'build', note, { ships });
     }
