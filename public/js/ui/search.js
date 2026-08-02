@@ -35,7 +35,12 @@ async function executeSearch(type) {
         if (type === 'player') {
             resultsContainer.innerHTML = data.results.map(p => `
                 <button data-player-id="${p.id}" class="btn-search-player text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-s transition-colors flex justify-between items-center shadow-sm">
-                    <span class="truncate font-medium">${p.alliance_tag ? `<span class="text-muted-foreground font-normal">[${esc(p.alliance_tag)}]</span> ` : ''}${esc(p.name)}</span>
+                    <span class="truncate font-medium">${p.alliance_tag ? `<span class="text-muted-foreground font-normal">[${esc(p.alliance_tag)}]</span> ` : ''}${esc(p.name || `#${p.id}`)}${
+                        // Matched on a name from an earlier round rather than the current
+                        // one. Say so — otherwise the result looks like a mistake, because
+                        // the text shown is not the text that was typed.
+                        p.former_name ? `<span class="text-muted-foreground font-normal"> — was ${esc(p.former_name)}${p.former_round ? ` (${esc(p.former_round)})` : ''}</span>` : ''
+                    }</span>
                     <span class="text-s text-muted-foreground font-mono">#${p.id}</span>
                 </button>`).join('');
 

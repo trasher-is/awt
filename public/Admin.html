@@ -269,9 +269,33 @@
                     <div class="mb-4">
                         <h3 class="font-bold text-destructive mb-1"><i class="fa-solid fa-skull mr-1"></i> Nuke All Intel - New Round</h3>
                         <p class="text-xs text-destructive/80">Obliterates ALL systems, planets, fleets, and map data. User accounts remain. Requires Master Admin password.</p>
+                        <p class="text-xs text-muted-foreground mt-2"><i class="fa-solid fa-box-archive mr-1"></i>Player names, ids and system names are archived first, in the same transaction — if the snapshot fails, nothing is deleted.</p>
                     </div>
                     <button onclick="nukeIntel()" class="h-9 px-4 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 text-sm font-medium transition-colors">Initiate Server Wipe</button>
                 </div>
+            </div>
+
+            <!-- ROUND ARCHIVE -->
+            <div class="border border-border rounded-lg p-6 shadow-sm mt-6">
+                <div class="flex items-start justify-between gap-4 flex-wrap mb-4">
+                    <div>
+                        <h3 class="font-bold mb-1"><i class="fa-solid fa-box-archive mr-1"></i> Round Archive</h3>
+                        <p class="text-xs text-muted-foreground">
+                            Who was who, per round. A player id is stable for the life of an account but the name is not,
+                            so this is what lets the intel panel say that Chewie played last round as Elfenlied.
+                            Snapshot while the round is still live to catch players who go inactive before it ends.
+                        </p>
+                    </div>
+                    <div class="flex items-end gap-2">
+                        <div class="flex flex-col">
+                            <label for="round-label-input" class="text-xs text-muted-foreground mb-1">Label</label>
+                            <input id="round-label-input" type="text" placeholder="e.g. Beta 3"
+                                   class="h-9 w-40 rounded-md border border-input bg-transparent px-3 text-sm focus:outline-none">
+                        </div>
+                        <button onclick="archiveRoundNow()" class="h-9 px-4 rounded-md border border-border bg-transparent hover:bg-secondary text-sm font-medium transition-colors whitespace-nowrap">Snapshot Now</button>
+                    </div>
+                </div>
+                <div id="rounds-list" class="text-sm text-muted-foreground">Loading…</div>
             </div>
         </section>
     </main>
@@ -296,6 +320,7 @@
                     loadStatus();
                     loadBroadcasts();
                     loadSettings();
+                    loadRounds();
                 } else {
                     window.location.href = '/dashboard';
                 }
@@ -677,23 +702,81 @@
             if(currentAdminUser !== 'admin') {
                 return alert("AUTHORIZATION DENIED: Only the Master Admin account can initiate a server wipe.");
             }
-            const pass = prompt("CRITICAL WARNING: This will permanently destroy all mapping and intel data. To proceed, enter the Master Admin password:");
+            const label = prompt("Label for the round being closed (shown next to old player names later), e.g. \"Beta 3\".\nLeave blank for a dated label.");
+            if (label === null) return;
+
+            const pass = prompt("CRITICAL WARNING: This will permanently destroy all mapping and intel data.\nPlayer names, ids and system names are archived first.\nTo proceed, enter the Master Admin password:");
             if(!pass) return;
 
             const res = await fetch('/hub-api/admin/nuke-intel', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: pass })
+                body: JSON.stringify({ password: pass, label })
             });
             const data = await res.json();
-            
+
             if(data.success) {
-                alert("SERVER WIPE EXECUTED. All intelligence data has been destroyed.");
+                const a = data.archived || {};
+                alert(`SERVER WIPE EXECUTED.\n\nArchived first: ${a.players ?? 0} players and ${a.systems ?? 0} systems as "${a.label || 'unlabelled'}".`);
                 loadStatus();
+                loadRounds();
             } else {
                 alert(data.error);
             }
         }
+
+        // --- ROUND ARCHIVE ---
+        async function loadRounds() {
+            const box = document.getElementById('rounds-list');
+            if (!box) return;
+            try {
+                const res = await fetch('/hub-api/admin/rounds');
+                const data = await res.json();
+                if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+
+                if (!data.rounds.length) {
+                    box.innerHTML = 'Nothing archived yet. The next server wipe will take a snapshot automatically.';
+                    return;
+                }
+                box.innerHTML = `
+                    <table class="w-full text-left">
+                        <thead class="text-xs uppercase text-muted-foreground border-b border-border">
+                            <tr><th class="py-2">Round</th><th>Archived</th><th class="text-right">Players</th><th class="text-right">Systems</th></tr>
+                        </thead>
+                        <tbody>${data.rounds.map(r => `
+                            <tr class="border-b border-border/50">
+                                <td class="py-2 text-foreground font-medium">${esc(r.label || `#${r.id}`)}</td>
+                                <td class="text-xs">${esc(String(r.archivedAt || '').replace('T', ' ').slice(0, 16))}</td>
+                                <td class="text-right font-mono">${r.players}</td>
+                                <td class="text-right font-mono">${r.systems}</td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>`;
+            } catch (err) {
+                box.textContent = `Could not load the archive: ${err.message}`;
+            }
+        }
+
+        async function archiveRoundNow() {
+            const input = document.getElementById('round-label-input');
+            const label = input ? input.value.trim() : '';
+            if (!confirm(`Snapshot the CURRENT round${label ? ` as "${label}"` : ''}?\n\nNothing is deleted — this only records who is who right now.`)) return;
+
+            const res = await fetch('/hub-api/admin/rounds/archive', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ label })
+            });
+            const data = await res.json();
+            if (data.success) {
+                if (input) input.value = '';
+                alert(`Archived ${data.players} players and ${data.systems} systems as "${data.label}".`);
+                loadRounds();
+            } else {
+                alert(data.error);
+            }
+        }
+
     </script>
 </body>
 </html>
