@@ -1443,6 +1443,12 @@ function interactionAsMessage(interaction, content) {
 
 // Map a slash invocation onto the equivalent ! string. The mapping lives in one place so
 // the two entry points cannot drift.
+// Autocompleted options whose value is a SYSTEM id. Everything else that is
+// autocompleted is a player name. Keep this in step with src/discord-commands.js — the
+// test asserts the two agree, so adding an option there without adding it here fails the
+// build rather than quietly suggesting the wrong list.
+const SYSTEM_OPTION_NAMES = new Set(['system', 'from', 'to']);
+
 function slashToPrefix(interaction) {
     const name = interaction.commandName;
     const sub = interaction.options.getSubcommand(false);
@@ -1458,9 +1464,26 @@ function slashToPrefix(interaction) {
     }
     if (name === 'calc') {
         if (sub === 'travel') {
-            const parts = ['!tt', s('from'), s('to')];
-            if (i('energy') != null) parts.push(String(i('energy')));
-            if (i('speed') != null) parts.push(String(i('speed')));
+            // !tt reads six positional arguments:
+            //   sysA planetA sysB planetB speed energy
+            // or five, where the fifth is a player name to take speed and energy from.
+            //
+            // This used to emit `!tt <from> <to> [energy] [speed]` — no planets at all, so
+            // the destination system landed in planetA, the energy in sysB, and the whole
+            // thing either failed the usage check or answered for a route nobody asked
+            // about. The order was inverted as well: !tt takes speed BEFORE energy.
+            const parts = ['!tt', s('from'), String(i('from_planet')), s('to'), String(i('to_planet'))];
+            const player = s('player');
+            if (player) {
+                // Semi-manual form. A player name goes last and may contain spaces; !tt
+                // joins everything from the fifth argument on, so this stays one field.
+                parts.push(player);
+            } else {
+                // Manual form. Both numbers are required together — !tt only takes the
+                // manual branch when BOTH the fifth and sixth arguments parse as numbers,
+                // so sending one alone would silently be read as a player name.
+                parts.push(String(i('speed') ?? 0), String(i('energy') ?? 0));
+            }
             return parts.join(' ');
         }
         if (sub === 'distance') return `!dist ${s('from')} ${s('to')}`;
@@ -1488,8 +1511,12 @@ client.on('interactionCreate', async (interaction) => {
     try {
         if (interaction.isAutocomplete()) {
             const focused = interaction.options.getFocused(true);
-            const isSystem = /system|from|to/.test(focused.name);
-            const choices = isSystem ? suggestSystems(focused.value) : suggestPlayers(focused.value);
+            // Matched exactly, not by substring. The old /system|from|to/ would have
+            // claimed an option called "to_planet" the moment one existed, and answered a
+            // planet index with a list of solar systems.
+            const choices = SYSTEM_OPTION_NAMES.has(focused.name)
+                ? suggestSystems(focused.value)
+                : suggestPlayers(focused.value);
             return interaction.respond(choices);
         }
         if (!interaction.isChatInputCommand()) return;
@@ -1825,4 +1852,5 @@ module.exports = {
     // Exported for the tests: these are the pieces with real logic in them, and they run
     // without a Discord connection.
     handleTimer, checkDueTimers, handleLink, parseTimerInput, slashToPrefix, registerSlashCommands,
+    SYSTEM_OPTION_NAMES,
 };
