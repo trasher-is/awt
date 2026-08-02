@@ -5,11 +5,15 @@
 // Caveat if this ever runs clustered: each worker keeps its own window, so the
 // effective limit becomes max*workers. Swap in a shared store before scaling out.
 //
-// Keys on req.ip, which is only meaningful because server.js sets `trust proxy` —
-// behind a TLS terminator every request would otherwise carry the proxy's address and
-// all users would share one bucket.
+// Keys on req.ip by default, which is only meaningful because server.js sets
+// `trust proxy` — behind a TLS terminator every request would otherwise carry the proxy's
+// address and all users would share one bucket.
+//
+// Pass `keyOf` to bucket by something else. The proxy ceiling keys on the session instead,
+// because several alliance members behind one home connection share an address and must
+// not throttle each other, while one member with four tabs open is still one member.
 
-function rateLimit({ windowMs, max, message = 'Too many requests. Please slow down.' }) {
+function rateLimit({ windowMs, max, message = 'Too many requests. Please slow down.', keyOf = null }) {
     const buckets = new Map(); // key -> { count, resetAt }
 
     // Drop expired buckets so the map cannot grow unbounded from one-off IPs.
@@ -24,7 +28,7 @@ function rateLimit({ windowMs, max, message = 'Too many requests. Please slow do
     return function rateLimitMiddleware(req, res, next) {
         if (!(max > 0)) return next(); // max=0 disables the limiter via config
 
-        const key = req.ip || req.socket.remoteAddress || 'unknown';
+        const key = (keyOf ? keyOf(req) : req.ip) || req.socket.remoteAddress || 'unknown';
         const now = Date.now();
         let bucket = buckets.get(key);
 

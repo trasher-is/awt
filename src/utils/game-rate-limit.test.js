@@ -77,6 +77,73 @@ function worstWindow(starts) {
     for (let i = 0; i < 4; i++) await R.schedule(async () => {});
     ok('four sequential requests are not throttled at all', Date.now() - t0 < 200, Date.now() - t0);
 
+    console.log('\n── The cap holds across two JS REALMS ' + '─'.repeat(38));
+    // The configuration this tool actually runs in has two module instances live at once:
+    // the dashboard document loads this file, and src/proxy.js injects main.js into the
+    // proxied game page so the iframe loads it again. Before the shared window they were
+    // two separate budgets — five each, ten per second out of one tab. Two require()s with
+    // a shared fake localStorage reproduce exactly that.
+    const MOD = path.join(__dirname, '..', '..', 'public', 'js', 'utils', 'game-rate-limit.js');
+    const fakeStore = (() => {
+        const map = new Map();
+        return {
+            getItem: k => (map.has(k) ? map.get(k) : null),
+            setItem: (k, v) => { map.set(k, String(v)); },
+            removeItem: k => { map.delete(k); },
+        };
+    })();
+    globalThis.localStorage = fakeStore;
+
+    delete require.cache[require.resolve(MOD)];
+    const realmA = require(MOD);
+    delete require.cache[require.resolve(MOD)];
+    const realmB = require(MOD);
+
+    ok('the two instances really are separate modules', realmA !== realmB);
+    ok('both report the window as shared', realmA.snapshot().shared && realmB.snapshot().shared);
+
+    realmA.reset();
+    starts = [];
+    const burst = (mod, n) => Promise.all(Array.from({ length: n }, () =>
+        mod.schedule(async () => { starts.push(Date.now()); })
+    ));
+    await Promise.all([burst(realmA, 12), burst(realmB, 12)]);
+    ok('all 24 requests from both realms ran', starts.length === 24, starts.length);
+    ok('never more than 5 per second ACROSS both realms', worstWindow(starts) <= 5, worstWindow(starts));
+
+    // And without the shared store the two instances are independent again — which is the
+    // bug this replaced, kept here so the test proves the mechanism and not a coincidence.
+    delete globalThis.localStorage;
+    delete require.cache[require.resolve(MOD)];
+    const loneA = require(MOD);
+    delete require.cache[require.resolve(MOD)];
+    const loneB = require(MOD);
+    ok('with no shared store each instance falls back to its own window',
+        !loneA.snapshot().shared && !loneB.snapshot().shared);
+    starts = [];
+    await Promise.all([burst(loneA, 5), burst(loneB, 5)]);
+    ok('and that fallback is exactly the old per-realm behaviour (this is why server.js gates too)',
+        worstWindow(starts) === 10, worstWindow(starts));
+
+    console.log('\n── Automated requests are marked for the server-side gate ' + '─'.repeat(18));
+    // server.js can only tell a scan apart from the member browsing if gameFetch says so.
+    delete require.cache[require.resolve(MOD)];
+    const marked = require(MOD);
+    const seenInit = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => { seenInit.push({ url, init }); return { ok: true }; };
+    try {
+        await marked.gameFetch('/Game/Alliance');
+        await marked.gameFetch('/Game/Players', { headers: { 'X-Test': 'kept' }, method: 'POST' });
+    } finally {
+        globalThis.fetch = realFetch;
+    }
+    ok('gameFetch marks the request', seenInit[0].init.headers.get('X-AWT-Automated') === '1');
+    ok('and does not lose the caller\'s own headers or options',
+        seenInit[1].init.headers.get('X-Test') === 'kept'
+        && seenInit[1].init.headers.get('X-AWT-Automated') === '1'
+        && seenInit[1].init.method === 'POST');
+
     console.log('\n── Every game request actually goes through the gate ' + '─'.repeat(23));
     // A limiter nothing calls limits nothing.
     const ROOT = path.join(__dirname, '..', '..', 'public', 'js');
@@ -87,8 +154,10 @@ function worstWindow(starts) {
         }
         return out;
     };
-    // Bare fetch() calls whose target is a game path rather than one of ours.
-    const GAME_PATH = /await\s+fetch\(\s*[`'"]\/(Game|Info|Ranking|About)\//;
+    // Bare fetch() calls whose target is a game path rather than one of ours. `api/v\d` is
+    // in the list because the game's own REST API lives there: nothing calls it yet, and
+    // when something does it must arrive through the gate like everything else.
+    const GAME_PATH = /await\s+fetch\(\s*[`'"]\/(Game|Info|Ranking|About|api\/v\d)\//;
     const offenders = [];
     for (const file of walk(ROOT)) {
         const src = fs.readFileSync(file, 'utf8')
@@ -97,6 +166,15 @@ function worstWindow(starts) {
         if (GAME_PATH.test(src)) offenders.push(path.relative(process.cwd(), file));
     }
     ok('no browser file calls the game with a bare fetch()', offenders.length === 0, offenders);
+
+    // scripts/ too. collect-travel-fixtures.js used to sit outside the gate entirely, with
+    // a --delay flag that accepted 0, firing ~600 calls as fast as the network allowed.
+    const collector = fs.readFileSync(path.join(__dirname, '..', '..', 'scripts', 'collect-travel-fixtures.js'), 'utf8');
+    ok('the fixture collector goes through the shared gate',
+        /require\(['"]\.\.\/public\/js\/utils\/game-rate-limit\.js['"]\)/.test(collector)
+        && /rate\.schedule\(/.test(collector));
+    ok('and it cannot be pointed at the production game',
+        /ALLOWED_HOSTS/.test(collector) && !/ALLOWED_HOSTS\s*=\s*new Set\(\[[^\]]*'astrowars\.games'/.test(collector));
 
     // And the old per-loop sleeps are gone, so there is exactly one mechanism.
     const scanner = fs.readFileSync(path.join(ROOT, 'scrapers', 'mass-scanner.js'), 'utf8');

@@ -15,20 +15,46 @@
 //   3. AW_COOKIE='...' node scripts/collect-travel-fixtures.js
 //
 // OPTIONS
-//   --base <url>        default https://test.astrowars.games
-//   --energy 0,5,15,30  energy levels to sweep       (default 0,5,15,30,45)
-//   --pairs 40          how many system pairs to try (default 40)
-//   --delay 250         milliseconds between calls   (default 250)
+//   --base <url>        TEST SERVERS ONLY — see below      (default https://test.astrowars.games)
+//   --player-id <id>    whose speed bonus to record        (default: derived, see below)
+//   --energy 0,5,15,30  energy levels to sweep             (default 0,5,15,30,45)
+//   --pairs 40          how many system pairs to try       (default 40)
+//   --delay 250         politeness pause between calls     (default 250)
 //   --dry               probe and report, write nothing
 //   --out <path>        default src/utils/travel-fixtures.json
 //
 // The script never overwrites a fixture that is already in the file: it matches on the
 // full input tuple and only appends new ones.
+//
+// ─── THIS SCRIPT HAS NEVER SUCCESSFULLY RUN ───────────────────────────────────
+// Read that before trusting anything it prints. Every fixture in travel-fixtures.json is
+// `"source": "measured"` — hand-observed in game. Not one came from here, because the
+// script asked GET /api/v1/Player for a single player object while the published spec
+// says that route answers with an ARRAY of ListPlayer, which carries no
+// intelligenceReport at all. So the race-speed lookup found nothing and the run aborted
+// before its first probe. It is fixed below to accept either shape, but "accepts either
+// shape" is a guess made from a document, not a thing anyone has watched work.
+//
+// ─── WHY --base IS RESTRICTED ─────────────────────────────────────────────────
+// This flag used to take any URL, which meant pointing an automated 600-call sweep at the
+// production game was one word on a command line. Programmatic use of the production API
+// has not been agreed with the game's administration (see issue #24), so the base is
+// checked against an allowlist and everything else is refused. Widening that allowlist is
+// a decision about an agreement with a person, not a code change — the same rule the
+// five-per-second cap lives under.
+//
+// ─── WHY --delay IS NO LONGER THE RATE LIMIT ──────────────────────────────────
+// A sleep in a loop bounds that loop and nothing else. Requests now go through the shared
+// gate in public/js/utils/game-rate-limit.js — the same module the browser side uses,
+// require()d here through its UMD wrapper — so this script counts against the same five
+// per second as everything else. --delay is a courtesy pause on top of that, and setting
+// it to 0 no longer removes the ceiling.
 
 const fs = require('fs');
 const path = require('path');
 
 const model = require('../public/js/utils/travel-model.js');
+const rate = require('../public/js/utils/game-rate-limit.js');
 
 const argv = process.argv.slice(2);
 const flag = (name, def) => {
@@ -37,58 +63,149 @@ const flag = (name, def) => {
 };
 const has = name => argv.includes('--' + name);
 
-const BASE = flag('base', 'https://test.astrowars.games').replace(/\/$/, '');
+// Hosts this script is allowed to talk to. Production is deliberately absent: nobody has
+// agreed to programmatic use of it. Adding an entry here means an agreement was reached
+// with the game's administration — record it in docs/ before you touch this list.
+const ALLOWED_HOSTS = new Set(['test.astrowars.games', 'localhost', '127.0.0.1']);
+
+function assertAllowedBase(raw) {
+    let url;
+    try {
+        url = new URL(raw);
+    } catch (err) {
+        throw new Error(`--base is not a URL: ${raw}`);
+    }
+    if (!ALLOWED_HOSTS.has(url.hostname)) {
+        throw new Error(
+            `Refusing to run against ${url.hostname}.\n` +
+            `This script only talks to: ${[...ALLOWED_HOSTS].join(', ')}.\n` +
+            `Programmatic use of the production game has not been agreed with its administration ` +
+            `(issue #24), and a 600-call sweep is not the way to open that conversation.`
+        );
+    }
+    return url.origin;
+}
+
+// GET /api/v1/Player is documented as returning ListPlayer[], but the script was written
+// as though it returned the logged-in player, and no one has ever seen which is true on a
+// live server. Accept both, and when it is a list say plainly that we cannot tell which
+// entry is "us" rather than picking one and baking a stranger's speed bonus into every
+// fixture.
+function pickSelf(payload, wantedId) {
+    if (payload && !Array.isArray(payload) && typeof payload === 'object') {
+        if (wantedId != null && payload.id != null && String(payload.id) !== String(wantedId)) {
+            throw new Error(`--player-id ${wantedId} was given but /api/v1/Player answered with player ${payload.id}`);
+        }
+        return payload;
+    }
+    if (Array.isArray(payload)) {
+        if (wantedId == null) {
+            throw new Error(
+                `/api/v1/Player returned a list of ${payload.length} players, not the logged-in one.\n` +
+                `There is no "me" endpoint in the spec, so pass --player-id <your id> and the script\n` +
+                `will read your race speed from /api/v1/Player/<id> instead.`
+            );
+        }
+        const found = payload.find(p => String(p.id) === String(wantedId));
+        if (!found) throw new Error(`player ${wantedId} is not in the ${payload.length} players /api/v1/Player returned`);
+        return found;
+    }
+    throw new Error(`/api/v1/Player returned ${typeof payload}, which is neither a player nor a list of them`);
+}
+
+// Player.origin is a Point {x, y} in the spec — it has no id — but the original code read
+// player.origin.id. Accept an id, a coordinate pair, or nothing, and fall back to the
+// first system with coordinates rather than crashing: the home system only decides which
+// routes get sampled, not whether the samples are correct.
+function resolveHome(player, systems) {
+    const origin = player && player.origin;
+    if (origin && origin.id != null) {
+        const byId = systems.find(s => String(s.id) === String(origin.id));
+        if (byId) return byId;
+    }
+    if (origin && origin.x != null && origin.y != null) {
+        const byCoords = systems.find(s => s.x === origin.x && s.y === origin.y);
+        if (byCoords) return byCoords;
+    }
+    return systems[0];
+}
+
+// Race speed lives on the intelligence report, which ListPlayer does not carry. Returns
+// null when it cannot be read, so the caller can stop with a useful message.
+function readSpeed(player) {
+    const race = (player && player.intelligenceReport && player.intelligenceReport.race) || {};
+    if (race.speedBonus != null) return race.speedBonus;
+    if (race.speedPick != null) return race.speedPick;
+    return null;
+}
+
+const BASE_RAW = flag('base', 'https://test.astrowars.games');
 const ENERGY_LEVELS = flag('energy', '0,5,15,30,45').split(',').map(Number).filter(n => !isNaN(n));
 const PAIR_BUDGET = parseInt(flag('pairs', '40'), 10);
 const DELAY_MS = parseInt(flag('delay', '250'), 10);
+const PLAYER_ID = flag('player-id', null);
 const DRY = has('dry');
 const OUT = path.resolve(flag('out', path.join(__dirname, '..', 'src', 'utils', 'travel-fixtures.json')));
 const COOKIE = process.env.AW_COOKIE || flag('cookie', '');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-if (!COOKIE) {
-    console.error('No session cookie. The API returns 401 without one:\n');
-    console.error("  AW_COOKIE='.AspNetCore.Identity.Application=...' node scripts/collect-travel-fixtures.js\n");
-    console.error('Log in to the test server in a browser and copy the cookie from DevTools.');
-    process.exit(2);
-}
-
-async function api(pathAndQuery) {
-    const res = await fetch(BASE + pathAndQuery, {
-        headers: { Cookie: COOKIE, Accept: 'application/json' },
-        redirect: 'manual'
+// Same gate as the browser side, so this script's ~600 calls count against the same five
+// per second as a scan running in someone's tab.
+function api(base, pathAndQuery) {
+    return rate.schedule(async () => {
+        const res = await fetch(base + pathAndQuery, {
+            headers: { Cookie: COOKIE, Accept: 'application/json' },
+            redirect: 'manual'
+        });
+        if (res.status === 401 || (res.status >= 300 && res.status < 400)) {
+            throw new Error('401 / redirected to login — the cookie is missing, wrong or expired');
+        }
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${pathAndQuery}`);
+        return res.json();
     });
-    if (res.status === 401 || (res.status >= 300 && res.status < 400)) {
-        throw new Error('401 / redirected to login — the cookie is missing, wrong or expired');
-    }
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${pathAndQuery}`);
-    return res.json();
 }
 
 const hms = s => model.formatTime(s);
 
-(async () => {
+async function main() {
+    const BASE = assertAllowedBase(BASE_RAW);
+
+    if (!COOKIE) {
+        console.error('No session cookie. The API returns 401 without one:\n');
+        console.error("  AW_COOKIE='.AspNetCore.Identity.Application=...' node scripts/collect-travel-fixtures.js\n");
+        console.error('Log in to the test server in a browser and copy the cookie from DevTools.');
+        process.exit(2);
+    }
+
     console.log(`Base: ${BASE}`);
+    console.log(`Rate: ${rate.MAX_PER_SECOND} requests per second, shared with everything else this tool does.`);
 
     // 1. Who are we? The endpoint bakes this player's speed bonus into every answer, so
     //    the fixture is only replayable if we record it.
-    const player = await api('/api/v1/Player');
-    const race = (player.intelligenceReport && player.intelligenceReport.race) || {};
-    const speed = race.speedBonus != null ? race.speedBonus : (race.speedPick != null ? race.speedPick : null);
+    let player = pickSelf(await api(BASE, '/api/v1/Player'), PLAYER_ID);
+    let speed = readSpeed(player);
+
+    // ListPlayer has no intelligenceReport. If that is the shape we got, the full player
+    // record has it — but only for an id we were told, because there is no "me" route.
+    if (speed == null && player.id != null) {
+        console.log(`No race data on the list entry — asking /api/v1/Player/${player.id} for the full record.`);
+        player = await api(BASE, `/api/v1/Player/${player.id}`);
+        speed = readSpeed(player);
+    }
+
     const ownEnergy = player.intelligenceReport ? player.intelligenceReport.energyLevel : null;
 
     console.log(`Player: ${player.name} (level ${player.playerLevel})`);
     console.log(`Race speed bonus: ${speed}   account energy level: ${ownEnergy}`);
     if (speed == null) {
-        console.error('\nCould not read the race speed bonus from /api/v1/Player.');
+        console.error('\nCould not read the race speed bonus for this player.');
         console.error('Without it the fixtures cannot be replayed offline. Aborting.');
         process.exit(3);
     }
 
     // 2. Systems, so we can turn system ids into the (x, y) the local formula needs.
-    const systems = await api('/api/v1/SolarSystem');
-    const byId = new Map(systems.map(s => [s.id, s]));
+    const systems = await api(BASE, '/api/v1/SolarSystem');
     console.log(`Systems: ${systems.length}`);
 
     // 3. Build a grid that deliberately covers the regions the harness reports as missing:
@@ -96,7 +213,7 @@ const hms = s => model.formatTime(s);
     const withCoords = systems.filter(s => s.x != null && s.y != null);
     if (withCoords.length < 2) throw new Error('not enough systems with coordinates');
 
-    const home = withCoords.find(s => s.id === (player.origin && player.origin.id)) || withCoords[0];
+    const home = resolveHome(player, withCoords);
     const dist = s => model.systemDistance(home.x, home.y, s.x, s.y);
     const sorted = withCoords.filter(s => s.id !== home.id).sort((a, b) => dist(a) - dist(b));
 
@@ -126,7 +243,7 @@ const hms = s => model.formatTime(s);
                     + `&toSystem=${p.to.id}&toPlanetIndex=${p.tp}&energyLevel=${energy}`;
             let tt;
             try {
-                tt = await api(q);
+                tt = await api(BASE, q);
             } catch (err) {
                 errors++;
                 if (errors <= 5) console.error(`  ! ${err.message}`);
@@ -194,7 +311,16 @@ const hms = s => model.formatTime(s);
     fs.writeFileSync(OUT, JSON.stringify(file, null, 2) + '\n');
     console.log(`\nWrote ${toAdd.length} new fixtures to ${path.relative(process.cwd(), OUT)} (${file.cases.length} total).`);
     console.log('Now run: node src/utils/travel-calc.test.js');
-})().catch(err => {
-    console.error('\nFailed:', err.message);
-    process.exit(1);
-});
+}
+
+// Only sweep when run as a program. Required as a module it exposes the pieces that can
+// be checked without a live server, which is how src/utils/game-traffic.test.js covers
+// the base allowlist and the two response shapes that stopped this script working.
+if (require.main === module) {
+    main().catch(err => {
+        console.error('\nFailed:', err.message);
+        process.exit(1);
+    });
+}
+
+module.exports = { assertAllowedBase, pickSelf, resolveHome, readSpeed, ALLOWED_HOSTS };
