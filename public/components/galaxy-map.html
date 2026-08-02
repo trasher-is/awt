@@ -1,0 +1,82 @@
+<div id="galaxy-map-panel" class="fixed top-0 right-0 h-full w-full md:w-[calc(100%-3.5rem)] bg-black border-l border-border transform translate-x-full transition-transform duration-300 z-40 flex flex-col shadow-2xl overflow-hidden">
+
+    <div class="h-14 border-b border-border flex items-center justify-between px-4 md:px-6 bg-zinc-900 shrink-0">
+        <div class="flex items-center gap-3 min-w-0">
+            <div class="w-8 h-8 rounded-md bg-white/5 flex items-center justify-center shrink-0">
+                <i class="fa-solid fa-satellite-dish text-base text-sky-400"></i>
+            </div>
+            <div class="min-w-0">
+                <h2 class="font-bold text-foreground tracking-wide truncate">Galaxy Archive</h2>
+                <p class="text-sm text-muted-foreground hidden sm:block">The whole galaxy as the alliance last saw it — including what it cannot see now</p>
+            </div>
+        </div>
+        <button id="close-galaxy-map-btn" class="w-8 h-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors shrink-0">
+            <i class="fa-solid fa-xmark text-base"></i>
+        </button>
+    </div>
+
+    <!-- TOOLBAR -->
+    <div class="border-b border-border bg-zinc-950 px-3 md:px-6 py-2 flex items-center gap-x-4 gap-y-2 flex-wrap shrink-0">
+        <div id="map-layer-toggles" class="flex items-center gap-x-4 gap-y-1 flex-wrap text-xs">
+            <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                <input type="checkbox" id="gm-layer-territories" checked class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
+                <span class="text-muted-foreground">Territories</span>
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                <input type="checkbox" id="gm-layer-vision" class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
+                <span class="text-muted-foreground">Vision <span class="text-amber-500/80">(modelled)</span></span>
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                <input type="checkbox" id="gm-layer-free" class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
+                <span class="text-muted-foreground">Free planets</span>
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                <input type="checkbox" id="gm-layer-stale" class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
+                <span class="text-muted-foreground">Age of intel</span>
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                <input type="checkbox" id="gm-layer-labels" class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
+                <span class="text-muted-foreground">Names</span>
+            </label>
+        </div>
+
+        <div class="flex items-center gap-1 ml-auto">
+            <button id="gm-zoom-out" title="Zoom out" class="h-7 w-7 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors">
+                <i class="fa-solid fa-minus"></i>
+            </button>
+            <button id="gm-zoom-in" title="Zoom in" class="h-7 w-7 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors">
+                <i class="fa-solid fa-plus"></i>
+            </button>
+            <button id="gm-reset" title="Fit the whole galaxy" class="h-7 px-2 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors">
+                <i class="fa-solid fa-expand mr-1"></i>Fit
+            </button>
+            <button id="gm-refresh" title="Reload from the archive" class="h-7 px-2 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors">
+                <i class="fa-solid fa-rotate mr-1"></i>Reload
+            </button>
+        </div>
+    </div>
+
+    <!-- CANVAS -->
+    <div id="gm-stage" class="flex-1 relative bg-black overflow-hidden touch-none">
+        <canvas id="gm-canvas" class="absolute inset-0 w-full h-full cursor-grab"></canvas>
+
+        <div id="gm-status" class="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm pointer-events-none">
+            Loading the archive…
+        </div>
+
+        <!-- Hover readout -->
+        <div id="gm-tooltip" class="absolute hidden pointer-events-none z-10 max-w-xs rounded-md border border-border bg-zinc-900/95 backdrop-blur px-3 py-2 text-xs shadow-2xl"></div>
+
+        <!-- Legend -->
+        <div id="gm-legend" class="absolute bottom-2 left-2 rounded-md border border-border bg-zinc-900/90 backdrop-blur px-3 py-2 text-[11px] leading-relaxed text-muted-foreground max-w-[16rem]">
+            <div class="font-semibold text-foreground mb-1">Legend</div>
+            <div id="gm-legend-body" class="flex flex-col gap-0.5"></div>
+        </div>
+    </div>
+
+    <!-- COVERAGE -->
+    <div class="border-t border-border bg-zinc-950 px-3 md:px-6 py-2 text-xs text-muted-foreground shrink-0 flex items-center gap-x-4 gap-y-1 flex-wrap">
+        <span id="gm-coverage">—</span>
+        <span class="ml-auto text-[11px] text-zinc-500">Click a system to open it in System Intel</span>
+    </div>
+</div>

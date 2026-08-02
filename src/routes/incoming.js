@@ -5,6 +5,7 @@ const { sendOrEditIncoming, replyToIncoming, updateIncomingCover } = require('..
 const { formatTime } = require('../utils/travel-calc');
 const { ONTIME_LIMIT, LATE_LIMIT, SOURCE_TAG, computeInterceptors } = require('../utils/interceptors');
 const { winChance, resolveStats } = require('../utils/battle');
+const battleModel = require('../../public/js/utils/battle-model.js');
 const { toggleCovering, getCovering, renderCoverLine } = require('../utils/covering');
 const router = express.Router();
 
@@ -149,6 +150,10 @@ function attachWinChances(result, data) {
             const allyRow = statStmt.get(d.name.toLowerCase());
             d.win = winChance(allyFleet, resolveStats(allyRow), enemyFleet, enemyStats);
             d.winUnknown = enemyStats.unknown; // attacker race not scouted
+            // The band is computed here, not in each renderer, so the Discord alert and
+            // the News panel can never quote different confidence for the same fight.
+            // Interceptions are fleet-only, so no starbase term applies.
+            d.winBand = battleModel.winBand(d.win).text;
         }
     } catch (e) {
         console.error('[Incoming] win-chance calc failed:', e.message);
@@ -162,9 +167,12 @@ function launchUrl(a, target) {
     return `https://${process.env.PROXY_DOMAIN}/Game/Fleets/Launch/${a.fleetId}?systemId=${target.systemId}&planetIndex=${target.planetIndex}`;
 }
 
+// A range, not a reading: the win figure comes from a regression fit and is used to
+// decide whether to commit a real fleet.
 function winTag(a) {
     if (a.win == null) return '';
-    return ` · 🎲 ${Math.round(a.win * 100)}%${a.winUnknown ? '?' : ''}`;
+    const band = a.winBand || battleModel.winBand(a.win).text;
+    return ` · 🎲 ${band}${a.winUnknown ? ' (race unscouted)' : ''}`;
 }
 
 function defenderLine(a, extra, target) {
@@ -313,7 +321,7 @@ router.post('/incoming/defenders', requireAuth, (req, res) => {
         const slim = (a) => ({
             name: a.name, cv: a.cv, eta: a.eta, delta: a.delta, source: a.source, note: a.note,
             ownerId: a.ownerId, originSys: a.originSys, originIdx: a.originIdx, fleetId: a.fleetId,
-            win: a.win, winUnknown: a.winUnknown
+            win: a.win, winBand: a.winBand, winUnknown: a.winUnknown
         });
         res.json({
             success: true,

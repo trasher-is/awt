@@ -1,10 +1,54 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const fs = require('fs');
+const path = require('path');
 const db = require('../database');
 const { requireAuth, requireAdmin } = require('./_middleware');
 const router = express.Router();
 
+// Reject empty or whitespace-only passwords before they reach bcrypt. hashSync(undefined)
+// throws, which the surrounding handlers reported as a generic "Database error".
+function invalidPassword(pw) {
+    if (typeof pw !== 'string' || pw.trim().length === 0) return 'Password is required';
+    if (pw.length < 8) return 'Password must be at least 8 characters';
+    return null;
+}
+
 // --- 3. ADMIN DASHBOARD TOOLS ---
+
+// --- SERVER LOG VIEWER ---
+// The admin panel fetches /hub-api/admin/logs, but no such route existed - the request
+// fell through the hub router to the game proxy, so the viewer never worked. The only
+// implementation lived in server.js as /api/admin/logs, registered above the session
+// middleware, which made it unauthenticated. It lives here now, behind requireAdmin.
+router.get('/admin/logs', requireAdmin, (req, res) => {
+    let logPath = process.env.LOG_PATH || '/root/.pm2/logs/awt-error.log';
+
+    // config.json is read with JSON.parse rather than require(): require() caches, so
+    // edits needed a restart to take effect, and it executes the file as a module, which
+    // turns "can write config.json" into "can run code in this process".
+    try {
+        const configPath = path.join(__dirname, '..', '..', 'config.json');
+        if (fs.existsSync(configPath)) {
+            const localConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            if (localConfig.logPath) logPath = localConfig.logPath;
+        }
+    } catch (err) {
+        console.error('[Admin] Could not read config.json:', err.message);
+    }
+
+    if (!fs.existsSync(logPath)) {
+        return res.json({ success: false, logs: `Log file not found at: ${logPath}` });
+    }
+
+    fs.readFile(logPath, 'utf8', (err, data) => {
+        if (err) {
+            console.error('[Admin] Log read failed:', err.message);
+            return res.json({ success: false, logs: 'Permission denied or unable to read log file.' });
+        }
+        res.json({ success: true, logs: data.trim().split('\n').slice(-20).join('\n') });
+    });
+});
 
 // Get all users (joined with players table for idle_time)
 router.get('/admin/users', requireAdmin, (req, res) => {
@@ -57,6 +101,16 @@ router.delete('/admin/users/:id', requireAdmin, (req, res) => {
 // Add a new user
 router.post('/admin/users', requireAdmin, (req, res) => {
     const { game_name, password, role, discord_name } = req.body;
+
+    if (typeof game_name !== 'string' || game_name.trim() === '') {
+        return res.status(400).json({ error: 'Username is required' });
+    }
+    const pwError = invalidPassword(password);
+    if (pwError) return res.status(400).json({ error: pwError });
+    if (role && !['admin', 'user', 'guest'].includes(role)) {
+        return res.status(400).json({ error: 'Invalid role' });
+    }
+
     try {
         const hash = bcrypt.hashSync(password, 10);
         db.prepare(`INSERT INTO app_users (game_name, password_hash, role, discord_name) VALUES (?, ?, ?, ?)`).run(game_name, hash, role || 'user', discord_name || null);
@@ -78,15 +132,44 @@ router.post('/admin/users/:id/discord', requireAdmin, (req, res) => {
     }
 });
 
+// Clear a Discord link. Linking is now a one-time-code challenge that only the account
+// holder can complete, and a link can never be reassigned from Discord — so this is the
+// only way to move one, e.g. when a member changes Discord account or someone linked the
+// wrong Hub account before the code flow existed.
+router.delete('/admin/users/:id/discord', requireAdmin, (req, res) => {
+    try {
+        const user = db.prepare(`SELECT game_name, discord_id, discord_name FROM app_users WHERE id = ?`).get(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        if (!user.discord_id && !user.discord_name) {
+            return res.json({ success: true, changed: false, message: 'That account has no Discord link.' });
+        }
+        db.transaction(() => {
+            db.prepare(`UPDATE app_users SET discord_id = NULL, discord_name = NULL WHERE id = ?`).run(req.params.id);
+            // Any pending link codes for this account are void once an admin intervenes.
+            db.prepare(`DELETE FROM discord_link_codes WHERE user_id = ?`).run(req.params.id);
+        })();
+        console.log(`[Admin] Discord link cleared for '${user.game_name}' (was ${user.discord_id || user.discord_name}).`);
+        res.json({ success: true, changed: true });
+    } catch (err) {
+        console.error('[Admin] Failed to clear Discord link:', err);
+        res.status(500).json({ error: 'Failed to clear the Discord link' });
+    }
+});
+
 // Toggle Active Status (Ban/Unban)
 router.post('/admin/users/:id/toggle', requireAdmin, (req, res) => {
-    const user = db.prepare(`SELECT game_name, is_active FROM app_users WHERE id = ?`).get(req.params.id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    if (user.game_name === 'admin') return res.status(403).json({ error: 'Cannot ban the master admin' });
+    try {
+        const user = db.prepare(`SELECT game_name, is_active FROM app_users WHERE id = ?`).get(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        if (user.game_name === 'admin') return res.status(403).json({ error: 'Cannot ban the master admin' });
 
-    const newStatus = user.is_active === 1 ? 0 : 1;
-    db.prepare(`UPDATE app_users SET is_active = ? WHERE id = ?`).run(newStatus, req.params.id);
-    res.json({ success: true, is_active: newStatus });
+        const newStatus = user.is_active === 1 ? 0 : 1;
+        db.prepare(`UPDATE app_users SET is_active = ? WHERE id = ?`).run(newStatus, req.params.id);
+        res.json({ success: true, is_active: newStatus });
+    } catch (err) {
+        console.error('[DB Error] Failed to toggle user:', err);
+        res.status(500).json({ error: 'Failed to update user' });
+    }
 });
 
 // Change User Role
@@ -95,29 +178,42 @@ router.post('/admin/users/:id/role', requireAdmin, (req, res) => {
     const validRoles = ['admin', 'user', 'guest'];
     if (!validRoles.includes(role)) return res.status(400).json({ error: 'Invalid role' });
 
-    const user = db.prepare(`SELECT game_name FROM app_users WHERE id = ?`).get(req.params.id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    if (user.game_name === 'admin') return res.status(403).json({ error: 'Cannot change the master admin role' });
+    try {
+        const user = db.prepare(`SELECT game_name FROM app_users WHERE id = ?`).get(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        if (user.game_name === 'admin') return res.status(403).json({ error: 'Cannot change the master admin role' });
 
-    db.prepare(`UPDATE app_users SET role = ? WHERE id = ?`).run(role, req.params.id);
-    res.json({ success: true, role });
+        db.prepare(`UPDATE app_users SET role = ? WHERE id = ?`).run(role, req.params.id);
+        res.json({ success: true, role });
+    } catch (err) {
+        console.error('[DB Error] Failed to change role:', err);
+        res.status(500).json({ error: 'Failed to change role' });
+    }
 });
 
 // Change a user's password
 router.post('/admin/users/:id/password', requireAdmin, (req, res) => {
     const { new_password } = req.body;
-    const targetUser = db.prepare(`SELECT game_name FROM app_users WHERE id = ?`).get(req.params.id);
 
-    if (!targetUser) return res.status(404).json({ error: 'User not found' });
+    const pwError = invalidPassword(new_password);
+    if (pwError) return res.status(400).json({ error: pwError });
 
-    // SECURITY: Only the session holding the 'admin' game_name can change the master admin password
-    if (targetUser.game_name === 'admin' && req.session.gameName !== 'admin') {
-        return res.status(403).json({ error: 'Only the Master Admin can change this password.' });
+    try {
+        const targetUser = db.prepare(`SELECT game_name FROM app_users WHERE id = ?`).get(req.params.id);
+        if (!targetUser) return res.status(404).json({ error: 'User not found' });
+
+        // SECURITY: Only the session holding the 'admin' game_name can change the master admin password
+        if (targetUser.game_name === 'admin' && req.session.gameName !== 'admin') {
+            return res.status(403).json({ error: 'Only the Master Admin can change this password.' });
+        }
+
+        const hash = bcrypt.hashSync(new_password, 10);
+        db.prepare(`UPDATE app_users SET password_hash = ? WHERE id = ?`).run(hash, req.params.id);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[DB Error] Failed to change password:', err);
+        res.status(500).json({ error: 'Failed to change password' });
     }
-
-    const hash = bcrypt.hashSync(new_password, 10);
-    db.prepare(`UPDATE app_users SET password_hash = ? WHERE id = ?`).run(hash, req.params.id);
-    res.json({ success: true });
 });
 
 // --- DATABASE CONTROLS ---

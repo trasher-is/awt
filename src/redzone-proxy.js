@@ -21,9 +21,13 @@ const redzoneProxy = createProxyMiddleware({
     selfHandleResponse: true,
     on: {
         proxyReq: (proxyReq, req) => {
-            const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-            proxyReq.setHeader('X-Forwarded-For', clientIp);
-            proxyReq.setHeader('X-Real-IP', clientIp);
+            // Same reasoning as src/proxy.js, and it matters more here: this proxy is
+            // open to anyone, so trusting the caller's X-Forwarded-For would let a
+            // stranger drive traffic at the game under someone else's address.
+            const observed = req.socket.remoteAddress || '';
+            const forwarded = req.headers['x-forwarded-for'];
+            proxyReq.setHeader('X-Forwarded-For', forwarded ? `${forwarded}, ${observed}` : observed);
+            proxyReq.setHeader('X-Real-IP', req.ip || observed);
         },
         proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
             // Let the game render inside a normal tab and allow our injected script.

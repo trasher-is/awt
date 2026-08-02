@@ -10,10 +10,14 @@ import {
     openAllianceStatsPanel,
     openTradeAgreementsPanel,
     openBattleCalcPanel,
-    openTravelCalcPanel
+    openTravelCalcPanel,
+    openRoutePlannerPanel
 } from './archives.js';
 import { runMassScan, runPlayerScan } from '../scrapers/mass-scanner.js';
 import { initNotes, toggleNotesPanel } from './notes.js';
+import '../utils/vision-model.js';   // side-effect import: the !vision rule, defined once
+
+const { visionRadius } = globalThis.AWVision;
 
 let toolUser = null;
 let currentSystemId = null;
@@ -48,6 +52,13 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('open-fleets-db-btn')?.addEventListener('click', openFleetDatabasePanel);
     document.getElementById('open-battle-calc-btn')?.addEventListener('click', openBattleCalcPanel);
     document.getElementById('open-travel-calc-btn')?.addEventListener('click', openTravelCalcPanel);
+    document.getElementById('open-route-planner-btn')?.addEventListener('click', openRoutePlannerPanel);
+    // Loaded on demand: the map pulls a canvas renderer nobody needs until they ask for it.
+    document.getElementById('open-galaxy-map-btn')?.addEventListener('click', async () => {
+        const { openGalaxyMapPanel } = await import('./galaxy-map.js');
+        await openGalaxyMapPanel(toolUser && toolUser.id);
+    });
+    document.getElementById('link-discord-btn')?.addEventListener('click', requestDiscordLinkCode);
     document.getElementById('notes-trigger')?.addEventListener('click', toggleNotesPanel);
     initNotes();
 
@@ -145,7 +156,37 @@ async function initWrapper() {
     } catch (err) {}
 }
 
-async function logout() { 
+// The Hub half of the Discord link challenge. You are already logged in here, which is
+// the proof "!link <name>" never had — that command took a name and bound whoever typed
+// it, so anyone could claim any unlinked account.
+async function requestDiscordLinkCode() {
+    const box = document.getElementById('link-discord-box');
+    const codeEl = document.getElementById('link-discord-code');
+    const noteEl = document.getElementById('link-discord-note');
+    if (!box || !codeEl) return;
+
+    box.classList.remove('hidden');
+    codeEl.textContent = '…';
+    noteEl.textContent = '';
+    try {
+        const res = await fetch('/hub-api/link-code', { method: 'POST' });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
+        if (d.alreadyLinked) {
+            codeEl.textContent = '—';
+            noteEl.textContent = d.message;
+            return;
+        }
+        codeEl.textContent = `!link ${d.code}`;
+        const mins = Math.round((d.expiresInSeconds || 600) / 60);
+        noteEl.textContent = `Or /link code:${d.code} — expires in ${mins} minutes, single use.`;
+    } catch (err) {
+        codeEl.textContent = '—';
+        noteEl.textContent = err.message;
+    }
+}
+
+async function logout() {
     await fetch('/hub-api/logout', { method: 'POST' }); 
     window.location.href = '/hub-assets/login.html'; 
 }
@@ -183,14 +224,19 @@ async function handleAllianceVisionToggle() {
         const playersData = await playersRes.json();
 
         if (statsData.success && playersData.success) {
+            // The radius rule comes from vision-model.js rather than being spelled out
+            // here. It used to be `p.biology > 0` with `range: p.biology`, which silently
+            // dropped every member whose biology has never been scraped — the column
+            // defaults to 0 — while `!vision` on Discord still reported them using their
+            // science level. Two answers to one question, and this was the quiet one.
             const memberIds = new Set(statsData.stats.map(row => Number(row.player_id)));
             const allianceVisionData = playersData.players
-                .filter(p => memberIds.has(Number(p.id)) && p.origin_system && p.biology > 0)
+                .filter(p => memberIds.has(Number(p.id)) && p.origin_system)
                 .map(p => ({
                     playerId: p.id,
                     playerName: p.name,
                     originSystemId: p.origin_system,
-                    range: p.biology
+                    range: visionRadius(p)
                 }));
 
             iframe.contentWindow.postMessage({ type: 'SHOW_ALLIANCE_VISION', payload: { visions: allianceVisionData } }, window.location.origin);

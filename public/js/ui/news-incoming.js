@@ -9,6 +9,9 @@
 //   • adds a 📣 button that sends/updates a Discord incoming alert for that fleet
 import { extractPlayerData } from '../scrapers/player-parser.js';
 import { runAllianceFleetScan } from '../scrapers/alliance-parser.js';
+import { esc } from '../utils/escape.js';
+import '../utils/game-rate-limit.js';
+const { gameFetch } = globalThis.AWGameRate;
 
 function toast(msg) {
     try {
@@ -140,27 +143,34 @@ function launchLink(a, target) {
     // Relative URL: the news page is served on the proxy domain, so this resolves to the
     // logged-in player's own game. Only the fleet's owner can actually launch it.
     const url = `/Game/Fleets/Launch/${a.fleetId}?systemId=${target.systemId}&planetIndex=${target.planetIndex}`;
-    return ` <a href="${url}" target="_blank" style="color:#60a5fa;text-decoration:none">🚀 Launch</a>`;
+    return ` <a href="${esc(url)}" target="_blank" style="color:#60a5fa;text-decoration:none">🚀 Launch</a>`;
 }
 
 function renderDefenderData(box, d, target) {
     if (!d.success || !d.mapped) { box.innerHTML = '<span style="opacity:.6">⚠️ Target system not mapped.</span>'; return; }
-    const winTag = (a) => a.win == null ? '' : ` · 🎲 ${Math.round(a.win * 100)}%${a.winUnknown ? '?' : ''}`;
+    // A range, not a reading. These numbers decide whether someone commits a real fleet,
+    // and a single percentage from a regression fit overstates what is known. The band is
+    // computed server-side (see src/routes/incoming.js) so this panel and the Discord
+    // alert cannot quote different confidence for the same fight.
+    const winTag = (a) => {
+        if (a.win == null || !a.winBand) return '';
+        return ` · 🎲 ${esc(a.winBand)}${a.winUnknown ? ' (attacker race unscouted)' : ''}`;
+    };
     const row = (a, extra) =>
-        `<div>${SRC[a.source] || ''} <b>${a.name}</b> [${a.cv.toLocaleString()} CV] ➔ ${fmtTime(a.eta)}${winTag(a)}${extra}${launchLink(a, target)}</div>`;
+        `<div>${SRC[a.source] || ''} <b>${esc(a.name)}</b> [${a.cv.toLocaleString()} CV] ➔ ${fmtTime(a.eta)}${winTag(a)}${extra}${launchLink(a, target)}</div>`;
 
     let html = '';
     if (d.unknownTiming) {
         html += '<div style="font-weight:bold">🛡️ Closest defenders (timing unknown):</div>';
-        html += d.onTime.length ? d.onTime.map(a => row(a, a.note ? ` (${a.note})` : '')).join('') : '<div>❌ none found</div>';
+        html += d.onTime.length ? d.onTime.map(a => row(a, a.note ? ` (${esc(a.note)})` : '')).join('') : '<div>❌ none found</div>';
     } else {
         html += '<div style="font-weight:bold;color:#4ade80">🛡️ Can defend in time:</div>';
         html += d.onTime.length
-            ? d.onTime.map(a => row(a, ` (spare ${fmtTime(a.delta)}${a.note ? ', ' + a.note : ''})`)).join('')
+            ? d.onTime.map(a => row(a, ` (spare ${fmtTime(a.delta)}${a.note ? ', ' + esc(a.note) : ''})`)).join('')
             : '<div>❌ none in time</div>';
         if (d.late && d.late.length) {
             html += '<div style="font-weight:bold;color:#fbbf24;margin-top:4px">🟡 Just missing it (&lt;15m):</div>';
-            html += d.late.map(a => row(a, ` (late ${fmtTime(Math.abs(a.delta))}${a.note ? ', ' + a.note : ''})`)).join('');
+            html += d.late.map(a => row(a, ` (late ${fmtTime(Math.abs(a.delta))}${a.note ? ', ' + esc(a.note) : ''})`)).join('');
         }
     }
     box.innerHTML = html;
@@ -178,7 +188,7 @@ async function enrichFleetIds(d) {
     const ids = [];
     for (const sysId of systems) {
         try {
-            const html = await (await fetch(`/Game/Map/SolarSystem/${sysId}`)).text();
+            const html = await (await gameFetch(`/Game/Map/SolarSystem/${sysId}`)).text();
             const doc = new DOMParser().parseFromString(html, 'text/html');
             const { fleets } = extractSystemData(doc);
             fleets.forEach(f => {
@@ -222,7 +232,7 @@ async function refreshAttacker(info, span, arrivalUnix, defBox, btn, coverEl) {
     try {
         // 1. Re-scrape the attacker's profile for fresh race/science/level intel.
         toast(`Scanning ${info.attacker.name}...`);
-        const resp = await fetch(`/Game/Players/Profile/${info.attacker.id}`);
+        const resp = await gameFetch(`/Game/Players/Profile/${info.attacker.id}`);
         const html = await resp.text();
         const doc = new DOMParser().parseFromString(html, 'text/html');
         const p = extractPlayerData(info.attacker.id, doc);
@@ -254,7 +264,7 @@ function renderCovering(el, names) {
     if (!el) return;
     if (names && names.length) {
         el.style.display = 'block';
-        el.innerHTML = `🛡️ <b>Covering:</b> ${names.map(n => `<b>${n}</b>`).join(', ')}`;
+        el.innerHTML = `🛡️ <b>Covering:</b> ${names.map(n => `<b>${esc(n)}</b>`).join(', ')}`;
     } else {
         el.style.display = 'none';
         el.innerHTML = '';

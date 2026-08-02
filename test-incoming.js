@@ -92,7 +92,18 @@ const payload = { content };
         const data = await res.json();
         console.log('matched attack:', data.matched);
         console.log('\n================ ASSEMBLED ALERT ================\n');
-        console.log(data.message || '(no message — parse failed)');
+        // The preview response is { ok, matched, parsed, data } — see the preview branch
+        // in src/routes/webhook.js. This used to read data.message, which the endpoint
+        // has never returned, so it always printed the parse-failed line even when the
+        // notification had parsed perfectly.
+        if (data.parsed) {
+            console.log('parsed fields:');
+            console.log(JSON.stringify(data.parsed, null, 2));
+            console.log('\nannounce payload:');
+            console.log(JSON.stringify(data.data, null, 2));
+        } else {
+            console.log('(nothing parsed — the text did not match the Incoming: pattern)');
+        }
         console.log('\n================================================\n');
     } catch (err) {
         console.error('Request failed (is the server running on port ' + PORT + '?):', err.message);

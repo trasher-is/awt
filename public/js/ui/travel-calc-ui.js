@@ -1,24 +1,15 @@
-// Travel calculator panel logic — called from archives.js after the panel is injected.
-// Mirrors the server formula in src/utils/travel-calc.js (verified exact to 0s).
+// Travel calculator panel — called from archives.js after the panel is injected.
+//
+// This file no longer carries its own copy of the formula. It used to mirror the server
+// one by hand, which is how a panel and a Discord alert could quote different times for
+// the same route. Both now run ../utils/travel-model.js; the side-effect import below
+// runs that file and puts its API on globalThis.
 
-function calcTravelSeconds(sx, sy, sp, ex, ey, ep, energy, speed, alliance) {
-    const mod = Math.pow(0.91, energy) / (1 + 0.11 * speed);
-    const planetTerm = Math.sqrt(Math.abs(sp - ep) + 1);
-    let t;
-    if (sx === ex && sy === ey) {
-        t = 1200 + 14400 * planetTerm * mod;              // same system, 20-min min
-    } else {
-        const dist = Math.hypot(ex - sx, ey - sy);
-        t = 2700 + (36000 * dist + 3600 * planetTerm) * mod; // deep space, 45-min min
-    }
-    t = Math.floor(t);
-    return alliance ? Math.floor(t * 0.5) : t;
-}
+import { esc } from '../utils/escape.js';
+import '../utils/travel-model.js';
+import '../utils/battle-model.js';   // side-effect import: cvOf for the system view
 
-function fmt(sec) {
-    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
-    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-}
+const { calcTravelSeconds, formatTime: fmt, systemDistance } = globalThis.AWTravelModel;
 
 let sysCache = null, playerCache = null;
 
@@ -34,7 +25,7 @@ function render() {
     document.getElementById('tc-time').textContent = fmt(secs);
 
     const sameSys = (sx === ex && sy === ey);
-    const dist = sameSys ? 0 : Math.hypot(ex - sx, ey - sy);
+    const dist = sameSys ? 0 : systemDistance(sx, sy, ex, ey);
     const meta = sameSys
         ? `Same system · ${Math.abs(sp - ep)} planet slots apart`
         : `Deep space · distance ${dist.toFixed(2)}`;
@@ -73,8 +64,8 @@ function wireSystemSearch(inputId, dropId, xId, yId, onPick) {
         if (!matches.length) { drop.classList.add('hidden'); return; }
         drop.classList.remove('hidden');
         drop.innerHTML = matches.map(s =>
-            `<button data-x="${s.x}" data-y="${s.y}" data-id="${s.id}" data-name="${(s.name || 'Sys').replace(/"/g, '&quot;')}" class="tc-sys-pick w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-zinc-800 text-left transition-colors">
-                <span class="text-foreground font-medium truncate">${s.name || 'Sys'} #${s.id}</span>
+            `<button data-x="${s.x}" data-y="${s.y}" data-id="${s.id}" data-name="${esc(s.name || 'Sys')}" class="tc-sys-pick w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-zinc-800 text-left transition-colors">
+                <span class="text-foreground font-medium truncate">${esc(s.name || 'Sys')} #${s.id}</span>
                 <span class="text-zinc-500 ml-auto">${s.x}/${s.y}</span>
             </button>`).join('');
         drop.querySelectorAll('.tc-sys-pick').forEach(btn => btn.addEventListener('mousedown', e => {
@@ -102,8 +93,8 @@ function wirePlayerSearch() {
         if (!matches.length) { drop.classList.add('hidden'); return; }
         drop.classList.remove('hidden');
         drop.innerHTML = matches.map(p =>
-            `<button data-e="${p.energy||0}" data-s="${p.race_speed||0}" data-name="${(p.name || '').replace(/"/g, '&quot;')}" class="tc-pl-pick w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-zinc-800 text-left transition-colors">
-                <span class="text-foreground font-medium truncate">${p.name}</span>
+            `<button data-e="${p.energy||0}" data-s="${p.race_speed||0}" data-name="${esc(p.name || '')}" class="tc-pl-pick w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-zinc-800 text-left transition-colors">
+                <span class="text-foreground font-medium truncate">${esc(p.name)}</span>
                 <span class="text-zinc-500 ml-auto">E${p.energy||0} spd${p.race_speed||0}</span>
             </button>`).join('');
         drop.querySelectorAll('.tc-pl-pick').forEach(btn => btn.addEventListener('mousedown', e => {
@@ -119,8 +110,7 @@ function wirePlayerSearch() {
     input.addEventListener('blur', () => setTimeout(() => drop.classList.add('hidden'), 150));
 }
 
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-const cvOf = (f) => (f.destroyers || 0) * 3 + (f.cruisers || 0) * 24 + (f.battleships || 0) * 60;
+const { cvOf } = globalThis.AWBattleModel;
 
 async function renderSystemView(sysId) {
     const box = document.getElementById('tc-system-view');

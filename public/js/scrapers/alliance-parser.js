@@ -1,4 +1,11 @@
 import { parseArrivalToISO } from '../utils/fleet-time.js';
+import '../utils/scrape-report.js';
+import '../utils/parse-number.js';
+import '../utils/game-rate-limit.js';
+const { gameFetch } = globalThis.AWGameRate;
+
+const { ScrapeReport, LABELS, labelledValue, headerIndex, matchesLabel } = globalThis.AWScrape;
+const { parseLocaleInt } = globalThis.AWNumber;
 
 export async function scrapeAlliance() {
     console.log(`[Spy] Initiating scrape for Alliance profile...`);
@@ -26,39 +33,57 @@ export async function scrapeAlliance() {
     }
 
     // 2. Parse the Alliance Profile Table
-    document.querySelectorAll('table tbody tr').forEach(row => {
-        const tds = row.querySelectorAll('td');
-        if (tds.length >= 2) {
-            const label = tds[0].innerText.trim();
-            const val = tds[1].innerText.trim();
+    const report = new ScrapeReport('alliance profile');
+    const field = (which, synonyms, opts) => {
+        const hit = labelledValue(document, synonyms, opts);
+        report.label(hit.found, which);
+        return hit;
+    };
 
-            if (label === 'Name') p.name = val;
-            if (label === 'Tag') p.tag = val;
-            if (label.includes('Points')) p.points = parseInt(val.split('(')[0].replace(/,/g, ''), 10) || 0;
-            if (label === 'Ranking') p.ranking = parseInt(val, 10) || null;
-            if (label === 'Leader') {
-                const a = tds[1].querySelector('a');
-                if (a) p.leader_id = parseInt(a.getAttribute('href').split('/').pop(), 10);
-            }
-        }
-    });
+    p.name = field('name', LABELS.name).value || null;
+    p.tag = field('tag', LABELS.tag).value || null;
+
+    const pointsHit = field('points', LABELS.points, { exact: false });
+    if (pointsHit.found) p.points = parseLocaleInt(pointsHit.value.split('(')[0]);
+
+    const rankHit = field('ranking', LABELS.ranking);
+    if (rankHit.found) p.ranking = parseLocaleInt(rankHit.value) || null;
+
+    // The leader id comes from the profile link, not the visible text — an href survives
+    // translation, a name does not.
+    const leaderHit = field('leader', LABELS.leader);
+    const leaderLink = leaderHit.cell && leaderHit.cell.querySelector ? leaderHit.cell.querySelector('a') : null;
+    if (leaderLink) p.leader_id = parseInt(leaderLink.getAttribute('href').split('/').pop(), 10);
 
     // 3. Rip the entire Member roster cleanly from the roster tracking buttons
     // Since rows contain 2 members horizontally, we target the distinct member buttons directly.
     document.querySelectorAll('a[href*="/Game/Alliance/Member/"]').forEach(btn => {
-        const mId = parseInt(btn.getAttribute('href').split('/').pop(), 10);
-        
-        // Find the matching profile link on the page using the ID to steal the name string
-        const playerProfileLink = document.querySelector(`a[href^="/Game/Players/Profile/${mId}"]`);
-        if (playerProfileLink) {
+        report.tryRow(() => {
+            const mId = parseInt(btn.getAttribute('href').split('/').pop(), 10);
+
+            // Find the matching profile link on the page using the ID to steal the name string
+            const playerProfileLink = document.querySelector(`a[href^="/Game/Players/Profile/${mId}"]`);
+            if (!playerProfileLink) {
+                report.problem('member button without a matching profile link', `member ${mId}`);
+                return false;
+            }
             const mName = playerProfileLink.innerText.trim();
-            
+
             // Prevent duplicate mutations
             if (!p.members.find(m => m.id === mId)) {
                 p.members.push({ id: mId, name: mName });
             }
-        }
+            return true;
+        }, 'member link');
     });
+
+    // A roster page with member buttons but no parsed members is a broken scrape, not an
+    // empty alliance — do not overwrite the stored roster with nothing.
+    if (report.emptyFromNonEmpty) {
+        report.finish();
+        console.error('[Spy] Alliance roster parsed 0 of', report.rowsSeen, 'member links — not syncing.');
+        return;
+    }
 
     // 4. Beam to backend
     try {
@@ -68,6 +93,7 @@ export async function scrapeAlliance() {
             body: JSON.stringify(p)
         });
         if (response.ok) {
+            report.finish();
             console.log(`[Spy] Alliance '${p.tag}' synced! (${p.members.length} members mapped)`);
             
             // Toast notification removed from here
@@ -86,33 +112,64 @@ export async function scrapeAlliance() {
 //   • Stationed (14 cells): SID,Name,Pop | Frm,Fac,Cyb,Lab,SB | TR,CS,DS,CR,BS,CV
 //   • In-flight (11 cells): the 4 building cols are replaced by one colspan=4 cell holding
 //     the landing time ("00:59:46 - birž. 28"); the fleet lands at this planet then.
-// In BOTH shapes the ship columns are the LAST SIX cells [TR,CS,DS,CR,BS,CV], so we read
-// from the end and don't care about the building-column layout.
+// In BOTH shapes the ship columns are the LAST SIX cells [TR,CS,DS,CR,BS,CV]. Reading
+// from the end survives a column inserted on the LEFT, but not one inserted among or
+// after the ship columns — and nothing would notice. So we now ask the table's own header
+// row where each ship column is, and only fall back to counting from the end when the
+// header is absent. A PARTIAL header match is treated as no match: mixing two addressing
+// schemes is how you get plausible numbers in the wrong fields.
 //
 // Siege rows (class *-siege, e.g. "friendly-siege"/"enemy-siege") are OTHER players'
 // fleets parked on the planet — never the member's own — so we skip them.
-function extractMemberFleets(doc, playerId) {
+const SHIP_COLUMNS = [
+    { key: 'transports',   synonyms: ['tr', 'transports', 'transport'] },
+    { key: 'colony_ships', synonyms: ['cs', 'colony ships', 'colony'] },
+    { key: 'destroyers',   synonyms: ['ds', 'destroyers', 'destroyer'] },
+    { key: 'cruisers',     synonyms: ['cr', 'cruisers', 'cruiser'] },
+    { key: 'battleships',  synonyms: ['bs', 'battleships', 'battleship'] },
+];
+
+function extractMemberFleets(doc, playerId, report) {
     const fleets = [];
-    doc.querySelectorAll('tr[data-planet-id]').forEach(row => {
+    const rows = doc.querySelectorAll('tr[data-planet-id]');
+    if (!rows.length) return fleets;
+
+    const table = rows[0].closest ? rows[0].closest('table') : null;
+    const byHeader = {};
+    let headerHits = 0;
+    for (const col of SHIP_COLUMNS) {
+        const idx = headerIndex(table, col.synonyms);
+        byHeader[col.key] = idx;
+        if (idx >= 0) headerHits++;
+    }
+    const useHeader = headerHits === SHIP_COLUMNS.length;
+    if (!useHeader && headerHits > 0) {
+        report.problem('fleet header only partially matched — using positional fallback',
+                       `${headerHits}/${SHIP_COLUMNS.length} columns`);
+    }
+
+    rows.forEach(row => {
         if (/siege/i.test(row.className)) return;
 
+        report.tryRow(() => {
         const cells = row.querySelectorAll('td');
-        if (cells.length < 11) return;
+        if (cells.length < 11) { report.problem('fleet row too short', `${cells.length} cells`); return false; }
 
         const sysLink = row.querySelector('a[href*="/Game/Map/SolarSystem/"]');
-        if (!sysLink) return;
+        if (!sysLink) { report.problem('fleet row without a SolarSystem link', ''); return false; }
         const m = sysLink.getAttribute('href').match(/\/SolarSystem\/(\d+)\/(\d+)/);
-        if (!m) return;
+        if (!m) { report.problem('unparseable SolarSystem href', sysLink.getAttribute('href')); return false; }
 
-        const n = (cell) => parseInt((cell.innerText || '').replace(/[,.\s ]/g, ''), 10) || 0;
+        const n = (cell) => (cell ? parseLocaleInt(cell.innerText) : 0);
         const last = cells.length;
-        const transports  = n(cells[last - 6]);
-        const colony_ships = n(cells[last - 5]);
-        const destroyers  = n(cells[last - 4]);
-        const cruisers    = n(cells[last - 3]);
-        const battleships = n(cells[last - 2]);
+        const ships = {};
+        SHIP_COLUMNS.forEach((col, i) => {
+            const idx = useHeader ? byHeader[col.key] : last - 6 + i;
+            ships[col.key] = n(cells[idx]);
+        });
 
-        if (transports + colony_ships + destroyers + cruisers + battleships === 0) return;
+        // An empty planet is not a parse failure — count it as parsed and move on.
+        if (SHIP_COLUMNS.reduce((s, c) => s + ships[c.key], 0) === 0) return true;
 
         // In-flight rows carry a landing time in a colspan'd cell -> set arrival_at so the
         // server treats it as "lands later, then can relaunch".
@@ -123,9 +180,11 @@ function extractMemberFleets(doc, playerId) {
         fleets.push({
             system_id: parseInt(m[1], 10),
             planet_index: parseInt(m[2], 10),
-            transports, colony_ships, destroyers, cruisers, battleships,
+            ...ships,
             arrival_at
         });
+        return true;
+        }, 'fleet row');
     });
     return fleets;
 }
@@ -133,81 +192,88 @@ function extractMemberFleets(doc, playerId) {
 // Fetch + parse one member's alliance page and sync stats + stationed fleets.
 async function syncMember(url) {
     const idMatch = url.match(/\/Member\/(\d+)/);
-    if (!idMatch) return;
+    if (!idMatch) return { ok: false, report: null };
     const playerId = parseInt(idMatch[1], 10);
+    const report = new ScrapeReport(`member ${playerId}`);
 
-    const res = await fetch(url);
+    const res = await gameFetch(url);
     const html = await res.text();
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const tds = Array.from(doc.querySelectorAll('td'));
 
     // Parse Username
     const profileLink = doc.querySelector('a[href*="/Game/Players/Profile/"]');
-    if (!profileLink) return;
+    if (!profileLink) {
+        report.problem('member page without a profile link', url);
+        report.finish();
+        return { ok: false, report };
+    }
     const name = profileLink.innerText.trim();
     {
 
-            // Planets & Next Culture
-            const planetTd = tds.find(td => td.innerHTML.includes('Planets<br>(Next Culture)'));
+            // Planets & Next Culture. The old lookup matched the literal markup
+            // 'Planets<br>(Next Culture)', which breaks on any translation AND on the
+            // game emitting '<br/>' instead of '<br>'. The countdown span carries an id,
+            // which is markup the game controls and translation cannot touch — so find
+            // the value cell from the span and read the label cell from there.
             let planetsText = '';
             let nextCultureSeconds = null;
-            if (planetTd && planetTd.nextElementSibling) {
-                const valTd = planetTd.nextElementSibling;
+            const cultureSpan = doc.querySelector('#nextCulture');
+            const valTd = cultureSpan && cultureSpan.closest ? cultureSpan.closest('td') : null;
+            if (valTd) {
                 planetsText = valTd.innerText.split('(')[0].trim();
-                const timerSpan = valTd.querySelector('#nextCulture');
-                if (timerSpan) {
-                    nextCultureSeconds = parseInt(timerSpan.getAttribute('data-value'), 10);
-                }
+                nextCultureSeconds = parseInt(cultureSpan.getAttribute('data-value'), 10);
+                if (isNaN(nextCultureSeconds)) nextCultureSeconds = null;
             }
+            report.label(!!valTd, 'planets / next culture');
 
-            const getRate = (label) => {
-                const td = tds.find(t => t.innerText.trim() === label);
-                return (td && td.nextElementSibling) ? td.nextElementSibling.innerText.trim().split(' ')[0] : '';
+            const grab = (which, synonyms, opts = {}) => {
+                const hit = labelledValue(doc, synonyms, opts);
+                report.label(hit.found, which);
+                return hit.found ? hit.value : '';
             };
+            // Rates read as "1 234 /h" — keep only the leading number.
+            const grabRate = (which, synonyms) => (grab(which, synonyms).split(' ')[0] || '');
 
-            const getSimpleVal = (label) => {
-                const td = tds.find(t => t.innerText.trim() === label);
-                return (td && td.nextElementSibling) ? td.nextElementSibling.innerText.trim() : '';
-            };
-
-            const getIntelVal = (label) => {
-                const td = tds.find(t => t.innerText.trim() === label);
-                if (td && td.nextElementSibling) {
-                    const parsed = parseInt(td.nextElementSibling.innerText.trim(), 10);
-                    return isNaN(parsed) ? 0 : parsed;
-                }
-                return 0;
-            };
-
-            const pLevelTd = tds.find(t => t.innerText.includes('Player Level') && t.querySelector('a[data-href*="PlayerLevelTable"]'));
-            const cvLimitTd = tds.find(t => t.innerText.includes('CV Limit'));
+            const pLevelTd = tds.find(t => matchesLabel(t.innerText, LABELS.playerLevel) && t.querySelector('a[data-href*="PlayerLevelTable"]'));
+            const cvLimitHit = labelledValue(doc, LABELS.cvLimit, { exact: false });
+            report.label(!!pLevelTd, 'player level');
+            report.label(cvLimitHit.found, 'cv limit');
 
             const payload = {
                 player_id: playerId,
                 name,
                 planets_text: planetsText,
                 next_culture_seconds: nextCultureSeconds,
-                science_rate: getRate('Science'),
-                culture_rate: getRate('Culture'),
-                production_rate: getRate('Production'),
-                astro_dollars: getSimpleVal('Astro Dollars'),
-                production_points: getSimpleVal('Production Points'),
-                artefact: getSimpleVal('Artefact'),
+                science_rate: grabRate('science rate', LABELS.scienceRate),
+                culture_rate: grabRate('culture rate', LABELS.cultureRate),
+                production_rate: grabRate('production rate', LABELS.productionRate),
+                astro_dollars: grab('astro dollars', LABELS.astroDollars),
+                production_points: grab('production points', LABELS.productionPoints),
+                artefact: grab('artefact', LABELS.artefact),
                 level_text: pLevelTd && pLevelTd.nextElementSibling ? pLevelTd.nextElementSibling.innerText.trim().replace(/\s+/g, ' ') : '',
-                cv_limit_text: cvLimitTd && cvLimitTd.nextElementSibling ? cvLimitTd.nextElementSibling.innerText.trim().replace(/\s+/g, ' ') : '',
-                economy: getIntelVal('Economy'),
-                energy: getIntelVal('Energy'),
-                mathematics: getIntelVal('Mathematics'),
-                physics: getIntelVal('Physics'),
-                population: getIntelVal('Population'),
-                fleets: extractMemberFleets(doc, playerId)
+                cv_limit_text: cvLimitHit.value.replace(/\s+/g, ' '),
+                economy: parseLocaleInt(grab('economy', LABELS.economy, { accept: v => !v.includes('%') })),
+                energy: parseLocaleInt(grab('energy', LABELS.energy)),
+                mathematics: parseLocaleInt(grab('mathematics', LABELS.mathematics)),
+                physics: parseLocaleInt(grab('physics', LABELS.physics)),
+                population: parseLocaleInt(grab('population', LABELS.population)),
+                fleets: extractMemberFleets(doc, playerId, report)
             };
+
+            // A member page where most labels went unmatched is a locale mismatch, not an
+            // empty member. Syncing it would overwrite good stats with zeros.
+            if (report.likelyWrongLanguage) {
+                report.finish();
+                return { ok: false, report };
+            }
 
             await fetch('/hub-api/sync/alliance-stats', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+            return { ok: true, report };
     }
 }
 
@@ -239,25 +305,50 @@ export async function scrapeAllianceMembers() {
     if (urls.length === 0) return;
 
     console.log(`[AWT Scraper] Found ${urls.length} alliance members. Syncing stats + fleets in background...`);
+    const roster = new ScrapeReport('alliance member scan');
     for (const url of urls) {
-        try { await syncMember(url); }
-        catch (err) { console.error('[AWT Scraper] Member sync failed:', err); }
+        try {
+            const r = await syncMember(url);
+            roster.row(!!(r && r.ok));
+            if (r && r.report && !r.report.ok) roster.problem('member scrape degraded', r.report.summary());
+        } catch (err) {
+            // This used to be a bare console.error inside the loop, so a scan where every
+            // member failed still finished quietly.
+            roster.row(false);
+            roster.problem('member sync threw', err.message);
+            console.error('[AWT Scraper] Member sync failed:', err);
+        }
     }
+    const result = roster.finish();
+    if (typeof window !== 'undefined' && window.parent && !result.ok) {
+        window.parent.postMessage({ type: 'SHOW_TOAST', payload: `⚠️ ${result.line}` }, window.location.origin);
+    }
+    return result;
 }
 
 // Off-page scan (e.g. triggered from the News page): fetch the alliance overview to get
 // the member roster, then sync each member's stats + stationed fleets. Returns a count.
 export async function runAllianceFleetScan() {
-    const ovRes = await fetch('/Game/Alliance');
+    const ovRes = await gameFetch('/Game/Alliance');
     const ovDoc = new DOMParser().parseFromString(await ovRes.text(), 'text/html');
     const urls = memberLinksFrom(ovDoc);
     if (urls.length === 0) return 0;
 
     console.log(`[AWT Scraper] Refreshing ${urls.length} alliance members' fleets...`);
-    let ok = 0;
+    // `ok` used to count every call that did not throw, including ones that silently
+    // parsed nothing, so the News page reported a full refresh after a total failure.
+    const roster = new ScrapeReport('alliance fleet refresh');
     for (const url of urls) {
-        try { await syncMember(url); ok++; }
-        catch (err) { console.error('[AWT Scraper] Member sync failed:', err); }
+        try {
+            const r = await syncMember(url);
+            roster.row(!!(r && r.ok));
+            if (r && r.report && !r.report.ok) roster.problem('member scrape degraded', r.report.summary());
+        } catch (err) {
+            roster.row(false);
+            roster.problem('member sync threw', err.message);
+            console.error('[AWT Scraper] Member sync failed:', err);
+        }
     }
-    return ok;
+    roster.finish();
+    return roster.rowsParsed;
 }

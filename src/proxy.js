@@ -162,15 +162,53 @@ function generateSyntheticPage(systemId) {
     `;
 }
 
+// The hub's own session cookie. express-session is mounted in server.js without a `name`
+// option, so it uses the library default.
+const HUB_SESSION_COOKIE = 'connect.sid';
+
+// The proxied game pages are served from the hub's origin, which means the browser attaches
+// EVERY cookie it holds for that origin — including the hub's own session cookie, signed
+// with SESSION_SECRET. http-proxy-middleware forwards inbound headers untouched, so that
+// cookie was being handed to the game server on every proxied request: an asset, a page, a
+// scrape, all of them. The game has no use for it and holding it is a liability for whoever
+// runs that server as much as for us.
+//
+// Strip ours by name and forward the rest verbatim — the game's own session cookie lives
+// under the same origin and must still get through, or the member is logged out.
+function stripHubCookie(cookieHeader) {
+    if (!cookieHeader) return null;
+    const kept = cookieHeader
+        .split(';')
+        .filter(part => part.split('=')[0].trim() !== HUB_SESSION_COOKIE)
+        .map(part => part.trim())
+        .filter(Boolean);
+    return kept.join('; ');
+}
+
 const proxyOptions = {
     target: process.env.TARGET_URL || 'https://astrowars.games',
     changeOrigin: true,
-    selfHandleResponse: true, 
+    selfHandleResponse: true,
     on: {
         proxyReq: (proxyReq, req, res) => {
-            const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-            proxyReq.setHeader('X-Forwarded-For', clientIp);
-            proxyReq.setHeader('X-Real-IP', clientIp);
+            const cookies = stripHubCookie(req.headers.cookie);
+            if (cookies) proxyReq.setHeader('Cookie', cookies);
+            else proxyReq.removeHeader('Cookie');
+
+            // Internal marker for the rate gate in server.js. The game has no reason to
+            // learn how this tool is built.
+            proxyReq.removeHeader('X-AWT-Automated');
+
+            // The inbound X-Forwarded-For is supplied by the caller. Echoing it verbatim
+            // let anyone present an arbitrary address to the game, so a rate limit or ban
+            // upstream would land on whoever's IP they chose. Append the address we
+            // actually observed rather than replacing the chain with theirs, and take
+            // X-Real-IP from req.ip, which Express derives using the app's trust proxy
+            // setting instead of from a raw header.
+            const observed = req.socket.remoteAddress || '';
+            const forwarded = req.headers['x-forwarded-for'];
+            proxyReq.setHeader('X-Forwarded-For', forwarded ? `${forwarded}, ${observed}` : observed);
+            proxyReq.setHeader('X-Real-IP', req.ip || observed);
         },
         proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
             res.removeHeader('x-frame-options');
@@ -207,3 +245,7 @@ const proxyOptions = {
 };
 
 module.exports = createProxyMiddleware(proxyOptions);
+// Exposed so src/utils/game-traffic.test.js can check the cookie rule directly rather
+// than by reading the source and hoping.
+module.exports.stripHubCookie = stripHubCookie;
+module.exports.HUB_SESSION_COOKIE = HUB_SESSION_COOKIE;
