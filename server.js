@@ -21,6 +21,8 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { rateLimit } = require('./src/utils/rate-limit');
 const { gameTrafficGate } = require('./src/utils/game-traffic');
+const { hubBody } = require('./src/utils/hub-body');
+const { splitSessionsDatabase } = require('./src/utils/session-store');
 
 // Behind a TLS terminator every request arrives from the same socket address. Without
 // this, req.ip is the proxy for everyone — the rate limiters below would throttle all
@@ -104,12 +106,29 @@ const COOKIE_SECURE = process.env.COOKIE_SECURE !== undefined
     ? process.env.COOKIE_SECURE === 'true'
     : process.env.NODE_ENV !== 'development';
 
+// Sessions used to live in awt.db alongside the intel. A galaxy sync writes thousands of
+// rows in one transaction and holds the write lock for its duration, and connect-sqlite3
+// offers no busy-timeout option — so session writes in that window failed outright:
+//
+//   Error: SQLITE_BUSY: database is locked      (node-sqlite3's wording, i.e. the store,
+//                                                not our better-sqlite3 connection, which
+//                                                already waits up to 10s)
+//
+// which means a member's login silently did not persist. Own file, own write lock. The
+// split copies existing sessions across once so nobody is logged out by the change.
+const sessionSplit = splitSessionsDatabase(path.join(__dirname, 'awt.db'), path.join(__dirname, 'sessions.db'));
+if (sessionSplit.action === 'split') {
+    console.log(`[Core] Moved ${sessionSplit.copied} sessions out of awt.db into sessions.db.`);
+} else if (sessionSplit.error) {
+    console.warn(`[Core] Session split skipped (${sessionSplit.action}): ${sessionSplit.error}. Everyone will need to log in again.`);
+}
+
 app.use(session({
     // `dir` must be absolute for the same reason .env is loaded from __dirname above:
     // under pm2 the working directory can differ from the project root, and a relative
-    // '.' would then point the session store at a different awt.db than the one the
-    // rest of the app uses — logging everyone out with no obvious cause.
-    store: new SQLiteStore({ db: 'awt.db', dir: __dirname }),
+    // '.' would then point the session store at a different file than the one the split
+    // above wrote — logging everyone out with no obvious cause.
+    store: new SQLiteStore({ db: 'sessions.db', dir: __dirname }),
     secret: resolveSessionSecret(),
     resave: false,
     saveUninitialized: false,
@@ -131,13 +150,12 @@ app.use(express.static(path.join(__dirname, 'public'), {
 
 app.use('/hub-assets', express.static(path.join(__dirname, 'public')));
 
-// 🔴 FIX: Attached the JSON parser strictly to OUR api routes only.
-// Galaxy and system syncs legitimately post megabytes of scraped rows; nothing else
-// does. The 50 MB ceiling is therefore scoped to /sync/*, and every other hub endpoint
-// gets a sane 2 MB so one logged-in account cannot tie up the process with a huge body.
-const syncJson = express.json({ limit: '50mb' });
-const hubJson = express.json({ limit: '2mb' });
-app.use('/hub-api', (req, res, next) => (req.path.startsWith('/sync') ? syncJson : hubJson)(req, res, next));
+// JSON parsing for our api routes only, with the size ceilings scoped to /sync/* — and
+// the guarantee that req.body is an object by the time any handler sees it. See
+// src/utils/hub-body.js: express.json() leaves req.body undefined whenever the
+// Content-Type does not match, and nineteen handlers destructure it without a guard, so
+// a POST with the wrong content type answered 500 with a stack trace in the body.
+app.use('/hub-api', hubBody({ syncLimit: '50mb', limit: '2mb' }));
 
 // Brute-force guard on the hub login: loose enough that a forgetful member is not
 // locked out, tight enough that guessing a password over the network is hopeless.
