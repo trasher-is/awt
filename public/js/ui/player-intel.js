@@ -15,10 +15,22 @@ export async function loadPlayerIntel(playerId) {
             const playerLabel = document.getElementById('ui-player-id');
             if (playerLabel) {
                 const allyTag = p.alliance_tag ? `[${esc(p.alliance_tag)}] ` : '';
+                // Names this id went by in earlier rounds. The id is what survives a round
+                // wipe; the name is not, and people rename between rounds — so without
+                // this the panel cannot tell you that the account you are looking at is
+                // the one you fought last round under a different name.
+                const former = Array.isArray(data.formerNames) ? data.formerNames : [];
+                const formerLine = former.length
+                    ? `<div class="text-xs text-muted-foreground mt-0.5" title="Earlier rounds, newest first">
+                           <i class="fa-solid fa-clock-rotate-left mr-1"></i>previously
+                           ${former.map(f => `<span class="text-foreground">${esc(f.name)}</span>${f.label ? ` <span class="opacity-70">(${esc(f.label)})</span>` : ''}`).join(', ')}
+                       </div>`
+                    : '';
                 playerLabel.innerHTML = `
                     <span class="text-muted-foreground font-bold">${allyTag}</span>
                     <a href="#" data-player-profile="${p.id}" class="text-blue-400 hover:underline font-semibold">${esc(p.name || 'Unknown')}</a>
                     <span class="text-xs text-muted-foreground ml-1">(#${p.id})</span>
+                    ${formerLine}
                 `;
                 const profileLink = playerLabel.querySelector('[data-player-profile]');
                 profileLink?.addEventListener('click', (e) => {

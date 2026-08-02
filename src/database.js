@@ -516,6 +516,60 @@ function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_route_legs_route     ON route_legs(route_id, leg_index);
     `);
 
+    // --- ROUND ARCHIVE ---
+    // "Nuke data" wipes the round so the next one starts clean, which is right: the map
+    // reshuffles and last round's coordinates are worse than none. But a player id is
+    // stable for the life of an account and people rename between rounds, so the wipe was
+    // also destroying the only way to tell that Chewie used to be Elfenlied.
+    //
+    // These tables hold what is still true a round later — who somebody was — and nothing
+    // else. Fleets, planet ownership and events describe a map that no longer exists.
+    // See src/utils/round-archive.js.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS rounds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            label TEXT,
+            note TEXT,
+            player_count INTEGER DEFAULT 0,
+            system_count INTEGER DEFAULT 0,
+            archived_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS round_players (
+            round_id INTEGER NOT NULL,
+            player_id INTEGER NOT NULL,
+            name TEXT,
+            alliance_tag TEXT,
+            points INTEGER,
+            level INTEGER,
+            planet_count INTEGER DEFAULT 0,
+            PRIMARY KEY (round_id, player_id),
+            FOREIGN KEY(round_id) REFERENCES rounds(id) ON DELETE CASCADE
+        )
+    `);
+
+    // No foreign key to players(id): the whole point is that these rows outlive the row
+    // they were copied from. A reference would be deleted with it.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS round_systems (
+            round_id INTEGER NOT NULL,
+            system_id INTEGER NOT NULL,
+            name TEXT,
+            x INTEGER,
+            y INTEGER,
+            PRIMARY KEY (round_id, system_id),
+            FOREIGN KEY(round_id) REFERENCES rounds(id) ON DELETE CASCADE
+        )
+    `);
+
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_round_players_player ON round_players(player_id);
+        CREATE INDEX IF NOT EXISTS idx_round_players_name   ON round_players(name);
+        CREATE INDEX IF NOT EXISTS idx_round_systems_system ON round_systems(system_id);
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

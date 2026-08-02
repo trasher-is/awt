@@ -98,6 +98,32 @@ router.get('/search/player', requireAuth, (req, res) => {
 
         // Pass the wildcard string for the LIKE, and the raw string for the exact ID match
         const results = query.all(searchTerm, q);
+
+        // Also match names from earlier rounds. Someone typing a name they remember should
+        // find the account, not an empty list — the id is what carries across a wipe, the
+        // name is not. These are appended rather than merged in SQL so the current-name
+        // matches stay first and the former name can be labelled as one.
+        const seen = new Set(results.map(r => r.id));
+        const former = db.prepare(`
+            SELECT rp.player_id AS id, p.name, a.tag AS alliance_tag,
+                   rp.name AS former_name, r.label AS former_round
+            FROM round_players rp
+            JOIN rounds r ON r.id = rp.round_id
+            LEFT JOIN players p ON p.id = rp.player_id
+            LEFT JOIN alliances a ON a.id = p.alliance_id
+            WHERE rp.name LIKE ? AND p.id IS NOT NULL
+            GROUP BY rp.player_id
+            ORDER BY r.id DESC
+            LIMIT 20
+        `).all(searchTerm);
+
+        for (const row of former) {
+            if (seen.has(row.id)) continue;
+            seen.add(row.id);
+            results.push(row);
+            if (results.length >= 20) break;
+        }
+
         res.json({ success: true, results });
     } catch (err) {
         console.error("[DB Error] Player search failed:", err);

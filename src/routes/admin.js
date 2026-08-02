@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const db = require('../database');
 const { requireAuth, requireAdmin } = require('./_middleware');
+const { archiveRound, listRounds, roundDetail } = require('../utils/round-archive');
 const router = express.Router();
 
 // Reject empty or whitespace-only passwords before they reach bcrypt. hashSync(undefined)
@@ -244,9 +245,45 @@ router.post('/admin/clear-fleets', requireAdmin, (req, res) => {
     }
 });
 
+// --- ROUND ARCHIVE ---
+// The index of past rounds, and a way to snapshot the current one WITHOUT wiping it.
+// The manual snapshot matters because the automatic one runs at wipe time, by which point
+// the round is over and some players have already gone inactive and stopped being
+// scraped. Taking one while the round is still live captures a fuller picture.
+router.get('/admin/rounds', requireAdmin, (req, res) => {
+    try {
+        res.json({ success: true, rounds: listRounds(db) });
+    } catch (err) {
+        console.error('[DB Error] Failed to list rounds:', err);
+        res.status(500).json({ error: 'Failed to list archived rounds' });
+    }
+});
+
+router.get('/admin/rounds/:id', requireAdmin, (req, res) => {
+    try {
+        const round = roundDetail(db, req.params.id);
+        if (!round) return res.status(404).json({ error: 'No such archived round' });
+        res.json({ success: true, round });
+    } catch (err) {
+        console.error('[DB Error] Failed to read round:', err);
+        res.status(500).json({ error: 'Failed to read archived round' });
+    }
+});
+
+router.post('/admin/rounds/archive', requireAdmin, (req, res) => {
+    const { label, note } = req.body;
+    try {
+        const result = db.transaction(() => archiveRound(db, { label, note }))();
+        res.json({ success: true, ...result });
+    } catch (err) {
+        console.error('[DB Error] Failed to archive round:', err);
+        res.status(500).json({ error: 'Failed to archive the current round' });
+    }
+});
+
 // Nuke All Intel (Requires Master Admin Password)
 router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
-    const { password } = req.body;
+    const { password, label, note } = req.body;
 
     if (req.session.gameName !== 'admin') {
         return res.status(403).json({ error: 'Only the Master Admin can execute a database nuke.' });
@@ -258,7 +295,14 @@ router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
     }
 
     try {
+        let archived;
         const nukeTx = db.transaction(() => {
+            // Snapshot BEFORE the deletes, in the same transaction. A player id is stable
+            // for the life of an account and people rename between rounds, so this is the
+            // only chance to record that the account now called Chewie played the last
+            // round as Elfenlied. If the snapshot throws, nothing is deleted.
+            archived = archiveRound(db, { label, note });
+
             db.prepare(`DELETE FROM fleets`).run();
             db.prepare(`DELETE FROM planet_plans`).run();
             db.prepare(`DELETE FROM planet_events`).run();
@@ -269,10 +313,11 @@ router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
         });
 
         nukeTx();
-        res.json({ success: true });
+        console.log(`[Admin] Round wiped. Archived ${archived.players} players and ${archived.systems} systems as "${archived.label}".`);
+        res.json({ success: true, archived });
     } catch (err) {
         console.error("[DB Error] Nuke failed:", err);
-        res.status(500).json({ error: 'Nuke transaction failed.' });
+        res.status(500).json({ error: 'Nuke transaction failed. Nothing was deleted.' });
     }
 });
 

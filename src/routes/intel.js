@@ -2,7 +2,21 @@ const express = require('express');
 const db = require('../database');
 const { requireAuth } = require('./_middleware');
 const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
+const { previousNames, findByFormerName } = require('../utils/round-archive');
 const router = express.Router();
+
+// --- WHO USED TO BE CALLED THIS ---
+// The reverse lookup. Searching for a name that no longer exists should find the account
+// that used it, because "who was Elfenlied" is a question people actually ask and the
+// answer — Chewie, id 39 — is the whole reason the archive exists.
+router.get('/intel/former-names', requireAuth, (req, res) => {
+    try {
+        res.json({ success: true, results: findByFormerName(db, req.query.q) });
+    } catch (err) {
+        console.error('[DB Error] Former-name lookup failed:', err);
+        res.status(500).json({ error: 'Former-name lookup failed' });
+    }
+});
 
 // --- GET ENEMY DATA MATRIX FOR CHOSEN ALLIANCE ---
 router.get('/intel/war-room/players', requireAuth, (req, res) => {
@@ -444,12 +458,23 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
             console.error('[DB Error] Login heatmap unavailable:', err.message);
         }
 
+        // Names this id went by in earlier rounds. A player id survives a round wipe;
+        // the name does not, and people rename. Empty for anyone who has not renamed, so
+        // the panel shows nothing rather than the player's own name repeated back.
+        let formerNames = [];
+        try {
+            formerNames = previousNames(db, playerId, { currentName: playerInfo.name });
+        } catch (err) {
+            console.error('[DB Error] Name history unavailable:', err.message);
+        }
+
         res.json({
             success: true,
             player: playerInfo,
             activity: formattedActivity,
             heatmap: heatmap,
-            systems: systems // <-- Injected payload
+            systems: systems, // <-- Injected payload
+            formerNames
         });
 
     } catch (error) {
