@@ -1,4 +1,4 @@
-import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth } from './page-injections.js';
+import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initFleetTimers } from './page-injections.js';
 import { initNewsIncomingTools } from '../ui/news-incoming.js';
 
 export function initSpy() {
@@ -556,6 +556,9 @@ export function initSpy() {
         }
         if (pathLower.includes('/game/planets/planet/')) {
             initStarbaseTimer();
+        }
+        if (pathLower.includes('/game/fleets')) {
+            initFleetTimers();
         }
         if (pathLower.includes('/game/players/profile/')) {
             initProfilePLGrowth();

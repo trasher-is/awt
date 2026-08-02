@@ -74,4 +74,57 @@ router.post('/plans', (req, res) => {
     }
 });
 
+// --- SHARED TRADE-AGREEMENT MATRIX (redzone /ta page) ---
+// Whole thing is one small JSON blob (an alliance is ~10-20 people) in app_settings,
+// loaded and saved as a unit. Open (no password) — low-value planning data on an
+// already-open proxy; can be moved behind isAuthed later if it ever gets griefed.
+//   { players: [{ name, production }], done: ["a|b", ...] }  (done keys are sorted names)
+router.get('/ta', (req, res) => {
+    try {
+        const row = db.prepare(`SELECT value FROM app_settings WHERE key = 'rz_ta'`).get();
+        const data = row && row.value ? JSON.parse(row.value) : { players: [], done: [] };
+        res.json({ success: true, data });
+    } catch (err) {
+        console.error('[rzhub] TA load failed:', err.message);
+        res.status(500).json({ success: false, error: 'Load failed' });
+    }
+});
+
+router.post('/ta', (req, res) => {
+    try {
+        const data = req.body && req.body.data;
+        if (!data || !Array.isArray(data.players)) {
+            return res.status(400).json({ success: false, error: 'Bad payload' });
+        }
+        // Trades are stored as { "a|b": 'assigned' | 'done' }. Accept the legacy done[]
+        // array too (folded in as 'done') so older saved blobs / clients still work.
+        const trades = {};
+        if (Array.isArray(data.done)) {
+            data.done.forEach(k => { const key = String(k).slice(0, 90); if (key) trades[key] = 'done'; });
+        }
+        if (data.trades && typeof data.trades === 'object') {
+            let n = 0;
+            for (const [k, v] of Object.entries(data.trades)) {
+                if (n++ > 20000) break;
+                if (v === 'assigned' || v === 'done') { const key = String(k).slice(0, 90); if (key) trades[key] = v; }
+            }
+        }
+        const clean = {
+            players: data.players.slice(0, 100).map(p => ({
+                name: String(p.name || '').trim().slice(0, 40),
+                production: Math.max(0, parseInt(p.production, 10) || 0)
+            })).filter(p => p.name),
+            trades
+        };
+        db.prepare(`
+            INSERT INTO app_settings (key, value, updated_at) VALUES ('rz_ta', ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+        `).run(JSON.stringify(clean));
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[rzhub] TA save failed:', err.message);
+        res.status(500).json({ success: false, error: 'Save failed' });
+    }
+});
+
 module.exports = router;

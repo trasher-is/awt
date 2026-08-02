@@ -31,11 +31,16 @@ const fs = require('fs');
 // cookie first-party. It's mounted just below and reachable regardless of host.
 app.use((req, res, next) => {
     const host = (req.headers.host || '').toLowerCase();
-    if (host.startsWith('rz.') && !req.path.startsWith('/rzhub/')) return redzoneProxy(req, res, next);
+    const awtOwned = req.path.startsWith('/rzhub/') || req.path === '/ta';
+    if (host.startsWith('rz.') && !awtOwned) return redzoneProxy(req, res, next);
     next();
 });
 
 app.use('/rzhub', express.json(), require('./src/routes/rzhub'));
+
+// Redzone trade-agreement planner page (self-contained). Carved out of the rz proxy
+// above; open, like the rest of the rz tooling.
+app.get('/ta', (req, res) => res.sendFile(path.join(__dirname, 'public', 'rz-ta.html')));
 
 app.get('/api/admin/logs', (req, res) => {
     // 1. Set a default fallback path

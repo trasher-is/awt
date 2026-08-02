@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Redzone Trade Agreements</title>
+<style>
+    :root { --green:#22c55e; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:#0f1115; color:#e6e8eb; font-family:system-ui,Segoe UI,Roboto,sans-serif; font-size:14px; }
+    header { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:10px 14px; background:#191c22; border-bottom:1px solid #333; }
+    header h1 { font-size:16px; margin:0; font-weight:700; }
+    .price { color:#8a919c; font-size:12px; }
+    .spacer { flex:1; }
+    button { font:inherit; cursor:pointer; border:1px solid #444; border-radius:6px; background:#262a31; color:#e6e8eb; padding:6px 12px; }
+    button:hover { background:#30353d; }
+    button.primary { background:#2563eb; border-color:#2563eb; }
+    button.primary:hover { background:#1d4ed8; }
+    #save-status { font-size:12px; color:#8a919c; min-width:70px; }
+    main { padding:14px; }
+    .wrap { overflow-x:auto; border:1px solid #333; border-radius:8px; }
+    table { border-collapse:collapse; white-space:nowrap; }
+    th, td { border:1px solid #2a2e35; padding:4px 6px; text-align:center; }
+    thead th { background:#1e222a; position:sticky; top:0; font-weight:600; }
+    tbody th.rowname { background:#1e222a; text-align:left; position:sticky; left:0; z-index:1; max-width:130px; overflow:hidden; text-overflow:ellipsis; }
+    .colname { writing-mode:vertical-rl; transform:rotate(180deg); height:70px; font-size:12px; }
+    td.diag { background:#000; }
+    td.cell { cursor:pointer; width:34px; height:30px; }
+    td.cell:hover { outline:2px solid #2563eb; outline-offset:-2px; }
+    td.done { background:var(--green); color:#04270f; font-weight:700; }
+    td.assigned { background:#f59e0b; color:#3a2400; font-weight:700; }
+    input.prod { width:80px; background:#0f1115; border:1px solid #444; border-radius:4px; color:#e6e8eb; padding:3px 5px; text-align:right; font:inherit; }
+    td.tas { font-variant-numeric:tabular-nums; font-size:12px; color:#8a919c; }
+    td.tas.over { color:#f87171; font-weight:700; }
+    .rm { color:#6b7280; cursor:pointer; margin-left:6px; }
+    .rm:hover { color:#f87171; }
+    .totals { margin:12px 2px; color:#8a919c; }
+    .totals b { color:#e6e8eb; }
+    #rounds { margin-top:16px; }
+    #rounds h2 { font-size:14px; margin:0 0 8px; }
+    .round { background:#191c22; border:1px solid #333; border-radius:8px; padding:8px 12px; margin-bottom:8px; }
+    .round .rlabel { color:#8a919c; font-size:12px; margin-bottom:4px; }
+    .pair { display:inline-block; background:#262a31; border:1px solid #3a3f47; border-radius:6px; padding:3px 8px; margin:3px 4px 0 0; }
+    .empty { color:#8a919c; padding:24px; text-align:center; }
+    .hint { color:#8a919c; font-size:12px; margin:2px 0 12px; }
+    .legend { font-size:12px; color:#8a919c; margin:2px 0 12px; }
+    .legend .sw { display:inline-block; width:12px; height:12px; border-radius:3px; vertical-align:-1px; margin:0 4px 0 12px; }
+    .panel { background:#191c22; border:1px solid #333; border-radius:8px; padding:10px 14px; margin-bottom:16px; }
+    .panel h2 { font-size:14px; margin:0 0 8px; }
+    .panel h2 span { color:#8a919c; font-weight:400; font-size:12px; }
+    .ptable { width:100%; border-collapse:collapse; white-space:nowrap; }
+    .ptable th { text-align:left; color:#8a919c; font-weight:600; font-size:12px; border-bottom:1px solid #2a2e35; padding:4px 10px 4px 0; }
+    .ptable td { padding:4px 10px 4px 0; border-bottom:1px solid #20242b; font-variant-numeric:tabular-nums; }
+    .ptable td.num { text-align:right; }
+    .ptable .warn { color:#f59e0b; }
+    #feasibility { display:none; margin-bottom:16px; padding:14px 18px; border:2px solid #ef4444; background:#3a0d0d; border-radius:8px; color:#fca5a5; }
+    #feasibility .big { color:#ff4d4d; font-size:22px; font-weight:800; letter-spacing:.5px; }
+    #feasibility .sub { color:#f3b0b0; font-size:13px; margin-top:6px; }
+</style>
+</head>
+<body>
+<header>
+    <h1>🤝 Redzone Trade Agreements</h1>
+    <span class="price">TA price 120,000</span>
+    <span class="spacer"></span>
+    <button onclick="addPlayer()">＋ Add player</button>
+    <button class="primary" onclick="autoFill()" title="Assign partners until everyone has 5 TAs (keeps existing ones)">✨ Auto-fill to 5</button>
+    <span id="save-status"></span>
+    <button onclick="location.href='/Game/Planets'">← Back to game</button>
+</header>
+<main>
+    <div class="hint">Click a cell once to <b>assign a partner</b> (amber), again to mark the <b>TA done</b> (green), again to clear. Both sides fill in together. Each player can hold at most <b>5 TAs</b> — use <b>✨ Auto-fill to 5</b> to have everyone paired up automatically.</div>
+    <div class="legend"><span class="sw" style="background:#f59e0b"></span>assigned<span class="sw" style="background:#22c55e"></span>done</div>
+    <div id="feasibility"></div>
+    <div class="panel" id="production"></div>
+    <div id="board"></div>
+    <div class="totals" id="totals"></div>
+    <div id="rounds"></div>
+</main>
+<script>
+const TA_PRICE = 120000;
+const MAX_TA = 5; // game limit: each player can hold at most 5 trade agreements
+// state.trades maps a sorted "a|b" name key to 'assigned' or 'done' (absent = nothing yet).
+let state = { players: [], trades: {} };
+let saveTimer = null;
+
+const pairKey = (a, b) => [a, b].sort().join('|');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+
+async function load() {
+    try {
+        const res = await fetch('/rzhub/ta');
+        const data = await res.json();
+        if (data.success) {
+            const d = data.data || {};
+            state.players = (d.players || []).map(p => ({ name: p.name, production: p.production || 0 }));
+            state.trades = {};
+            if (d.trades && typeof d.trades === 'object') Object.assign(state.trades, d.trades);
+            // Migrate the old two-state format (done: ["a|b", ...]) into 'done' trades.
+            if (Array.isArray(d.done)) d.done.forEach(k => { state.trades[k] = 'done'; });
+        }
+    } catch (e) { setStatus('load failed'); }
+    render();
+}
+
+function setStatus(msg) { document.getElementById('save-status').textContent = msg; }
+
+function save() {
+    setStatus('saving…');
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+        try {
+            const res = await fetch('/rzhub/ta', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ data: { players: state.players, trades: state.trades } })
+            });
+            setStatus(res.ok ? 'saved ✓' : 'save failed');
+        } catch (e) { setStatus('save failed'); }
+    }, 400);
+}
+
+function addPlayer() {
+    const name = (prompt('Player name:') || '').trim();
+    if (!name) return;
+    if (state.players.some(p => p.name.toLowerCase() === name.toLowerCase())) { alert('That name already exists.'); return; }
+    state.players.push({ name, production: 0 });
+    save(); render();
+}
+
+function removePlayer(name) {
+    if (!confirm('Remove ' + name + '?')) return;
+    state.players = state.players.filter(p => p.name !== name);
+    Object.keys(state.trades).forEach(k => { if (k.split('|').indexOf(name) !== -1) delete state.trades[k]; });
+    save(); render();
+}
+
+const stateOf = (a, b) => state.trades[pairKey(a, b)] || null;
+// Total TAs a player holds — both assigned (planned) and done count toward the max of 5.
+function taCount(name) {
+    let n = 0;
+    for (const k of Object.keys(state.trades)) if (k.split('|').indexOf(name) !== -1) n++;
+    return n;
+}
+// Assigned-but-not-done TAs a player still has to actually carry out.
+function todoFor(name) {
+    let n = 0;
+    for (const [k, v] of Object.entries(state.trades)) if (v === 'assigned' && k.split('|').indexOf(name) !== -1) n++;
+    return n;
+}
+
+// Cell click cycles: (nothing) -> assigned -> done -> (nothing). A new assignment is
+// blocked if it would push either player past the 5-TA cap.
+function cycle(a, b) {
+    if (a === b) return;
+    const k = pairKey(a, b);
+    const s = state.trades[k];
+    if (!s) {
+        const over = [a, b].find(n => taCount(n) >= MAX_TA);
+        if (over) { alert(over + ' already has ' + MAX_TA + ' trade agreements (the max).'); return; }
+        state.trades[k] = 'assigned';
+    } else if (s === 'assigned') {
+        state.trades[k] = 'done';
+    } else {
+        delete state.trades[k];
+    }
+    save(); render();
+}
+
+// Build the current adjacency (all trades, assigned + done) as name -> Set of partners.
+function currentAdjacency() {
+    const adj = {};
+    state.players.forEach(p => { adj[p.name] = new Set(); });
+    Object.keys(state.trades).forEach(k => {
+        const [a, b] = k.split('|');
+        if (adj[a] && adj[b]) { adj[a].add(b); adj[b].add(a); }
+    });
+    return adj;
+}
+
+// Havel–Hakimi completion: starting from `adj`, keep connecting the player furthest from
+// MAX_TA to the other neediest players it isn't already paired with. This reaches 5-each
+// whenever it's still possible; when existing trades make it impossible it fills as far as
+// it can. `commit` true writes the new edges into state as 'assigned'; false just returns
+// the resulting adjacency (used for the feasibility check without touching real data).
+function completeToMax(adj, commit) {
+    const names = state.players.map(p => p.name);
+    const need = {};
+    names.forEach(n => { need[n] = Math.max(0, MAX_TA - adj[n].size); });
+    for (;;) {
+        const order = names.filter(n => need[n] > 0).sort((a, b) => need[b] - need[a]);
+        if (!order.length) break;
+        const u = order[0];
+        const cands = names.filter(n => n !== u && need[n] > 0 && !adj[u].has(n)).sort((a, b) => need[b] - need[a]);
+        const take = Math.min(need[u], cands.length);
+        for (let i = 0; i < take; i++) {
+            const c = cands[i];
+            adj[u].add(c); adj[c].add(u);
+            need[c]--;
+            if (commit) state.trades[pairKey(u, c)] = 'assigned';
+        }
+        need[u] = 0; // u is done (satisfied, or stuck with no candidates left)
+    }
+    return adj;
+}
+
+// "Offer a way for everyone to have 5 TAs" — auto-assign partners to fill everyone to the
+// cap, keeping all existing trades. Reports anyone who couldn't be completed.
+function autoFill() {
+    completeToMax(currentAdjacency(), true);
+    save(); render();
+    const short = infeasiblePlayers();
+    if (short.length) alert('Filled as far as possible, but existing trades block a full set of 5 for: ' + short.join(', '));
+}
+
+// Players who, given the CURRENT committed trades, can no longer reach 5 TAs — computed by
+// simulating the best-case completion on a copy and seeing who's left short.
+function infeasiblePlayers() {
+    if (state.players.length < 2) return [];
+    const adj = completeToMax(currentAdjacency(), false);
+    return state.players.map(p => p.name).filter(n => adj[n].size < MAX_TA);
+}
+
+function fmtHours(h) {
+    if (!isFinite(h) || h <= 0) return '—';
+    if (h < 1) return Math.round(h * 60) + 'm';
+    if (h < 24) return (Math.round(h * 10) / 10) + 'h';
+    return Math.floor(h / 24) + 'd ' + Math.round(h % 24) + 'h';
+}
+
+// Greedy edge-colouring of the assigned-but-not-done pairs into rounds where no player
+// appears twice — so every pair within a round can be traded at the same time. Only the
+// committed plan (assigned) is scheduled, not every theoretical pairing.
+function computeRounds() {
+    const pending = Object.keys(state.trades).filter(k => state.trades[k] === 'assigned').map(k => k.split('|'));
+    const rounds = [];
+    for (const [a, b] of pending) {
+        let r = 0;
+        while (rounds[r] && (rounds[r].used.has(a) || rounds[r].used.has(b))) r++;
+        if (!rounds[r]) rounds[r] = { pairs: [], used: new Set() };
+        rounds[r].pairs.push([a, b]);
+        rounds[r].used.add(a); rounds[r].used.add(b);
+    }
+    return rounds;
+}
+
+function renderProduction() {
+    const el = document.getElementById('production');
+    const players = state.players;
+    if (!players.length) { el.innerHTML = '<div class="empty">No players yet. Click <b>＋ Add player</b> to start.</div>'; return; }
+    let h = `<h2>Players &amp; production <span>· production per hour · TA costs ${TA_PRICE.toLocaleString()} · max ${MAX_TA} TAs each</span></h2>`;
+    h += `<table class="ptable"><thead><tr><th>Player</th><th>Production /h</th><th>TAs</th><th>1 TA every</th><th>To&nbsp;do</th><th>Time to fund to-do</th></tr></thead><tbody>`;
+    players.forEach(p => {
+        const rate = p.production || 0;
+        const perTa = rate > 0 ? TA_PRICE / rate : Infinity;      // hours to earn one TA
+        const held = taCount(p.name);          // assigned + done, out of MAX_TA
+        const todo = todoFor(p.name);           // assigned but not yet done
+        const fundTodo = rate > 0 ? todo * perTa : Infinity;
+        h += '<tr>';
+        h += `<td>${esc(p.name)} <span class="rm" onclick="removePlayer('${esc(p.name).replace(/'/g, "\\'")}')">✕</span></td>`;
+        h += `<td><input class="prod" type="number" min="0" step="10000" value="${rate || ''}" placeholder="0" data-name="${esc(p.name)}"></td>`;
+        h += `<td class="num${held >= MAX_TA ? ' warn' : ''}">${held}/${MAX_TA}</td>`;
+        h += `<td class="num${rate > 0 ? '' : ' warn'}">${rate > 0 ? fmtHours(perTa) : 'enter prod'}</td>`;
+        h += `<td class="num">${todo}</td>`;
+        h += `<td class="num">${todo ? fmtHours(fundTodo) : '—'}</td>`;
+        h += '</tr>';
+    });
+    h += '</tbody></table>';
+    el.innerHTML = h;
+    el.querySelectorAll('input.prod').forEach(inp => {
+        inp.addEventListener('change', () => {
+            const p = state.players.find(x => x.name === inp.getAttribute('data-name'));
+            if (p) { p.production = Math.max(0, parseInt(inp.value, 10) || 0); save(); render(); }
+        });
+    });
+}
+
+function renderBoard() {
+    const board = document.getElementById('board');
+    const players = state.players;
+    if (!players.length) { board.innerHTML = ''; document.getElementById('totals').textContent = ''; document.getElementById('rounds').innerHTML = ''; return; }
+
+    let html = '<div class="wrap"><table><thead><tr><th class="rowname">Player</th>';
+    players.forEach(p => { html += `<th class="colname" title="${esc(p.name)}">${esc(p.name)}</th>`; });
+    html += '</tr></thead><tbody>';
+    players.forEach(rp => {
+        html += `<tr><th class="rowname">${esc(rp.name)}</th>`;
+        players.forEach(cp => {
+            if (rp.name === cp.name) { html += '<td class="diag"></td>'; return; }
+            const s = stateOf(rp.name, cp.name);
+            const cls = s === 'done' ? 'done' : s === 'assigned' ? 'assigned' : '';
+            const lbl = s === 'done' ? 'o' : s === 'assigned' ? '•' : '';
+            html += `<td class="cell ${cls}" data-a="${esc(rp.name)}" data-b="${esc(cp.name)}">${lbl}</td>`;
+        });
+        html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+    board.innerHTML = html;
+    board.querySelectorAll('td.cell').forEach(td => {
+        td.addEventListener('click', () => cycle(td.getAttribute('data-a'), td.getAttribute('data-b')));
+    });
+
+    let done = 0, assigned = 0;
+    Object.values(state.trades).forEach(v => { if (v === 'done') done++; else if (v === 'assigned') assigned++; });
+    const full = players.filter(p => taCount(p.name) >= MAX_TA).length;
+    document.getElementById('totals').innerHTML =
+        `Done: <b>${done}</b> · assigned (pending): <b>${assigned}</b> · players at max ${MAX_TA}: <b>${full}</b>/${players.length}`;
+
+    const rounds = computeRounds();
+    const rEl = document.getElementById('rounds');
+    if (!rounds.length) {
+        rEl.innerHTML = assigned === 0 && done === 0
+            ? '<h2>Suggested order</h2><div class="empty">No trades planned yet. Assign partners by clicking cells, or hit <b>Auto-fill to 5</b>.</div>'
+            : '<h2>Suggested order</h2><div class="empty">Nothing pending — all assigned trades are done 🎉</div>';
+        return;
+    }
+    let rh = `<h2>Suggested order — ${rounds.length} round${rounds.length > 1 ? 's' : ''} (each round can be done in parallel)</h2>`;
+    rounds.forEach((rd, i) => {
+        rh += `<div class="round"><div class="rlabel">Round ${i + 1} — ${rd.pairs.length} trade${rd.pairs.length > 1 ? 's' : ''}</div>`;
+        rd.pairs.forEach(([a, b]) => { rh += `<span class="pair">${esc(a)} ↔ ${esc(b)}</span>`; });
+        rh += '</div>';
+    });
+    rEl.innerHTML = rh;
+}
+
+function renderFeasibility() {
+    const el = document.getElementById('feasibility');
+    const bad = infeasiblePlayers();
+    if (!bad.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = 'block';
+    el.innerHTML =
+        `<div class="big">⚠ ${bad.map(esc).join(', ')} CAN NO LONGER GET 5 TAs</div>` +
+        `<div class="sub">The current trades have used up too many slots. Un-assign a trade somewhere (click a cell to clear it) to free things up.</div>`;
+}
+
+function render() { renderFeasibility(); renderProduction(); renderBoard(); }
+
+load();
+</script>
+</body>
+</html>

@@ -851,6 +851,57 @@ export function initScienceTimers() {
     });
 }
 
+// ---------------------------------------------------------------
+// FLEET ARRIVAL COUNTDOWN — /Game/Fleets
+// The "Estimated Arrival" cell shows an absolute local time like "04:28:17 - Jul 16".
+// Append the time REMAINING from now, e.g. " | 26m", " | 4h 28m", " | 2d 1h 30m".
+// Pure client-side, viewer-local (the game already renders the arrival in local time).
+// ---------------------------------------------------------------
+const _FLEET_MONTHS = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+// "04:28:17 - Jul 16" -> a local Date (this year, or next year if it'd otherwise be well past).
+function parseFleetArrival(text) {
+    const m = (text || '').match(/(\d{1,2}):(\d{2}):(\d{2})\s*-\s*([A-Za-z]{3})\s+(\d{1,2})/);
+    if (!m) return null;
+    const mo = _FLEET_MONTHS[m[4].toLowerCase()];
+    if (mo == null) return null;
+    const now = new Date();
+    let d = new Date(now.getFullYear(), mo, +m[5], +m[1], +m[2], +m[3]);
+    if (d.getTime() - now.getTime() < -2 * 86400 * 1000) d = new Date(now.getFullYear() + 1, mo, +m[5], +m[1], +m[2], +m[3]);
+    return d;
+}
+function fmtFleetRemaining(ms) {
+    if (ms <= 0) return 'arrived';
+    let s = Math.floor(ms / 1000);
+    const d = Math.floor(s / 86400); s -= d * 86400;
+    const h = Math.floor(s / 3600); s -= h * 3600;
+    const mn = Math.floor(s / 60);
+    if (d > 0) return `${d}d ${h}h ${mn}m`;
+    if (h > 0) return `${h}h ${mn}m`;
+    return `${mn}m`;
+}
+export function initFleetTimers() {
+    if (!window.location.pathname.toLowerCase().includes('/game/fleets')) return;
+    document.querySelectorAll('td').forEach(td => {
+        // Cache the parsed target on the cell so repeat passes only recompute the text.
+        let ms = td.getAttribute('data-aw-eta-ms');
+        if (ms == null) {
+            const d = parseFleetArrival(td.textContent);
+            if (!d) return;
+            ms = String(d.getTime());
+            td.setAttribute('data-aw-eta-ms', ms);
+        }
+        let span = td.querySelector('.aw-fleet-eta');
+        if (!span) {
+            span = document.createElement('span');
+            span.className = 'aw-fleet-eta';
+            span.style.whiteSpace = 'nowrap';
+            span.innerHTML = ' <span style="color:#fff">|</span> <span class="aw-fleet-eta-t" style="color:#ced4da"></span>';
+            td.appendChild(span);
+        }
+        span.querySelector('.aw-fleet-eta-t').textContent = fmtFleetRemaining(Number(ms) - Date.now());
+    });
+}
+
 (function autoScrapeRankings() {
     if (!window.location.pathname.toLowerCase().includes('/ranking/bestguarded')) return;
 

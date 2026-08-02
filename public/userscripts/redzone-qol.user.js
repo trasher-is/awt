@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Astro Wars Redzone — QoL Timers & Calculators
 // @namespace    https://37.27.17.97.nip.io/userscripts/
-// @version      1.8.0
+// @version      1.9.1
 // @description  Population timer, science/culture research-queue timers, culture level calculator, and an interactive science level calculator for redzone.astrowars.games. Pure client-side — no login, no backend, reads only the current page's own DOM plus the game's own /Info/* tables.
 // @match        *://redzone.astrowars.games/*
 // @updateURL    https://37.27.17.97.nip.io/userscripts/redzone-qol.user.js
@@ -469,6 +469,60 @@
     }
 
     // -----------------------------------------------------------------
+    // FLEET ARRIVAL COUNTDOWN — /Game/Fleets
+    // The "Estimated Arrival" cell shows a local time like "04:28:17 - Jul 16"; append the
+    // remaining time from now (" | 26m", " | 4h 28m", " | 2d 1h 30m"). Viewer-local — the
+    // game already renders arrival in local time. A tiny 30s tick keeps it live without a
+    // reload (only rewrites the handful of injected spans — no DOM re-scan, no fetches).
+    // -----------------------------------------------------------------
+    const _FLEET_MONTHS = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+    let _fleetTickSet = false;
+    function parseFleetArrival(text) {
+        const m = (text || '').match(/(\d{1,2}):(\d{2}):(\d{2})\s*-\s*([A-Za-z]{3})\s+(\d{1,2})/);
+        if (!m) return null;
+        const mo = _FLEET_MONTHS[m[4].toLowerCase()];
+        if (mo == null) return null;
+        const now = new Date();
+        let d = new Date(now.getFullYear(), mo, +m[5], +m[1], +m[2], +m[3]);
+        if (d.getTime() - now.getTime() < -2 * 86400 * 1000) d = new Date(now.getFullYear() + 1, mo, +m[5], +m[1], +m[2], +m[3]);
+        return d;
+    }
+    function fmtFleetRemaining(ms) {
+        if (ms <= 0) return 'arrived';
+        let s = Math.floor(ms / 1000);
+        const d = Math.floor(s / 86400); s -= d * 86400;
+        const h = Math.floor(s / 3600); s -= h * 3600;
+        const mn = Math.floor(s / 60);
+        if (d > 0) return `${d}d ${h}h ${mn}m`;
+        if (h > 0) return `${h}h ${mn}m`;
+        return `${mn}m`;
+    }
+    function updateFleetSpans() {
+        document.querySelectorAll('.aw-fleet-eta').forEach(span => {
+            const ms = Number(span.getAttribute('data-eta-ms'));
+            const t = span.querySelector('.aw-fleet-eta-t');
+            if (ms && t) t.textContent = fmtFleetRemaining(ms - Date.now());
+        });
+    }
+    function initFleetTimers() {
+        if (!window.location.pathname.toLowerCase().includes('/game/fleets')) return;
+        document.querySelectorAll('td').forEach(td => {
+            if (td.querySelector('.aw-fleet-eta')) return;
+            const d = parseFleetArrival(td.textContent);
+            if (!d) return;
+            const span = document.createElement('span');
+            span.className = 'aw-fleet-eta';
+            span.setAttribute('data-eta-ms', String(d.getTime()));
+            span.style.whiteSpace = 'nowrap';
+            span.innerHTML = ' <span style="color:#fff">|</span> <span class="aw-fleet-eta-t" style="color:#ced4da"></span>';
+            td.appendChild(span);
+        });
+        updateFleetSpans();
+        // One lightweight ticker for the life of this page (cleared on the next full reload).
+        if (!_fleetTickSet) { _fleetTickSet = true; setInterval(updateFleetSpans, 30000); }
+    }
+
+    // -----------------------------------------------------------------
     // SYSTEM PLANNER — /Game/Map/SolarSystem/<id>
     // A shared, communal per-planet planning note, injected as an extra "Plan" column in
     // the system table. Everyone who enters the shared password sees and edits the SAME
@@ -603,6 +657,8 @@
         try { await initScienceLevelCalculator(); } catch (e) { }
         await yieldToMain();
         try { initScienceTimers(); } catch (e) { }
+        await yieldToMain();
+        try { initFleetTimers(); } catch (e) { }
         await yieldToMain();
         try { await initSystemPlanner(); } catch (e) { }
     }
