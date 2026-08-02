@@ -178,6 +178,144 @@ router.get('/intel/systems_db', requireAuth, (req, res) => {
     }
 });
 
+// --- GALAXY ARCHIVE MAP ---
+// Everything the map panel draws, in one request.
+//
+// It is deliberately NOT the planets database with a canvas on top. planets_db returns
+// every planet row in the archive and the map needs one summary per system, so building
+// it here keeps a galaxy's worth of rows on this side of the wire instead of shipping
+// megabytes to a browser that would immediately reduce them.
+//
+// ─── WHAT THIS MAP IS, AND WHAT IT IS NOT ─────────────────────────────────────
+// The game already draws a live map, and public/js/core/spy.js already annotates it. This
+// one exists for what that map cannot show: the whole galaxy at once, systems currently
+// out of vision, and ownership as of the last time anybody looked — with the age of that
+// answer visible rather than implied.
+//
+// The two halves of the data have very different coverage, and the panel has to say so:
+//   • coordinates are COMPLETE. galaxy-parser.js reads them from the travel calculator's
+//     system dropdown, which lists every system in the galaxy whether or not it has ever
+//     been scanned.
+//   • contents are whatever has been scanned. A system with no planet rows is not an
+//     empty system, it is an unvisited one, and drawing those two the same way would
+//     turn a gap in our intel into a claim about the galaxy.
+router.get('/intel/galaxy-map', requireAuth, (req, res) => {
+    try {
+        const systems = db.prepare(`
+            SELECT s.id, s.name, s.x, s.y, s.updated_at
+            FROM systems s
+            WHERE s.x IS NOT NULL AND s.y IS NOT NULL
+        `).all();
+
+        // One row per (system, owning alliance). owner_id is NULL for a planet seen to be
+        // unowned, and also for one whose owner has never been scraped — those are counted
+        // separately as `free` and `unknown` rather than merged into "nobody".
+        const ownership = db.prepare(`
+            SELECT p.system_id,
+                   a.id  AS alliance_id,
+                   a.tag AS alliance_tag,
+                   COUNT(*) AS planets,
+                   SUM(CASE WHEN p.owner_id IS NULL OR p.owner_id = 0 THEN 1 ELSE 0 END) AS free_planets,
+                   SUM(CASE WHEN p.is_sieged = 1 THEN 1 ELSE 0 END) AS sieged_planets,
+                   MAX(p.updated_at) AS last_seen
+            FROM planets p
+            LEFT JOIN players u ON p.owner_id = u.id
+            LEFT JOIN alliances a ON u.alliance_id = a.id
+            GROUP BY p.system_id, a.id
+        `).all();
+
+        // The alliance this hub belongs to: the members whose stats have been collected.
+        // alliance_member_stats is what the existing alliance-vision overlay treats as
+        // "us", so the map agrees with it rather than inventing a second definition.
+        const memberIds = db.prepare(`SELECT player_id FROM alliance_member_stats`).all().map(r => r.player_id);
+        const ownTag = memberIds.length
+            ? (db.prepare(`
+                SELECT a.tag, COUNT(*) AS n
+                FROM players p JOIN alliances a ON p.alliance_id = a.id
+                WHERE p.id IN (${memberIds.map(() => '?').join(',')})
+                GROUP BY a.tag ORDER BY n DESC LIMIT 1
+              `).get(...memberIds) || {}).tag || null
+            : null;
+
+        // Observers for the vision layer. Radius is NOT computed here — the rule lives in
+        // public/js/utils/vision-model.js and is applied once, on the client, so the map
+        // and Discord cannot drift apart again.
+        const observers = memberIds.length
+            ? db.prepare(`
+                SELECT p.id AS playerId, p.name, p.biology, p.science_level,
+                       s.id AS originSystemId, s.x, s.y
+                FROM players p
+                JOIN systems s ON p.origin_system = s.id
+                WHERE p.id IN (${memberIds.map(() => '?').join(',')})
+                  AND p.origin_system IS NOT NULL AND p.origin_system > 0
+                  AND s.x IS NOT NULL AND s.y IS NOT NULL
+              `).all(...memberIds)
+            : [];
+
+        const bySystem = new Map();
+        for (const row of ownership) {
+            let entry = bySystem.get(row.system_id);
+            if (!entry) {
+                entry = { known: 0, free: 0, unaligned: 0, sieged: 0, owners: [], lastSeen: null };
+                bySystem.set(row.system_id, entry);
+            }
+            entry.known += row.planets;
+            entry.free += row.free_planets;
+            entry.sieged += row.sieged_planets;
+            if (row.last_seen && (!entry.lastSeen || row.last_seen > entry.lastSeen)) entry.lastSeen = row.last_seen;
+
+            if (row.alliance_id != null) {
+                entry.owners.push({ allianceId: row.alliance_id, tag: row.alliance_tag, planets: row.planets });
+            } else {
+                // No alliance joined: either genuinely unowned, or an owner we have never
+                // scraped. free_planets separates the two.
+                entry.unaligned += row.planets - row.free_planets;
+            }
+        }
+
+        const out = systems.map(s => {
+            const agg = bySystem.get(s.id) || { known: 0, free: 0, unaligned: 0, sieged: 0, owners: [], lastSeen: null };
+            const owners = agg.owners.slice().sort((a, b) => b.planets - a.planets);
+            return {
+                id: s.id,
+                name: s.name,
+                x: s.x,
+                y: s.y,
+                known: agg.known,
+                free: agg.free,
+                unaligned: agg.unaligned,
+                sieged: agg.sieged,
+                owners,
+                // Whoever holds the most planets we know about. Ties break on tag so the
+                // colour of a contested system does not flicker between reloads.
+                top: owners.length
+                    ? owners.filter(o => o.planets === owners[0].planets).sort((a, b) => String(a.tag).localeCompare(String(b.tag)))[0].tag
+                    : null,
+                lastSeen: agg.lastSeen,
+            };
+        });
+
+        res.json({
+            success: true,
+            generatedAt: new Date().toISOString(),
+            ownTag,
+            systems: out,
+            observers,
+            // Said out loud so the panel can label itself honestly instead of the reader
+            // having to infer it.
+            coverage: {
+                systemsKnown: out.length,
+                systemsScanned: out.filter(s => s.known > 0).length,
+                observersPlaced: observers.length,
+                membersTracked: memberIds.length,
+            },
+        });
+    } catch (err) {
+        console.error('[DB Error] Failed to build the galaxy map:', err);
+        res.status(500).json({ error: 'Failed to build the galaxy map' });
+    }
+});
+
 // Get Full Planets Database
 router.get('/intel/planets_db', requireAuth, (req, res) => {
     try {
