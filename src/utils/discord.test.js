@@ -160,7 +160,10 @@ const capture = () => { const out = []; return { out, reply: (t) => { out.push(t
         [fake('intel', 'bio'), '!bio'],
         [fake('intel', 'alliance'), '!intels'],
         [fake('calc', 'distance', { from: '10', to: '20' }), '!dist 10 20'],
-        [fake('calc', 'travel', { from: '10', to: '20', energy: 9, speed: 2 }), '!tt 10 20 9 2'],
+        // The assertion here used to be '!tt 10 20 9 2' — it encoded the bug rather than
+        // catching it. !tt reads sysA planetA sysB planetB speed energy, so that string
+        // put the destination system into planetA and the energy into sysB.
+        [fake('calc', 'travel', { from: '10', from_planet: 1, to: '20', to_planet: 7, speed: 2, energy: 9 }), '!tt 10 1 20 7 2 9'],
         [fake('calc', 'battle', { defender: '1000 0 0', attacker: '0 125 0', starbase: 5 }), '!battle 1000 0 0 vs 0 125 0 --sb 5'],
         [fake('plan', 'add', { system: '137', planet: 4, note: 'hit this' }), '!plan 137 4 hit this'],
         [fake('scan', 'holes'), '!holes'],
@@ -173,6 +176,86 @@ const capture = () => { const out = []; return { out, reply: (t) => { out.push(t
     }
     ok('an unmapped command returns null rather than guessing',
         bot.slashToPrefix(fake('nonsense', 'nope')) === null);
+
+    console.log('\n── /calc travel asks for everything the answer depends on ' + '─'.repeat(18));
+    // Travel time depends on the planet at each end — the formula adds
+    // sqrt(|Δplanet| + 1) to every hop — so a subcommand that only took two systems could
+    // not produce a correct answer even in principle.
+    const travel = cmds.find(c2 => c2.name === 'calc').options.find(o => o.name === 'travel');
+    const optNames = travel.options.map(o => o.name);
+    for (const need of ['from', 'from_planet', 'to', 'to_planet']) {
+        ok(`travel takes ${need}`, optNames.includes(need), optNames);
+    }
+    const required = travel.options.filter(o => o.required).map(o => o.name);
+    ok('all four route arguments are required',
+        ['from', 'from_planet', 'to', 'to_planet'].every(n => required.includes(n)), required);
+    ok('the two systems are still ordered before their planets, matching !tt',
+        optNames.indexOf('from') < optNames.indexOf('from_planet')
+        && optNames.indexOf('from_planet') < optNames.indexOf('to')
+        && optNames.indexOf('to') < optNames.indexOf('to_planet'), optNames);
+
+    const planetOpts = travel.options.filter(o => o.name.endsWith('_planet'));
+    ok('planet indexes are bounded to the 1-12 the game has',
+        planetOpts.every(o => o.min_value === 1 && o.max_value === 12), planetOpts.map(o => [o.min_value, o.max_value]));
+    ok('and they are not autocompleted — twelve numbers in a dropdown is slower than typing one',
+        planetOpts.every(o => !o.autocomplete));
+
+    const playerOpt = travel.options.find(o => o.name === 'player');
+    ok('travel can take stats from a player, the way !tt always could', !!playerOpt);
+    ok('that player field autocompletes', playerOpt && playerOpt.autocomplete === true);
+    ok('and it is optional, because the manual form still exists', playerOpt && !playerOpt.required);
+
+    console.log('\n── ...and hands !tt its arguments in the order it reads them ' + '─'.repeat(15));
+    ok('semi-manual: a player name goes last, replacing the two numbers',
+        bot.slashToPrefix(fake('calc', 'travel', { from: '10', from_planet: 1, to: '20', to_planet: 7, player: 'Elfenlied' }))
+        === '!tt 10 1 20 7 Elfenlied');
+    ok('a player name with spaces stays one argument — !tt joins from the fifth onwards',
+        bot.slashToPrefix(fake('calc', 'travel', { from: '10', from_planet: 1, to: '20', to_planet: 7, player: 'Dark Star' }))
+        === '!tt 10 1 20 7 Dark Star');
+    ok('a player wins over speed and energy rather than producing seven arguments',
+        bot.slashToPrefix(fake('calc', 'travel', { from: '10', from_planet: 1, to: '20', to_planet: 7, player: 'Chewie', speed: 3, energy: 4 }))
+        === '!tt 10 1 20 7 Chewie');
+    // !tt only takes its manual branch when BOTH the fifth and sixth arguments are
+    // numbers. Emitting just one would be read as a player name called "2".
+    ok('speed alone still emits both numbers',
+        bot.slashToPrefix(fake('calc', 'travel', { from: '10', from_planet: 1, to: '20', to_planet: 7, speed: 2 }))
+        === '!tt 10 1 20 7 2 0');
+    ok('energy alone still emits both numbers',
+        bot.slashToPrefix(fake('calc', 'travel', { from: '10', from_planet: 1, to: '20', to_planet: 7, energy: 9 }))
+        === '!tt 10 1 20 7 0 9');
+    ok('neither given falls back to zeros, which is what an unset profile means',
+        bot.slashToPrefix(fake('calc', 'travel', { from: '10', from_planet: 1, to: '20', to_planet: 7 }))
+        === '!tt 10 1 20 7 0 0');
+    ok('a negative race speed survives, since -4..4 is the real range',
+        bot.slashToPrefix(fake('calc', 'travel', { from: '10', from_planet: 1, to: '20', to_planet: 7, speed: -3, energy: 0 }))
+        === '!tt 10 1 20 7 -3 0');
+
+    // What !tt itself requires, asserted against its own usage rules rather than trusted.
+    for (const [label, opts] of [
+        ['manual', { from: '10', from_planet: 1, to: '20', to_planet: 7, speed: 2, energy: 9 }],
+        ['semi-manual', { from: '10', from_planet: 1, to: '20', to_planet: 7, player: 'Chewie' }],
+    ]) {
+        const emitted = bot.slashToPrefix(fake('calc', 'travel', opts));
+        const args = emitted.slice(1).trim().split(/ +/).slice(1);   // strip "!tt"
+        ok(`${label}: passes !tt's own arity check (>= 5 arguments)`, args.length >= 5, args);
+        ok(`${label}: the first four parse as numbers, as !tt requires`,
+            args.slice(0, 4).every(a => Number.isInteger(parseInt(a, 10))), args.slice(0, 4));
+    }
+
+    console.log('\n── Autocomplete answers the right list ' + '─'.repeat(37));
+    // The router used to match option names by substring: /system|from|to/ would have
+    // claimed "to_planet" the moment one existed and offered solar systems for a planet
+    // index.
+    ok('system-valued option names are matched exactly, not by substring',
+        bot.SYSTEM_OPTION_NAMES.has('to') && !bot.SYSTEM_OPTION_NAMES.has('to_planet'));
+    const autocompletedNames = new Set(cmds.flatMap(c2 =>
+        (c2.options || []).flatMap(o => (o.options || []).filter(x => x.autocomplete).map(x => x.name))));
+    for (const name of bot.SYSTEM_OPTION_NAMES) {
+        ok(`"${name}" is an option the command tree actually declares`, autocompletedNames.has(name), [...autocompletedNames]);
+    }
+    const playerish = [...autocompletedNames].filter(n => !bot.SYSTEM_OPTION_NAMES.has(n));
+    ok('every other autocompleted option is a player field, so the fallback is correct',
+        playerish.every(n => /player/.test(n)), playerish);
 
     // cleanup
     db.exec(`DELETE FROM discord_timers WHERE discord_user_id LIKE 'test-%'`);

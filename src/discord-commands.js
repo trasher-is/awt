@@ -81,6 +81,12 @@ const playerOption = (o, name = 'player', desc = 'Player name') =>
     o.setName(name).setDescription(desc).setAutocomplete(true).setRequired(true);
 const systemOption = (o, name = 'system', desc = 'Solar system') =>
     o.setName(name).setDescription(desc).setAutocomplete(true).setRequired(true);
+// Planet indexes are 1-12 in game. Deliberately NOT autocompleted: twelve numbers in a
+// dropdown is slower to use than typing one, and an autocompleted option would be routed
+// by name in the interaction handler, where "to_planet" would have to be told apart from
+// "to".
+const planetOption = (o, name = 'planet', desc = 'Planet index (1-12)') =>
+    o.setName(name).setDescription(desc).setRequired(true).setMinValue(1).setMaxValue(12);
 
 // The command tree. Every leaf maps to the same code the ! prefix reaches.
 function buildCommands() {
@@ -98,11 +104,23 @@ function buildCommands() {
         new SlashCommandBuilder()
             .setName('calc')
             .setDescription('Travel, battle and distance calculators')
-            .addSubcommand(s => s.setName('travel').setDescription('Travel time between two systems')
+            // Travel time depends on the PLANET at each end, not just the system: the
+            // formula adds sqrt(|Δplanet| + 1) to every hop, so the same two systems give
+            // different answers for planet 1 -> 1 and planet 1 -> 12. This subcommand used
+            // to take only the two systems, which made every answer it gave wrong except
+            // by accident. Both planet indexes are required for the same reason the prefix
+            // command requires them.
+            .addSubcommand(s => s.setName('travel').setDescription('Travel time between two planets')
                 .addStringOption(o => systemOption(o, 'from', 'Origin system'))
+                .addIntegerOption(o => planetOption(o, 'from_planet', 'Origin planet index (1-12)'))
                 .addStringOption(o => systemOption(o, 'to', 'Destination system'))
-                .addIntegerOption(o => o.setName('energy').setDescription('Energy level').setMinValue(0).setMaxValue(100))
-                .addIntegerOption(o => o.setName('speed').setDescription('Race speed (-4..4)').setMinValue(-4).setMaxValue(4)))
+                .addIntegerOption(o => planetOption(o, 'to_planet', 'Destination planet index (1-12)'))
+                // Either name a player and take their stats from the archive, or give the
+                // two numbers. `!tt` has offered both since it was written; the slash
+                // command offered neither properly.
+                .addStringOption(o => o.setName('player').setDescription('Take speed and energy from this player').setAutocomplete(true))
+                .addIntegerOption(o => o.setName('speed').setDescription('Race speed (-4..4) — ignored if a player is given').setMinValue(-4).setMaxValue(4))
+                .addIntegerOption(o => o.setName('energy').setDescription('Energy level — ignored if a player is given').setMinValue(0).setMaxValue(100)))
             .addSubcommand(s => s.setName('battle').setDescription('Battle estimate')
                 .addStringOption(o => o.setName('defender').setDescription('Defender fleet as "D C B", e.g. "1000 0 0"').setRequired(true))
                 .addStringOption(o => o.setName('attacker').setDescription('Attacker fleet as "D C B"').setRequired(true))
