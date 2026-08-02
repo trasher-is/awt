@@ -70,20 +70,33 @@ In production it runs under pm2. Two settings matter there:
 npm test
 ```
 
-Runs the travel-time harness, which checks the formula in `src/utils/travel-calc.js`
-against timings recorded in the game and fails if the worst error exceeds 2%.
+Runs every suite in `src/utils/*.test.js` — they are discovered, not listed, so adding one
+is a single new file. Among them: the travel-time and battle harnesses check the formulas
+against timings and outcomes recorded in the game, and several suites assert on source
+patterns rather than behaviour (that the rate limiter is actually called, that a rule
+exists in only one place).
 
 ## Notes for anyone working on this
 
-- **Scrapers are tied to the game's HTML.** They match on column positions and English
-  label text. If the game changes its markup — or a member plays with a different
-  interface language — parsing can return empty or shifted values *without raising an
-  error*. That is the first place to look when data goes wrong.
-- **Some formulas exist in more than one copy.** `src/utils/travel-calc.js` is mirrored
-  by hand in `public/js/ui/travel-calc-ui.js`, and the battle constants in
-  `src/utils/battle.js` are duplicated in `public/js/ui/battle-calc.js` and again inside
-  the `!battle` command. Recalibrating one does not update the others.
+**Working on this repository with a coding agent, or alongside other people? Read
+[`AGENTS.md`](AGENTS.md) first.** It covers the things that are expensive to rediscover:
+the two JavaScript realms, the dual-runtime modules in `public/js/utils/`, the merge
+discipline, and the rules that exist because of agreements outside this codebase.
+
+- **Scrapers are tied to the game's HTML.** If the game changes its markup — or a member
+  plays with a different interface language — parsing can return empty or shifted values.
+  `public/js/utils/scrape-report.js` exists so that fails loudly instead of writing zeroes,
+  and scrapers address elements structurally (header text, `href` shape, element ids)
+  rather than by column position. This is still the first place to look when data goes
+  wrong.
+- **The formulas have one copy each.** Travel time lives in `public/js/utils/travel-model.js`
+  and the battle model in `public/js/utils/battle-model.js`; the server, the Discord bot,
+  the dashboard and the tests all load the same file. They used to be duplicated by hand,
+  and the copies had drifted apart.
 - **The battle model is fitted, not derived.** Its constants were tuned against samples
-  from the in-game calculator and it is accurate to roughly ±3%. There is no test for it.
-- `awt.db`, `.env`, `.session-secret` and `config.json` are gitignored and should stay
-  that way.
+  from the in-game calculator. `src/utils/battle-calc.test.js` holds it to the recorded
+  outcomes and the UI presents its answers as a band rather than a single number.
+- **Five requests per second to the game is an agreement with its administrator**, not a
+  tuning knob. See `public/js/utils/game-rate-limit.js`.
+- `awt.db`, `sessions.db`, `.env`, `.session-secret` and `config.json` are gitignored and
+  should stay that way.
