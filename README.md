@@ -64,6 +64,34 @@ In production it runs under pm2. Two settings matter there:
 - `TRUST_PROXY=1` when behind nginx/Caddy/Cloudflare, so the real client IP is seen
 - `COOKIE_SECURE=false` only if the hub is served over plain HTTP
 
+### Behind a reverse proxy
+
+If something else terminates TLS in front of the hub, it **must forward the original
+protocol**. Without it the app cannot tell the request arrived over HTTPS, so the session
+cookie loses its `Secure` flag — and if you also set `COOKIE_SECURE=true`, no cookie is
+sent at all and **nobody can log in** (people already holding a cookie stay logged in, so
+it shows up as "after logging out I can't get back in"). The app warns once on startup
+traffic when it spots this, naming the missing header.
+
+nginx — inside the `location / { … }` that proxies to the app:
+
+```nginx
+proxy_pass http://localhost:3000;
+proxy_set_header Host              $host;
+proxy_set_header X-Real-IP         $remote_addr;
+proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;   # <- the one that is easy to forget
+```
+
+Then `nginx -t && systemctl reload nginx`.
+
+Caddy and Traefik set `X-Forwarded-*` themselves — nothing to do. For Apache use
+`ProxyPreserveHost On` plus `RequestHeader set X-Forwarded-Proto https`. Behind Cloudflare
+the header arrives already set, but keep `TRUST_PROXY=1` so the real client IP is used.
+
+Serving the hub over plain HTTP is supported (`COOKIE_SECURE=false`), it just means the
+session cookie is not marked `Secure`.
+
 ## Tests
 
 ```bash

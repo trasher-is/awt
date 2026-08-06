@@ -100,11 +100,24 @@ app.get('/ta', (req, res) => res.sendFile(path.join(__dirname, 'public', 'rz-ta.
 // /hub-api/admin/logs. It now lives in src/routes/admin.js behind requireAdmin.
 
 // --- 1. SESSIONS & SECURITY ---
-// Cookies are sent over HTTPS in production. Plain-HTTP local dev would never receive
-// them back with Secure set, so it is opt-out via COOKIE_SECURE=false / NODE_ENV.
+// Session cookie Secure flag. Default 'auto': express-session sets Secure only when
+// Express believes the request arrived over TLS (req.secure), which behind a proxy means
+// `trust proxy` is on AND the proxy sent X-Forwarded-Proto.
+//
+// This used to default to a hard `true`, which failed in the worst possible way: if the
+// reverse proxy did not send X-Forwarded-Proto, Express saw the proxy->app hop as plain
+// HTTP, express-session silently refused to set a Secure cookie, and EVERY login failed
+// with no error anywhere. Anyone already holding a cookie stayed logged in, so it looked
+// like "after logging out nobody can log back in" — see checkProxyHeaders() below, which
+// now names the missing header instead of leaving people to guess.
+//
+// 'auto' keeps the Secure flag whenever TLS is detectable and degrades to a working
+// (non-Secure) cookie when it is not, so a self-hosted instance behind a misconfigured
+// proxy is usable rather than locked out. COOKIE_SECURE=true forces it on regardless
+// (correct once the header is in place), COOKIE_SECURE=false forces it off.
 const COOKIE_SECURE = process.env.COOKIE_SECURE !== undefined
     ? process.env.COOKIE_SECURE === 'true'
-    : process.env.NODE_ENV !== 'development';
+    : 'auto';
 
 // Sessions used to live in awt.db alongside the intel. A galaxy sync writes thousands of
 // rows in one transaction and holds the write lock for its duration, and connect-sqlite3
@@ -139,6 +152,35 @@ app.use(session({
         secure: COOKIE_SECURE
     }
 }));
+
+// Reverse-proxy sanity check, once, on the first real request. A proxy that terminates
+// TLS but forwards neither X-Forwarded-Proto nor X-Forwarded-For leaves the app blind:
+// session cookies lose their Secure flag and the rate limiters bucket everyone under the
+// proxy's IP. Both are silent, so say it out loud with the fix attached.
+const proxyCheck = { done: false };
+function checkProxyHeaders(req) {
+    if (proxyCheck.done) return;
+    if (!app.get('trust proxy')) return;            // direct exposure: these headers are not expected
+    if (req.headers['x-forwarded-proto']) { proxyCheck.done = true; return; }  // configured correctly
+
+    // Do NOT judge by req.socket.remoteAddress: a reverse proxy on the same box connects
+    // from 127.0.0.1, so treating loopback as "local traffic" would silence this warning in
+    // precisely the deployment it exists to catch. Decide from the request instead — a
+    // forwarded-for header, or a real hostname, both mean something is proxying us.
+    const host = String(req.headers.host || '').toLowerCase();
+    const looksLocal = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host);
+    if (!req.headers['x-forwarded-for'] && looksLocal) return; // plain local dev, stay quiet
+
+    proxyCheck.done = true;
+    console.warn(
+        '[Core] Reverse proxy is not sending X-Forwarded-Proto.\n' +
+        '       Session cookies cannot be marked Secure, and TLS cannot be detected.\n' +
+        '       nginx:  proxy_set_header X-Forwarded-Proto $scheme;   (then: nginx -t && systemctl reload nginx)\n' +
+        '       Caddy/Traefik send it by default. Apache: ProxyPreserveHost On + RequestHeader set X-Forwarded-Proto https\n' +
+        '       If the hub really is served over plain HTTP, set COOKIE_SECURE=false to silence this.'
+    );
+}
+app.use((req, res, next) => { try { checkProxyHeaders(req); } catch (err) { /* never block a request */ } next(); });
 
 app.use(express.static(path.join(__dirname, 'public'), {
     setHeaders: (res, filePath) => {
