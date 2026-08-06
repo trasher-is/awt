@@ -148,7 +148,10 @@ router.post('/sync/system', requireAuth, (req, res) => {
 
             // Standard Upsert (Skip structural updates for players/alliances if we can't see them clearly)
             if (p.owner && !p.is_unknown) {
-                if (p.owner.alliance_id) upsertAlliance.run(p.owner.alliance_id, p.owner.alliance_tag, p.owner.alliance_tag);
+                // A system scan only ever sees the tag, so it seeds `name` from the tag and
+                // leaves name alone on conflict (the alliance-profile sync owns the real
+                // name). `?? ''` because alliances.name is NOT NULL and a tag can be absent.
+                if (p.owner.alliance_id) upsertAlliance.run(p.owner.alliance_id, p.owner.alliance_tag ?? null, p.owner.alliance_tag ?? '');
                 upsertPlayer.run(p.owner.id, p.owner.name, p.owner.alliance_id || null);
             }
 
@@ -293,7 +296,10 @@ router.post('/sync/player', requireAuth, (req, res) => {
         }
 
         if (player.alliance_id) {
-            db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET tag=excluded.tag`).run(player.alliance_id, player.alliance_tag, player.alliance_tag);
+            // As in the system scan above: seed name from the tag, `?? ''` because
+            // alliances.name is NOT NULL and the tag may be missing.
+            db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET tag=excluded.tag`)
+                .run(player.alliance_id, player.alliance_tag ?? null, player.alliance_tag ?? '');
         }
 
         db.prepare(`
@@ -366,9 +372,26 @@ router.post('/sync/player', requireAuth, (req, res) => {
 
 // --- ALLIANCE PROFILE SCRAPER RECEIVER ---
 router.post('/sync/alliance', requireAuth, (req, res) => {
-    const ally = req.body;
+    const body = req.body;
 
-    if (!ally || !ally.id) return res.status(400).json({ error: 'Invalid alliance payload' });
+    if (!body || !body.id) return res.status(400).json({ error: 'Invalid alliance payload' });
+
+    // Normalise before touching SQL. Two reasons:
+    //   • The game allows an alliance with NO name (only a tag) — e.g. ZiK, PUNX. The
+    //     parser sends name:null for those, and alliances.name is NOT NULL, so the upsert
+    //     died with "NOT NULL constraint failed: alliances.name" on every scan of them.
+    //     Nameless alliances are stored as '' (which is what the existing rows use).
+    //   • The row was passed straight to a named-parameter statement, so a payload missing
+    //     any single field threw "Missing named parameter" instead of syncing.
+    const ally = {
+        id: body.id,
+        name: body.name == null ? '' : String(body.name),
+        tag: body.tag == null ? null : String(body.tag),
+        leader_id: body.leader_id ?? null,
+        ranking: body.ranking ?? null,
+        points: body.points ?? null,
+        members: body.members
+    };
 
     console.log(`\n[API] Incoming profile sync for Alliance ID: ${ally.id} (${ally.tag})`);
 
