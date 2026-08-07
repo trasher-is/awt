@@ -11,7 +11,8 @@ import {
     openTradeAgreementsPanel,
     openBattleCalcPanel,
     openTravelCalcPanel,
-    openRoutePlannerPanel
+    openRoutePlannerPanel,
+    openBuildOrderPanel
 } from './archives.js';
 import { runMassScan, runPlayerScan } from '../scrapers/mass-scanner.js';
 import { initNotes, toggleNotesPanel } from './notes.js';
@@ -53,6 +54,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('open-battle-calc-btn')?.addEventListener('click', openBattleCalcPanel);
     document.getElementById('open-travel-calc-btn')?.addEventListener('click', openTravelCalcPanel);
     document.getElementById('open-route-planner-btn')?.addEventListener('click', openRoutePlannerPanel);
+    document.getElementById('open-build-order-btn')?.addEventListener('click', openBuildOrderPanel);
     // Loaded on demand: the map pulls a canvas renderer nobody needs until they ask for it.
     document.getElementById('open-galaxy-map-btn')?.addEventListener('click', async () => {
         const { openGalaxyMapPanel } = await import('./galaxy-map.js');

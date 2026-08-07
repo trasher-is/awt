@@ -15,7 +15,7 @@ let rawDbFleets = [], fltDbSortCol = 'cv', fltDbSortAsc = false;
 let rawDbAllyStats = [], allyStatsSortCol = 'player_id', allyStatsSortAsc = true;
 
 function closeOtherPanels(exceptId) {
-    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'battle-calc-panel', 'travel-calc-panel', 'route-planner-panel', 'galaxy-map-panel'].forEach(id => {
+    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'battle-calc-panel', 'travel-calc-panel', 'route-planner-panel', 'galaxy-map-panel', 'build-order-panel'].forEach(id => {
         if (id !== exceptId) document.getElementById(id)?.classList.replace('translate-x-0', 'translate-x-full');
     });
 }
@@ -278,18 +278,26 @@ async function loadWarRoomMatrixData() {
             const trMult = 1 + (p.trade_revenue || 0) / 100;
             const estimatedProd = base * raceMult * trMult * artifactProdMultiplier(p.artefact);
             const dailyPP = estimatedProd * 24;
-            const costFor3CV = 30 - Math.floor(eco * 0.3);
-            const cvDay = costFor3CV > 0 ? Math.floor((dailyPP / costFor3CV) * 3) : 0;
-            const maxCv = pop * (social + 3) * 10;
+            // A destroyer is 3 CV. The game's economy table (docs/game-rules.md) ends at
+            // economy 97 = 1 PP and levels 98-100 stay there, so clamp at 1: the bare
+            // subtraction hit zero at economy 100 and the guard below then reported 0 CV/day
+            // for the strongest economies in the game.
+            const costFor3CV = Math.max(1, 30 - Math.floor(eco * 0.3));
+            const cvDay = Math.floor((dailyPP / costFor3CV) * 3);
+            // MaxCombatValue = Σpopulation × (social + 3) × 11. The factor is 11, not 10.
+            const maxCv = pop * (social + 3) * 11;
             const idleSecs = parseIdleStringToSeconds(p.idle_time);
 
             // ~Science/h = (labs + population) base, scaled by the race science trait
             // and trade revenue %, mirroring the production formula.
-            //   race_science: -4..+4, each step = 4%  ->  1 + race_science*0.04
+            //   race_science: -4..+4, each step = 8%  ->  1 + race_science*0.08
             //   trade_revenue: stored as % (e.g. 49 = +49%)  ->  1 + tr/100
+            // The science trait is 8% per point, NOT the 4% that production uses — this
+            // column copied production's rate for months and understated a +4 science race
+            // by 16%. Confirmed against the build-order simulator's mechanics 2026-08-07.
             const labs = p.total_labs || 0;
             const sciBase = labs + pop;
-            const sciMult = 1 + (p.race_science || 0) * 0.04;
+            const sciMult = 1 + (p.race_science || 0) * 0.08;
             const estimatedScience = sciBase * sciMult * trMult;
 
             return { ...p, calculated_prod: estimatedProd, calculated_science: estimatedScience, cv_day: cvDay, max_cv: maxCv, idle_seconds: idleSecs };
@@ -1174,6 +1182,21 @@ export async function openTravelCalcPanel() {
     }
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
     closeOtherPanels('travel-calc-panel');
+    panel.classList.replace('translate-x-full', 'translate-x-0');
+    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
+}
+
+export async function openBuildOrderPanel() {
+    let panel = document.getElementById('build-order-panel');
+    if (!panel) {
+        const res = await fetch('/hub-assets/components/build-order.html');
+        document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
+        panel = document.getElementById('build-order-panel');
+        const { initBuildOrder } = await import('./build-order.js');
+        initBuildOrder();
+    }
+    if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
+    closeOtherPanels('build-order-panel');
     panel.classList.replace('translate-x-full', 'translate-x-0');
     if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
 }

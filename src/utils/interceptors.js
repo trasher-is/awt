@@ -19,9 +19,19 @@ const cleanInt = parseLocaleInt;
 // D*3 + C*24 + B*60.
 const { cvOf, SHIPS } = require('./battle');
 
-// Cost per CV in production points at a given economy level: destroyer = 3 CV for
-// round(30 * 0.99^eco) PP  ->  cost_per_CV = 10 * 0.99^eco.
-const costPerCv = (economy) => 10 * Math.pow(0.99, economy || 0);
+// Cost per CV in production points at a given economy level. A destroyer is 3 CV and costs
+// max(1, 30 - floor(eco * 0.3)) PP, so cost_per_CV is that over three.
+//
+// This was `10 * 0.99^eco` — an exponential curve that happens to agree near economy 0 and
+// then diverges badly: it matched only 6 of the 30 rows of the game's own economy table
+// (docs/game-rules.md), overcharging by 124% at economy 80 and 1000% at 97. Because this
+// number decides how much a defender can build, it was hiding more than half their
+// buildable CV in the incoming alerts. The linear form below matches all 30 rows exactly.
+//
+// The clamp matters: the table ends at economy 97 = 1 PP, and 98-100 stay there rather than
+// reaching 0. Without it, economy 100 divides by zero.
+const destroyerCost = (economy) => Math.max(1, 30 - Math.floor((economy || 0) * 0.3));
+const costPerCv = (economy) => destroyerCost(economy) / 3;
 
 function getPpPrice() {
     try {
