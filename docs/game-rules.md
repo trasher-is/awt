@@ -22,6 +22,7 @@ Levels not listed in a table are levels the game does not show; where a table sk
 - [Supply units](#supply-units)
 - [Culture and planet slots](#culture-and-planet-slots)
 - [Science](#science)
+- [Science fields — effects](#science-fields--effects)
 - [Social (population cap)](#social-population-cap)
 - [Economy (ship costs)](#economy-ship-costs)
 - [Starbase](#starbase)
@@ -602,6 +603,42 @@ it, so the pre-bonus base is `rate ÷ (1 + bonus)`.
 | 98 | 10,768,612 | 120,375,707 |
 | 99 | 11,825,379 | 132,201,086 |
 | 100 | 12,985,836 | 145,186,922 |
+
+## Science fields — effects
+
+Each of the six science fields does something different besides its raw growth rate:
+
+- **Biology** — increases vision range on the map (1 square per level, `VisionFactor = 1`;
+  see [Fleet and combat notes](#fleet-and-combat-notes) for the ≥6-level intel-report rule).
+  Fleets can only be sent to systems currently visible on the map. **At level 25**, fleets can
+  be sent by System ID directly instead of needing the system's name.
+- **Economy** — reduces ship construction cost (see [Economy (ship costs)](#economy-ship-costs)
+  for the exact curve and the 8×/20× destroyer-cruiser-battleship ratio, and
+  [Economy bonus](#economy-bonus) for the join-cohort +5%).
+- **Energy** — reduces fleet travel time. Each level is **91% of the previous level's time**
+  (`0.91^energy`), and this only applies **at launch** — fleets already in flight don't
+  benefit until they land and launch again. Landing on a planet you or an ally controls
+  **always halves** the flight time. (Matches `public/js/utils/travel-model.js` exactly —
+  `ENERGY_BASE = 0.91`, alliance/own-destination ×0.5.)
+- **Mathematics** — reduces combat losses (more survivors). **Level 12** lets you manually
+  choose any energy level from 1 up to your max at launch, instead of always launching at
+  max energy. **Level 15** is required to build Cruisers.
+  > The old help text claims a flat **25%** survivor bonus/malus once the mathematics gap
+  > between two players reaches 6 levels (plus a smaller, unlisted bonus below that gap).
+  > `public/js/utils/battle-model.js` instead uses a **12.5%** toughness multiplier
+  > (`MATH_BRACKET = 0.125`) fitted against real battle-fixture data — see
+  > `docs/battle-model.md`. Treat the fitted 12.5% as authoritative; the 25% in the old help
+  > text may describe an earlier, unrebalanced version of the mechanic.
+- **Physics** — increases win chance. **Level 15** is required to build Battleships. The old
+  help text claims a flat **25%** win-chance bonus at a 6-level physics gap; the calibrated
+  model in `battle-model.js` (`WIN_PHYS_BASE6`/`WIN_PHYS_SLOPE`) uses a logit-space term
+  fitted to real outcomes rather than a flat linear percentage — same caveat as Mathematics
+  above, don't treat "25%" as literal.
+- **Social** — raises the population cap per planet (see the table below). If a Hydroponic
+  Farm shows **+0 growth**, the planet has hit its population cap and needs a higher Social
+  level to grow further. **Spontaneous growth**: at the 00:00 CET daily update, if any of
+  your planets sits 6+ population levels below your Social level, one such planet is chosen
+  at random and instantly gains **+1 population level** for free.
 
 ## Social (population cap)
 
