@@ -27,7 +27,11 @@ Levels not listed in a table are levels the game does not show; where a table sk
 - [Trade agreements](#trade-agreements)
 - [Max Combat Value](#max-combat-value)
 - [Spending production points](#spending-production-points)
+- [Buying production points](#buying-production-points)
+- [Colonizing and conquering](#colonizing-and-conquering)
+- [Fleet and combat notes](#fleet-and-combat-notes)
 - [Score](#score)
+- [Win conditions](#win-conditions)
 - [Alliance ranking and points](#alliance-ranking-and-points)
 - [Player level](#player-level)
 
@@ -733,6 +737,10 @@ the end of a round, so treat them as relative rather than current.
 - Cost **20,000 A$**, paid by **both** sides — to send and to accept.
 - **Maximum 5** trade agreements per player.
 - The **trader race** pick can accept for free, but pays for it with **-6 race points**.
+- New trade agreements are only **accepted at four fixed times a day: 00:00, 06:00, 12:00,
+  18:00 CET/CEST** — not immediately on request.
+- The **trade rate (TR%) bonus recalculates every 5 minutes**, independent of the 6-hourly
+  acceptance cycle.
 
 > The redzone server uses a different price (**120,000**) — see the trade-agreement planner
 > at `/ta`, which is redzone-only.
@@ -762,6 +770,61 @@ you meet all of:
 **Note:** when selling PP for astro dollars, only **70%** of the PP on a **sieged** planet is
 converted — the rest is lost.
 
+## Buying production points
+
+Astro dollars buy production points only on your **main planet** — the planet with the
+**highest population** (populations compare to 2 decimal places; all planets are ranked by
+this).
+
+If your main planet is under siege, the next-highest-population planet becomes purchasable
+instead, but every already-sieged planet ranked above it in the list stacks a **5% penalty**
+on the amount of PP bought.
+
+Example: 5 planets ranked by population — 6, 5, 5, 4, 2. Buying 1,000 A$ of PP at a 1:1 price
+normally gets you 1,000 PP on the 6-pop planet. If that planet and the first 5-pop planet are
+both sieged, buying now happens on the second 5-pop planet, discounted 5% per sieged planet
+above it: 1,000 × 0.95 × 0.95 = 902.5, i.e. **902 PP**. The 4-pop and 2-pop planets are never
+eligible regardless of siege status — buying requires **population 5+**.
+
+## Colonizing and conquering
+
+Unknown (unowned) planets have two sources:
+
+- A player who **resigns** — all of their planets become Unknown and their fleet vanishes.
+  Any starbase they had **keeps its level**. Any production points left on the planet can
+  still be captured (see below) — but there are **no more artifacts** to be found on Unknown
+  planets; that was true only in a much older version of the game.
+- **Culture pressure**: the game spawns 3 new planets whenever the galaxy's colonized-planet
+  ratio crosses `CultureRatioSpawning = 0.85` (e.g. crossing from 850/1000 to 851/1000
+  colonized). **One of the three** spawned planets is Unknown, with **starbase level 2** and
+  **0 PP**.
+
+When you capture an Unknown planet that has leftover production points (from a resigned
+player), you keep **75% of the PP, up to a maximum of 750 PP**.
+
+> Still to confirm: whether colonizing a solo/Unknown-owned planet vs. conquering one from an
+> active enemy gives different starting buildings (e.g. a flat 4/4/4/4 vs. percentage combat
+> damage to existing buildings) — not documented here until verified.
+
+Colonizing (and disbanding a colony ship in general) is **not automatic on arrival** — the
+player must tick a confirmation checkbox for it to happen.
+
+## Fleet and combat notes
+
+- **Colony ships and transports have 0 combat value but a defense value of 2.** This doesn't
+  affect real (CV-based) battles, but it matters for **empty-fleet standoffs**: if only colony
+  ships/transports are landing on a planet where colony ships/transports are already sitting,
+  the ones already there **always win and kill the landing ones**.
+- The ETA calculator shows a flight as **"pending" for 2 minutes** after it's ordered (not up
+  to one minute, as the old help text says).
+- **Battle survivors are shown as a fraction**, and the fractional part is a **survival
+  chance**, not a rounding artifact: e.g. "10.7 destroyers survived" means 10 definitely
+  survived and an 11th has a 70% chance of having survived.
+- **Biology grants intel visibility**: if your biology level is **6 or more higher** than
+  another player's, you can see their full intel — race picks, sciences, trade rate %,
+  artifacts. Below that gap you see nothing about them, **unless you're in the same alliance**,
+  in which case you always see everything regardless of biology.
+
 ## Score
 
 Score is recalculated each daily update from population, player level and science levels.
@@ -780,6 +843,12 @@ three science levels above 20 — total `7 + 3 + 3 = 13` points.
 | Each Population level above 30 | 3 |
 | Each Player Level | 1 |
 | Each Science Level above 20 | 1 |
+
+## Win conditions
+
+- A **player** wins by reaching or exceeding **400 points for a total of 5 days**.
+- An **alliance** wins by reaching or exceeding **300 average alliance points for a total of
+  3 days**, with a minimum of **3 members**.
 
 ## Alliance ranking and points
 
@@ -897,4 +966,18 @@ Experience needed per player level; **aggregated** is the running total.
 | 97 | 35,328 | 1,227,419 |
 | 98 | 36,013 | 1,263,432 |
 | 99 | 36,704 | 1,300,136 |
+
+### Full XP from combat
+
+Winning a battle only pays out full XP if you had **at least 1 starbase and at least 1
+surviving ship** in the fight — otherwise XP is reduced to **25%**.
+
+### Autogrowth (unverified — needs a thorough check)
+
+Speed/attack/defence race picks are believed to also add a small daily player-level XP
+growth rate, separate from their direct combat/travel effect, and the default race (no picks)
+is believed to have a baseline daily growth rate too. awt already calculates and injects an
+autogrowth number into player profiles, but the user isn't confident it's accurate — **do not
+treat the current implementation's numbers as confirmed** until this is checked against real
+data.
 | 100 | 36,704 | 1,336,840 |
