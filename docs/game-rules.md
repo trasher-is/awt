@@ -25,6 +25,7 @@ Levels not listed in a table are levels the game does not show; where a table sk
 - [Science fields — effects](#science-fields--effects)
 - [Social (population cap)](#social-population-cap)
 - [Economy (ship costs)](#economy-ship-costs)
+- [Ship types](#ship-types)
 - [Starbase](#starbase)
 - [Artifacts](#artifacts)
 - [Alliance](#alliance)
@@ -50,15 +51,15 @@ game's own trait descriptions; speed/attack/defence are very likely the same ran
 has not been separately confirmed). **All picks must sum to exactly 0** — the creation
 screen enforces this directly, so a bonus anywhere is a malus somewhere else.
 
-| Trait | %/point |
-|---|---|
-| Growth | 8% |
-| Science | 8% |
-| Culture | 4% |
-| Production | 4% |
-| Speed | 11% |
-| Attack | 7% |
-| Defence | 11% |
+| Trait | %/point | Affects |
+|---|---|---|
+| Growth | 8% | Population growth |
+| Science | 8% | Science growth |
+| Culture | 4% | Culture growth |
+| Production | 4% | Production points/hour |
+| Speed | 11% | Fleet travel time |
+| Attack | 7% | Battles — win chance |
+| Defence | 11% | Battles — survivors |
 
 Two additional picks are one-time toggles rather than a scalable stat — each has a fixed
 point **cost** that must be offset by the seven traits above summing correspondingly
@@ -721,6 +722,36 @@ The prices below are matched exactly by:
 | 90 | 3 | 24 | 60 |
 | 94 | 2 | 16 | 40 |
 | 97 | 1 | 8 | 20 |
+
+## Ship types
+
+Attack/defence/CV values, from `public/js/utils/battle-model.js`:
+
+| Ship | Attack | Defence | Combat value |
+|---|---|---|---|
+| Destroyer | 2 | 1 | 3 |
+| Cruiser | 8 | 16 | 24 |
+| Battleship | 36 | 24 | 60 |
+
+> Battleship attack/defence still needs a check against the in-game Battle Calculator to
+> confirm the 36/24 figures above.
+
+**Transports** and **Colony Ships** both have **0 combat value**, a **defence of 2** (see
+[Fleet and combat notes](#fleet-and-combat-notes)), and cost **60 PP** each — a flat cost, not
+scaled by economy like the three combat ships above.
+
+- **Transports** capture/conquer a planet that already has population (owned by another
+  player, or Unknown with leftover population) — you need at least as many transports as
+  the target's population level. They're also used to pop-kill/bomb a planet: e.g. sending
+  20 transports against a planet with 10 population kills all 10 population. Building
+  damage from a pop-kill is random and scales with how much PP was spent on the transports
+  used in the attack.
+- **Colony ships** found new colonies. Sending exactly **1 CS** colonizes a free planet with
+  **0 buildings and 0 PP**. Sending **more than 1** uses one CS to colonize and the rest
+  **disband into PP**, at a rate of **15 PP per extra CS**: 2 CS colonizes but the 1 extra CS
+  does *not* disband (still 0 PP) — you need at least **3 CS** to get any starting PP (1 to
+  colonize + 2 that disband = 30 PP), 4 CS gives 45 PP, and so on. You can also colonize with
+  1 CS first and send more CS afterward — those later ones still disband into PP on arrival.
 
 ## Starbase
 
