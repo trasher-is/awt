@@ -15,15 +15,18 @@ Levels not listed in a table are levels the game does not show; where a table sk
 ## Contents
 
 - [Race picks](#race-picks)
+- [Bonuses stack multiplicatively](#bonuses-stack-multiplicatively-not-additively)
 - [Population growth](#population-growth)
 - [Production](#production)
 - [Buildings](#buildings)
+- [Supply units](#supply-units)
 - [Culture and planet slots](#culture-and-planet-slots)
 - [Science](#science)
 - [Social (population cap)](#social-population-cap)
 - [Economy (ship costs)](#economy-ship-costs)
 - [Starbase](#starbase)
 - [Artifacts](#artifacts)
+- [Alliance](#alliance)
 - [Trade agreements](#trade-agreements)
 - [Max Combat Value](#max-combat-value)
 - [Spending production points](#spending-production-points)
@@ -31,6 +34,7 @@ Levels not listed in a table are levels the game does not show; where a table sk
 - [Colonizing and conquering](#colonizing-and-conquering)
 - [Fleet and combat notes](#fleet-and-combat-notes)
 - [Score](#score)
+- [Late-joiner catch-up](#late-joiner-catch-up)
 - [Win conditions](#win-conditions)
 - [Alliance ranking and points](#alliance-ranking-and-points)
 - [Player level](#player-level)
@@ -82,6 +86,20 @@ no single "correct" allocation. Two archetypes that come up a lot:
 
 This section is about what players *choose to do*, not a game mechanic — it will not be
 consistent across an alliance and is not something a calculator should assume.
+
+## Bonuses stack multiplicatively, not additively
+
+Every growth/production/science/culture bonus in this doc — race pick %, artifacts, trade
+rate (TR%), economy bonus — combines with the others by **multiplying `(1 + bonus)` factors
+together**, not by adding percentages.
+
+Worked example: +4 Science race pick (`4 × 8% = 32%`), plus a Memory Jar 3 artifact
+(`+30%` production and science), plus 85% TR (80% trade rate + 5% economy bonus, which is
+**additive to TR%**, see [Economy bonus](#economy-bonus) below):
+
+    total bonus = (1 + 0.32) × (1 + 0.30) × (1 + 0.85) − 1 = +217%
+
+not `32 + 30 + 85 = 147%`.
 
 ## Population growth
 
@@ -244,6 +262,22 @@ Cost to raise any building one level. **Aggregated** is the running total from l
 | 28 | 284,076 | 852,215 |
 | 29 | 426,113 | 1,278,328 |
 | 30 | 639,170 | 1,917,498 |
+
+## Supply units
+
+Past the point production points can no longer raise a building (the PP cost table above
+tops out), further levels are bought with **Supply Units (SU)** instead. Each building type
+has its own current SU cost, which **drops as more players spend SU** on that building type
+galaxy-wide and rises again over time — it isn't a fixed price:
+
+| Building | SU cost |
+|---|---|
+| Galactic Cybernet | 200 |
+| Hydroponic Farm | 300 |
+| Research Lab | 250 |
+| Robotic Factory | 150 |
+
+Not currently used anywhere in awt's code — general reference only.
 
 ## Culture and planet slots
 
@@ -732,6 +766,15 @@ the end of a round, so treat them as relative rather than current.
 | 20 | Memory Jar 3 | +0% | +30% | +0% | +30% | $72,735.17 |
 | 21 | Heart Of Rana 3 | +30% | +30% | +30% | +30% | $273,813.51 |
 
+## Alliance
+
+| Action | Fee |
+|---|---|
+| Create an alliance | 1,000 A$ |
+| Change alliance name | 200 A$ |
+| Change alliance tag | 500 A$ |
+| Change alliance color | 500 A$ |
+
 ## Trade agreements
 
 - Cost **20,000 A$**, paid by **both** sides — to send and to accept.
@@ -739,11 +782,20 @@ the end of a round, so treat them as relative rather than current.
 - The **trader race** pick can accept for free, but pays for it with **-6 race points**.
 - New trade agreements are only **accepted at four fixed times a day: 00:00, 06:00, 12:00,
   18:00 CET/CEST** — not immediately on request.
+- An unaccepted trade agreement offer **expires after 2 days**.
 - The **trade rate (TR%) bonus recalculates every 5 minutes**, independent of the 6-hourly
   acceptance cycle.
 
 > The redzone server uses a different price (**120,000**) — see the trade-agreement planner
 > at `/ta`, which is redzone-only.
+
+### Economy bonus
+
+Every 25 players who joined around the same time are grouped into a **join cohort**. Whoever
+in that cohort of 25 has the highest economy science gets a **+5% economy bonus**, which is
+**additive to TR%** (not a separate multiplicative factor) — e.g. 80% TR% + 5% economy bonus
+combine to 85% before being multiplied with everything else. See
+[Bonuses stack multiplicatively](#bonuses-stack-multiplicatively-not-additively).
 
 ## Max Combat Value
 
@@ -794,10 +846,15 @@ Unknown (unowned) planets have two sources:
   Any starbase they had **keeps its level**. Any production points left on the planet can
   still be captured (see below) — but there are **no more artifacts** to be found on Unknown
   planets; that was true only in a much older version of the game.
-- **Culture pressure**: the game spawns 3 new planets whenever the galaxy's colonized-planet
-  ratio crosses `CultureRatioSpawning = 0.85` (e.g. crossing from 850/1000 to 851/1000
-  colonized). **One of the three** spawned planets is Unknown, with **starbase level 2** and
-  **0 PP**.
+- **New systems opening up**: systems spawn in **clusters of 5** (`SpawningClusterSize = 5`).
+  Each system has 12 planets, but only 4 of them (planets 2, 5, 8, 11) are ever assigned to
+  players or game-created Unknowns. A new cluster of 5 systems only opens once the current
+  ones fill up (85% occupied, `CultureRatioSpawning = 0.85` — 17 of the 20 available player
+  slots taken), so with 4 playable slots × 5 systems = 20 slots per cluster, the next cluster
+  opens after roughly the 17th player joins. New players are randomly assigned into whichever
+  open system still has space. Some of the 20 slots in a cluster are **game-created Unknowns,
+  with starbase level 2 and 0 PP**, not a resigned player's leftover — exact count per cluster
+  not yet confirmed.
 
 When you capture an Unknown planet that has leftover production points (from a resigned
 player), you keep **75% of the PP, up to a maximum of 750 PP**.
@@ -808,6 +865,10 @@ player), you keep **75% of the PP, up to a maximum of 750 PP**.
 
 Colonizing (and disbanding a colony ship in general) is **not automatic on arrival** — the
 player must tick a confirmation checkbox for it to happen.
+
+**Deliberately gifting a planet to another player is discouraged by design**: the 5.0.0-beta
+patch notes confirm an active anti-gifting mechanic — heavy damage to the transferred planet
+and caps on its buildings — though the exact numbers aren't published.
 
 ## Fleet and combat notes
 
@@ -824,6 +885,16 @@ player must tick a confirmation checkbox for it to happen.
   another player's, you can see their full intel — race picks, sciences, trade rate %,
   artifacts. Below that gap you see nothing about them, **unless you're in the same alliance**,
   in which case you always see everything regardless of biology.
+- **Colony ships and transports never take damage when their side wins a battle.**
+- **Fleets with fewer than 4 ships can lose every ship even in a battle they win** — the
+  "safe if you're the bigger fleet" assumption doesn't hold at very small fleet sizes.
+- Rough win-chance calibration from the official patch notes: **~80% win chance needs about
+  1.2× the enemy's power; a guaranteed win needs about 1.5×.** Worth cross-checking against
+  `public/js/utils/battle-model.js`'s `WIN_RA`/`WIN_RA_BASE6`/`WIN_RA_SLOPE` fit at some point.
+- **Base travel time (0 Energy, +0 Speed) is 20 minutes between planets in the same system,
+  45 minutes between systems** — before any energy/speed reduction. (There's a second,
+  unused pair of values in the game's config, `04:00:00`/`10:00:00`; the 20min/45min pair is
+  the one that matches the live travel calculator.)
 
 ## Score
 
@@ -843,6 +914,15 @@ three science levels above 20 — total `7 + 3 + 3 = 13` points.
 | Each Population level above 30 | 3 |
 | Each Player Level | 1 |
 | Each Science Level above 20 | 1 |
+
+## Late-joiner catch-up
+
+Every new player starts with population level 1, culture level 1, biology level 0, and
+**300 production points**. Players who join after the round has already started additionally
+get catch-up bonuses that scale with how late they are: **+100 production points/day**,
+**+0.15 culture levels/day**, **+0.15 research levels/day**. Useful for reasoning about the
+best time to join a round — the later you join, the bigger the one-time catch-up, but you
+also start further behind on everything else.
 
 ## Win conditions
 
@@ -976,8 +1056,9 @@ surviving ship** in the fight — otherwise XP is reduced to **25%**.
 
 Speed/attack/defence race picks are believed to also add a small daily player-level XP
 growth rate, separate from their direct combat/travel effect, and the default race (no picks)
-is believed to have a baseline daily growth rate too. awt already calculates and injects an
-autogrowth number into player profiles, but the user isn't confident it's accurate — **do not
-treat the current implementation's numbers as confirmed** until this is checked against real
-data.
+is believed to have a baseline daily growth rate too. The official 5.0.0-beta patch notes
+confirm autogrowth "depends more strongly on race picks" than before, so the *mechanic* is
+real — but no exact numbers are published. awt already calculates and injects an autogrowth
+number into player profiles, but the user isn't confident it's accurate — **do not treat the
+current implementation's numbers as confirmed** until this is checked against real data.
 | 100 | 36,704 | 1,336,840 |
