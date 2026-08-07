@@ -14,6 +14,7 @@ Levels not listed in a table are levels the game does not show; where a table sk
 
 ## Contents
 
+- [Race picks](#race-picks)
 - [Population growth](#population-growth)
 - [Production](#production)
 - [Buildings](#buildings)
@@ -31,6 +32,52 @@ Levels not listed in a table are levels the game does not show; where a table sk
 - [Player level](#player-level)
 
 ---
+
+## Race picks
+
+At race creation you spend points across seven scalable traits, each an integer (known
+range: **-4 to +4** for growth/science/culture/production, confirmed elsewhere in this
+game's own trait descriptions; speed/attack/defence are very likely the same range but that
+has not been separately confirmed). **All picks must sum to exactly 0** — the creation
+screen enforces this directly, so a bonus anywhere is a malus somewhere else.
+
+| Trait | %/point |
+|---|---|
+| Growth | 8% |
+| Science | 8% |
+| Culture | 4% |
+| Production | 4% |
+| Speed | 11% |
+| Attack | 7% |
+| Defence | 11% |
+
+Two additional picks are one-time toggles rather than a scalable stat — each has a fixed
+point **cost** that must be offset by the seven traits above summing correspondingly
+negative, so the grand total still lands on 0:
+
+| Pick | Cost | Effect |
+|---|---|---|
+| **Startup Lab (SUL)** | 1 | Starts with 12 research-lab buildings already built |
+| **Trader** | 6 | Can accept trade agreements for free (no A$ cost to accept) |
+
+    (sum of the 7 trait picks) + (1 if SUL) + (6 if Trader) = 0
+
+Worked example — `-4 Growth, +4 Science, 0 Culture, 0 Production, -4 Speed, +3 Attack, 0
+Defence, + SUL`: the seven traits sum to `-4+4+0+0-4+3+0 = -1`, and SUL's cost of `1` brings
+the total to `-1 + 1 = 0`.
+
+### Playstyles
+
+Players build very different races and build orders around the same trait pool — there is
+no single "correct" allocation. Two archetypes that come up a lot:
+
+- **Culture pushers** — favour Culture to unlock planet slots faster and grow the empire
+  wide rather than tall.
+- **Speeders** — run heavy +Speed (e.g. +4) alongside high Energy (40+), trading other
+  traits away for fleets that arrive faster than everyone else's.
+
+This section is about what players *choose to do*, not a game mechanic — it will not be
+consistent across an alliance and is not something a calculator should assume.
 
 ## Population growth
 
