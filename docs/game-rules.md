@@ -86,6 +86,13 @@ no single "correct" allocation. Two archetypes that come up a lot:
   wide rather than tall.
 - **Speeders** — run heavy +Speed (e.g. +4) alongside high Energy (40+), trading other
   traits away for fleets that arrive faster than everyone else's.
+- **Production fighters** — `-4 Growth, -4 Science, +4 Culture, +4 Production, -4 Speed,
+  +4 Attack, 0 Defence`. Give up growth, science and speed for wide expansion (culture),
+  strong production, and a real combat edge on the attacking side.
+- **Farmers** — `+4 Growth, +4 Science, 0 Culture, +4 Production, -4 Speed, -4 Attack,
+  -4 Defence`. Give up speed and both combat traits to maximize growth/science/production —
+  a builder's race that isn't trying to fight, just to develop fast. (More archetypes to be
+  added as the user documents them.)
 
 This section is about what players *choose to do*, not a game mechanic — it will not be
 consistent across an alliance and is not something a calculator should assume.
