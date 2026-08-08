@@ -29,6 +29,7 @@ Levels not listed in a table are levels the game does not show; where a table sk
 - [Starbase](#starbase)
 - [Artifacts](#artifacts)
 - [Alliance](#alliance)
+- [Non-aggression pacts](#non-aggression-pacts)
 - [Trade agreements](#trade-agreements)
 - [Max Combat Value](#max-combat-value)
 - [Spending production points](#spending-production-points)
@@ -807,8 +808,11 @@ scaled by economy like the three combat ships above.
 
 ## Artifacts
 
-Bought with astro dollars. Prices move with the market — the ones below were captured near
-the end of a round, so treat them as relative rather than current.
+Bought with astro dollars — each type becomes available to buy once you reach the player
+level shown in the table. Prices move with the market — the ones below were captured near
+the end of a round, so treat them as relative rather than current. Artifacts can also be
+traded between players on the Trade Screen. You can own as many as you like, but only **one
+can be active at a time**.
 
 | Player Level | Type | Growth | Science | Culture | Production | Price |
 |---|---|---|---|---|---|---|
@@ -842,6 +846,27 @@ the end of a round, so treat them as relative rather than current.
 | Change alliance name | 200 A$ |
 | Change alliance tag | 500 A$ |
 | Change alliance color | 500 A$ |
+
+**No cap on member count**, and **no member-kick feature** — removing a member requires
+contacting a game admin.
+
+## Non-aggression pacts
+
+A Non-Aggression Pact (NAP) is an agreement between players (or alliances) not to attack each
+other. It can be terminated **with prior warning** (honorable) or **without warning**
+(backstabbing) — the latter carries a reputation cost among players who hear about it.
+
+- **Friendly Attack/Fire**: deliberately attacking an ally or NAP partner to boost your
+  player level and earn Supply Units early in the game.
+- **Friendly Siege**: an ally deliberately sieges your planet on purpose, redirecting where
+  your bought production points land — see [Buying production points](#buying-production-points)
+  for the mechanic itself (the 5%-per-sieged-planet penalty). Used to quickly develop a weak
+  planet further down your planet list, or to build up defenses on a planet away from the
+  real attacker.
+- **Planet Gifting**: using a friendly/NAP relationship to hand a planet to another
+  player — e.g. sending transports through a friendly fleet to colonize *for* someone else,
+  or gifting a planet from a deliberately weak/farmable ("cow") account. Generally
+  considered cheating, though some players use it strategically.
 
 ## Trade agreements
 
@@ -954,6 +979,7 @@ and caps on its buildings — though the exact numbers aren't published.
   artifacts. Below that gap you see nothing about them, **unless you're in the same alliance**,
   in which case you always see everything regardless of biology.
 - **Colony ships and transports never take damage when their side wins a battle.**
+- **Maximum of 5 fleets in transit at any given time.**
 - **Fleets with fewer than 4 ships can lose every ship even in a battle they win** — the
   "safe if you're the bigger fleet" assumption doesn't hold at very small fleet sizes.
 - Rough win-chance calibration from the official patch notes: **~80% win chance needs about
