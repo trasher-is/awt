@@ -117,3 +117,56 @@ above 20 — see [Score](game-rules.md#score) for the exact formula. A player wi
 holding 400+ points for 5 straight days; an alliance wins by averaging 300+ points across its
 top members for 3 straight days, with at least 3 members counted. See
 [Win conditions](game-rules.md#win-conditions).
+
+## Strategy
+
+### Playstyle archetypes
+
+Race picks and build orders vary a lot between players, and there's no single "correct" way
+to play. A few archetypes that come up often — see
+[Playstyles](game-rules.md#playstyles) for the exact race-pick numbers behind each:
+
+- **Culture pushers** grow wide instead of tall, favoring Culture to unlock planet slots as
+  fast as possible.
+- **Speeders** run heavy +Speed with high Energy, prioritizing fleets that arrive faster than
+  everyone else's over almost everything.
+- **Production fighters** trade away growth, science and speed for strong production and a
+  real edge on the attacking side of combat.
+- **Farmers** trade away speed and both combat traits to maximize growth, science and
+  production — a builder who isn't trying to fight, just to develop fast.
+
+This list will grow as more archetypes get documented — it's not exhaustive.
+
+### Race-pick advice for new players
+
+If you don't know your preferred playstyle yet, the safe default is **no picks at all**
+(`0/0/0/0/0/0/0`) — every trait at its baseline. It's a fine way to learn the game without
+committing to a playstyle you might regret once you understand your options better.
+
+Two mistakes worth avoiding even as a beginner:
+
+- **Taking -4 Production.** It stalls your buildings, ships, and colony expansion right when
+  you need production points the most.
+- **Taking -4 Attack.** Weak attack makes you an easy target — other players will notice you
+  can't retaliate effectively and pick on you accordingly.
+
+### Early build order
+
+A common early building order: **Robotic Factory → Galactic Cybernet → Hydroponic Farm →
+Research Lab.** The logic is production first — Robotic Factory and Galactic Cybernet get
+your production points flowing before you spend on population growth (Hydroponic Farm) or
+science (Research Lab).
+
+The common mistake here is building the Hydroponic Farm or Research Lab too early — investing
+in population growth or science before your production can actually support the rest of your
+build queue just slows everything down.
+
+### Artifact priority
+
+You can only have **one artifact active at a time** (see
+[Artifacts](game-rules.md#artifacts) for the full cost/bonus table), so pick deliberately
+rather than buying whatever's available. Early game, prioritize a **culture** artifact
+(Basalt Monolith is culture-only; Crystal Rod combines it with growth) to keep expanding your
+planet count. Later, switch priority to **production** (Charcoal Diamond is production-only;
+Memory Jar combines it with science) once you have enough planets and need to fund a bigger
+build queue.
