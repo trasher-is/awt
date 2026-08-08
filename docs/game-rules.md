@@ -276,7 +276,9 @@ Cost to raise any building one level. **Aggregated** is the running total from l
 ## Supply units
 
 Past the point production points can no longer raise a building (the PP cost table above
-tops out), further levels are bought with **Supply Units (SU)** instead.
+tops out), further levels are bought with **Supply Units (SU)** instead. A Supply Unit's own
+starting price (to buy one, at the very start of a round) is **$750** — after that it moves
+with the market like everything else (see Market volatility below).
 
 Using a Supply Unit on a specific building type has its own live market price in A$ on the
 Trade screen — this is **what you get back when you spend an SU on that building**, not a
@@ -824,34 +826,38 @@ scaled by economy like the three combat ships above.
 ## Artifacts
 
 Bought with astro dollars — each type becomes available to buy once you reach the player
-level shown in the table. Prices move with the market — the ones below were captured near
-the end of a round, so treat them as relative rather than current. Artifacts can also be
-traded between players on the Trade Screen. You can own as many as you like, but only **one
-can be active at a time**.
+level shown in the table. Artifacts can also be traded between players on the Trade Screen.
+You can own as many as you like, but only **one can be active at a time**.
 
-| Player Level | Type | Growth | Science | Culture | Production | Price |
-|---|---|---|---|---|---|---|
-| 1 | Basalt Monolith 1 | +0% | +0% | +10% | +0% | $2,608.81 |
-| 2 | Astrolabe 1 | +0% | +10% | +0% | +0% | $1,783.96 |
-| 3 | Celestial Prism 1 | +10% | +0% | +0% | +0% | $1,862.66 |
-| 4 | Crystal Rod 1 | +10% | +0% | +10% | +0% | $7,292.89 |
-| 5 | Charcoal Diamond 1 | +0% | +0% | +0% | +10% | $2,573.98 |
-| 6 | Memory Jar 1 | +0% | +10% | +0% | +10% | $7,718.32 |
-| 7 | Heart Of Rana 1 | +10% | +10% | +10% | +10% | $30,721.53 |
-| 8 | Basalt Monolith 2 | +0% | +0% | +20% | +0% | $10,067.19 |
-| 9 | Astrolabe 2 | +0% | +20% | +0% | +0% | $5,315.63 |
-| 10 | Celestial Prism 2 | +20% | +0% | +0% | +0% | $4,972.73 |
-| 11 | Crystal Rod 2 | +20% | +0% | +20% | +0% | $29,301.14 |
-| 12 | Charcoal Diamond 2 | +0% | +0% | +0% | +20% | $10,658.69 |
-| 13 | Memory Jar 2 | +0% | +20% | +0% | +20% | $32,448.62 |
-| 14 | Heart Of Rana 2 | +20% | +20% | +20% | +20% | $120,193.37 |
-| 15 | Basalt Monolith 3 | +0% | +0% | +30% | +0% | $22,498.88 |
-| 16 | Astrolabe 3 | +0% | +30% | +0% | +0% | $11,102.13 |
-| 17 | Celestial Prism 3 | +30% | +0% | +0% | +0% | $11,024.45 |
-| 18 | Crystal Rod 3 | +30% | +0% | +30% | +0% | $65,025.00 |
-| 19 | Charcoal Diamond 3 | +0% | +0% | +0% | +30% | $24,034.97 |
-| 20 | Memory Jar 3 | +0% | +30% | +0% | +30% | $72,735.17 |
-| 21 | Heart Of Rana 3 | +30% | +30% | +30% | +30% | $273,813.51 |
+There are two different prices in play: a **base price** per tier (fixed for the round, from
+the 5.0.0-beta rebalance — single-effect types share a base price with their sibling, as do
+the two dual-effect types), and a **live market price** that moves with demand like everything
+else on the Trade screen (the snapshot column below, captured near the end of a round —
+treat it as relative, not current).
+
+| Player Level | Type | Growth | Science | Culture | Production | Base price | Market snapshot |
+|---|---|---|---|---|---|---|---|
+| 1 | Basalt Monolith 1 | +0% | +0% | +10% | +0% | $2,500 | $2,608.81 |
+| 2 | Astrolabe 1 | +0% | +10% | +0% | +0% | $1,225 | $1,783.96 |
+| 3 | Celestial Prism 1 | +10% | +0% | +0% | +0% | $1,225 | $1,862.66 |
+| 4 | Crystal Rod 1 | +10% | +0% | +10% | +0% | $7,225 | $7,292.89 |
+| 5 | Charcoal Diamond 1 | +0% | +0% | +0% | +10% | $2,500 | $2,573.98 |
+| 6 | Memory Jar 1 | +0% | +10% | +0% | +10% | $7,225 | $7,718.32 |
+| 7 | Heart Of Rana 1 | +10% | +10% | +10% | +10% | $28,900 | $30,721.53 |
+| 8 | Basalt Monolith 2 | +0% | +0% | +20% | +0% | $10,000 | $10,067.19 |
+| 9 | Astrolabe 2 | +0% | +20% | +0% | +0% | $4,900 | $5,315.63 |
+| 10 | Celestial Prism 2 | +20% | +0% | +0% | +0% | $4,900 | $4,972.73 |
+| 11 | Crystal Rod 2 | +20% | +0% | +20% | +0% | $28,900 | $29,301.14 |
+| 12 | Charcoal Diamond 2 | +0% | +0% | +0% | +20% | $10,000 | $10,658.69 |
+| 13 | Memory Jar 2 | +0% | +20% | +0% | +20% | $28,900 | $32,448.62 |
+| 14 | Heart Of Rana 2 | +20% | +20% | +20% | +20% | $115,600 | $120,193.37 |
+| 15 | Basalt Monolith 3 | +0% | +0% | +30% | +0% | $22,500 | $22,498.88 |
+| 16 | Astrolabe 3 | +0% | +30% | +0% | +0% | $11,025 | $11,102.13 |
+| 17 | Celestial Prism 3 | +30% | +0% | +0% | +0% | $11,025 | $11,024.45 |
+| 18 | Crystal Rod 3 | +30% | +0% | +30% | +0% | $65,025 | $65,025.00 |
+| 19 | Charcoal Diamond 3 | +0% | +0% | +0% | +30% | $22,500 | $24,034.97 |
+| 20 | Memory Jar 3 | +0% | +30% | +0% | +30% | $65,025 | $72,735.17 |
+| 21 | Heart Of Rana 3 | +30% | +30% | +30% | +30% | $260,100 | $273,813.51 |
 
 ## Alliance
 
