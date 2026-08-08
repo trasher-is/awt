@@ -1148,6 +1148,7 @@ Experience needed per player level; **aggregated** is the running total.
 | 97 | 35,328 | 1,227,419 |
 | 98 | 36,013 | 1,263,432 |
 | 99 | 36,704 | 1,300,136 |
+| 100 | 36,704 | 1,336,840 |
 
 ### Full XP from combat
 
@@ -1163,4 +1164,3 @@ confirm autogrowth "depends more strongly on race picks" than before, so the *me
 real — but no exact numbers are published. awt already calculates and injects an autogrowth
 number into player profiles, but the user isn't confident it's accurate — **do not treat the
 current implementation's numbers as confirmed** until this is checked against real data.
-| 100 | 36,704 | 1,336,840 |
