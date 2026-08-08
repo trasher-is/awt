@@ -1017,10 +1017,15 @@ and caps on its buildings — though the exact numbers aren't published.
 - Rough win-chance calibration from the official patch notes: **~80% win chance needs about
   1.2× the enemy's power; a guaranteed win needs about 1.5×.** Worth cross-checking against
   `public/js/utils/battle-model.js`'s `WIN_RA`/`WIN_RA_BASE6`/`WIN_RA_SLOPE` fit at some point.
-- **Base travel time (0 Energy, +0 Speed) is 20 minutes between planets in the same system,
-  45 minutes between systems** — before any energy/speed reduction. (There's a second,
-  unused pair of values in the game's config, `04:00:00`/`10:00:00`; the 20min/45min pair is
-  the one that matches the live travel calculator.)
+- **Travel time has a fixed floor and a reducible part — both config pairs are real, not
+  redundant.** `FixedTravelTimeInterPlanets`/`FixedTravelTimeInterSystems` (**20 min / 45
+  min**) are hard minimums — energy and speed can never bring a flight below them, except the
+  own-planet/alliance 50% halving, which can. `TravelTimeInterPlanets`/`TravelTimeInterSystems`
+  (**4h / 10h**) are the coefficients for the *reducible* part of the flight, which energy
+  and speed actually shrink. At 0 Energy and +0 Speed, a flight is the full 4h/10h reducible
+  time plus the 20min/45min floor on top — matches
+  `public/js/utils/travel-model.js` exactly (`SAME_SYSTEM_MIN=1200s` + `SAME_SYSTEM_PLANET=
+  14400s`, `DEEP_SPACE_MIN=2700s` + `DEEP_SPACE_DIST=36000s`).
 
 ## Score
 
