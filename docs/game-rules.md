@@ -933,28 +933,32 @@ eligible regardless of siege status — buying requires **population 5+**.
 
 ## Colonizing and conquering
 
-Unknown (unowned) planets have two sources:
+### How systems and planets spawn
 
-- A player who **resigns** — all of their planets become Unknown and their fleet vanishes.
-  Any starbase they had **keeps its level**. Any production points left on the planet can
-  still be captured (see below) — but there are **no more artifacts** to be found on Unknown
-  planets; that was true only in a much older version of the game.
-- **New systems opening up**: systems spawn in **clusters of 5** (`SpawningClusterSize = 5`).
-  Each system has 12 planets, but only 4 of them (planets 2, 5, 8, 11) are ever assigned to
-  players or game-created Unknowns. A new cluster of 5 systems only opens once the current
-  ones fill up (85% occupied, `CultureRatioSpawning = 0.85` — 17 of the 20 available player
-  slots taken), so with 4 playable slots × 5 systems = 20 slots per cluster, the next cluster
-  opens after roughly the 17th player joins. New players are randomly assigned into whichever
-  open system still has space. Some of the 20 slots in a cluster are **game-created Unknowns,
-  with starbase level 2 and 0 PP**, not a resigned player's leftover — exact count per cluster
-  not yet confirmed.
+Each system has **12 planet slots**, but only 4 of them — **planets 2, 5, 8, 11** — are ever
+assigned to a player's first planet or a game-created Unknown. New players are randomly
+assigned an **Origin system** from the currently active **block of 5 systems**
+(`SpawningClusterSize = 5`) — at the very start of a round, that's systems 1-5.
 
-When you capture an Unknown planet that has leftover production points (from a resigned
+When a player (or a game-created Unknown) is assigned one of these 4 slots, **two Free
+planets spawn adjacent to it** (e.g. a player landing on planet 2 spawns Free planets 1 and
+3). These Free planets have **no buildings** and are colonized normally with Colony Ships.
+
+**Culture pressure** (`CultureRatioSpawning = 0.85`) is the fraction of the active block's
+`4 slots × 5 systems = 20` player/Unknown slots that are filled. Once players colonize their
+way up (first planet → the 2 adjacent Free planets → further expansion) and occupancy of
+those 20 slots crosses 85%, the **next block of 5 systems opens**, and **one Unknown spawns
+in one of them, with 2 Free planets next to it** — same shape as a player spawn, just
+game-created instead of player-owned.
+
+### Capturing a populated planet
+
+**Conquering never keeps the target's existing buildings** — this applies whether you're
+capturing from an active enemy, a solo/inactive player, or an Unknown (former player) planet.
+Exactly how many buildings (if any) you start with instead is **still unconfirmed**.
+
+When capturing an Unknown planet that has leftover production points (from a resigned
 player), you keep **75% of the PP, up to a maximum of 750 PP**.
-
-> Still to confirm: whether colonizing a solo/Unknown-owned planet vs. conquering one from an
-> active enemy gives different starting buildings (e.g. a flat 4/4/4/4 vs. percentage combat
-> damage to existing buildings) — not documented here until verified.
 
 Colonizing (and disbanding a colony ship in general) is **not automatic on arrival** — the
 player must tick a confirmation checkbox for it to happen.
