@@ -276,16 +276,19 @@ Cost to raise any building one level. **Aggregated** is the running total from l
 ## Supply units
 
 Past the point production points can no longer raise a building (the PP cost table above
-tops out), further levels are bought with **Supply Units (SU)** instead. Each building type
-has its own current SU cost, which **drops as more players spend SU** on that building type
-galaxy-wide and rises again over time — it isn't a fixed price:
+tops out), further levels are bought with **Supply Units (SU)** instead.
 
-| Building | SU cost |
+Using a Supply Unit on a specific building type has its own live market price in A$ on the
+Trade screen — this is **what you get back when you spend an SU on that building**, not a
+fixed "cost." Like every other price on that screen it fluctuates with demand (see Market
+volatility below); the values below are one snapshot, not fixed constants:
+
+| Building | A$ (snapshot) |
 |---|---|
-| Galactic Cybernet | 200 |
-| Hydroponic Farm | 300 |
-| Research Lab | 250 |
-| Robotic Factory | 150 |
+| Galactic Cybernet | $144.27 |
+| Hydroponic Farm | $129.69 |
+| Research Lab | $168.26 |
+| Robotic Factory | $86.04 |
 
 Not currently used anywhere in awt's code — general reference only.
 
