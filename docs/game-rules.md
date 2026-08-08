@@ -629,8 +629,9 @@ Each of the six science fields does something different besides its raw growth r
 
 - **Biology** — increases vision range on the map (1 square per level, `VisionFactor = 1`;
   see [Fleet and combat notes](#fleet-and-combat-notes) for the ≥6-level intel-report rule).
-  Fleets can only be sent to systems currently visible on the map. **At level 25**, fleets can
-  be sent by System ID directly instead of needing the system's name.
+  Fleets can only be sent to systems currently visible on the map. **At level 25**, the whole
+  map opens up and fleets can be sent by System ID directly instead of needing the system's
+  name.
 - **Economy** — reduces ship construction cost (see [Economy (ship costs)](#economy-ship-costs)
   for the exact curve and the 8×/20× destroyer-cruiser-battleship ratio, and
   [Economy bonus](#economy-bonus) for the join-cohort +5%).

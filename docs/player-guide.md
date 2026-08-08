@@ -53,8 +53,8 @@ is separate). Each field does something different besides its raw growth rate â€
 [Science fields â€” effects](game-rules.md#science-fields--effects) for the full rundown, but
 in short:
 
-- **Biology** lets you see further on the map, and eventually (level 25) lets you send fleets
-  by system ID instead of by name.
+- **Biology** lets you see further on the map, and at level 25 opens up the whole map, letting
+  you send fleets by system ID instead of by name.
 - **Economy** makes your ships cheaper to build.
 - **Energy** makes your fleets travel faster.
 - **Mathematics** means fewer losses when you're attacked.
