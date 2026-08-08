@@ -948,9 +948,10 @@ on the amount of PP bought.
 
 Example: 5 planets ranked by population — 6, 5, 5, 4, 2. Buying 1,000 A$ of PP at a 1:1 price
 normally gets you 1,000 PP on the 6-pop planet. If that planet and the first 5-pop planet are
-both sieged, buying now happens on the second 5-pop planet, discounted 5% per sieged planet
-above it: 1,000 × 0.95 × 0.95 = 902.5, i.e. **902 PP**. The 4-pop and 2-pop planets are never
-eligible regardless of siege status — buying requires **population 5+**.
+both sieged, buying now happens on the second 5-pop planet, discounted **5 percentage points
+per sieged planet above it** (subtracted, not compounded): `1,000 × (1 - 0.05 - 0.05) = 900`,
+i.e. **900 PP**. The 4-pop and 2-pop planets are never eligible regardless of siege status —
+buying requires **population 5+**.
 
 ## Colonizing and conquering
 
