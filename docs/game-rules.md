@@ -995,8 +995,14 @@ and caps on its buildings — though the exact numbers aren't published.
   affect real (CV-based) battles, but it matters for **empty-fleet standoffs**: if only colony
   ships/transports are landing on a planet where colony ships/transports are already sitting,
   the ones already there **always win and kill the landing ones**.
-- The ETA calculator shows a flight as **"pending" for 2 minutes** after it's ordered (not up
-  to one minute, as the old help text says).
+- **Fleet hosting cycle**: all flights, battles and colonizations are only resolved at the
+  end of a 2-minute cycle (`00:00:00`-`00:01:59`, then the next cycle starts). This is why the
+  ETA calculator shows a flight as **"pending"** for up to 2 minutes after it's ordered — it's
+  not resolved until the current cycle ends (not "up to one minute," as the old help text
+  says).
+- **Standard server hosting cycle**: separately, every 5 minutes (also starting at
+  `00:00:00`) all planets receive 5 minutes' worth of growth, production, science and culture
+  at once, rather than continuously.
 - **Battle survivors are shown as a fraction**, and the fractional part is a **survival
   chance**, not a rounding artifact: e.g. "10.7 destroyers survived" means 10 definitely
   survived and an 11th has a 70% chance of having survived.
