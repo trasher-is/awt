@@ -282,6 +282,13 @@ galaxy-wide and rises again over time — it isn't a fixed price:
 
 Not currently used anywhere in awt's code — general reference only.
 
+**Market volatility**: A$, PP, Supply Unit and artifact prices all move with player demand —
+buying pushes a price up, selling pushes it down — and Supply Units in particular are known
+to develop a late-round "resonance" (bouncing up and down) from speculative trading. The
+game's own config exposes per-market volatility factors (artifacts, PP, supply units) and a
+static PP price increase, but their exact formulas are unconfirmed — treat prices as dynamic
+and demand-driven rather than fixed, without relying on a specific number here.
+
 ## Culture and planet slots
 
 **Culture level is the number of planets you may own.** Reaching the next culture level is
@@ -733,9 +740,6 @@ Attack/defence/CV values, from `public/js/utils/battle-model.js`:
 | Destroyer | 2 | 1 | 3 |
 | Cruiser | 8 | 16 | 24 |
 | Battleship | 36 | 24 | 60 |
-
-> Battleship attack/defence still needs a check against the in-game Battle Calculator to
-> confirm the 36/24 figures above.
 
 **Transports** and **Colony Ships** both have **0 combat value**, a **defence of 2** (see
 [Fleet and combat notes](#fleet-and-combat-notes)), and cost **60 PP** each — a flat cost, not
