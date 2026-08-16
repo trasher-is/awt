@@ -71,6 +71,21 @@
         return Math.sqrt(dx * dx + dy * dy);
     }
 
+    // Analytic inverse of the deep-space branch, for the galaxy map's isochrone rings:
+    // how far (in coordinate units) a fleet gets within a time budget of `seconds`.
+    // The planet term is fixed at √(0+1) = 1 (same planet index on both ends), so
+    //   T = 2700 + (36000·dist + 3600)·mod   inverts to
+    //   dist = ((T[÷0.5 if alliance] − 2700)/mod − 3600)/36000
+    // Clamped at 0: a budget below the fixed deep-space minimum reaches no other system.
+    // The alliance halving is undone BEFORE inverting, mirroring where the forward
+    // formula applies it (after everything else).
+    function isochroneRadius(seconds, energy, raceSpeed, isAlliance) {
+        const mod = speedModifier(energy, raceSpeed);
+        const budget = isAlliance ? seconds / ALLIANCE_FACTOR : seconds;
+        const dist = ((budget - DEEP_SPACE_MIN) / mod - DEEP_SPACE_PLANET) / DEEP_SPACE_DIST;
+        return Math.max(0, dist);
+    }
+
     function formatTime(seconds) {
         const h = Math.floor(seconds / 3600);
         const m = Math.floor((seconds % 3600) / 60);
@@ -79,7 +94,7 @@
     }
 
     return {
-        calcTravelSeconds, formatTime, systemDistance, speedModifier,
+        calcTravelSeconds, formatTime, systemDistance, speedModifier, isochroneRadius,
         constants: {
             SAME_SYSTEM_MIN, SAME_SYSTEM_PLANET,
             DEEP_SPACE_MIN, DEEP_SPACE_DIST, DEEP_SPACE_PLANET,
