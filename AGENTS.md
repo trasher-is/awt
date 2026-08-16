@@ -35,15 +35,32 @@ did not agree to be published, and the game's administrator cannot agree on thei
 Test fixtures are hand-written or synthetic. `scripts/seed-dev-galaxy.js` exists precisely
 so a UI change can be reviewed without anyone's real intel.
 
-### Production game API is off limits
+### Production game API: agreed, with boundaries
 
-The game has a REST API. Its spec is published on the **test** server and its routes answer
-`401` rather than `404` on production, so they exist and are session-gated — but
-programmatic use of production has not been agreed with the game's administration
-(issue #24).
+The game has a REST API (`/api/v1/*`, OpenAPI 3.0.1 spec at `/swagger/v1/swagger.json`).
+Programmatic use of production **has been agreed** with the game's administration — this
+resolves what issue #24 was blocking on — under conditions that bind exactly like the rate
+limit above:
 
-No script in this repository may accept a production base URL. `scripts/collect-travel-fixtures.js`
-checks `--base` against an allowlist and refuses everything else. Keep it that way.
+- **One global budget for the whole hub combined.** Every member, every feature, one
+  bucket: `GAME_API_MAX_PER_SECOND`, default 5, enforced by `apiGate` in `server.js`. The
+  env var exists for deployment, not for tuning — raising it requires the administrator's
+  **renewed consent, not a code review**. Be precise about what this caps: the `/api/v1`
+  stream, globally. It is *not* a promise that the hub overall never exceeds 5 req/s — the
+  scraper gate is per-member and marker-only, so scraped traffic, API traffic and page
+  loads combined can pass 5/s with several active members. That is pre-existing behaviour,
+  unchanged by the agreement.
+- **A member's own session through the proxy is the only sanctioned path.** Requests are
+  same-origin `/api/v1/...` from a logged-in member's browser; the proxy forwards their
+  own game session and counts the request against the budget on the way. The server never
+  calls the API itself — it has no game session.
+- **No dedicated bot or test accounts.** The Discord bot has no session and stays on the
+  local formulas permanently.
+
+Server-side scripts still must not accept a production base URL.
+`scripts/collect-travel-fixtures.js` checks `--base` against an allowlist and refuses
+everything else. Keep it that way — the agreement covers the member-session path, nothing
+else.
 
 ### Do not invent translations
 
@@ -106,6 +123,7 @@ Current dual-runtime modules and their globals:
 | `parse-number.js` | `AWNumber` | Locale-aware number parsing |
 | `scrape-report.js` | `AWScrape` | Scraper failure reporting, label synonyms |
 | `game-rate-limit.js` | `AWGameRate` | The 5/s gate |
+| `aw-api.js` | `AWApi` | Game REST API client (`/api/v1`); every call rides `AWGameRate.gameFetch` |
 
 **Do not "modernise" these to ESM.** Adding an `import` breaks Node; adding `export`
 breaks the tests. Files in `public/js/ui/` and `public/js/scrapers/` are plain ESM and are
