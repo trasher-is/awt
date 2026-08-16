@@ -229,7 +229,7 @@ const proxyCeiling = rateLimit({
 
 // --- GAME API BUDGET ---
 // The game's administration has agreed to programmatic use of the production REST API
-// (/api/v1/*) under a hard ceiling of FIVE requests per second for the whole hub
+// (the /api/v1 paths) under a hard ceiling of FIVE requests per second for the whole hub
 // combined — every member, every feature, one shared budget. That is why keyOf collapses
 // everyone into a single bucket and isAutomated counts every request, marker or not
 // (gameGate above is per-member and marker-only; this is a different promise). The
@@ -265,7 +265,7 @@ const requireAuth = (req, res, next) => {
     res.redirect('/hub-assets/login.html');
 };
 
-// --- GAME REST API (/api/v1/*) ---
+// --- GAME REST API (the /api/v1 paths) ---
 // Dedicated chain for the game's REST API, forwarded by the SAME proxy middleware as
 // page traffic so the cookie/marker hygiene (hub session stripped, X-AWT-Automated
 // removed, the member's own game session forwarded) is inherited rather than duplicated.
