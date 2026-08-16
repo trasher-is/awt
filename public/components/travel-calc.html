@@ -91,7 +91,13 @@
             <div id="tc-result" class="bg-zinc-900 border border-border rounded-lg p-6 flex flex-col items-center gap-2">
                 <div class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Travel time</div>
                 <div id="tc-time" class="text-4xl font-bold font-mono text-foreground">--:--:--</div>
+                <!-- Shown only when the number above came from GET /api/v1/Fleet/travelTime -->
+                <div id="tc-source-badge" class="hidden text-xs font-semibold uppercase tracking-wider text-emerald-400 border border-emerald-500/30 rounded px-2 py-0.5">źródło: serwer gry</div>
+                <!-- Local formula result, kept visible beneath while the API value is primary -->
+                <div id="tc-local-line" class="hidden text-xs text-muted-foreground font-mono"></div>
                 <div id="tc-meta" class="text-xs text-muted-foreground"></div>
+                <!-- Quiet degradation notice when the game API could not answer -->
+                <div id="tc-api-note" class="hidden text-xs text-amber-400"></div>
             </div>
 
             <!-- Live destination system view (populated when a destination system is chosen) -->
