@@ -300,13 +300,20 @@ router.post('/sync/player', requireAuth, (req, res) => {
             console.log(`[SYSTEM] Player ${player.id} restart detected (${originChanged ? 'origin moved' : 'logins reset'}); resetting stale profile stats.`);
 
             db.prepare(`DELETE FROM fleets WHERE owner_id = ?`).run(player.id);
+            // The reset is a HEURISTIC and heuristics misfire (see issues #46/#48: a false
+            // restart once zeroed a player's race picks). So it may only clear columns the
+            // upsert below writes UNCONDITIONALLY — the public stats anyone can read off the
+            // profile/ranking. It must NOT touch the intel-derived columns (sciences per
+            // field, race picks, artefact, eco bonus, has_intel), because those are governed
+            // solely by the `has_intel` CASE guard in the upsert: hard-won intel must never
+            // be destroyed by a guess. A genuinely restarted player keeps stale intel (with
+            // its old intel_updated_at) until the next scan with vision overwrites it —
+            // cosmetic staleness beats irreversible data loss. origin_system IS reset here so
+            // the originChanged signal can re-arm on the next move.
             db.prepare(`
                 UPDATE players SET
                     level=0, points=0, ranking=NULL, science_level=0, culture_level=0,
-                    biology=0, economy=0, energy=0, mathematics=0, physics=0, social=0,
-                    trade_revenue=0, artefact=NULL, eco_bonus=0,
-                    race_growth=0, race_science=0, race_culture=0, race_production=0, race_speed=0, race_attack=0, race_defense=0,
-                    race_trader=0, race_sul=0, origin_system=NULL, has_intel=0, intel_updated_at=NULL,
+                    origin_system=NULL,
                     home_planet_id=NULL, home_system_id=NULL, home_planet_index=NULL, possible_homes='[]',
                     total_planets=0, total_population=0, total_farms=0, total_factories=0, total_labs=0, total_cybernetics=0, cv_used=0, cv_limit=0
                 WHERE id = ?
