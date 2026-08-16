@@ -306,6 +306,10 @@ router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
             db.prepare(`DELETE FROM fleets`).run();
             db.prepare(`DELETE FROM planet_plans`).run();
             db.prepare(`DELETE FROM planet_events`).run();
+            // Battle reports describe battles on the map being wiped — they go with it.
+            // starbase_order_audit is deliberately NOT here: it is an operations record
+            // of who sent what through the hub, and that stays true across rounds.
+            db.prepare(`DELETE FROM battle_reports`).run();
             db.prepare(`DELETE FROM planets`).run();
             db.prepare(`DELETE FROM players`).run();
             db.prepare(`DELETE FROM alliances`).run();
@@ -397,7 +401,7 @@ router.get('/admin/settings', requireAdmin, (req, res) => {
 
 router.post('/admin/settings', requireAdmin, (req, res) => {
     const { key, value } = req.body;
-    const allowedKeys = ['discord_announce_channel', 'discord_popdrop_channel', 'discord_incoming_channel', 'discord_reminder_channel', 'discord_blocked_channels'];
+    const allowedKeys = ['discord_announce_channel', 'discord_popdrop_channel', 'discord_incoming_channel', 'discord_reminder_channel', 'discord_battlereport_channel', 'discord_blocked_channels'];
     if (!allowedKeys.includes(key)) return res.status(400).json({ error: 'Unknown setting key' });
 
     try {
