@@ -2,6 +2,8 @@ const express = require('express');
 const db = require('../database');
 const { requireAuth } = require('./_middleware');
 const { announceSystemChanges } = require('../discord_bot');
+const { mapApiReport, upsertReports, formatBattleEmbed } = require('../utils/battle-reports');
+const { postEmbed, defuseMentions, settingValue } = require('../utils/discord-post');
 const router = express.Router();
 
 // --- MAP SCRAPER DATA RECEIVER ---
@@ -28,14 +30,15 @@ router.post('/sync/system', requireAuth, (req, res) => {
     `);
 
     const upsertPlanet = db.prepare(`
-        INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet, is_sieged)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(system_id, planet_index) DO UPDATE SET
             game_planet_id=excluded.game_planet_id,
             owner_id=excluded.owner_id,
             population=excluded.population,
             starbase=excluded.starbase,
             has_fleet=excluded.has_fleet,
+            is_sieged=excluded.is_sieged,
             updated_at=CURRENT_TIMESTAMP
     `);
 
@@ -50,7 +53,10 @@ router.post('/sync/system', requireAuth, (req, res) => {
     `);
 
     // --- NEW: History Logging Prep ---
-    const getOldPlanet = db.prepare(`SELECT owner_id, population FROM planets WHERE system_id = ? AND planet_index = ?`);
+    // starbase/has_fleet/is_sieged are selected because the fog-of-war guard below
+    // restores them: reading them off a row that never carried them bound `undefined`
+    // (-> NULL) and quietly erased the very values the guard exists to preserve.
+    const getOldPlanet = db.prepare(`SELECT owner_id, population, starbase, has_fleet, is_sieged FROM planets WHERE system_id = ? AND planet_index = ?`);
     const getPlayerName = db.prepare(`
         SELECT p.name, a.tag AS alliance_tag
         FROM players p
@@ -87,7 +93,18 @@ router.post('/sync/system', requireAuth, (req, res) => {
             let finalOwnerId = p.owner ? p.owner.id : null;
             let finalPopulation = p.population;
             let finalStarbase = p.starbase;
-            let finalHasFleet = p.has_fleet;
+            // has_fleet: DOM scrapers send an explicit 0/1; the API-sourced payload cannot
+            // see fleets at all and sends null. Absent means "this payload cannot see fleet
+            // state", so keep the last observation rather than nulling out a scraped marker.
+            let finalHasFleet = (p.has_fleet === undefined || p.has_fleet === null)
+                ? (oldP ? oldP.has_fleet : null)
+                : p.has_fleet;
+            // is_sieged only arrives from the API-sourced sync path (the game's hasSiege
+            // flag) — DOM scrapers never send it. Absent means "this payload cannot see
+            // siege state", so keep whatever we knew rather than zeroing it out.
+            let finalIsSieged = (p.is_sieged === undefined || p.is_sieged === null)
+                ? (oldP ? oldP.is_sieged : 0)
+                : (p.is_sieged ? 1 : 0);
 
             // CRITICAL FOG OF WAR GUARD: If scan reports "Unknown", protect historical stats from being nuked
             if (p.is_unknown && oldP) {
@@ -95,6 +112,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 finalPopulation = oldP.population;
                 finalStarbase = oldP.starbase;
                 finalHasFleet = oldP.has_fleet;
+                finalIsSieged = oldP.is_sieged;
             }
 
             // SOFT-UNKNOWN GUARD: a scan can fail to pick up the owner link while the
@@ -161,7 +179,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
             if (p.game_planet_id != null) {
                 clearMovedPlanet.run(p.game_planet_id, system_id, p.planet_index);
             }
-            upsertPlanet.run(p.game_planet_id, system_id, p.planet_index, finalOwnerId, finalPopulation, finalStarbase, finalHasFleet);
+            upsertPlanet.run(p.game_planet_id, system_id, p.planet_index, finalOwnerId, finalPopulation, finalStarbase, finalHasFleet, finalIsSieged);
         }
 
         // NOTE: Fleet positions are no longer derived from system scans. They are now
@@ -282,13 +300,20 @@ router.post('/sync/player', requireAuth, (req, res) => {
             console.log(`[SYSTEM] Player ${player.id} restart detected (${originChanged ? 'origin moved' : 'logins reset'}); resetting stale profile stats.`);
 
             db.prepare(`DELETE FROM fleets WHERE owner_id = ?`).run(player.id);
+            // The reset is a HEURISTIC and heuristics misfire (see issues #46/#48: a false
+            // restart once zeroed a player's race picks). So it may only clear columns the
+            // upsert below writes UNCONDITIONALLY — the public stats anyone can read off the
+            // profile/ranking. It must NOT touch the intel-derived columns (sciences per
+            // field, race picks, artefact, eco bonus, has_intel), because those are governed
+            // solely by the `has_intel` CASE guard in the upsert: hard-won intel must never
+            // be destroyed by a guess. A genuinely restarted player keeps stale intel (with
+            // its old intel_updated_at) until the next scan with vision overwrites it —
+            // cosmetic staleness beats irreversible data loss. origin_system IS reset here so
+            // the originChanged signal can re-arm on the next move.
             db.prepare(`
                 UPDATE players SET
                     level=0, points=0, ranking=NULL, science_level=0, culture_level=0,
-                    biology=0, economy=0, energy=0, mathematics=0, physics=0, social=0,
-                    trade_revenue=0, artefact=NULL, eco_bonus=0,
-                    race_growth=0, race_science=0, race_culture=0, race_production=0, race_speed=0, race_attack=0, race_defense=0,
-                    race_trader=0, race_sul=0, origin_system=NULL, has_intel=0, intel_updated_at=NULL,
+                    origin_system=NULL,
                     home_planet_id=NULL, home_system_id=NULL, home_planet_index=NULL, possible_homes='[]',
                     total_planets=0, total_population=0, total_farms=0, total_factories=0, total_labs=0, total_cybernetics=0, cv_used=0, cv_limit=0
                 WHERE id = ?
@@ -481,15 +506,31 @@ router.post('/sync/galaxy', requireAuth, (req, res) => {
             updated_at=CURRENT_TIMESTAMP
     `);
 
+    // x/y land in INTEGER-affinity columns, but a bound non-numeric string is stored as
+    // TEXT and later reaches the map UI, so coerce here at the trust boundary: a system id
+    // must be a positive integer, and x/y become real numbers or the row is skipped. This
+    // keeps a member-supplied string from ever persisting as coordinates (defence in depth
+    // for the map's own esc(); one bad row is skipped, never aborts the batch).
+    const coord = (v) => {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+    };
+
+    let stored = 0;
     const syncTransaction = db.transaction((sysList) => {
         for (const s of sysList) {
-            upsertSystem.run(s.id, s.name, s.x, s.y);
+            if (!Number.isInteger(s.id) || s.id <= 0) continue;
+            const x = coord(s.x);
+            const y = coord(s.y);
+            if (x === null || y === null) continue;
+            upsertSystem.run(s.id, typeof s.name === 'string' ? s.name : null, x, y);
+            stored++;
         }
     });
 
     try {
         syncTransaction(systems);
-        res.json({ success: true, count: systems.length });
+        res.json({ success: true, count: stored });
     } catch (err) {
         console.error(`[DB Error] Failed to sync galaxy index:`, err);
         res.status(500).json({ error: 'Database sync failed' });
@@ -630,6 +671,110 @@ router.post('/sync/alliance-roster', requireAuth, (req, res) => {
     } catch (err) {
         console.error("[DB Error] Alliance roster reconcile failed:", err);
         res.status(500).json({ error: 'Database transaction failed' });
+    }
+});
+
+// --- BATTLE REPORT RECEIVER (game REST API) ---
+// Body: { reports: [<raw /api/v1 battle-report objects>] }. Mapping/validation lives in
+// src/utils/battle-reports.js: a malformed report is skipped, never aborts the batch,
+// and INSERT OR IGNORE makes re-syncs idempotent (the game report id is the PK).
+//
+// Discord announcements are fired AFTER the commit, fire-and-forget, only for reports
+// the hub had never seen (freshly inserted, announced=0), capped at 5 embeds per sync
+// with the overflow summarized in one line. Names are player-controlled strings on
+// their way to Discord, so they pass through defuseMentions first.
+router.post('/sync/battle-reports', requireAuth, (req, res) => {
+    const list = Array.isArray(req.body.reports) ? req.body.reports : null;
+    if (!list) return res.status(400).json({ error: 'Invalid payload' });
+
+    const rows = [];
+    for (const r of list) {
+        const row = mapApiReport(r);
+        if (row) rows.push(row);
+    }
+
+    try {
+        const { inserted, skipped } = upsertReports(db, rows);
+
+        // Announce the ones the alliance has not seen yet. The pass is driven from the
+        // table (WHERE announced = 0), not just this batch's freshly inserted rows, so a
+        // report that was synced BEFORE the Discord channel was configured still gets
+        // announced once the channel exists (INSERT OR IGNORE would otherwise send it to
+        // `skipped` on a re-sync and it could never announce). announced=1 is flipped only
+        // when a channel is actually configured — otherwise the rows stay a retry queue.
+        if (settingValue('discord_battlereport_channel')) {
+            const pending = db.prepare(
+                `SELECT * FROM battle_reports WHERE announced = 0 ORDER BY started_at ASC, id ASC`).all();
+            if (pending.length > 0) {
+                const markAnnounced = db.prepare(`UPDATE battle_reports SET announced = 1 WHERE id = ?`);
+                const toEmbed = pending.slice(0, 5);
+                for (const row of toEmbed) {
+                    const embed = formatBattleEmbed({
+                        ...row,
+                        att_player_name: row.att_player_name == null ? null : defuseMentions(row.att_player_name),
+                        def_player_name: row.def_player_name == null ? null : defuseMentions(row.def_player_name),
+                        att_alliance_tag: row.att_alliance_tag == null ? null : defuseMentions(row.att_alliance_tag),
+                        def_alliance_tag: row.def_alliance_tag == null ? null : defuseMentions(row.def_alliance_tag),
+                        winner: row.winner == null ? null : defuseMentions(row.winner),
+                    });
+                    postEmbed('discord_battlereport_channel', embed).catch(err =>
+                        console.error('[Discord] battle-report announce error:', err.message));
+                }
+                if (pending.length > toEmbed.length) {
+                    postEmbed('discord_battlereport_channel', {
+                        title: 'More battle reports',
+                        description: `…and ${pending.length - toEmbed.length} more new battle reports synced.`,
+                        color: 0x99aab5,
+                    }).catch(err => console.error('[Discord] battle-report announce error:', err.message));
+                }
+                // Fire-and-forget above: the flag is flipped for every pending row now, so a
+                // Discord hiccup drops that one embed rather than replaying the whole backlog
+                // on the next sync (matches how reminders/timers mark themselves sent).
+                const flip = db.transaction((ids) => { for (const id of ids) markAnnounced.run(id); });
+                flip(pending.map(r => r.id));
+            }
+        }
+
+        // newest_started_at is the dashboard scheduler's contract: the next pull uses it
+        // as BattleDateFrom so the search window only ever moves forward.
+        const newest = db.prepare(`SELECT MAX(started_at) AS newest FROM battle_reports`).get().newest || null;
+
+        res.json({ success: true, inserted: inserted.length, skipped, newest_started_at: newest });
+    } catch (err) {
+        console.error('[DB Error] Battle report sync failed:', err);
+        res.status(500).json({ error: 'Database sync failed' });
+    }
+});
+
+// --- STARBASE ORDER AUDIT RECEIVER ---
+// One row per starbase-order geometry PUT the member's browser confirmed against the
+// game API (the hub never sends that PUT itself). The actor comes from the session, not
+// the payload — the payload only says what was sent, never who sent it.
+router.post('/sync/starbase-audit', requireAuth, (req, res) => {
+    const b = req.body;
+    const orderId = Number(b.order_id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+        return res.status(400).json({ error: 'Invalid order_id' });
+    }
+
+    const intOrNull = v => (Number.isInteger(v) ? v : null);
+    const realOrNull = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+    try {
+        db.prepare(`
+            INSERT INTO starbase_order_audit
+                (order_id, system_id, planet_index, range, angle1, angle2, actor_user_id, actor_game_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            orderId,
+            intOrNull(b.system_id), intOrNull(b.planet_index),
+            realOrNull(b.range), realOrNull(b.angle1), realOrNull(b.angle2),
+            req.session.userId, req.session.gameName || null
+        );
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[DB Error] Starbase order audit failed:', err);
+        res.status(500).json({ error: 'Audit write failed' });
     }
 });
 

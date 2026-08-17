@@ -9,7 +9,10 @@ database, and exposes that back through a dashboard and a Discord bot.
 
 Members reach the game *through* this server rather than directly. The proxy injects a
 script into each game page; that script reads the page's DOM and posts what it finds to
-the hub, so intel gathered by one member is available to everyone.
+the hub, so intel gathered by one member is available to everyone. The dashboard can also
+query the game's own REST API (`/api/v1`, forwarded through the same proxy under one
+globally rate-limited budget — see [`docs/game-api.md`](docs/game-api.md)) and feeds those
+answers into the same database.
 
 ```
 browser ──► AWT proxy ──► astrowars.games
@@ -37,6 +40,7 @@ browser ──► AWT proxy ──► astrowars.games
 | `src/routes/` | API under `/hub-api` — auth, sync, intel, trade, notes, admin, search, incoming |
 | `src/utils/` | Game maths: travel time, battle model, interceptor analysis |
 | `public/` | Dashboard (`Wrapper.html`), admin panel, login page |
+| `public/js/utils/` | Dual-runtime shared modules: the formulas, the rate gate, the game API client |
 | `public/js/scrapers/` | Page parsers injected into the game |
 | `public/js/ui/` | Dashboard panel logic |
 | `public/userscripts/` | Standalone Tampermonkey script for redzone |

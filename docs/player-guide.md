@@ -118,6 +118,16 @@ holding 400+ points for 5 straight days; an alliance wins by averaging 300+ poin
 top members for 3 straight days, with at least 3 members counted. See
 [Win conditions](game-rules.md#win-conditions).
 
+### RedZone rounds
+
+Some rounds run on the separate RedZone server (`redzone.astrowars.games`) at **×10 pace** —
+the round simply moves about ten times faster than a standard one, so plan in hours where
+you'd normally plan in days. A few numbers change too: a **trade agreement costs
+120,000 A$ there instead of 20,000 A$**. The full list of RedZone differences hasn't been
+written down yet — it's being collected in issue #53 — so on a RedZone round, treat the
+numbers in this guide and in [game-rules.md](game-rules.md) as standard-round values until
+someone has confirmed them there.
+
 ## Strategy
 
 ### Playstyle archetypes

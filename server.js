@@ -227,6 +227,22 @@ const proxyCeiling = rateLimit({
     keyOf: req => (req.session && req.session.userId ? `u${req.session.userId}` : null),
 });
 
+// --- GAME API BUDGET ---
+// The game's administration has agreed to programmatic use of the production REST API
+// (the /api/v1 paths) under a hard ceiling of FIVE requests per second for the whole hub
+// combined — every member, every feature, one shared budget. That is why keyOf collapses
+// everyone into a single bucket and isAutomated counts every request, marker or not
+// (gameGate above is per-member and marker-only; this is a different promise). The
+// ceiling is deploy-configurable, but its default stays 5 and raising
+// GAME_API_MAX_PER_SECOND requires the game administrator's renewed consent — it is an
+// agreement with a person, not a tuning knob.
+const apiGate = gameTrafficGate({
+    keyOf: () => 'global',
+    isAutomated: () => true,
+    maxPerSecond: process.env.GAME_API_MAX_PER_SECOND === undefined ? 5 : Number(process.env.GAME_API_MAX_PER_SECOND),
+    maxWaitMs: process.env.GAME_API_MAX_WAIT_MS === undefined ? 8000 : Number(process.env.GAME_API_MAX_WAIT_MS),
+});
+
 // Read-only view of what the gate has been doing — for the admin panel, and for the day
 // someone asks us to show that the agreement is being kept. Registered before the /hub-api
 // router so it is unambiguously this file's endpoint, not one of the domain routers'.
@@ -235,7 +251,52 @@ app.get('/hub-api/admin/game-traffic', (req, res) => {
     res.json({ success: true, gate: gameGate.snapshot() });
 });
 
+// Sibling read-only view for the global API budget above — same reason, same audience.
+app.get('/hub-api/admin/api-traffic', (req, res) => {
+    if (!req.session || req.session.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    res.json({ success: true, gate: apiGate.snapshot() });
+});
+
 app.use('/hub-api', apiRoutes);
+
+// --- 3. AUTHENTICATION FIREWALL ---
+const requireAuth = (req, res, next) => {
+    if (req.session && req.session.userId) return next();
+    res.redirect('/hub-assets/login.html');
+};
+
+// --- GAME REST API (the /api/v1 paths) ---
+// Dedicated chain for the game's REST API, forwarded by the SAME proxy middleware as
+// page traffic so the cookie/marker hygiene (hub session stripped, X-AWT-Automated
+// removed, the member's own game session forwarded) is inherited rather than duplicated.
+// The server never calls the API itself — it has no game session; every request here
+// originates in a member's browser.
+//
+// Registered BEFORE the app.use('/api', express.json(...)) mount below on purpose:
+// express.json would otherwise drain PUT/POST bodies before the proxy could forward
+// them, and the game would receive empty requests. The path is left untouched (no
+// prefix stripping) so the proxy forwards /api/v1/... verbatim.
+//
+// The match is deliberately tolerant: the upstream game (ASP.NET Core / Kestrel) routes
+// case-insensitively and percent-decodes before matching, so `/API/v1/...` and
+// `/%61pi/v1/...` reach the same endpoint. If we only matched the literal lowercased
+// `/api/v1`, those variants would skip apiGate and fall through to the catch-all proxy
+// below — forwarded to the game without ever touching the global 5 req/s budget. So the
+// guard normalizes (percent-decode + lowercase) before comparing; over-matching is safe
+// because the chain only ADDS auth + gating and still forwards the original URL verbatim.
+const isGameApiPath = (req) => {
+    let p = req.path;
+    // A malformed %-escape throws; fall back to the raw path in that case.
+    try { p = decodeURIComponent(p); } catch (e) { p = req.path; }
+    return p.toLowerCase().startsWith('/api/v1');
+};
+app.use((req, res, next) => {
+    if (!isGameApiPath(req)) return next();
+    requireAuth(req, res, () =>
+        proxyCeiling(req, res, () =>
+            apiGate(req, res, () =>
+                proxyMiddleware(req, res, next))));
+});
 
 // External game-notification webhook (no session auth — called by the in-game forwarder).
 // Rate-limited because it is reachable by anyone and each call runs several joins plus a
@@ -245,12 +306,6 @@ app.use('/api/game-notifications', rateLimit({
     max: process.env.WEBHOOK_MAX === undefined ? 30 : Number(process.env.WEBHOOK_MAX)
 }));
 app.use('/api', express.json({ limit: '5mb' }), require('./src/routes/webhook'));
-
-// --- 3. AUTHENTICATION FIREWALL ---
-const requireAuth = (req, res, next) => {
-    if (req.session && req.session.userId) return next();
-    res.redirect('/hub-assets/login.html'); 
-};
 
 // Short shareable shortcut: /rz -> the redzone subdomain (the actual open proxy). No
 // auth — it's just a redirect to a public entry point.

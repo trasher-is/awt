@@ -38,6 +38,10 @@
                 <input type="checkbox" id="gm-layer-labels" class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
                 <span class="text-muted-foreground">Names</span>
             </label>
+            <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                <input type="checkbox" id="gm-layer-isochrones" class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
+                <span class="text-muted-foreground">Isochrones <span class="text-amber-500/80">(standard pace)</span></span>
+            </label>
         </div>
 
         <div class="flex items-center gap-1 ml-auto">
@@ -53,7 +57,35 @@
             <button id="gm-refresh" title="Reload from the archive" class="h-7 px-2 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors">
                 <i class="fa-solid fa-rotate mr-1"></i>Reload
             </button>
+            <button id="gm-seed-api" title="Index every system's coordinates through the game API — one call, uses your own game session" class="h-7 px-2 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors">
+                <i class="fa-solid fa-cloud-arrow-down mr-1"></i>Seed from API
+            </button>
         </div>
+    </div>
+
+    <!-- ISOCHRONE CONTROLS (shown while the Isochrones layer is on) -->
+    <div id="gm-iso-controls" class="hidden border-b border-border bg-zinc-950 px-3 md:px-6 py-2 flex items-center gap-x-4 gap-y-2 flex-wrap shrink-0 text-xs">
+        <div class="relative">
+            <input type="text" id="gm-iso-origin" placeholder="Origin system…" autocomplete="off"
+                class="h-7 w-44 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+            <div id="gm-iso-origin-drop" class="hidden absolute top-8 left-0 z-50 w-56 bg-zinc-900 border border-border rounded shadow-xl max-h-48 overflow-y-auto"></div>
+        </div>
+        <label class="flex items-center gap-1.5 text-muted-foreground">Energy
+            <input type="number" id="gm-iso-energy" min="0" max="100" value="0" class="h-7 w-14 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+        </label>
+        <label class="flex items-center gap-1.5 text-muted-foreground">Race speed
+            <input type="number" id="gm-iso-speed" min="-4" max="4" value="0" class="h-7 w-14 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+        </label>
+        <label class="flex items-center gap-1.5 cursor-pointer select-none text-muted-foreground">
+            <input type="checkbox" id="gm-iso-alliance" class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
+            Allied / own destination (halved)
+        </label>
+        <label class="flex items-center gap-1.5 text-muted-foreground">Bands (h)
+            <input type="number" id="gm-iso-t1" min="1" value="12" class="h-7 w-14 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+            <input type="number" id="gm-iso-t2" min="1" value="24" class="h-7 w-14 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+            <input type="number" id="gm-iso-t3" min="1" value="48" class="h-7 w-14 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+        </label>
+        <span class="text-[11px] text-amber-500/80">Band times assume the standard round pace — the current RedZone round runs ×10 faster.</span>
     </div>
 
     <!-- CANVAS -->

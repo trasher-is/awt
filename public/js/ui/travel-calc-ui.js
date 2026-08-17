@@ -8,10 +8,29 @@
 import { esc } from '../utils/escape.js';
 import '../utils/travel-model.js';
 import '../utils/battle-model.js';   // side-effect import: cvOf for the system view
+import '../utils/game-rate-limit.js'; // side-effect import: the shared 5/s gate AWApi rides
+import '../utils/aw-api.js';          // side-effect import: game REST client on globalThis
 
 const { calcTravelSeconds, formatTime: fmt, systemDistance } = globalThis.AWTravelModel;
+const { getTravelTime, getSystemPlanets, mapPlanetsToSyncPayload } = globalThis.AWApi;
 
 let sysCache = null, playerCache = null;
+
+// ─── GAME-SERVER TRAVEL TIME (v2) ─────────────────────────────────────────────
+// The local formula renders instantly and stays the authority by default. When both
+// endpoints came from the system picker (so their game ids are known) and the alliance
+// box is unchecked, a debounced GET /api/v1/Fleet/travelTime adds the game's own answer
+// as the primary display; the local value stays visible beneath it. The API line is
+// skipped for alliance moves (the endpoint's semantics for allied halving are
+// unverified) and for manually typed coordinates (the endpoint takes system ids).
+const API_DEBOUNCE_MS = 400;
+const MISMATCH_WARN_SECONDS = 2;
+
+// System ids are only known when the user picked from the dropdown; typing into the
+// X/Y boxes clears them (the coordinates no longer describe the picked system).
+let origSysId = null, destSysId = null;
+// Debounce timer + a sequence token so a slow response never paints over newer inputs.
+let apiTimer = null, apiSeq = 0;
 
 function render() {
     const g = id => parseFloat(document.getElementById(id)?.value) || 0;
@@ -31,6 +50,63 @@ function render() {
         : `Deep space · distance ${dist.toFixed(2)}`;
     const half = alliance ? '' : ` · allied would be ${fmt(Math.floor(secs * 0.5))}`;
     document.getElementById('tc-meta').textContent = meta + half;
+
+    // Local is the authority again until the game server answers for THESE inputs:
+    // invalidate any in-flight response, cancel the pending call, drop the API dressing.
+    apiSeq++;
+    if (apiTimer) { clearTimeout(apiTimer); apiTimer = null; }
+    document.getElementById('tc-source-badge')?.classList.add('hidden');
+    document.getElementById('tc-local-line')?.classList.add('hidden');
+
+    const eligible = origSysId != null && destSysId != null && !alliance;
+    if (!eligible) {
+        document.getElementById('tc-api-note')?.classList.add('hidden');
+        return;
+    }
+    const params = { fromSystem: origSysId, fromPlanetIndex: sp, toSystem: destSysId, toPlanetIndex: ep, energyLevel: energy };
+    const context = { ...params, from: [sx, sy], to: [ex, ey], raceSpeed: speed, alliance: !!alliance, localSeconds: secs };
+    apiTimer = setTimeout(() => { apiTimer = null; showApiTime(params, context); }, API_DEBOUNCE_MS);
+}
+
+async function showApiTime(params, context) {
+    const seq = ++apiSeq;
+    const res = await getTravelTime(params);
+    if (seq !== apiSeq) return; // inputs changed while this was in flight
+
+    const note = document.getElementById('tc-api-note');
+    const total = res.ok && res.data ? res.data.totalSeconds : null;
+    if (typeof total !== 'number' || !isFinite(total)) {
+        // Local-only degradation: the big number is already correct, so just say quietly
+        // why there is no server line. No console noise — an expired session or a game
+        // outage is not this panel's error to shout about.
+        if (note) {
+            note.textContent = res.reason === 'session'
+                ? 'Game session unavailable — using local formula.'
+                : 'Game server unavailable — using local formula.';
+            note.classList.remove('hidden');
+        }
+        return;
+    }
+
+    // totalSeconds may be fractional; formatTime assumes integers, so round first.
+    const apiSecs = Math.round(total);
+    document.getElementById('tc-time').textContent = fmt(apiSecs);
+    document.getElementById('tc-source-badge')?.classList.remove('hidden');
+    const localLine = document.getElementById('tc-local-line');
+    if (localLine) {
+        localLine.textContent = `local formula: ${fmt(context.localSeconds)}`;
+        localLine.classList.remove('hidden');
+    }
+    note?.classList.add('hidden');
+
+    // A real disagreement is calibration data — log it with everything needed to turn it
+    // into a fixture. Expected sources of routine mismatch: the API answers for the
+    // logged-in player (their race speed is baked in, so a speed typed for someone else
+    // diverges by design), and a speed-paced round (RedZone x10) the local formula does
+    // not model.
+    if (Math.abs(apiSecs - context.localSeconds) > MISMATCH_WARN_SECONDS) {
+        console.warn('[travel-calc] game API and local formula disagree', { ...context, apiSeconds: apiSecs });
+    }
 }
 
 async function loadSystems() {
@@ -75,8 +151,10 @@ function wireSystemSearch(inputId, dropId, xId, yId, onPick) {
             // Reflect the chosen system back into the search box (was showing the typed text).
             input.value = `${btn.dataset.name} #${btn.dataset.id}`;
             drop.classList.add('hidden');
-            render();
+            // onPick BEFORE render: render() reads the picked system id to decide whether
+            // the game-server travel time applies, so the id must be recorded first.
             if (onPick) onPick(parseInt(btn.dataset.id, 10));
+            render();
         }));
     });
     input.addEventListener('blur', () => setTimeout(() => drop.classList.add('hidden'), 150));
@@ -161,12 +239,31 @@ async function renderSystemView(sysId) {
             <table class="w-full text-xs"><tbody>${fleetRows}</tbody></table>` : ''}
         `;
 
-        // "Update" pulls the live system map, parses + syncs it, then re-renders.
+        // "Update" refreshes the hub's intel for this system, then re-renders. The game
+        // API is asked first (one rate-gated GET instead of a full page scrape); when it
+        // cannot answer — expired session, outage — the old DOM scrape still works.
         document.getElementById('tc-sys-update')?.addEventListener('click', async (e) => {
             const btn = e.currentTarget;
             btn.disabled = true; btn.textContent = 'Updating…';
-            const { scrapeSystemById } = await import('../scrapers/system-parser.js');
-            const ok = await scrapeSystemById(sysId);
+            let ok = false;
+            const res = await getSystemPlanets(sysId);
+            if (res.ok && Array.isArray(res.data)) {
+                // Same payload shape the scraper POSTs, built by the one shared mapper.
+                // No scrape fallback past this point: the sync target is the hub itself,
+                // and the scraper POSTs to the same route — it would fail the same way.
+                try {
+                    const r = await fetch('/hub-api/sync/system', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(mapPlanetsToSyncPayload(sysId, res.data)),
+                    });
+                    const d = await r.json();
+                    ok = !!d.success;
+                } catch (err) { ok = false; }
+            } else {
+                const { scrapeSystemById } = await import('../scrapers/system-parser.js');
+                ok = await scrapeSystemById(sysId);
+            }
             if (typeof window.showToast === 'function') {
                 window.showToast(ok ? `System #${sysId} updated` : `Could not update system #${sysId}`);
             }
@@ -181,12 +278,22 @@ export function initTravelCalc() {
     document.getElementById('close-travel-calc-btn')?.addEventListener('click', () => {
         document.getElementById('travel-calc-panel')?.classList.replace('translate-x-0', 'translate-x-full');
     });
+    // Typing into a coordinate box forgets the picked system id — registered BEFORE the
+    // render listeners below so render() never captures a stale id. (The picker sets
+    // .value programmatically, which fires no 'input' event, so picks survive this.)
+    [['tc-orig-x', 'tc-orig-y'], ['tc-dest-x', 'tc-dest-y']].forEach(([xId, yId], i) => {
+        const clear = () => { if (i === 0) origSysId = null; else destSysId = null; };
+        document.getElementById(xId)?.addEventListener('input', clear);
+        document.getElementById(yId)?.addEventListener('input', clear);
+    });
     document.querySelectorAll('#travel-calc-panel .tc-in').forEach(el => {
         el.addEventListener('input', render);
         el.addEventListener('change', render);
     });
-    wireSystemSearch('tc-orig-sys-input', 'tc-orig-sys-dropdown', 'tc-orig-x', 'tc-orig-y');
-    wireSystemSearch('tc-dest-sys-input', 'tc-dest-sys-dropdown', 'tc-dest-x', 'tc-dest-y', renderSystemView);
+    wireSystemSearch('tc-orig-sys-input', 'tc-orig-sys-dropdown', 'tc-orig-x', 'tc-orig-y',
+        id => { origSysId = id; });
+    wireSystemSearch('tc-dest-sys-input', 'tc-dest-sys-dropdown', 'tc-dest-x', 'tc-dest-y',
+        id => { destSysId = id; renderSystemView(id); });
     wirePlayerSearch();
     render();
 }
