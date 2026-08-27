@@ -4,6 +4,8 @@
 // target, split into on-time and late.
 const db = require('../database');
 const { calcTravelSeconds, formatTime } = require('./travel-calc');
+const systemsRepo = require('../repositories/systems');
+const fleetsRepo = require('../repositories/fleets');
 
 const ONTIME_LIMIT = 10;
 const LATE_LIMIT = 10;
@@ -45,7 +47,7 @@ function getPpPrice() {
 
 // attack: { systemId, planetIndex, defenderName, arrivalUnix }
 function computeInterceptors(attack, nowUnix) {
-    const target = db.prepare(`SELECT x, y FROM systems WHERE id = ?`).get(attack.systemId);
+    const target = systemsRepo.getSystemCoords(attack.systemId);
     if (!target || target.x == null || target.y == null) return null;
 
     const defender = attack.defenderName
@@ -57,16 +59,9 @@ function computeInterceptors(attack, nowUnix) {
         ? `p.alliance_id = @aid`
         : `LOWER(p.name) IN (SELECT LOWER(game_name) FROM app_users WHERE is_active = 1)`;
 
-    const fleets = db.prepare(`
-        SELECT f.system_id AS origin_sys, f.planet_index, f.game_fleet_id,
-               f.destroyers, f.cruisers, f.battleships, f.arrival_at,
-               p.id AS owner_id, p.name AS owner_name, p.energy, p.race_speed,
-               s.x AS sx, s.y AS sy
-        FROM fleets f
-        JOIN players p ON f.owner_id = p.id
-        JOIN systems s ON f.system_id = s.id
-        WHERE ${whereClause} AND s.x IS NOT NULL AND s.y IS NOT NULL
-    `).all(allianceId ? { aid: allianceId } : {});
+    const fleets = allianceId
+        ? fleetsRepo.getInterceptFleetsByAlliance(allianceId)
+        : fleetsRepo.getInterceptFleetsByActiveUsers();
 
     const ppPrice = getPpPrice();
 

@@ -24,6 +24,7 @@
 
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const db = require('./database');
+const systemsRepo = require('./repositories/systems');
 
 // Autocomplete is capped at 25 choices by Discord.
 const MAX_CHOICES = 25;
@@ -61,12 +62,8 @@ function suggestSystems(query) {
     const q = String(query || '').trim();
     try {
         const rows = q
-            ? db.prepare(`
-                SELECT id, name, x, y FROM systems
-                WHERE name LIKE ? OR CAST(id AS TEXT) LIKE ?
-                ORDER BY LENGTH(COALESCE(name, '')) ASC LIMIT ?
-              `).all(`%${q}%`, `${q}%`, MAX_CHOICES)
-            : db.prepare(`SELECT id, name, x, y FROM systems WHERE x IS NOT NULL ORDER BY id LIMIT ?`).all(MAX_CHOICES);
+            ? systemsRepo.searchSystemsByQueryPrefix(`%${q}%`, `${q}%`, MAX_CHOICES)
+            : systemsRepo.listSystemsWithCoordsLimited(MAX_CHOICES);
         return rows.map(r => ({
             name: `${r.name || 'Unknown'} #${r.id}${r.x != null ? ` (${r.x}/${r.y})` : ''}`.slice(0, 100),
             value: String(r.id),

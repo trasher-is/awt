@@ -4,6 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const db = require('../database');
 const { requireAuth, requireAdmin } = require('./_middleware');
+const systemsRepo = require('../repositories/systems');
+const fleetsRepo = require('../repositories/fleets');
+const plansRepo = require('../repositories/plans');
 const { archiveRound, listRounds, roundDetail } = require('../utils/round-archive');
 const router = express.Router();
 
@@ -223,10 +226,10 @@ router.post('/admin/users/:id/password', requireAdmin, (req, res) => {
 router.get('/admin/status', requireAdmin, (req, res) => {
     try {
         const stats = {
-            systems: db.prepare(`SELECT COUNT(*) as count FROM systems`).get().count,
-            planets: db.prepare(`SELECT COUNT(*) as count FROM planets`).get().count,
+            systems: systemsRepo.countSystems(),
+            planets: systemsRepo.countPlanets(),
             players: db.prepare(`SELECT COUNT(*) as count FROM players`).get().count,
-            fleets: db.prepare(`SELECT COUNT(*) as count FROM fleets`).get().count,
+            fleets: fleetsRepo.countFleets(),
             uptime: process.uptime()
         };
         res.json({ success: true, stats });
@@ -238,7 +241,7 @@ router.get('/admin/status', requireAdmin, (req, res) => {
 // Clear Old Fleets (> 10 Days)
 router.post('/admin/clear-fleets', requireAdmin, (req, res) => {
     try {
-        const result = db.prepare(`DELETE FROM fleets WHERE updated_at <= datetime('now', '-10 days')`).run();
+        const result = fleetsRepo.deleteFleetsOlderThan10Days();
         res.json({ success: true, deleted: result.changes });
     } catch (err) {
         res.status(500).json({ error: 'Failed to clear fleets' });
@@ -303,13 +306,13 @@ router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
             // round as Elfenlied. If the snapshot throws, nothing is deleted.
             archived = archiveRound(db, { label, note });
 
-            db.prepare(`DELETE FROM fleets`).run();
-            db.prepare(`DELETE FROM planet_plans`).run();
-            db.prepare(`DELETE FROM planet_events`).run();
-            db.prepare(`DELETE FROM planets`).run();
+            fleetsRepo.deleteAllFleets();
+            plansRepo.deleteAllPlans();
+            systemsRepo.deleteAllPlanetEvents();
+            systemsRepo.deleteAllPlanets();
             db.prepare(`DELETE FROM players`).run();
             db.prepare(`DELETE FROM alliances`).run();
-            db.prepare(`DELETE FROM systems`).run();
+            systemsRepo.deleteAllSystems();
         });
 
         nukeTx();

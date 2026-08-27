@@ -1,6 +1,8 @@
 const express = require('express');
 const db = require('../database');
 const { requireAuth } = require('./_middleware');
+const plansRepo = require('../repositories/plans');
+const systemsRepo = require('../repositories/systems');
 const router = express.Router();
 
 // --- PLANET PLANS (META-DATA) ---
@@ -8,12 +10,7 @@ const router = express.Router();
 // Get all plans for a specific system
 router.get('/plans/:systemId', requireAuth, (req, res) => {
     try {
-        const plans = db.prepare(`
-            SELECT p.planet_index, p.note, p.updated_at, u.game_name as author
-            FROM planet_plans p
-            LEFT JOIN app_users u ON p.author_id = u.id
-            WHERE p.system_id = ?
-        `).all(req.params.systemId);
+        const plans = plansRepo.getPlansForSystemDetailed(req.params.systemId);
         res.json({ success: true, plans });
     } catch (err) {
         console.error("[DB Error] Failed to fetch plans:", err);
@@ -32,10 +29,7 @@ router.post('/plans', requireAuth, (req, res) => {
 
     try {
         // Removed the ON CONFLICT clause to stop overwriting old records
-        db.prepare(`
-            INSERT INTO planet_plans (system_id, planet_index, author_id, note)
-            VALUES (?, ?, ?, ?)
-        `).run(system_id, planet_index, author_id, note);
+        plansRepo.createPlan(system_id, planet_index, author_id, note);
 
         res.json({ success: true });
     } catch (err) {
@@ -56,17 +50,11 @@ router.delete('/plans/:systemId/:planetIndex', requireAuth, (req, res) => {
         const isAdmin = req.session.role === 'admin';
 
         const result = isAdmin
-            ? db.prepare(`DELETE FROM planet_plans WHERE system_id = ? AND planet_index = ?`)
-                .run(systemId, planetIndex)
-            : db.prepare(`
-                DELETE FROM planet_plans
-                WHERE system_id = ? AND planet_index = ? AND (author_id = ? OR author_id IS NULL)
-              `).run(systemId, planetIndex, req.session.userId);
+            ? plansRepo.deletePlanAsAdmin(systemId, planetIndex)
+            : plansRepo.deletePlanAsAuthor(systemId, planetIndex, req.session.userId);
 
         if (result.changes === 0) {
-            const stillThere = db.prepare(
-                `SELECT 1 FROM planet_plans WHERE system_id = ? AND planet_index = ?`
-            ).get(systemId, planetIndex);
+            const stillThere = plansRepo.planExists(systemId, planetIndex);
             if (stillThere) {
                 return res.status(403).json({ error: 'That plan was written by someone else. Ask them or an admin to remove it.' });
             }
@@ -138,14 +126,7 @@ router.get('/search/system', requireAuth, (req, res) => {
 
     try {
         const searchTerm = `%${q}%`;
-        const query = db.prepare(`
-            SELECT id, name, x, y
-            FROM systems
-            WHERE name LIKE ? OR CAST(id AS TEXT) = ?
-            LIMIT 20
-        `);
-
-        const results = query.all(searchTerm, q);
+        const results = systemsRepo.searchSystemsByNameOrId(searchTerm, q);
         res.json({ success: true, results });
     } catch (err) {
         console.error("[DB Error] System search failed:", err);

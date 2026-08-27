@@ -3,6 +3,7 @@ const db = require('../database');
 const { requireAuth } = require('./_middleware');
 const { calcTravelSeconds, formatTime } = require('../utils/travel-calc');
 const { postEmbed, defuseMentions } = require('../utils/discord-post');
+const systemsRepo = require('../repositories/systems');
 
 const router = express.Router();
 
@@ -19,8 +20,7 @@ function bioNeededFor(distance) {
 
 function loadSystems(ids) {
     if (!ids.length) return new Map();
-    const marks = ids.map(() => '?').join(',');
-    const rows = db.prepare(`SELECT id, name, x, y FROM systems WHERE id IN (${marks})`).all(...ids);
+    const rows = systemsRepo.getSystemsByIds(ids);
     return new Map(rows.map(r => [r.id, r]));
 }
 
