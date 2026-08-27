@@ -1,5 +1,8 @@
 const express = require('express');
 const db = require('../database');
+const systemsRepo = require('../repositories/systems');
+const fleetsRepo = require('../repositories/fleets');
+const plansRepo = require('../repositories/plans');
 const { requireAuth } = require('./_middleware');
 const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
 const { previousNames, findByFormerName } = require('../utils/round-archive');
@@ -65,11 +68,11 @@ router.get('/alliance-intel/:allianceId', requireAuth, (req, res) => {
 // --- INTEL HUB STATS ---
 router.get('/intel/summary', requireAuth, (req, res) => {
     try {
-        const systems = db.prepare(`SELECT COUNT(*) as count FROM systems`).get().count;
-        const planets = db.prepare(`SELECT COUNT(*) as count FROM planets`).get().count;
+        const systems = systemsRepo.countSystems();
+        const planets = systemsRepo.countPlanets();
         const players = db.prepare(`SELECT COUNT(*) as count FROM players`).get().count;
         const alliances = db.prepare(`SELECT COUNT(*) as count FROM alliances`).get().count;
-        const fleets = db.prepare(`SELECT COUNT(*) as count FROM fleets`).get().count; // <-- Added fleets
+        const fleets = fleetsRepo.countFleets();
 
         res.json({ success: true, systems, planets, players, alliances, fleets });
     } catch (err) {
@@ -81,7 +84,7 @@ router.get('/intel/summary', requireAuth, (req, res) => {
 // --- GET ALL SYSTEMS FOR MASS SCAN ---
 router.get('/systems', requireAuth, (req, res) => {
     try {
-        const systems = db.prepare(`SELECT id FROM systems ORDER BY id ASC`).all();
+        const systems = systemsRepo.listSystemIds();
         res.json({ success: true, systems: systems.map(s => s.id) });
     } catch (err) {
         console.error("[DB Error] Failed to fetch system list:", err);
@@ -107,48 +110,16 @@ router.get('/intel/system/:id', requireAuth, (req, res) => {
         const sysId = req.params.id;
 
         // 1. Get Planets & Owners (Updated to grab joined Guarded Ranking values)
-        const planets = db.prepare(`
-            SELECT p.planet_index, p.population, p.starbase, p.has_fleet, p.is_sieged, p.game_planet_id,
-                   u.name as owner_name, u.home_system_id, u.home_planet_index, u.possible_homes,
-                   a.tag as alliance_tag,
-                   bg.cv as guard_cv
-            FROM planets p
-            LEFT JOIN players u ON p.owner_id = u.id
-            LEFT JOIN alliances a ON u.alliance_id = a.id
-            LEFT JOIN best_guarded bg ON p.game_planet_id = bg.game_planet_id
-            WHERE p.system_id = ?
-            ORDER BY p.planet_index ASC
-        `).all(sysId);
+        const planets = systemsRepo.getSystemPlanetsWithIntel(sysId);
 
         // 2. Get Fleets
-        const fleets = db.prepare(`
-            SELECT f.planet_index, f.transports, f.colony_ships, f.destroyers, f.cruisers, f.battleships,
-                   u.name as owner_name, a.tag as alliance_tag
-            FROM fleets f
-            LEFT JOIN players u ON f.owner_id = u.id
-            LEFT JOIN alliances a ON u.alliance_id = a.id
-            WHERE f.system_id = ?
-        `).all(sysId);
+        const fleets = fleetsRepo.getFleetsForSystem(sysId);
 
         // 3. Get History (Last 10 events) - FIXED: Removed event_types table dependency
-        const history = db.prepare(`
-            SELECT e.id, e.planet_index, e.event_type_id, e.timestamp, e.old_value, e.new_value,
-                   o1.name as old_owner, o2.name as new_owner
-            FROM planet_events e
-            LEFT JOIN players o1 ON e.old_value = o1.id AND e.event_type_id = 1
-            LEFT JOIN players o2 ON e.new_value = o2.id AND e.event_type_id = 1
-            WHERE e.system_id = ?
-            ORDER BY e.timestamp DESC, e.id DESC
-            LIMIT 10
-        `).all(sysId);
+        const history = systemsRepo.getPlanetHistory(sysId);
 
         // 4. Get Plans
-        const plans = db.prepare(`
-            SELECT p.planet_index, p.note, u.game_name as author
-            FROM planet_plans p
-            LEFT JOIN app_users u ON p.author_id = u.id
-            WHERE p.system_id = ?
-        `).all(sysId);
+        const plans = plansRepo.getPlansForSystem(sysId);
 
         res.json({ success: true, planets, fleets, history, plans });
     } catch (err) {
@@ -178,12 +149,7 @@ router.get('/intel/players', requireAuth, (req, res) => {
 // Get Full Systems Database
 router.get('/intel/systems_db', requireAuth, (req, res) => {
     try {
-        const systems = db.prepare(`
-            SELECT s.*,
-                   (SELECT COUNT(*) FROM planets WHERE system_id = s.id) as planet_count,
-                   (SELECT COUNT(*) FROM fleets WHERE system_id = s.id) as fleet_count
-            FROM systems s
-        `).all();
+        const systems = systemsRepo.getSystemsDbSummary();
 
         res.json({ success: true, systems });
     } catch (err) {
@@ -215,28 +181,12 @@ router.get('/intel/systems_db', requireAuth, (req, res) => {
 //     turn a gap in our intel into a claim about the galaxy.
 router.get('/intel/galaxy-map', requireAuth, (req, res) => {
     try {
-        const systems = db.prepare(`
-            SELECT s.id, s.name, s.x, s.y, s.updated_at
-            FROM systems s
-            WHERE s.x IS NOT NULL AND s.y IS NOT NULL
-        `).all();
+        const systems = systemsRepo.getGalaxyMapSystems();
 
         // One row per (system, owning alliance). owner_id is NULL for a planet seen to be
         // unowned, and also for one whose owner has never been scraped — those are counted
         // separately as `free` and `unknown` rather than merged into "nobody".
-        const ownership = db.prepare(`
-            SELECT p.system_id,
-                   a.id  AS alliance_id,
-                   a.tag AS alliance_tag,
-                   COUNT(*) AS planets,
-                   SUM(CASE WHEN p.owner_id IS NULL OR p.owner_id = 0 THEN 1 ELSE 0 END) AS free_planets,
-                   SUM(CASE WHEN p.is_sieged = 1 THEN 1 ELSE 0 END) AS sieged_planets,
-                   MAX(p.updated_at) AS last_seen
-            FROM planets p
-            LEFT JOIN players u ON p.owner_id = u.id
-            LEFT JOIN alliances a ON u.alliance_id = a.id
-            GROUP BY p.system_id, a.id
-        `).all();
+        const ownership = systemsRepo.getGalaxyMapOwnership();
 
         // The alliance this hub belongs to: the members whose stats have been collected.
         // alliance_member_stats is what the existing alliance-vision overlay treats as
@@ -333,15 +283,7 @@ router.get('/intel/galaxy-map', requireAuth, (req, res) => {
 // Get Full Planets Database
 router.get('/intel/planets_db', requireAuth, (req, res) => {
     try {
-        const planets = db.prepare(`
-            SELECT p.system_id, p.planet_index, p.population, p.starbase, p.is_sieged, p.updated_at,
-                   s.name as system_name, s.x, s.y,
-                   u.name as owner_name, a.tag as alliance_tag
-            FROM planets p
-            LEFT JOIN systems s ON p.system_id = s.id
-            LEFT JOIN players u ON p.owner_id = u.id
-            LEFT JOIN alliances a ON u.alliance_id = a.id
-        `).all();
+        const planets = systemsRepo.getPlanetsFullDb();
 
         res.json({ success: true, planets });
     } catch (err) {
@@ -353,15 +295,7 @@ router.get('/intel/planets_db', requireAuth, (req, res) => {
 // Get Full Fleets Database
 router.get('/intel/fleets_db', requireAuth, (req, res) => {
     try {
-        const fleets = db.prepare(`
-            SELECT f.*,
-                   s.name as system_name, s.x, s.y,
-                   u.name as owner_name, a.tag as alliance_tag
-            FROM fleets f
-            LEFT JOIN systems s ON f.system_id = s.id
-            LEFT JOIN players u ON f.owner_id = u.id
-            LEFT JOIN alliances a ON u.alliance_id = a.id
-        `).all();
+        const fleets = fleetsRepo.getFleetsFullDb();
 
         res.json({ success: true, fleets });
     } catch (err) {
@@ -400,12 +334,7 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
         }
 
         // NEW: Fetch all distinct coordinates where this player owns assets
-        const systems = db.prepare(`
-            SELECT DISTINCT s.id, s.name, s.x, s.y
-            FROM planets p
-            JOIN systems s ON p.system_id = s.id
-            WHERE p.owner_id = ?
-        `).all(playerId);
+        const systems = systemsRepo.getDistinctSystemsForPlayer(playerId);
 
         // --- Fetch historical logins for the Line Chart ---
         let formattedActivity = [];
@@ -566,21 +495,7 @@ router.get('/intel/war-room/alliances', requireAuth, (req, res) => {
 // --- UNIFIED OPERATIONS TIMELINE ---
 router.get('/intel/timeline', requireAuth, (req, res) => {
     try {
-        const timeline = db.prepare(`
-            SELECT f.*,
-                   s.name as system_name, s.x, s.y,
-                   p.name as owner_name, a.tag as alliance_tag,
-                   pl.note as plan_note, u.game_name as plan_author
-            FROM fleets f
-            LEFT JOIN systems s ON f.system_id = s.id
-            LEFT JOIN players p ON f.owner_id = p.id
-            LEFT JOIN alliances a ON p.alliance_id = a.id
-            -- Correlate tactical plan logs to matching destinations
-            LEFT JOIN planet_plans pl ON f.system_id = pl.system_id AND f.planet_index = pl.planet_index
-            LEFT JOIN app_users u ON pl.author_id = u.id
-            WHERE f.arrival_time IS NOT NULL AND f.arrival_time != '-'
-            ORDER BY f.arrival_time ASC
-        `).all();
+        const timeline = fleetsRepo.getFleetsForTimeline();
 
         res.json({ success: true, timeline });
     } catch (err) {
@@ -593,23 +508,7 @@ router.get('/intel/timeline', requireAuth, (req, res) => {
 router.get('/intel/takeover/:systemId', requireAuth, (req, res) => {
     try {
         const sysId = req.params.systemId;
-        const board = db.prepare(`
-            SELECT p.planet_index, p.population, p.starbase, p.has_fleet,
-                   u.name as owner_name, a.tag as alliance_tag,
-                   t.assigned_name, t.pipeline_status, t.target_arrival_time,
-                   runner.energy as runner_energy, runner.race_speed as runner_speed,
-                   sys_target.x as target_x, sys_target.y as target_y,
-                   sys_origin.x as origin_x, sys_origin.y as origin_y
-            FROM planets p
-            LEFT JOIN players u ON p.owner_id = u.id
-            LEFT JOIN alliances a ON u.alliance_id = a.id
-            LEFT JOIN planet_takeovers t ON p.system_id = t.system_id AND p.planet_index = t.planet_index
-            LEFT JOIN players runner ON LOWER(t.assigned_name) = LOWER(runner.name)
-            LEFT JOIN systems sys_target ON p.system_id = sys_target.id
-            LEFT JOIN systems sys_origin ON runner.origin_system = sys_origin.id
-            WHERE p.system_id = ?
-            ORDER BY p.planet_index ASC
-        `).all(sysId);
+        const board = systemsRepo.getTakeoverBoard(sysId);
 
         res.json({ success: true, board });
     } catch (err) {
@@ -631,15 +530,7 @@ router.post('/intel/takeover', requireAuth, (req, res) => {
     }
 
     try {
-        db.prepare(`
-            INSERT INTO planet_takeovers (system_id, planet_index, assigned_name, pipeline_status, target_arrival_time, updated_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(system_id, planet_index) DO UPDATE SET
-                assigned_name = CASE WHEN excluded.assigned_name = '__REMOVE__' THEN NULL ELSE COALESCE(excluded.assigned_name, assigned_name) END,
-                pipeline_status = COALESCE(excluded.pipeline_status, pipeline_status),
-                target_arrival_time = CASE WHEN excluded.target_arrival_time = '__REMOVE__' THEN NULL ELSE COALESCE(excluded.target_arrival_time, target_arrival_time) END,
-                updated_at = CURRENT_TIMESTAMP
-        `).run(system_id, planet_index, assigned_name || null, pipeline_status || null, target_arrival_time || null);
+        systemsRepo.upsertTakeover(system_id, planet_index, assigned_name || null, pipeline_status || null, target_arrival_time || null);
 
         res.json({ success: true });
     } catch (err) {
