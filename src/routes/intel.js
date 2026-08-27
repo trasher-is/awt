@@ -3,6 +3,7 @@ const db = require('../database');
 const systemsRepo = require('../repositories/systems');
 const fleetsRepo = require('../repositories/fleets');
 const plansRepo = require('../repositories/plans');
+const playersRepo = require('../repositories/players');
 const { requireAuth } = require('./_middleware');
 const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
 const { previousNames, findByFormerName } = require('../utils/round-archive');
@@ -27,19 +28,7 @@ router.get('/intel/war-room/players', requireAuth, (req, res) => {
     if (!alliance_id) return res.status(400).json({ error: 'Missing Alliance Identifier selection' });
 
     try {
-        const players = db.prepare(`
-            SELECT p.id, p.name, p.economy, p.social, p.physics, p.mathematics, p.energy, p.biology, p.idle_time,
-                   p.race_attack, p.race_defense, p.race_speed, p.race_production, p.race_science,
-                   p.updated_at as player_scan_time, p.intel_updated_at,
-                   p.total_population, p.total_factories, p.total_farms, p.total_cybernetics, p.total_labs,
-                   p.trade_revenue, p.artefact,
-                   p.level, p.culture_level, p.has_intel,
-                   a.tag as alliance_tag,
-                   (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as total_planets
-            FROM players p
-            JOIN alliances a ON p.alliance_id = a.id
-            WHERE p.alliance_id = ?
-        `).all(alliance_id);
+        const players = playersRepo.getWarRoomPlayers(alliance_id);
 
         res.json({ success: true, players });
     } catch (err) {
@@ -52,10 +41,7 @@ router.get('/intel/war-room/players', requireAuth, (req, res) => {
 router.get('/alliance-intel/:allianceId', requireAuth, (req, res) => {
     try {
         const allianceId = req.params.allianceId;
-        const rows = db.prepare(`
-            SELECT id FROM players
-            WHERE alliance_id = ? AND has_intel = 1
-        `).all(allianceId);
+        const rows = playersRepo.getAllianceIntelPlayerIds(allianceId);
 
         const intelIds = rows.map(row => row.id);
         res.json(intelIds);
@@ -70,7 +56,7 @@ router.get('/intel/summary', requireAuth, (req, res) => {
     try {
         const systems = systemsRepo.countSystems();
         const planets = systemsRepo.countPlanets();
-        const players = db.prepare(`SELECT COUNT(*) as count FROM players`).get().count;
+        const players = playersRepo.countPlayers();
         const alliances = db.prepare(`SELECT COUNT(*) as count FROM alliances`).get().count;
         const fleets = fleetsRepo.countFleets();
 
@@ -96,7 +82,7 @@ router.get('/systems', requireAuth, (req, res) => {
 router.get('/players', requireAuth, (req, res) => {
     try {
         // We only scan players we actually know about from system/alliance mapping
-        const playersList = db.prepare(`SELECT id FROM players ORDER BY id ASC`).all();
+        const playersList = playersRepo.listPlayerIds();
         res.json({ success: true, players: playersList.map(p => p.id) });
     } catch (err) {
         console.error("[DB Error] Failed to fetch player list:", err);
@@ -132,12 +118,7 @@ router.get('/intel/system/:id', requireAuth, (req, res) => {
 router.get('/intel/players', requireAuth, (req, res) => {
     try {
         // Fetch every player, join their alliance tag, and count how many planets they own in our DB
-        const players = db.prepare(`
-            SELECT p.*, a.tag as alliance_tag,
-                   (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as planet_count
-            FROM players p
-            LEFT JOIN alliances a ON p.alliance_id = a.id
-        `).all();
+        const players = playersRepo.getFullPlayersDb();
 
         res.json({ success: true, players });
     } catch (err) {
@@ -192,29 +173,12 @@ router.get('/intel/galaxy-map', requireAuth, (req, res) => {
         // alliance_member_stats is what the existing alliance-vision overlay treats as
         // "us", so the map agrees with it rather than inventing a second definition.
         const memberIds = db.prepare(`SELECT player_id FROM alliance_member_stats`).all().map(r => r.player_id);
-        const ownTag = memberIds.length
-            ? (db.prepare(`
-                SELECT a.tag, COUNT(*) AS n
-                FROM players p JOIN alliances a ON p.alliance_id = a.id
-                WHERE p.id IN (${memberIds.map(() => '?').join(',')})
-                GROUP BY a.tag ORDER BY n DESC LIMIT 1
-              `).get(...memberIds) || {}).tag || null
-            : null;
+        const ownTag = (playersRepo.getAllianceTagForMembers(memberIds) || {}).tag || null;
 
         // Observers for the vision layer. Radius is NOT computed here — the rule lives in
         // public/js/utils/vision-model.js and is applied once, on the client, so the map
         // and Discord cannot drift apart again.
-        const observers = memberIds.length
-            ? db.prepare(`
-                SELECT p.id AS playerId, p.name, p.biology, p.science_level,
-                       s.id AS originSystemId, s.x, s.y
-                FROM players p
-                JOIN systems s ON p.origin_system = s.id
-                WHERE p.id IN (${memberIds.map(() => '?').join(',')})
-                  AND p.origin_system IS NOT NULL AND p.origin_system > 0
-                  AND s.x IS NOT NULL AND s.y IS NOT NULL
-              `).all(...memberIds)
-            : [];
+        const observers = playersRepo.getVisionObservers(memberIds);
 
         const bySystem = new Map();
         for (const row of ownership) {
@@ -320,14 +284,7 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
     try {
         const playerId = req.params.id;
 
-        const playerInfo = db.prepare(`
-            SELECT p.*,
-                   a.tag as alliance_tag,
-                   (SELECT COUNT(*) FROM planets WHERE owner_id = ?) as planet_count
-            FROM players p
-            LEFT JOIN alliances a ON p.alliance_id = a.id
-            WHERE p.id = ?
-        `).get(playerId, playerId);
+        const playerInfo = playersRepo.getPlayerWithPlanetCount(playerId);
 
         if (!playerInfo) {
             return res.json({ success: false, error: 'Player not found in database.' });
@@ -339,13 +296,7 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
         // --- Fetch historical logins for the Line Chart ---
         let formattedActivity = [];
         try {
-            const history = db.prepare(`
-                SELECT timestamp, total_logins
-                FROM player_logins
-                WHERE player_id = ?
-                ORDER BY timestamp ASC
-                LIMIT 30
-            `).all(playerId);
+            const history = playersRepo.getPlayerLoginHistory(playerId);
 
             formattedActivity = history.map(row => ({
                 date: new Date(row.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
@@ -368,12 +319,7 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
         // --- Fetch the Online Probability Heatmap ---
         let heatmap = Array(24).fill(0);
         try {
-            const heatmapData = db.prepare(`
-                SELECT strftime('%H', timestamp) as hour, COUNT(*) as count
-                FROM player_logins
-                WHERE player_id = ?
-                GROUP BY hour
-            `).all(playerId);
+            const heatmapData = playersRepo.getPlayerLoginHeatmap(playerId);
 
             heatmapData.forEach(row => {
                 if (row.hour !== null) {
