@@ -1,5 +1,6 @@
 const express = require('express');
 const db = require('../database');
+const systemsRepo = require('../repositories/systems');
 const { requireAuth } = require('./_middleware');
 const { sendOrEditIncoming, replyToIncoming, updateIncomingCover } = require('../discord_bot');
 const { formatTime } = require('../utils/travel-calc');
@@ -99,11 +100,7 @@ function computeDefenders(data) {
     // interceptor search is scoped to our alliance.
     let defenderName = null;
     try {
-        const row = db.prepare(`
-            SELECT pl.name FROM planets pn
-            JOIN players pl ON pn.owner_id = pl.id
-            WHERE pn.system_id = ? AND pn.planet_index = ?
-        `).get(data.target.systemId, data.target.planetIndex);
+        const row = systemsRepo.getPlanetOwnerName(data.target.systemId, data.target.planetIndex);
         if (row) defenderName = row.name;
     } catch (e) { /* fall back to active-users scope */ }
 

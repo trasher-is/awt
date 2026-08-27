@@ -1003,20 +1003,7 @@ async function handleMessage(message) {
         }
 
         // FETCHES BOTH OWNER NAME AND OWNER ALLIANCE TAG FOR COMPREHENSIVE SECTOR SCANNING
-        const rows = db.prepare(`
-            SELECT p.system_id, s.name as sys_name, p.planet_index, u.name as owner_name, a.tag as owner_alliance_tag
-            FROM planets p
-            JOIN systems s ON p.system_id = s.id
-            LEFT JOIN players u ON p.owner_id = u.id
-            LEFT JOIN alliances a ON u.alliance_id = a.id
-            WHERE p.system_id IN (
-                SELECT DISTINCT p2.system_id
-                FROM planets p2
-                JOIN players u2 ON p2.owner_id = u2.id
-                JOIN alliances a2 ON u2.alliance_id = a2.id
-                WHERE a2.tag = ?
-            )
-        `).all(tag);
+        const rows = systemsRepo.getPlanetsForAllianceTag(tag);
 
         const planRows = plansRepo.getAllPlanIndex();
 

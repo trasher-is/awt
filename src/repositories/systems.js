@@ -12,7 +12,7 @@ function countPlanets() {
     return countPlanetsStmt.get().count;
 }
 
-// Consolidates 7 near-identical lookups (discord_bot.js x5, sync.js announce x1,
+// Consolidates 8 near-identical lookups (discord_bot.js x6, sync.js announce x1,
 // interceptors.js x1) into one shape: id, name, x, y. See Global Constraints.
 const getSystemCoordsStmt = db.prepare(`SELECT id, name, x, y FROM systems WHERE id = ?`);
 function getSystemCoords(id) {
@@ -31,6 +31,9 @@ function listSystemIds() {
 
 // Arity varies per call, so this statement is prepared fresh each call (matches the
 // original behavior in routes/routes.js) rather than cached at module load.
+// Minor addition: the empty-array early return below wasn't in the original inline
+// query in routes/routes.js. It's harmless (the only caller already guards against
+// empty arrays) but is a deliberate defensive addition, not a preserved behavior.
 function getSystemsByIds(ids) {
     if (!ids.length) return [];
     const marks = ids.map(() => '?').join(',');
@@ -208,6 +211,33 @@ function getOldPlanet(systemId, planetIndex) {
     return getOldPlanetStmt.get(systemId, planetIndex);
 }
 
+const getPlanetsForAllianceTagStmt = db.prepare(`
+    SELECT p.system_id, s.name as sys_name, p.planet_index, u.name as owner_name, a.tag as owner_alliance_tag
+    FROM planets p
+    JOIN systems s ON p.system_id = s.id
+    LEFT JOIN players u ON p.owner_id = u.id
+    LEFT JOIN alliances a ON u.alliance_id = a.id
+    WHERE p.system_id IN (
+        SELECT DISTINCT p2.system_id
+        FROM planets p2
+        JOIN players u2 ON p2.owner_id = u2.id
+        JOIN alliances a2 ON u2.alliance_id = a2.id
+        WHERE a2.tag = ?
+    )
+`);
+function getPlanetsForAllianceTag(tag) {
+    return getPlanetsForAllianceTagStmt.all(tag);
+}
+
+const getPlanetOwnerNameStmt = db.prepare(`
+    SELECT pl.name FROM planets pn
+    JOIN players pl ON pn.owner_id = pl.id
+    WHERE pn.system_id = ? AND pn.planet_index = ?
+`);
+function getPlanetOwnerName(systemId, planetIndex) {
+    return getPlanetOwnerNameStmt.get(systemId, planetIndex);
+}
+
 const upsertPlanetStmt = db.prepare(`
     INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -223,6 +253,12 @@ function upsertPlanet(gamePlanetId, systemId, planetIndex, ownerId, population, 
     upsertPlanetStmt.run(gamePlanetId, systemId, planetIndex, ownerId, population, starbase, hasFleet);
 }
 
+// A planet's game_planet_id is globally UNIQUE, but it can show up at a new
+// (system_id, planet_index) slot when a planet is re-slotted/relocated. The upsert
+// above only resolves the (system_id, planet_index) conflict, so without this the
+// INSERT path would trip the game_planet_id UNIQUE constraint and abort the whole
+// system's transaction (losing all of that system's updates). Clear the stale row
+// at the old location first.
 const clearMovedPlanetStmt = db.prepare(`
     DELETE FROM planets WHERE game_planet_id = ? AND (system_id != ? OR planet_index != ?)
 `);
@@ -307,6 +343,7 @@ module.exports = {
     upsertSystemFull, deleteAllSystems, countBestGuardedAt, clearBestGuarded, insertBestGuarded,
     getSystemPlanetsWithIntel, getSystemPlanetsForBot, getPlanetsFullDb,
     getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getOldPlanet, upsertPlanet,
+    getPlanetsForAllianceTag, getPlanetOwnerName,
     clearMovedPlanet, deleteAllPlanets, logPlanetEvent, getPlanetHistory, deleteAllPlanetEvents,
     getTakeoverBoard, upsertTakeover,
 };
