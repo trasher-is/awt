@@ -241,7 +241,7 @@ function upsertPlayerNameOnly(id, name) {
 
 const getPlayerBiologyByNameStmt = db.prepare(`SELECT id, biology FROM players WHERE LOWER(name) = ?`);
 function getPlayerBiologyByName(name) {
-    return getPlayerBiologyByNameStmt.get(name.toLowerCase());
+    return getPlayerBiologyByNameStmt.get(name);
 }
 
 const getThreatPlayersByBiologyStmt = db.prepare(`
@@ -410,7 +410,7 @@ function getPlayerCombatStatsById(id) {
 // statStmt loop (byte-identical SQL in the original code — see Global Constraints exception #2).
 const getPlayerCombatStatsByNameStmt = db.prepare(`SELECT ${STAT_COLS} FROM players WHERE LOWER(name) = ?`);
 function getPlayerCombatStatsByName(name) {
-    return getPlayerCombatStatsByNameStmt.get(name.toLowerCase());
+    return getPlayerCombatStatsByNameStmt.get(name);
 }
 
 const getPlayerWithAllianceByNameLowerStmt = db.prepare(`
@@ -420,7 +420,7 @@ const getPlayerWithAllianceByNameLowerStmt = db.prepare(`
     WHERE LOWER(p.name) = ?
 `);
 function getPlayerWithAllianceByNameLower(name) {
-    return getPlayerWithAllianceByNameLowerStmt.get(name.toLowerCase());
+    return getPlayerWithAllianceByNameLowerStmt.get(name);
 }
 
 // --- players: read (interceptors.js) ---
