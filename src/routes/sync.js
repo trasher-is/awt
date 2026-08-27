@@ -4,6 +4,7 @@ const { requireAuth } = require('./_middleware');
 const { announceSystemChanges } = require('../discord_bot');
 const systemsRepo = require('../repositories/systems');
 const fleetsRepo = require('../repositories/fleets');
+const playersRepo = require('../repositories/players');
 const router = express.Router();
 
 // --- MAP SCRAPER DATA RECEIVER ---
@@ -21,27 +22,13 @@ router.post('/sync/system', requireAuth, (req, res) => {
         ON CONFLICT(id) DO UPDATE SET tag=excluded.tag, updated_at=CURRENT_TIMESTAMP
     `);
 
-    const upsertPlayer = db.prepare(`
-        INSERT INTO players (id, name, alliance_id) VALUES (?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            name = excluded.name,
-            alliance_id = CASE WHEN excluded.alliance_id IS NOT NULL THEN excluded.alliance_id ELSE players.alliance_id END,
-            updated_at = CURRENT_TIMESTAMP
-    `);
-
     // --- NEW: History Logging Prep ---
-    const getPlayerName = db.prepare(`
-        SELECT p.name, a.tag AS alliance_tag
-        FROM players p
-        LEFT JOIN alliances a ON p.alliance_id = a.id
-        WHERE p.id = ?
-    `);
 
     // Collect human-readable events for the Discord announcer (only used during a galaxy scan)
     const announceEvents = [];
     const nameOf = (id) => {
         if (!id) return null;
-        const row = getPlayerName.get(id);
+        const row = playersRepo.getPlayerNameWithTag(id);
         if (!row) return `#${id}`;
         return row.alliance_tag ? `[${row.alliance_tag}] ${row.name}` : row.name;
     };
@@ -127,7 +114,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 // leaves name alone on conflict (the alliance-profile sync owns the real
                 // name). `?? ''` because alliances.name is NOT NULL and a tag can be absent.
                 if (p.owner.alliance_id) upsertAlliance.run(p.owner.alliance_id, p.owner.alliance_tag ?? null, p.owner.alliance_tag ?? '');
-                upsertPlayer.run(p.owner.id, p.owner.name, p.owner.alliance_id || null);
+                playersRepo.upsertPlayerBasic(p.owner.id, p.owner.name, p.owner.alliance_id || null);
             }
 
             // Pass the calculated final parameters securely down to the table updater.
@@ -227,7 +214,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
         cv_limit: p.cv_limit || 0
     };
 
-    const oldPlayer = db.prepare('SELECT logins, points, origin_system FROM players WHERE id = ?').get(p.id);
+    const oldPlayer = playersRepo.getPlayerRestartCheck(p.id);
 
     const syncTransaction = db.transaction((player) => {
         // Restart detection. Planet ownership is NEVER touched here — that belongs to
@@ -257,17 +244,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
             console.log(`[SYSTEM] Player ${player.id} restart detected (${originChanged ? 'origin moved' : 'logins reset'}); resetting stale profile stats.`);
 
             fleetsRepo.deleteFleetsByOwner(player.id);
-            db.prepare(`
-                UPDATE players SET
-                    level=0, points=0, ranking=NULL, science_level=0, culture_level=0,
-                    biology=0, economy=0, energy=0, mathematics=0, physics=0, social=0,
-                    trade_revenue=0, artefact=NULL, eco_bonus=0,
-                    race_growth=0, race_science=0, race_culture=0, race_production=0, race_speed=0, race_attack=0, race_defense=0,
-                    race_trader=0, race_sul=0, origin_system=NULL, has_intel=0, intel_updated_at=NULL,
-                    home_planet_id=NULL, home_system_id=NULL, home_planet_index=NULL, possible_homes='[]',
-                    total_planets=0, total_population=0, total_farms=0, total_factories=0, total_labs=0, total_cybernetics=0, cv_used=0, cv_limit=0
-                WHERE id = ?
-            `).run(player.id);
+            playersRepo.resetPlayerOnRestart(player.id);
         }
 
         if (player.alliance_id) {
@@ -277,62 +254,10 @@ router.post('/sync/player', requireAuth, (req, res) => {
                 .run(player.alliance_id, player.alliance_tag ?? null, player.alliance_tag ?? '');
         }
 
-        db.prepare(`
-            INSERT INTO players (
-                id, name, alliance_id, country, local_time, idle_time, origin_system,
-                level, ranking, points, science_level, culture_level,
-                biology, economy, energy, mathematics, physics, social,
-                trade_revenue, artefact, eco_bonus,
-                race_growth, race_science, race_culture, race_production, race_speed, race_attack, race_defense,
-                race_trader, race_sul, joined, logins, has_intel, intel_updated_at,
-                home_planet_id, home_system_id, home_planet_index, possible_homes,
-                total_planets, total_population, total_farms, total_factories, total_labs, total_cybernetics, cv_used, cv_limit
-            ) VALUES (
-                @id, @name, @alliance_id, @country, @local_time, @idle_time, @origin_system,
-                @level, @ranking, @points, @science_level, @culture_level,
-                @biology, @economy, @energy, @mathematics, @physics, @social,
-                @trade_revenue, @artefact, @eco_bonus,
-                @race_growth, @race_science, @race_culture, @race_production, @race_speed, @race_attack, @race_defense,
-                @race_trader, @race_sul, @joined, @logins, @has_intel,
-                CASE WHEN @has_intel = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
-                @home_planet_id, @home_system_id, @home_planet_index, @possible_homes,
-                @total_planets, @total_population, @total_farms, @total_factories, @total_labs, @total_cybernetics, @cv_used, @cv_limit
-            ) ON CONFLICT(id) DO UPDATE SET
-                name=excluded.name, alliance_id=excluded.alliance_id, country=excluded.country,
-                local_time=excluded.local_time, idle_time=excluded.idle_time, origin_system=excluded.origin_system,
-                level=excluded.level, ranking=excluded.ranking, points=excluded.points,
-                science_level=excluded.science_level, culture_level=excluded.culture_level,
-                joined=excluded.joined, logins=excluded.logins,
-                home_planet_id=excluded.home_planet_id, home_system_id=excluded.home_system_id, home_planet_index=excluded.home_planet_index,
-                possible_homes=excluded.possible_homes, total_planets=excluded.total_planets, total_population=excluded.total_population,
-                total_farms=excluded.total_farms, total_factories=excluded.total_factories, total_labs=excluded.total_labs,
-                total_cybernetics=excluded.total_cybernetics, cv_used=excluded.cv_used, cv_limit=excluded.cv_limit,
-                updated_at=CURRENT_TIMESTAMP,
-
-                biology = CASE WHEN excluded.has_intel = 1 THEN excluded.biology ELSE players.biology END,
-                economy = CASE WHEN excluded.has_intel = 1 THEN excluded.economy ELSE players.economy END,
-                energy = CASE WHEN excluded.has_intel = 1 THEN excluded.energy ELSE players.energy END,
-                mathematics = CASE WHEN excluded.has_intel = 1 THEN excluded.mathematics ELSE players.mathematics END,
-                physics = CASE WHEN excluded.has_intel = 1 THEN excluded.physics ELSE players.physics END,
-                social = CASE WHEN excluded.has_intel = 1 THEN excluded.social ELSE players.social END,
-                trade_revenue = CASE WHEN excluded.has_intel = 1 THEN excluded.trade_revenue ELSE players.trade_revenue END,
-                artefact = CASE WHEN excluded.has_intel = 1 THEN excluded.artefact ELSE players.artefact END,
-                eco_bonus = CASE WHEN excluded.has_intel = 1 THEN excluded.eco_bonus ELSE players.eco_bonus END,
-                race_growth = CASE WHEN excluded.has_intel = 1 THEN excluded.race_growth ELSE players.race_growth END,
-                race_science = CASE WHEN excluded.has_intel = 1 THEN excluded.race_science ELSE players.race_science END,
-                race_culture = CASE WHEN excluded.has_intel = 1 THEN excluded.race_culture ELSE players.race_culture END,
-                race_production = CASE WHEN excluded.has_intel = 1 THEN excluded.race_production ELSE players.race_production END,
-                race_speed = CASE WHEN excluded.has_intel = 1 THEN excluded.race_speed ELSE players.race_speed END,
-                race_attack = CASE WHEN excluded.has_intel = 1 THEN excluded.race_attack ELSE players.race_attack END,
-                race_defense = CASE WHEN excluded.has_intel = 1 THEN excluded.race_defense ELSE players.race_defense END,
-                race_trader = CASE WHEN excluded.has_intel = 1 THEN excluded.race_trader ELSE players.race_trader END,
-                race_sul = CASE WHEN excluded.has_intel = 1 THEN excluded.race_sul ELSE players.race_sul END,
-                intel_updated_at = CASE WHEN excluded.has_intel = 1 THEN CURRENT_TIMESTAMP ELSE players.intel_updated_at END,
-                has_intel = CASE WHEN excluded.has_intel = 1 THEN 1 ELSE players.has_intel END
-        `).run(player);
+        playersRepo.upsertPlayerFull(player);
 
         if (player.logins > 0 && (!oldPlayer || oldPlayer.logins !== player.logins)) {
-            db.prepare(`INSERT INTO player_logins (player_id, total_logins) VALUES (?, ?)`).run(player.id, player.logins);
+            playersRepo.insertPlayerLogin(player.id, player.logins);
         }
     });
 
@@ -385,17 +310,9 @@ router.post('/sync/alliance', requireAuth, (req, res) => {
         `).run(a);
 
         // 2. Map all members to this Alliance
-        const upsertPlayer = db.prepare(`
-            INSERT INTO players (id, name, alliance_id) VALUES (?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                name=excluded.name,
-                alliance_id=excluded.alliance_id,
-                updated_at=CURRENT_TIMESTAMP
-        `);
-
         if (Array.isArray(a.members)) {
             for (const member of a.members) {
-                upsertPlayer.run(member.id, member.name, a.id);
+                playersRepo.upsertAllianceMemberBasic(member.id, member.name, a.id);
             }
         }
     });
@@ -533,10 +450,7 @@ router.post('/sync/alliance-stats', requireAuth, (req, res) => {
                 s.economy, s.energy, s.mathematics, s.physics, s.population
             );
 
-            db.prepare(`
-                INSERT INTO players (id, name, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(id) DO UPDATE SET name=excluded.name, updated_at=CURRENT_TIMESTAMP
-            `).run(s.player_id, s.name);
+            playersRepo.upsertPlayerNameOnly(s.player_id, s.name);
 
             // Replace this member's stationed fleets so positions stay fresh and stale
             // ones are dropped. Only touch fleets when the scrape actually carried a
