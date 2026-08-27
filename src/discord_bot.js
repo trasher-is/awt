@@ -3,6 +3,7 @@ const db = require('./database');
 const systemsRepo = require('./repositories/systems');
 const fleetsRepo = require('./repositories/fleets');
 const plansRepo = require('./repositories/plans');
+const playersRepo = require('./repositories/players');
 const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
 const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require('./utils/covering');
 // The battle model — the same physical file the dashboard calculator imports, so
@@ -358,7 +359,7 @@ async function handleMessage(message) {
         }
 
         // Pull the author's own recorded profiles to extract baseline values
-        const me = db.prepare(`SELECT id, biology FROM players WHERE LOWER(name) = ?`).get(user.game_name.toLowerCase());
+        const me = playersRepo.getPlayerBiologyByName(user.game_name.toLowerCase());
         if (!me) {
             return message.reply(`❌ Could not locate your player profile data (\`${user.game_name}\`) in the synced database tracking array. Please scan your profile in-game first.`);
         }
@@ -367,24 +368,10 @@ async function handleMessage(message) {
         const threatThreshold = myBio + 6;
 
         // 1. Confirmed High Biology (has_intel = 1) -> Match bio directly
-        const confirmedThreats = db.prepare(`
-            SELECT p.name, p.biology, a.tag as ally_tag
-            FROM players p
-            LEFT JOIN alliances a ON p.alliance_id = a.id
-            WHERE p.has_intel = 1 AND p.biology >= ? AND p.id != ?
-            ORDER BY p.biology DESC, p.name ASC
-            LIMIT 25
-        `).all(threatThreshold, me.id);
+        const confirmedThreats = playersRepo.getThreatPlayersByBiology(threatThreshold, me.id);
 
         // 2. Suspected High Biology (has_intel = 0) -> Match science level as proxy ceiling
-        const suspectedThreats = db.prepare(`
-            SELECT p.name, p.science_level, a.tag as ally_tag
-            FROM players p
-            LEFT JOIN alliances a ON p.alliance_id = a.id
-            WHERE p.has_intel = 0 AND p.science_level >= ? AND p.id != ?
-            ORDER BY p.science_level DESC, p.name ASC
-            LIMIT 25
-        `).all(threatThreshold, me.id);
+        const suspectedThreats = playersRepo.getThreatPlayersByScience(threatThreshold, me.id);
 
         const embed = new EmbedBuilder()
             .setTitle(`🧬 Biology Threat Matrix (Your Bio: ${myBio})`)
@@ -447,7 +434,7 @@ async function handleMessage(message) {
         } else {
             // Semi-manual: look up player stats from the database
             const playerName = args.slice(4).join(' ');
-            const player = db.prepare(`SELECT name, race_speed, energy FROM players WHERE name LIKE ?`).get(playerName);
+            const player = playersRepo.getPlayerTravelStatsByName(playerName);
             
             if (!player) {
                 return message.reply(`❌ Player **${playerName}** not found in the database. Please provide valid stats manually or check the spelling.`);
@@ -495,11 +482,7 @@ async function handleMessage(message) {
         `).all();
 
         // FIXED: Added missing 'p' alias to prevent SQLITE_ERROR
-        const solosCount = db.prepare(`
-            SELECT COUNT(*) as count FROM players p
-            WHERE p.alliance_id IS NULL
-            AND p.has_intel = 1
-        `).get().count;
+        const solosCount = playersRepo.countUnaffiliatedIntelPlayers();
 
         if (alliancesWithIntel.length === 0 && solosCount === 0) {
             return message.reply('📭 No intelligence records found with active intel in the database.');
@@ -549,17 +532,9 @@ async function handleMessage(message) {
                 chosenGroup = groups[idx];
                 
                 if (chosenGroup.type === 'solos') {
-                    groupPlayers = db.prepare(`
-                        SELECT id, name FROM players
-                        WHERE alliance_id IS NULL AND has_intel = 1
-                        ORDER BY name ASC
-                    `).all();
+                    groupPlayers = playersRepo.listUnaffiliatedIntelPlayers();
                 } else {
-                    groupPlayers = db.prepare(`
-                        SELECT id, name FROM players
-                        WHERE alliance_id = ? AND has_intel = 1
-                        ORDER BY name ASC
-                    `).all(chosenGroup.id);
+                    groupPlayers = playersRepo.listAllianceIntelPlayers(chosenGroup.id);
                 }
 
                 if (groupPlayers.length === 0) {
@@ -600,14 +575,7 @@ async function handleMessage(message) {
 
                 const targetPlayer = groupPlayers[pIdx];
                 
-                const player = db.prepare(`
-                    SELECT p.*, a.tag as ally_tag,
-                           (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as actual_planets,
-                           (SELECT SUM(population) FROM planets WHERE owner_id = p.id) as actual_pop
-                    FROM players p 
-                    LEFT JOIN alliances a ON p.alliance_id = a.id 
-                    WHERE p.id = ?
-                `).get(targetPlayer.id);
+                const player = playersRepo.getPlayerFullById(targetPlayer.id);
 
                 if (!player) {
                     await menuMessage.edit({ content: '❌ Selected target file no longer matches raw database hashes.', embeds: [] });
@@ -778,14 +746,7 @@ async function handleMessage(message) {
         const playerName = args.join(' ');
         if (!playerName) return message.reply('❌ Usage: `!intel <player_name>`');
 
-        const player = db.prepare(`
-            SELECT p.*, a.tag as ally_tag,
-                   (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as actual_planets,
-                   (SELECT SUM(population) FROM planets WHERE owner_id = p.id) as actual_pop
-            FROM players p 
-            LEFT JOIN alliances a ON p.alliance_id = a.id 
-            WHERE p.name LIKE ?
-        `).get(playerName);
+        const player = playersRepo.getPlayerFullByName(playerName);
 
         if (!player) return message.reply(`❌ Player **${playerName}** not found in the database.`);
 
@@ -930,15 +891,7 @@ async function handleMessage(message) {
         const targetSys = systemsRepo.getSystemCoords(targetSysId);
         if (!targetSys) return message.reply(`❌ System **[${targetSysId}]** not found in the database. Scan or fly near it first.`);
 
-        const players = db.prepare(`
-            SELECT p.name, p.biology, p.science_level, s.x, s.y
-            FROM players p
-            JOIN alliances a ON p.alliance_id = a.id
-            JOIN systems s ON p.origin_system = s.id
-            WHERE a.tag = ?
-            AND p.origin_system IS NOT NULL 
-            AND p.origin_system > 0
-        `).all(tag);
+        const players = playersRepo.getAllianceOriginPlayersBrief(tag);
 
         if (!players || players.length === 0) {
             return message.reply(`❌ No players found for alliance [${tag}] with a recorded Origin System.`);
@@ -1108,13 +1061,7 @@ async function handleMessage(message) {
         if (!targetSys) return message.reply(`❌ System **[${sysId}]** not found in the database.`);
 
         // Find all players in that alliance with an origin system recorded
-        const alliancePlayers = db.prepare(`
-            SELECT p.id, p.name, p.biology, p.science_level, p.energy, p.race_speed, s.id as orig_sys_id, s.x as orig_x, s.y as orig_y
-            FROM players p
-            JOIN alliances a ON p.alliance_id = a.id
-            JOIN systems s ON p.origin_system = s.id
-            WHERE a.tag = ?
-        `).all(tag);
+        const alliancePlayers = playersRepo.getAllianceOriginPlayersDetailed(tag);
 
         if (!alliancePlayers || alliancePlayers.length === 0) {
             return message.reply(`❌ No tracked players found for alliance [${tag}] with known origin systems.`);
@@ -1240,7 +1187,7 @@ async function handleMessage(message) {
         // Auto-fill mods from DB if player names given
         let defPlayerLabel = null, atkPlayerLabel = null;
         if (defPlayerName) {
-            const p = db.prepare(`SELECT name, level, physics, mathematics, race_attack, race_defense FROM players WHERE name LIKE ?`).get(defPlayerName);
+            const p = playersRepo.getPlayerCombatStats(defPlayerName);
             if (p) {
                 defPhys    = sci(p.physics || 0);
                 defMath    = sci(p.mathematics || 0);
@@ -1251,7 +1198,7 @@ async function handleMessage(message) {
             }
         }
         if (atkPlayerName) {
-            const p = db.prepare(`SELECT name, level, physics, mathematics, race_attack, race_defense FROM players WHERE name LIKE ?`).get(atkPlayerName);
+            const p = playersRepo.getPlayerCombatStats(atkPlayerName);
             if (p) {
                 atkPhys    = sci(p.physics || 0);
                 atkMath    = sci(p.mathematics || 0);
