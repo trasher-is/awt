@@ -2,6 +2,8 @@ const express = require('express');
 const db = require('../database');
 const { requireAuth } = require('./_middleware');
 const { announceSystemChanges } = require('../discord_bot');
+const systemsRepo = require('../repositories/systems');
+const fleetsRepo = require('../repositories/fleets');
 const router = express.Router();
 
 // --- MAP SCRAPER DATA RECEIVER ---
@@ -12,7 +14,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
         return res.status(400).json({ error: 'Invalid payload' });
     }
 
-    db.prepare(`INSERT INTO systems (id) VALUES (?) ON CONFLICT(id) DO NOTHING`).run(system_id);
+    systemsRepo.upsertSystemStub(system_id);
 
     const upsertAlliance = db.prepare(`
         INSERT INTO alliances (id, tag, name) VALUES (?, ?, ?)
@@ -27,39 +29,12 @@ router.post('/sync/system', requireAuth, (req, res) => {
             updated_at = CURRENT_TIMESTAMP
     `);
 
-    const upsertPlanet = db.prepare(`
-        INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(system_id, planet_index) DO UPDATE SET
-            game_planet_id=excluded.game_planet_id,
-            owner_id=excluded.owner_id,
-            population=excluded.population,
-            starbase=excluded.starbase,
-            has_fleet=excluded.has_fleet,
-            updated_at=CURRENT_TIMESTAMP
-    `);
-
-    // A planet's game_planet_id is globally UNIQUE, but it can show up at a new
-    // (system_id, planet_index) slot when a planet is re-slotted/relocated. The upsert
-    // above only resolves the (system_id, planet_index) conflict, so without this the
-    // INSERT path would trip the game_planet_id UNIQUE constraint and abort the whole
-    // system's transaction (losing all of that system's updates). Clear the stale row
-    // at the old location first.
-    const clearMovedPlanet = db.prepare(`
-        DELETE FROM planets WHERE game_planet_id = ? AND (system_id != ? OR planet_index != ?)
-    `);
-
     // --- NEW: History Logging Prep ---
-    const getOldPlanet = db.prepare(`SELECT owner_id, population FROM planets WHERE system_id = ? AND planet_index = ?`);
     const getPlayerName = db.prepare(`
         SELECT p.name, a.tag AS alliance_tag
         FROM players p
         LEFT JOIN alliances a ON p.alliance_id = a.id
         WHERE p.id = ?
-    `);
-    const logEvent = db.prepare(`
-        INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value)
-        VALUES (?, ?, ?, ?, ?)
     `);
 
     // Collect human-readable events for the Discord announcer (only used during a galaxy scan)
@@ -82,7 +57,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
             if (!Number.isInteger(p.planet_index) || p.planet_index < 1 || p.planet_index > 99) continue;
 
             // Check for history events BEFORE upserting
-            const oldP = getOldPlanet.get(system_id, p.planet_index);
+            const oldP = systemsRepo.getOldPlanet(system_id, p.planet_index);
 
             let finalOwnerId = p.owner ? p.owner.id : null;
             let finalPopulation = p.population;
@@ -112,7 +87,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 if (oldP.owner_id !== finalOwnerId) {
                     // OWNER CHANGE — takes precedence; a pop drop that comes with a new
                     // owner is really just the conquest, already captured here.
-                    logEvent.run(system_id, p.planet_index, 1, oldP.owner_id, finalOwnerId); // 1 = OWNER_CHANGE (history)
+                    systemsRepo.logPlanetEvent(system_id, p.planet_index, 1, oldP.owner_id, finalOwnerId); // 1 = OWNER_CHANGE (history)
                     // Announce genuine transitions to Discord, but NOT "Empty -> owner":
                     // those are low-value new colonies, and while the planets table heals
                     // from the old null-purge corruption every re-detected owner would look
@@ -135,7 +110,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
                     const oldPop = Number(oldP.population);
                     const newPop = Number(finalPopulation);
                     if (Number.isFinite(oldPop) && Number.isFinite(newPop) && newPop < oldPop) {
-                        logEvent.run(system_id, p.planet_index, 2, oldPop, newPop); // 2 = POP_DROP
+                        systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, newPop); // 2 = POP_DROP
                         announceEvents.push({
                             planet_index: p.planet_index,
                             type: 'POP_DROP',
@@ -159,9 +134,9 @@ router.post('/sync/system', requireAuth, (req, res) => {
             // Re-home the planet if its id currently lives at another slot (avoids the
             // game_planet_id UNIQUE collision that would otherwise roll back the system).
             if (p.game_planet_id != null) {
-                clearMovedPlanet.run(p.game_planet_id, system_id, p.planet_index);
+                systemsRepo.clearMovedPlanet(p.game_planet_id, system_id, p.planet_index);
             }
-            upsertPlanet.run(p.game_planet_id, system_id, p.planet_index, finalOwnerId, finalPopulation, finalStarbase, finalHasFleet);
+            systemsRepo.upsertPlanet(p.game_planet_id, system_id, p.planet_index, finalOwnerId, finalPopulation, finalStarbase, finalHasFleet);
         }
 
         // NOTE: Fleet positions are no longer derived from system scans. They are now
@@ -177,7 +152,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
         // Announce detected planet events to Discord — both during a full galaxy scan
         // and during normal map browsing.
         if (announceEvents.length > 0) {
-            const sys = db.prepare(`SELECT id, name, x, y FROM systems WHERE id = ?`).get(system_id) || { id: system_id };
+            const sys = systemsRepo.getSystemCoords(system_id) || { id: system_id };
             announceSystemChanges(sys, announceEvents).catch(err =>
                 console.error('[Discord] announce error:', err.message)
             );
@@ -281,7 +256,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
         if (originChanged || loginsReset) {
             console.log(`[SYSTEM] Player ${player.id} restart detected (${originChanged ? 'origin moved' : 'logins reset'}); resetting stale profile stats.`);
 
-            db.prepare(`DELETE FROM fleets WHERE owner_id = ?`).run(player.id);
+            fleetsRepo.deleteFleetsByOwner(player.id);
             db.prepare(`
                 UPDATE players SET
                     level=0, points=0, ranking=NULL, science_level=0, culture_level=0,
@@ -442,16 +417,12 @@ router.post('/sync/fleet-ids', requireAuth, (req, res) => {
     const list = Array.isArray(req.body.fleets) ? req.body.fleets : [];
     if (!list.length) return res.json({ success: true, updated: 0 });
     try {
-        const upd = db.prepare(`
-            UPDATE fleets SET game_fleet_id = ?
-            WHERE owner_id = ? AND system_id = ? AND planet_index = ?
-        `);
         let updated = 0;
         const tx = db.transaction((rows) => {
             for (const f of rows) {
                 if (!Number.isInteger(f.game_fleet_id) || !Number.isInteger(f.owner_id)) continue;
                 if (!Number.isInteger(f.system_id) || !Number.isInteger(f.planet_index)) continue;
-                updated += upd.run(f.game_fleet_id, f.owner_id, f.system_id, f.planet_index).changes;
+                updated += fleetsRepo.updateFleetGameId(f.game_fleet_id, f.owner_id, f.system_id, f.planet_index).changes;
             }
         });
         tx(list);
@@ -472,18 +443,9 @@ router.post('/sync/galaxy', requireAuth, (req, res) => {
 
     console.log(`\n[API] Incoming Galaxy Index sync (${systems.length} systems)`);
 
-    const upsertSystem = db.prepare(`
-        INSERT INTO systems (id, name, x, y) VALUES (?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            name=excluded.name,
-            x=excluded.x,
-            y=excluded.y,
-            updated_at=CURRENT_TIMESTAMP
-    `);
-
     const syncTransaction = db.transaction((sysList) => {
         for (const s of sysList) {
-            upsertSystem.run(s.id, s.name, s.x, s.y);
+            systemsRepo.upsertSystemFull(s.id, s.name, s.x, s.y);
         }
     });
 
@@ -504,7 +466,7 @@ router.post('/sync/best-guarded', requireAuth, (req, res) => {
     }
 
     // Daily lock guard check against the exact server tick date signature
-    const existingCheck = db.prepare("SELECT COUNT(*) as count FROM best_guarded WHERE updated_at = ?").get(last_update);
+    const existingCheck = { count: systemsRepo.countBestGuardedAt(last_update) };
     if (existingCheck.count > 0) {
         return res.json({ success: true, skipped: true, message: 'Rankings already updated for today.' });
     }
@@ -512,15 +474,10 @@ router.post('/sync/best-guarded', requireAuth, (req, res) => {
     console.log(`[API] Processing fresh Best Guarded ranking sync batch updated at: ${last_update}`);
 
     const syncTx = db.transaction((rows) => {
-        db.prepare("DELETE FROM best_guarded").run(); // Clear stale indices safely
-
-        const insertStmt = db.prepare(`
-            INSERT INTO best_guarded (game_planet_id, cv, updated_at)
-            VALUES (?, ?, ?)
-        `);
+        systemsRepo.clearBestGuarded(); // Clear stale indices safely
 
         for (const row of rows) {
-            insertStmt.run(row.planet_id, row.cv, last_update);
+            systemsRepo.insertBestGuarded(row.planet_id, row.cv, last_update);
         }
     });
 
@@ -585,14 +542,10 @@ router.post('/sync/alliance-stats', requireAuth, (req, res) => {
             // ones are dropped. Only touch fleets when the scrape actually carried a
             // fleet array (avoids wiping data on a stats-only payload).
             if (fleets) {
-                db.prepare(`DELETE FROM fleets WHERE owner_id = ?`).run(s.player_id);
-                const ins = db.prepare(`
-                    INSERT INTO fleets (owner_id, system_id, planet_index, transports, colony_ships, destroyers, cruisers, battleships, arrival_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                `);
+                fleetsRepo.deleteFleetsByOwner(s.player_id);
                 for (const f of fleets) {
                     if (!Number.isInteger(f.system_id) || !Number.isInteger(f.planet_index)) continue;
-                    ins.run(
+                    fleetsRepo.insertFleetForAllianceStats(
                         s.player_id, f.system_id, f.planet_index,
                         f.transports || 0, f.colony_ships || 0, f.destroyers || 0, f.cruisers || 0, f.battleships || 0,
                         f.arrival_at || null
