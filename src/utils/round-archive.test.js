@@ -267,7 +267,7 @@ const cleanup = [];
         admin.indexOf('archiveRound(db') < admin.indexOf('DELETE FROM players')
         && admin.indexOf('archiveRound(db') !== -1, [admin.indexOf('archiveRound(db'), admin.indexOf('DELETE FROM players')]);
     ok('and it does so inside the same transaction as the deletes',
-        /db\.transaction\(\(\) => \{[\s\S]{0,400}archiveRound\(db[\s\S]{0,400}DELETE FROM fleets/.test(admin));
+        /db\.transaction\(\(\) => \{[\s\S]{0,400}archiveRound\(db[\s\S]{0,400}fleetsRepo\.deleteAllFleets\(\)/.test(admin));
     ok('the admin panel can snapshot without wiping', /\/admin\/rounds\/archive/.test(admin));
     ok('and can list what has been archived', /router\.get\('\/admin\/rounds'/.test(admin));
 
