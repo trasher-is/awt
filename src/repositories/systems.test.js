@@ -21,7 +21,6 @@ console.log('systems.test.js');
 ok('countSystems starts at 0', systems.countSystems() === 0);
 
 systems.upsertSystemFull(1, 'Rana', 10, 20);
-ok('getSystemCoords returns the upserted row', () => true);
 const coords = systems.getSystemCoords(1);
 ok('getSystemCoords name matches', coords.name === 'Rana');
 ok('getSystemCoords x matches', coords.x === 10);
@@ -42,6 +41,11 @@ ok('countPlanets is 1', systems.countPlanets() === 1);
 
 systems.clearMovedPlanet(500, 1, 1);
 ok('clearMovedPlanet does not remove a planet at its current location', systems.countPlanets() === 1);
+
+systems.upsertPlanet(600, 2, 1, null, 500, 2, 0);
+ok('countPlanets is 2 after second upsert', systems.countPlanets() === 2);
+systems.clearMovedPlanet(600, 2, 2); // planet 600 "moved" to system 2/index 2
+ok('clearMovedPlanet removes the stale row at the planet\'s old location', systems.countPlanets() === 1);
 
 systems.logPlanetEvent(1, 1, 1, null, 42);
 const history = systems.getPlanetHistory(1);

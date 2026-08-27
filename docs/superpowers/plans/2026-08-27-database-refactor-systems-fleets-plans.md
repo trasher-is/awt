@@ -24,7 +24,7 @@ compiled a given statement.
 ## Global Constraints
 
 - No SQL text, parameter order, or return-shape changes for any migrated query, with ONE
-  documented exception: `systems.getSystemCoords(id)` consolidates 7 near-identical
+  documented exception: `systems.getSystemCoords(id)` consolidates 8 near-identical
   `SELECT [name,]x,y FROM systems WHERE id = ?` call sites (some select `name, x, y`, one
   selects `id, name, x, y`) into a single `SELECT id, name, x, y FROM systems WHERE id = ?` —
   every existing caller destructures only the fields it already used, so the extra `id` field
@@ -251,7 +251,7 @@ function countPlanets() {
     return countPlanetsStmt.get().count;
 }
 
-// Consolidates 7 near-identical lookups (discord_bot.js x5, sync.js announce x1,
+// Consolidates 8 near-identical lookups (discord_bot.js x6, sync.js announce x1,
 // interceptors.js x1) into one shape: id, name, x, y. See Global Constraints.
 const getSystemCoordsStmt = db.prepare(`SELECT id, name, x, y FROM systems WHERE id = ?`);
 function getSystemCoords(id) {
