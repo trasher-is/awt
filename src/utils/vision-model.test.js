@@ -93,13 +93,15 @@ const readCode = rel => read(rel)
 
     console.log('\n── The endpoint hands over facts, not a rendered opinion ' + '─'.repeat(19));
     const intel = readCode('src/routes/intel.js');
+    const playersRepoSrc = readCode('src/repositories/players.js');
+    const systemsRepoSrc = readCode('src/repositories/systems.js');
     ok('a galaxy-map endpoint exists', /router\.get\('\/intel\/galaxy-map'/.test(intel));
     ok('it sends raw biology and science level rather than a precomputed radius',
-        /p\.biology, p\.science_level/.test(intel) && !/visionRadius/.test(intel));
+        /p\.biology, p\.science_level/.test(playersRepoSrc) && !/visionRadius/.test(intel));
     ok('it reports how much of the galaxy has actually been scanned',
         /systemsScanned/.test(intel) && /systemsKnown/.test(intel));
     ok('it only ships systems that have coordinates',
-        /s\.x IS NOT NULL AND s\.y IS NOT NULL/.test(intel));
+        /s\.x IS NOT NULL AND s\.y IS NOT NULL/.test(systemsRepoSrc));
     ok('it separates planets seen to be free from planets whose owner is unknown to us',
         /free_planets/.test(intel) && /unaligned/.test(intel));
 

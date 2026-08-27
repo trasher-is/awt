@@ -264,8 +264,8 @@ const cleanup = [];
     // A snapshot nothing invokes protects nothing.
     const admin = readCode('src/routes/admin.js');
     ok('nuke-intel archives before deleting',
-        admin.indexOf('archiveRound(db') < admin.indexOf('DELETE FROM players')
-        && admin.indexOf('archiveRound(db') !== -1, [admin.indexOf('archiveRound(db'), admin.indexOf('DELETE FROM players')]);
+        admin.indexOf('archiveRound(db') < admin.indexOf('playersRepo.deleteAllPlayers()')
+        && admin.indexOf('archiveRound(db') !== -1, [admin.indexOf('archiveRound(db'), admin.indexOf('playersRepo.deleteAllPlayers()')]);
     ok('and it does so inside the same transaction as the deletes',
         /db\.transaction\(\(\) => \{[\s\S]{0,400}archiveRound\(db[\s\S]{0,400}fleetsRepo\.deleteAllFleets\(\)/.test(admin));
     ok('the admin panel can snapshot without wiping', /\/admin\/rounds\/archive/.test(admin));
