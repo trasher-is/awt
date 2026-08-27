@@ -1,5 +1,8 @@
 const { Client, GatewayIntentBits, EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const db = require('./database');
+const systemsRepo = require('./repositories/systems');
+const fleetsRepo = require('./repositories/fleets');
+const plansRepo = require('./repositories/plans');
 const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
 const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require('./utils/covering');
 // The battle model — the same physical file the dashboard calculator imports, so
@@ -455,8 +458,8 @@ async function handleMessage(message) {
             playerNameDisplay = player.name;
         }
 
-        const sys1 = db.prepare(`SELECT name, x, y FROM systems WHERE id = ?`).get(sysA);
-        const sys2 = db.prepare(`SELECT name, x, y FROM systems WHERE id = ?`).get(sysB);
+        const sys1 = systemsRepo.getSystemCoords(sysA);
+        const sys2 = systemsRepo.getSystemCoords(sysB);
 
         if (!sys1) return message.reply(`❌ Origin System #${sysA} not found in the database.`);
         if (!sys2) return message.reply(`❌ Destination System #${sysB} not found in the database.`);
@@ -672,31 +675,12 @@ async function handleMessage(message) {
         const sysId = args[0];
         if (!sysId || isNaN(sysId)) return message.reply('❌ Usage: `!sys <system_id>`');
 
-        const sys = db.prepare(`SELECT * FROM systems WHERE id = ?`).get(sysId);
+        const sys = systemsRepo.getFullSystem(sysId);
         if (!sys) return message.reply(`❌ System #${sysId} is not in the Hub database. Scan it in-game first.`);
 
-        const planets = db.prepare(`
-            SELECT p.*, u.name as owner_name, a.tag as ally_tag
-            FROM planets p
-            LEFT JOIN players u ON p.owner_id = u.id
-            LEFT JOIN alliances a ON u.alliance_id = a.id
-            WHERE p.system_id = ? ORDER BY p.planet_index ASC
-        `).all(sysId);
-
-        const plans = db.prepare(`
-            SELECT pp.*, u.game_name as author_name 
-            FROM planet_plans pp
-            LEFT JOIN app_users u ON pp.author_id = u.id
-            WHERE pp.system_id = ?
-        `).all(sysId);
-
-        const fleets = db.prepare(`
-            SELECT f.*, u.name as owner_name, a.tag as ally_tag
-            FROM fleets f
-            LEFT JOIN players u ON f.owner_id = u.id
-            LEFT JOIN alliances a ON u.alliance_id = a.id
-            WHERE f.system_id = ?
-        `).all(sysId);
+        const planets = systemsRepo.getSystemPlanetsForBot(sysId);
+        const plans = plansRepo.getPlansForSystemForBot(sysId);
+        const fleets = fleetsRepo.getFleetsForSystemFull(sysId);
 
         const systemUrl = process.env.PROXY_DOMAIN
             ? `https://${process.env.PROXY_DOMAIN}/Game/Map/SolarSystem/${sysId}`
@@ -879,8 +863,8 @@ async function handleMessage(message) {
             return message.reply('❌ Usage: `!dist <sys1_id> <sys2_id>`');
         }
 
-        const sys1 = db.prepare(`SELECT name, x, y FROM systems WHERE id = ?`).get(id1);
-        const sys2 = db.prepare(`SELECT name, x, y FROM systems WHERE id = ?`).get(id2);
+        const sys1 = systemsRepo.getSystemCoords(id1);
+        const sys2 = systemsRepo.getSystemCoords(id2);
 
         if (!sys1) return message.reply(`❌ System #${id1} not found.`);
         if (!sys2) return message.reply(`❌ System #${id2} not found.`);
@@ -923,10 +907,7 @@ async function handleMessage(message) {
         }
 
         try {
-            db.prepare(`
-                INSERT INTO planet_plans (system_id, planet_index, author_id, note) 
-                VALUES (?, ?, ?, ?)
-            `).run(sysId, pIdx, user.id, note);
+            plansRepo.createPlan(sysId, pIdx, user.id, note);
             
             message.react('✅');
             message.reply(`✅ Plan saved for System **#${sysId}** Planet **${pIdx}** by ${user.game_name}.`);
@@ -946,7 +927,7 @@ async function handleMessage(message) {
         const targetSysId = parseInt(sysId, 10);
         const tag = args[1] ? args[1].toUpperCase() : 'RAID';
 
-        const targetSys = db.prepare("SELECT name, x, y FROM systems WHERE id = ?").get(targetSysId);
+        const targetSys = systemsRepo.getSystemCoords(targetSysId);
         if (!targetSys) return message.reply(`❌ System **[${targetSysId}]** not found in the database. Scan or fly near it first.`);
 
         const players = db.prepare(`
@@ -1037,7 +1018,7 @@ async function handleMessage(message) {
             )
         `).all(tag);
 
-        const planRows = db.prepare(`SELECT system_id, planet_index FROM planet_plans`).all();
+        const planRows = plansRepo.getAllPlanIndex();
 
         if (!rows || rows.length === 0) {
             return message.reply(`❌ No scanned systems found with an active presence for alliance [${tag}].`);
@@ -1136,7 +1117,7 @@ async function handleMessage(message) {
             return message.reply('❌ **Usage:** `!ghosts <system_id> <planet_num> <alliance_tag>`\n*Example: `!ghosts 1 10 AO`*');
         }
 
-        const targetSys = db.prepare("SELECT name, x, y FROM systems WHERE id = ?").get(sysId);
+        const targetSys = systemsRepo.getSystemCoords(sysId);
         if (!targetSys) return message.reply(`❌ System **[${sysId}]** not found in the database.`);
 
         // Find all players in that alliance with an origin system recorded
@@ -1169,12 +1150,7 @@ async function handleMessage(message) {
             const launchPoints = [];
             launchPoints.push({ x: p.orig_x, y: p.orig_y, planet_index: 1 }); // Default fallback slot
 
-            const scrapedPlanets = db.prepare(`
-                SELECT p.planet_index, s.x, s.y
-                FROM planets p
-                JOIN systems s ON p.system_id = s.id
-                WHERE p.owner_id = ?
-            `).all(p.id);
+            const scrapedPlanets = systemsRepo.getPlanetCoordsForPlayer(p.id);
 
             scrapedPlanets.forEach(sp => {
                 if (!launchPoints.some(lp => lp.x === sp.x && lp.y === sp.y && lp.planet_index === sp.planet_index)) {
