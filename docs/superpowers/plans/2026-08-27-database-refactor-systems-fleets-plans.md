@@ -48,24 +48,30 @@ compiled a given statement.
 - Create: `src/repositories/systems.test.js`, `src/repositories/fleets.test.js`,
   `src/repositories/plans.test.js`
 - Modify: `src/database.js` (testability: path override — see Task 0)
+- Modify: `src/utils/run-tests.js` (recursive test discovery — see Task 0)
 - Modify: `src/routes/intel.js`, `src/routes/sync.js`, `src/discord_bot.js`,
   `src/routes/admin.js`, `src/routes/routes.js`, `src/routes/search.js`,
   `src/utils/interceptors.js`, `src/discord-commands.js`
 
 ---
 
-### Task 0: Make the database path testable
+### Task 0: Make the database path testable, and make `npm test` find the new tests
 
 The smoke tests need a throwaway SQLite file, but `src/database.js` hardcodes its path to
 `awt.db` next to itself and runs `initDatabase()` immediately on `require`. Add an env override
-so tests can point it elsewhere without touching production behavior.
+so tests can point it elsewhere without touching production behavior. Also, `npm test`
+(`src/utils/run-tests.js`) only discovers `*.test.js` files in its own directory today, so the
+new `src/repositories/*.test.js` files from Tasks 1–3 need it to search recursively instead.
 
 **Files:**
 - Modify: `src/database.js:1-6`
+- Modify: `src/utils/run-tests.js`
 
 **Interfaces:**
 - Produces: requiring `../database` with `process.env.AWT_DB_PATH` set uses that path instead
   of the default `awt.db`. Unset, behavior is unchanged.
+- Produces: `npm test` discovers every `*.test.js` under `src/` recursively, not just directly
+  inside `src/utils/`.
 
 - [ ] **Step 1: Change the hardcoded path to an overridable one**
 
@@ -90,12 +96,96 @@ Expected: `[Core] Alliance Intelligence Hub v2 online on port 3001`, no new erro
 `ls -la /root/awt-test/awt.db` shows the same file (unchanged mtime pattern — i.e. still the one
 you copied earlier, not a new empty one).
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Make `npm test` discover tests outside `src/utils/`**
+
+`src/utils/run-tests.js` currently only scans its own directory (`fs.readdirSync(__dirname)`,
+non-recursive), so the new `src/repositories/*.test.js` files from Tasks 1–3 would never run
+under `npm test`. Fix it to walk `src/` recursively.
+
+In `src/utils/run-tests.js`, replace:
+
+```js
+const fs = require('fs');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const filter = process.argv[2] || '';
+const files = fs.readdirSync(__dirname)
+    .filter(f => f.endsWith('.test.js'))
+    .filter(f => !filter || f.includes(filter))
+    .sort();
+
+if (files.length === 0) {
+    console.log(filter ? `No test files match "${filter}".` : 'No test files found.');
+    process.exit(filter ? 1 : 0);
+}
+
+const results = [];
+for (const file of files) {
+    console.log(`\n${'═'.repeat(75)}\n▶ ${file}\n${'═'.repeat(75)}`);
+    const r = spawnSync(process.execPath, [path.join(__dirname, file)], { stdio: 'inherit' });
+    results.push({ file, code: r.status == null ? 1 : r.status });
+}
+```
+
+with:
+
+```js
+const fs = require('fs');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const srcRoot = path.join(__dirname, '..');
+
+function findTestFiles(dir) {
+    let found = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            found = found.concat(findTestFiles(full));
+        } else if (entry.isFile() && entry.name.endsWith('.test.js')) {
+            found.push(full);
+        }
+    }
+    return found;
+}
+
+const filter = process.argv[2] || '';
+const files = findTestFiles(srcRoot)
+    .map(f => path.relative(srcRoot, f))
+    .filter(f => !filter || f.includes(filter))
+    .sort();
+
+if (files.length === 0) {
+    console.log(filter ? `No test files match "${filter}".` : 'No test files found.');
+    process.exit(filter ? 1 : 0);
+}
+
+const results = [];
+for (const file of files) {
+    console.log(`\n${'═'.repeat(75)}\n▶ ${file}\n${'═'.repeat(75)}`);
+    const r = spawnSync(process.execPath, [path.join(srcRoot, file)], { stdio: 'inherit' });
+    results.push({ file, code: r.status == null ? 1 : r.status });
+}
+```
+
+The rest of the file (the summary printout at the bottom) is unchanged — `r.file` there is now
+a relative path like `repositories/systems.test.js` instead of a bare filename, which is fine
+and more informative in the summary.
+
+- [ ] **Step 4: Verify test discovery works and existing tests still pass**
+
+Run: `cd /root/awt-test && npm test`
+Expected: the same test files that ran before (from `src/utils/`) still all pass — this step
+runs before Tasks 1–3 exist, so no `repositories/` tests are discoverable yet, but the run
+itself must stay green.
+
+- [ ] **Step 5: Commit**
 
 ```bash
 cd /root/awt-test
-git add src/database.js
-git commit -m "Allow AWT_DB_PATH to override the database file, for tests"
+git add src/database.js src/utils/run-tests.js
+git commit -m "Allow AWT_DB_PATH to override the database file; make npm test discover tests recursively under src/"
 ```
 
 ---
