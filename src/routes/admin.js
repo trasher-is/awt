@@ -7,6 +7,7 @@ const { requireAuth, requireAdmin } = require('./_middleware');
 const systemsRepo = require('../repositories/systems');
 const fleetsRepo = require('../repositories/fleets');
 const plansRepo = require('../repositories/plans');
+const playersRepo = require('../repositories/players');
 const { archiveRound, listRounds, roundDetail } = require('../utils/round-archive');
 const router = express.Router();
 
@@ -228,7 +229,7 @@ router.get('/admin/status', requireAdmin, (req, res) => {
         const stats = {
             systems: systemsRepo.countSystems(),
             planets: systemsRepo.countPlanets(),
-            players: db.prepare(`SELECT COUNT(*) as count FROM players`).get().count,
+            players: playersRepo.countPlayers(),
             fleets: fleetsRepo.countFleets(),
             uptime: process.uptime()
         };
@@ -310,7 +311,7 @@ router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
             plansRepo.deleteAllPlans();
             systemsRepo.deleteAllPlanetEvents();
             systemsRepo.deleteAllPlanets();
-            db.prepare(`DELETE FROM players`).run();
+            playersRepo.deleteAllPlayers();
             db.prepare(`DELETE FROM alliances`).run();
             systemsRepo.deleteAllSystems();
         });

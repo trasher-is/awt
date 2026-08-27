@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../database');
 const systemsRepo = require('../repositories/systems');
+const playersRepo = require('../repositories/players');
 const { requireAuth } = require('./_middleware');
 const { sendOrEditIncoming, replyToIncoming, updateIncomingCover } = require('../discord_bot');
 const { formatTime } = require('../utils/travel-calc');
@@ -26,16 +27,7 @@ function statLine(s) {
 function getStatsByIds(ids) {
     const clean = [...new Set(ids.map((n) => parseInt(n, 10)).filter((n) => Number.isInteger(n) && n > 0))];
     if (clean.length === 0) return {};
-    const placeholders = clean.map(() => '?').join(',');
-    const rows = db.prepare(`
-        SELECT p.id, p.name, p.level, p.has_intel,
-               p.race_speed, p.race_attack, p.race_defense,
-               p.physics, p.mathematics, p.energy,
-               a.tag AS alliance_tag
-        FROM players p
-        LEFT JOIN alliances a ON p.alliance_id = a.id
-        WHERE p.id IN (${placeholders})
-    `).all(...clean);
+    const rows = playersRepo.getPlayerStatsByIds(clean);
 
     const out = {};
     for (const r of rows) {
@@ -123,8 +115,6 @@ function computeDefenders(data) {
     return result;
 }
 
-const STAT_COLS = `race_attack, race_defense, physics, mathematics, science_level, level, has_intel, intel_updated_at`;
-
 // Attach each defender's chance to beat the incoming fleet (defender fleet vs attacker
 // fleet). Attacker race/sciences fall back to assumptions when unknown/stale.
 function attachWinChances(result, data) {
@@ -133,18 +123,17 @@ function attachWinChances(result, data) {
         const enemyFleet = [s.destroyers || 0, s.cruisers || 0, s.battleships || 0];
         let enemyRow = null;
         if (data.attacker && data.attacker.id) {
-            enemyRow = db.prepare(`SELECT ${STAT_COLS} FROM players WHERE id = ?`).get(data.attacker.id);
+            enemyRow = playersRepo.getPlayerCombatStatsById(data.attacker.id);
         }
         if (!enemyRow && data.attacker && data.attacker.name) {
-            enemyRow = db.prepare(`SELECT ${STAT_COLS} FROM players WHERE LOWER(name) = ?`).get(data.attacker.name.toLowerCase());
+            enemyRow = playersRepo.getPlayerCombatStatsByName(data.attacker.name.toLowerCase());
         }
         const enemyStats = resolveStats(enemyRow);
 
-        const statStmt = db.prepare(`SELECT ${STAT_COLS} FROM players WHERE LOWER(name) = ?`);
         const all = [...result.onTime, ...(result.late || [])];
         for (const d of all) {
             const allyFleet = d.ships || [Math.floor(d.cv / 3), 0, 0];
-            const allyRow = statStmt.get(d.name.toLowerCase());
+            const allyRow = playersRepo.getPlayerCombatStatsByName(d.name.toLowerCase());
             d.win = winChance(allyFleet, resolveStats(allyRow), enemyFleet, enemyStats);
             d.winUnknown = enemyStats.unknown; // attacker race not scouted
             // The band is computed here, not in each renderer, so the Discord alert and
@@ -254,12 +243,7 @@ async function announceIncoming(data) {
     let stats = data.attacker.id ? getStatsByIds([data.attacker.id])[data.attacker.id] : null;
     if (!stats) {
         // Webhook only knows the attacker's name — resolve stats by name.
-        const row = db.prepare(`
-            SELECT p.id, p.name, p.level, p.has_intel, p.race_speed, p.race_attack, p.race_defense,
-                   p.physics, p.mathematics, p.energy, a.tag AS alliance_tag
-            FROM players p LEFT JOIN alliances a ON p.alliance_id = a.id
-            WHERE LOWER(p.name) = ?
-        `).get(data.attacker.name.toLowerCase());
+        const row = playersRepo.getPlayerWithAllianceByNameLower(data.attacker.name.toLowerCase());
         if (row) stats = { ...row, statLine: statLine(row) };
     }
 

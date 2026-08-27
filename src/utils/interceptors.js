@@ -6,6 +6,7 @@ const db = require('../database');
 const { calcTravelSeconds, formatTime } = require('./travel-calc');
 const systemsRepo = require('../repositories/systems');
 const fleetsRepo = require('../repositories/fleets');
+const playersRepo = require('../repositories/players');
 
 const ONTIME_LIMIT = 10;
 const LATE_LIMIT = 10;
@@ -51,13 +52,9 @@ function computeInterceptors(attack, nowUnix) {
     if (!target || target.x == null || target.y == null) return null;
 
     const defender = attack.defenderName
-        ? db.prepare(`SELECT alliance_id FROM players WHERE name = ? COLLATE NOCASE`).get(attack.defenderName)
+        ? playersRepo.getPlayerAllianceIdByName(attack.defenderName)
         : null;
     const allianceId = defender && defender.alliance_id ? defender.alliance_id : null;
-
-    const whereClause = allianceId
-        ? `p.alliance_id = @aid`
-        : `LOWER(p.name) IN (SELECT LOWER(game_name) FROM app_users WHERE is_active = 1)`;
 
     const fleets = allianceId
         ? fleetsRepo.getInterceptFleetsByAlliance(allianceId)
@@ -65,16 +62,9 @@ function computeInterceptors(attack, nowUnix) {
 
     const ppPrice = getPpPrice();
 
-    const homes = db.prepare(`
-        SELECT p.name AS owner_name, p.energy, p.race_speed, p.economy,
-               COALESCE(p.home_planet_index, 1) AS launch_planet,
-               ams.production_points, ams.astro_dollars,
-               s.x AS sx, s.y AS sy
-        FROM players p
-        JOIN alliance_member_stats ams ON ams.player_id = p.id
-        JOIN systems s ON s.id = COALESCE(p.home_system_id, p.origin_system)
-        WHERE ${whereClause} AND s.x IS NOT NULL AND s.y IS NOT NULL
-    `).all(allianceId ? { aid: allianceId } : {});
+    const homes = allianceId
+        ? playersRepo.getInterceptHomesByAlliance(allianceId)
+        : playersRepo.getInterceptHomesByActiveUsers();
 
     const timeUntilImpact = attack.arrivalUnix > 0 ? attack.arrivalUnix - nowUnix : null;
 

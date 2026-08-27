@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../database');
 const { requireAuth, requireAdmin } = require('./_middleware');
+const playersRepo = require('../repositories/players');
 const router = express.Router();
 
 const MAX_TAS = 5;
@@ -260,7 +261,7 @@ router.post('/sync/trade-inventory', requireAuth, (req, res) => {
     const value = isNaN(n) ? 0 : Math.max(0, n);
 
     try {
-        const row = db.prepare(`SELECT id FROM players WHERE name = ? COLLATE NOCASE`).get(me);
+        const row = playersRepo.getPlayerIdByName(me);
         if (!row) return res.json({ success: true, stored: false });
         db.prepare(`
             INSERT INTO alliance_member_stats (player_id, hoarded_au, updated_at)

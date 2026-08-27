@@ -25,6 +25,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const db = require('./database');
 const systemsRepo = require('./repositories/systems');
+const playersRepo = require('./repositories/players');
 
 // Autocomplete is capped at 25 choices by Discord.
 const MAX_CHOICES = 25;
@@ -37,16 +38,8 @@ function suggestPlayers(query) {
     const q = String(query || '').trim();
     try {
         const rows = q
-            ? db.prepare(`
-                SELECT p.name, a.tag
-                FROM players p LEFT JOIN alliances a ON a.id = p.alliance_id
-                WHERE p.name LIKE ? ORDER BY LENGTH(p.name) ASC LIMIT ?
-              `).all(`%${q}%`, MAX_CHOICES)
-            : db.prepare(`
-                SELECT p.name, a.tag
-                FROM players p LEFT JOIN alliances a ON a.id = p.alliance_id
-                ORDER BY p.points DESC LIMIT ?
-              `).all(MAX_CHOICES);
+            ? playersRepo.suggestPlayersByQuery(`%${q}%`, MAX_CHOICES)
+            : playersRepo.suggestPlayersTopByPoints(MAX_CHOICES);
         return rows.map(r => ({
             name: (r.tag ? `[${r.tag}] ${r.name}` : r.name).slice(0, 100),
             value: r.name.slice(0, 100),

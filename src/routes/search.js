@@ -3,6 +3,7 @@ const db = require('../database');
 const { requireAuth } = require('./_middleware');
 const plansRepo = require('../repositories/plans');
 const systemsRepo = require('../repositories/systems');
+const playersRepo = require('../repositories/players');
 const router = express.Router();
 
 // --- PLANET PLANS (META-DATA) ---
@@ -76,16 +77,8 @@ router.get('/search/player', requireAuth, (req, res) => {
 
     try {
         const searchTerm = `%${q}%`;
-        const query = db.prepare(`
-            SELECT p.id, p.name, a.tag as alliance_tag
-            FROM players p
-            LEFT JOIN alliances a ON p.alliance_id = a.id
-            WHERE p.name LIKE ? OR CAST(p.id AS TEXT) = ?
-            LIMIT 20
-        `);
-
         // Pass the wildcard string for the LIKE, and the raw string for the exact ID match
-        const results = query.all(searchTerm, q);
+        const results = playersRepo.searchPlayersByNameOrId(searchTerm, q);
 
         // Also match names from earlier rounds. Someone typing a name they remember should
         // find the account, not an empty list — the id is what carries across a wipe, the
