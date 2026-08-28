@@ -23,8 +23,14 @@
 // and scanned ones are filled.
 import { esc } from '../utils/escape.js';
 import '../utils/vision-model.js';   // side-effect import: the !vision rule, defined once
+import '../utils/travel-model.js';   // side-effect import: THE travel formula, defined once
+import '../utils/game-rate-limit.js'; // side-effect import: the shared 5/s gate AWApi rides
+import '../utils/aw-api.js';         // side-effect import: the game API client, gate included
 
 const { coverage: visionCoverage, visionRadius } = globalThis.AWVision;
+// All travel math comes from the shared model — this file holds no formula constants.
+const { calcTravelSeconds, isochroneRadius } = globalThis.AWTravelModel;
+const AWApi = globalThis.AWApi;
 
 const PREFS_KEY = 'awt.galaxyMap.layers.v1';
 
@@ -34,10 +40,31 @@ const DEFAULT_LAYERS = {
     free: false,
     stale: false,
     labels: false,
+    isochrones: false,
 };
 
-// Colour for an alliance tag. The game's own API exposes Alliance.color, but we have no
-// access to it (issue #24), so this derives a stable hue from the tag: the same alliance
+// Isochrone controls: origin system, the fleet the rings are drawn for, and the three
+// time bands. Defaults are a standing fleet (energy 0, speed 0) at half-day/day/two-day
+// bands. IMPORTANT: these times are STANDARD round pace — the model has no pace
+// multiplier, and the current RedZone round runs ×10; the panel says so on screen.
+const DEFAULT_ISO = {
+    origin: null,      // system id; null until derived from own home or picked by hand
+    energy: 0,         // 0..100
+    speed: 0,          // race speed, -4..+4
+    alliance: false,   // allied / own-destination move (halved)
+    hours: [12, 24, 48],
+};
+
+// Band colours, innermost first: reachable soonest reads green, latest reads red. The
+// wash goes under the system dots so ownership fill stays legible on top of it.
+const ISO_BANDS = [
+    { stroke: 'rgba(74,222,128,0.7)',  wash: 'rgba(74,222,128,0.20)' },
+    { stroke: 'rgba(251,191,36,0.6)',  wash: 'rgba(251,191,36,0.17)' },
+    { stroke: 'rgba(248,113,113,0.55)', wash: 'rgba(248,113,113,0.14)' },
+];
+
+// Colour for an alliance tag. The game's own API exposes Alliance.color, but the map does
+// not sync a colour feed — it derives a stable hue from the tag instead: the same alliance
 // is the same colour on every member's screen and across reloads, which is the property
 // that actually matters for reading a map. Our own alliance is special-cased to a colour
 // no hash can produce, so "us" never blends into a rival.
@@ -73,6 +100,32 @@ function savePrefs(userId, layers) {
         // an error the member has to dismiss.
         console.warn('[GalaxyMap] Could not save layer preferences:', err.message);
     }
+}
+
+// The isochrone controls ride in the same per-user prefs record, under an `iso` key the
+// layer loop never iterates. Stored values are member input from an older session, so
+// they are re-clamped on the way in — a hand-edited record must not draw nonsense.
+function sanitizeIso(saved) {
+    const s = saved && typeof saved === 'object' ? saved : {};
+    const int = (v, lo, hi, fallback) => {
+        const n = parseInt(v, 10);
+        return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : fallback;
+    };
+    const hours = DEFAULT_ISO.hours.map((fallback, i) => {
+        const h = Array.isArray(s.hours) ? parseFloat(s.hours[i]) : NaN;
+        return Number.isFinite(h) && h > 0 ? h : fallback;
+    });
+    return {
+        origin: Number.isFinite(parseInt(s.origin, 10)) ? parseInt(s.origin, 10) : null,
+        energy: int(s.energy, 0, 100, DEFAULT_ISO.energy),
+        speed: int(s.speed, -4, 4, DEFAULT_ISO.speed),
+        alliance: !!s.alliance,
+        hours,
+    };
+}
+
+function persistPrefs() {
+    savePrefs(state.userId, { ...state.layers, iso: state.iso });
 }
 
 function ageDays(iso) {
@@ -148,6 +201,47 @@ function draw() {
     ctx.fillRect(0, 0, w, h);
 
     drawGrid(ctx, w, h);
+
+    // Isochrones under everything: three "reachable within T" rings around the origin,
+    // and a band-coloured wash under each system dot so ownership fill stays readable on
+    // top. Radii are world units from the shared model, scaled to pixels here.
+    if (layers.isochrones && state.isoOrigin) {
+        const o = toScreen(state.isoOrigin.x, state.isoOrigin.y);
+
+        for (const s of systems) {
+            const band = state.isoBands.get(s.id);
+            if (band === undefined) continue;
+            const { sx, sy } = toScreen(s.x, s.y);
+            if (sx < -30 || sy < -30 || sx > w + 30 || sy > h + 30) continue;
+            ctx.fillStyle = ISO_BANDS[band].wash;
+            ctx.beginPath();
+            ctx.arc(sx, sy, radiusFor(s) + 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        for (let i = state.isoRings.length - 1; i >= 0; i--) {
+            const ring = state.isoRings[i];
+            if (!(ring.radius > 0)) continue;   // budget below the deep-space minimum
+            ctx.strokeStyle = ISO_BANDS[i].stroke;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([6, 4]);
+            ctx.beginPath();
+            ctx.arc(o.sx, o.sy, ring.radius * state.scale, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        ctx.setLineDash([]);
+
+        // The origin itself: a crosshair no band colour can be mistaken for.
+        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(o.sx, o.sy, 6, 0, Math.PI * 2);
+        ctx.moveTo(o.sx - 10, o.sy); ctx.lineTo(o.sx - 4, o.sy);
+        ctx.moveTo(o.sx + 4, o.sy);  ctx.lineTo(o.sx + 10, o.sy);
+        ctx.moveTo(o.sx, o.sy - 10); ctx.lineTo(o.sx, o.sy - 4);
+        ctx.moveTo(o.sx, o.sy + 4);  ctx.lineTo(o.sx, o.sy + 10);
+        ctx.stroke();
+    }
 
     // Vision first, underneath everything, so it reads as a wash rather than as a marker.
     if (layers.vision) {
@@ -310,6 +404,136 @@ function recomputeVision() {
         : new Map();
 }
 
+// ─── ISOCHRONES ──────────────────────────────────────────────────────────────
+// "How far does a fleet get from HERE in 12/24/48 hours?" — ring radii from the model's
+// analytic inverse, and a band per system from the forward formula (planet 1 → 1, the
+// branch the inverse is defined for). All of it standard round pace: the model has no
+// pace multiplier, and the current RedZone round runs ×10 — the controls row says so.
+
+function recomputeIsochrones() {
+    state.isoOrigin = null;
+    state.isoRings = [];
+    state.isoBands = new Map();
+    if (!state.layers.isochrones) return;
+
+    const origin = state.systems.find(s => s.id === state.iso.origin);
+    if (!origin) return;
+    state.isoOrigin = origin;
+
+    // Bands are cheapest sorted ascending; the inputs stay as typed, the maths does not
+    // care which box a number came from.
+    const hours = state.iso.hours.slice().sort((a, b) => a - b);
+    const { energy, speed, alliance } = state.iso;
+
+    state.isoRings = hours.map(h => ({
+        hours: h,
+        radius: isochroneRadius(h * 3600, energy, speed, alliance),
+    }));
+
+    for (const s of state.systems) {
+        if (s.id === origin.id) continue;   // the origin gets a crosshair, not a band
+        const t = calcTravelSeconds(origin.x, origin.y, 1, s.x, s.y, 1, energy, speed, alliance);
+        const band = hours.findIndex(h => t <= h * 3600);
+        if (band !== -1) state.isoBands.set(s.id, band);
+    }
+}
+
+// Default origin: the member's own home system, resolved the only way the hub can —
+// /hub-api/me's game name matched (case-insensitively) against the observers the map
+// already loaded. A broken bridge just means no default; the member picks one by hand.
+async function deriveHomeOrigin() {
+    try {
+        const res = await fetch('/hub-api/me');
+        const me = await res.json();
+        const name = me && me.gameName ? String(me.gameName).toLowerCase() : null;
+        if (!name) return;
+        const mine = state.observers.find(o => o.name && String(o.name).toLowerCase() === name);
+        if (mine && mine.originSystemId != null && state.systems.some(s => s.id === mine.originSystemId)) {
+            // In memory only: a derived default is not a choice, so it is not persisted.
+            state.iso.origin = mine.originSystemId;
+        }
+    } catch (err) {
+        console.warn('[GalaxyMap] Could not derive a home origin:', err.message);
+    }
+}
+
+function reflectIsoControls() {
+    const origin = state.systems.find(s => s.id === state.iso.origin);
+    const input = document.getElementById('gm-iso-origin');
+    if (input) input.value = origin ? `${origin.name || 'Sys'} #${origin.id}` : '';
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    set('gm-iso-energy', state.iso.energy);
+    set('gm-iso-speed', state.iso.speed);
+    set('gm-iso-t1', state.iso.hours[0]);
+    set('gm-iso-t2', state.iso.hours[1]);
+    set('gm-iso-t3', state.iso.hours[2]);
+    const allied = document.getElementById('gm-iso-alliance');
+    if (allied) allied.checked = !!state.iso.alliance;
+}
+
+function syncIsoControlsVisibility() {
+    document.getElementById('gm-iso-controls')?.classList.toggle('hidden', !state.layers.isochrones);
+}
+
+// Origin picker over the systems the map has already loaded — no extra endpoint, same
+// input-plus-dropdown shape as the travel calculator's system search.
+function wireIsoOriginPicker() {
+    const input = document.getElementById('gm-iso-origin');
+    const drop = document.getElementById('gm-iso-origin-drop');
+    if (!input || !drop) return;
+    input.addEventListener('input', () => {
+        const q = input.value.trim().toLowerCase();
+        if (!q) { drop.classList.add('hidden'); return; }
+        const matches = state.systems.filter(s =>
+            (s.name && s.name.toLowerCase().includes(q)) || String(s.id).includes(q)).slice(0, 12);
+        if (!matches.length) { drop.classList.add('hidden'); return; }
+        drop.classList.remove('hidden');
+        drop.innerHTML = matches.map(s =>
+            `<button data-id="${s.id}" class="gm-iso-pick w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-zinc-800 text-left transition-colors">
+                <span class="text-foreground font-medium truncate">${esc(s.name || 'Sys')} #${s.id}</span>
+                <span class="text-zinc-500 ml-auto">${Number(s.x)}/${Number(s.y)}</span>
+            </button>`).join('');
+        drop.querySelectorAll('.gm-iso-pick').forEach(btn => btn.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            state.iso.origin = parseInt(btn.dataset.id, 10);
+            drop.classList.add('hidden');
+            reflectIsoControls();
+            isoChanged();
+        }));
+    });
+    input.addEventListener('blur', () => setTimeout(() => drop.classList.add('hidden'), 150));
+}
+
+function wireIsoInputs() {
+    const clampInt = (v, lo, hi) => Math.max(lo, Math.min(hi, parseInt(v, 10) || 0));
+    document.getElementById('gm-iso-energy')?.addEventListener('input', (e) => {
+        state.iso.energy = clampInt(e.target.value, 0, 100);
+        isoChanged();
+    });
+    document.getElementById('gm-iso-speed')?.addEventListener('input', (e) => {
+        state.iso.speed = clampInt(e.target.value, -4, 4);
+        isoChanged();
+    });
+    document.getElementById('gm-iso-alliance')?.addEventListener('change', (e) => {
+        state.iso.alliance = e.target.checked;
+        isoChanged();
+    });
+    [['gm-iso-t1', 0], ['gm-iso-t2', 1], ['gm-iso-t3', 2]].forEach(([id, i]) => {
+        document.getElementById(id)?.addEventListener('input', (e) => {
+            const h = parseFloat(e.target.value);
+            state.iso.hours[i] = Number.isFinite(h) && h > 0 ? h : DEFAULT_ISO.hours[i];
+            isoChanged();
+        });
+    });
+}
+
+function isoChanged() {
+    persistPrefs();
+    recomputeIsochrones();
+    renderLegend();
+    draw();
+}
+
 function renderLegend() {
     const body = document.getElementById('gm-legend-body');
     if (!body) return;
@@ -335,6 +559,15 @@ function renderLegend() {
     rows.push(`<div>${dot('rgba(248,113,113,0.95)', false)}siege on record</div>`);
     if (state.layers.vision) {
         rows.push('<div class="mt-1 text-amber-500/90">Vision is modelled from biology, not read from the game.</div>');
+    }
+    if (state.layers.isochrones) {
+        if (state.isoOrigin) {
+            state.isoRings.forEach((ring, i) =>
+                rows.push(`<div>${dot(ISO_BANDS[i].stroke, false)}reachable within ${ring.hours} h</div>`));
+            rows.push('<div class="mt-1 text-amber-500/90">Standard-pace times — this RedZone round runs ×10.</div>');
+        } else {
+            rows.push('<div class="mt-1 text-amber-500/90">Isochrones: pick an origin system first.</div>');
+        }
     }
     body.innerHTML = rows.join('');
 }
@@ -370,6 +603,7 @@ async function loadData() {
             name: o.name,
             biology: o.biology,
             science_level: o.science_level,
+            originSystemId: o.originSystemId,
             x: o.x,
             y: o.y,
         }));
@@ -377,12 +611,21 @@ async function loadData() {
         state.coverage = data.coverage;
 
         if (!state.systems.length) {
-            if (status) status.textContent = 'The archive has no system coordinates yet. Open the travel calculator in game once to index the galaxy.';
+            if (status) {
+                // Static markup only — nothing player-derived. The button is created here
+                // rather than in the component, so it is wired by delegation (see init).
+                status.innerHTML = 'The archive has no system coordinates yet.'
+                    + '<button class="gm-seed-inline pointer-events-auto ml-2 h-7 px-2 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors">'
+                    + '<i class="fa-solid fa-cloud-arrow-down mr-1"></i>Seed from API</button>';
+            }
             return;
         }
         if (status) status.classList.add('hidden');
 
+        if (state.iso.origin == null) await deriveHomeOrigin();
         recomputeVision();
+        recomputeIsochrones();
+        reflectIsoControls();
         fitToData();
         renderLegend();
         renderCoverage();
@@ -396,12 +639,70 @@ async function loadData() {
     }
 }
 
+// ─── SEED FROM THE GAME API ──────────────────────────────────────────────────
+// One GET of the game's system index — through the member's own session and the shared
+// 5/s gate, like every game-bound request — replaces the old requirement to open the
+// in-game travel calculator once. The answer is filtered to systems that actually have
+// coordinates and handed to the existing /hub-api/sync/galaxy receiver; the map then
+// reloads from its own archive, the only surface it ever draws from.
+let seeding = false;
+async function seedFromApi() {
+    if (seeding) return;   // a re-click mid-run would double-spend the request budget
+    seeding = true;
+    const button = document.getElementById('gm-seed-api');
+    if (button) button.disabled = true;
+    const status = document.getElementById('gm-status');
+    const say = (msg) => { if (status) { status.classList.remove('hidden'); status.textContent = msg; } };
+    try {
+        say('Asking the game for the system index…');
+        const res = await AWApi.getSolarSystems();
+        if (!res.ok) {
+            say(res.reason === 'session'
+                ? 'Seeding needs your game session — log into the game first, then try again.'
+                : `The game API did not answer (${res.reason}${res.status ? `, HTTP ${res.status}` : ''}).`);
+            return;
+        }
+        const systems = (Array.isArray(res.data) ? res.data : [])
+            .filter(s => s && s.x != null && s.y != null)
+            .map(s => ({ id: s.id, name: s.name, x: s.x, y: s.y }));
+        if (!systems.length) {
+            say('The game returned no systems with coordinates — nothing to index.');
+            return;
+        }
+        const sync = await fetch('/hub-api/sync/galaxy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ systems }),
+        });
+        const result = await sync.json().catch(() => ({}));
+        if (!sync.ok || !result.success) {
+            say(`The archive rejected the index: ${result.error || `HTTP ${sync.status}`}`);
+            return;
+        }
+        if (typeof window.showToast === 'function') window.showToast(`Indexed ${systems.length} systems from the game API`);
+        await loadData();
+    } catch (err) {
+        console.error('[GalaxyMap] Seed failed:', err);
+        say(`Seeding failed: ${err.message}`);
+    } finally {
+        seeding = false;
+        if (button) button.disabled = false;
+    }
+}
+
 // ─── SETUP ───────────────────────────────────────────────────────────────────
 
 export async function initGalaxyMap(userId) {
     const canvas = document.getElementById('gm-canvas');
     const stage = document.getElementById('gm-stage');
     if (!canvas || !stage) return;
+
+    // One prefs record per member: the gm-layer-* checkboxes plus, under `iso`, the
+    // isochrone controls. The iso half is split off before the record becomes
+    // state.layers so the checkbox loops below only ever see real layers.
+    const prefs = loadPrefs(userId);
+    const savedIso = prefs.iso;
+    delete prefs.iso;
 
     state = {
         canvas,
@@ -413,7 +714,11 @@ export async function initGalaxyMap(userId) {
         seenBy: new Map(),
         ownTag: null,
         coverage: null,
-        layers: loadPrefs(userId),
+        layers: prefs,
+        iso: sanitizeIso(savedIso),
+        isoOrigin: null,
+        isoRings: [],
+        isoBands: new Map(),
         userId,
         scale: 20,
         offsetX: 0,
@@ -429,13 +734,26 @@ export async function initGalaxyMap(userId) {
     for (const key of Object.keys(DEFAULT_LAYERS)) {
         document.getElementById(`gm-layer-${key}`)?.addEventListener('change', (e) => {
             state.layers[key] = e.target.checked;
-            savePrefs(state.userId, state.layers);
+            persistPrefs();
             if (key === 'vision') recomputeVision();
+            if (key === 'isochrones') { syncIsoControlsVisibility(); recomputeIsochrones(); }
             renderLegend();
             renderCoverage();
             draw();
         });
     }
+
+    syncIsoControlsVisibility();
+    reflectIsoControls();
+    wireIsoOriginPicker();
+    wireIsoInputs();
+
+    document.getElementById('gm-seed-api')?.addEventListener('click', seedFromApi);
+    // The empty-state message offers the same seed. Its button only exists after
+    // loadData() renders it, so the click is caught here by delegation instead of an id.
+    document.getElementById('gm-status')?.addEventListener('click', (e) => {
+        if (e.target && e.target.closest && e.target.closest('.gm-seed-inline')) seedFromApi();
+    });
 
     document.getElementById('gm-zoom-in')?.addEventListener('click', () => zoomAt(1.3, canvas.clientWidth / 2, canvas.clientHeight / 2));
     document.getElementById('gm-zoom-out')?.addEventListener('click', () => zoomAt(1 / 1.3, canvas.clientWidth / 2, canvas.clientHeight / 2));
@@ -554,4 +872,4 @@ export async function openGalaxyMapPanel(userId) {
 }
 
 // Exposed for the tests, which check the pure pieces without a DOM.
-export const __internals = { allianceColour, ageDays, describeAge, DEFAULT_LAYERS, OWN_COLOUR };
+export const __internals = { allianceColour, ageDays, describeAge, DEFAULT_LAYERS, OWN_COLOUR, DEFAULT_ISO, sanitizeIso };

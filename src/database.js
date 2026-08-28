@@ -570,6 +570,82 @@ function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_round_systems_system ON round_systems(system_id);
     `);
 
+    // --- BATTLE REPORTS (game REST API ingest) ---
+    // One row per game battle report, keyed by the game's own report id so re-syncs are
+    // idempotent (INSERT OR IGNORE — see src/utils/battle-reports.js). att_/def_ mirror
+    // the API's firstParty/secondParty. `announced` tracks which rows have already been
+    // posted to Discord, so a re-sync never re-announces. Included in the admin round
+    // wipe (src/routes/admin.js): reports describe battles on a map that no longer
+    // exists once the round resets.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS battle_reports (
+            id INTEGER PRIMARY KEY,
+            started_at TEXT,
+            is_public INTEGER,
+            winner TEXT,
+            conquered_planet INTEGER,
+            killed_population INTEGER,
+            random_number REAL,
+
+            att_alliance_id INTEGER,
+            att_alliance_tag TEXT,
+            att_player_id INTEGER,
+            att_player_name TEXT,
+            att_has_won INTEGER,
+            att_luckiness REAL,
+            att_combat_value INTEGER,
+            att_survived_cv INTEGER,
+            att_lost_cv INTEGER,
+            att_pct_cv_lost REAL,
+            att_xp_gained INTEGER,
+            att_level_gained INTEGER,
+
+            def_alliance_id INTEGER,
+            def_alliance_tag TEXT,
+            def_player_id INTEGER,
+            def_player_name TEXT,
+            def_has_won INTEGER,
+            def_luckiness REAL,
+            def_combat_value INTEGER,
+            def_survived_cv INTEGER,
+            def_lost_cv INTEGER,
+            def_pct_cv_lost REAL,
+            def_xp_gained INTEGER,
+            def_level_gained INTEGER,
+
+            announced INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    // --- STARBASE ORDER AUDIT ---
+    // One row per starbase-order geometry PUT confirmed through the hub. This is an
+    // operations record of who sent what, and when — that stays true across rounds, so
+    // unlike battle_reports it deliberately SURVIVES the round wipe (same reasoning as
+    // the rounds/round_* archive) and carries no FK to systems or planets. The actor FK
+    // follows the planet_plans attribution model: SET NULL, never lose the row.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS starbase_order_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER,
+            system_id INTEGER,
+            planet_index INTEGER,
+            range REAL,
+            angle1 REAL,
+            angle2 REAL,
+            actor_user_id INTEGER REFERENCES app_users(id) ON DELETE SET NULL,
+            actor_game_name TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    // The battle-report sync asks for MAX(started_at) on every pull, and the audit log
+    // is read back per actor.
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_battle_reports_started ON battle_reports(started_at);
+        CREATE INDEX IF NOT EXISTS idx_starbase_audit_actor   ON starbase_order_audit(actor_user_id);
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

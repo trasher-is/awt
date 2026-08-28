@@ -33,16 +33,22 @@ ok('upsertSystemStub row has null name', systems.getFullSystem(2).name === null)
 const byIds = systems.getSystemsByIds([1, 2, 999]);
 ok('getSystemsByIds returns only existing ids', byIds.length === 2);
 
-systems.upsertPlanet(500, 1, 1, null, 1000, 3, 0);
+systems.upsertPlanet(500, 1, 1, null, 1000, 3, 0, 0);
 const planets = systems.getSystemPlanetsWithIntel(1);
 ok('getSystemPlanetsWithIntel returns the planet', planets.length === 1 && planets[0].population === 1000);
 
 ok('countPlanets is 1', systems.countPlanets() === 1);
 
+const oldPlanet = systems.getOldPlanet(1, 1);
+ok('getOldPlanet includes starbase/has_fleet/is_sieged for the fog-of-war guard', oldPlanet.starbase === 3 && oldPlanet.has_fleet === 0 && oldPlanet.is_sieged === 0);
+
+systems.upsertPlanet(500, 1, 1, null, 1000, 3, 0, 1);
+ok('upsertPlanet writes is_sieged', systems.getOldPlanet(1, 1).is_sieged === 1);
+
 systems.clearMovedPlanet(500, 1, 1);
 ok('clearMovedPlanet does not remove a planet at its current location', systems.countPlanets() === 1);
 
-systems.upsertPlanet(600, 2, 1, null, 500, 2, 0);
+systems.upsertPlanet(600, 2, 1, null, 500, 2, 0, 0);
 ok('countPlanets is 2 after second upsert', systems.countPlanets() === 2);
 systems.clearMovedPlanet(600, 2, 2); // planet 600 "moved" to system 2/index 2
 ok('clearMovedPlanet removes the stale row at the planet\'s old location', systems.countPlanets() === 1);

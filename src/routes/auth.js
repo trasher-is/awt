@@ -32,12 +32,31 @@ router.post('/logout', (req, res) => {
 });
 
 // --- TOOL USER CONTEXT ---
-// The Wrapper calls this to figure out who is supposed to be playing
+// The Wrapper calls this to figure out who is supposed to be playing.
+//
+// allianceId rides along for the battle-report scheduler, resolved through the only
+// app_users -> players bridge there is: case-insensitive name equality. It is null when
+// the member's hub username does not match an in-game player (the bridge breaks silently
+// when the two names drift apart — callers must treat null as "skip", never as an error).
 router.get('/me', requireAuth, (req, res) => {
+    let allianceId = null;
+    try {
+        const row = db.prepare(`
+            SELECT p.alliance_id AS alliance_id
+            FROM app_users u
+            JOIN players p ON LOWER(u.game_name) = LOWER(p.name)
+            WHERE u.id = ?
+        `).get(req.session.userId);
+        if (row && row.alliance_id != null) allianceId = row.alliance_id;
+    } catch (err) {
+        // Purely additive field: a broken bridge must never break /me itself.
+        console.error('[Auth] allianceId resolution failed:', err.message);
+    }
     res.json({
         id: req.session.userId,
         gameName: req.session.gameName,
-        role: req.session.role
+        role: req.session.role,
+        allianceId
     });
 });
 

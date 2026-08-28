@@ -206,7 +206,10 @@ function getPlanetCoordsForPlayer(playerId) {
     return getPlanetCoordsForPlayerStmt.all(playerId);
 }
 
-const getOldPlanetStmt = db.prepare(`SELECT owner_id, population FROM planets WHERE system_id = ? AND planet_index = ?`);
+// starbase/has_fleet/is_sieged are selected because the fog-of-war guard in sync.js
+// restores them: reading them off a row that never carried them bound `undefined`
+// (-> NULL) and quietly erased the very values the guard exists to preserve.
+const getOldPlanetStmt = db.prepare(`SELECT owner_id, population, starbase, has_fleet, is_sieged FROM planets WHERE system_id = ? AND planet_index = ?`);
 function getOldPlanet(systemId, planetIndex) {
     return getOldPlanetStmt.get(systemId, planetIndex);
 }
@@ -239,18 +242,19 @@ function getPlanetOwnerName(systemId, planetIndex) {
 }
 
 const upsertPlanetStmt = db.prepare(`
-    INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet, is_sieged)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(system_id, planet_index) DO UPDATE SET
         game_planet_id=excluded.game_planet_id,
         owner_id=excluded.owner_id,
         population=excluded.population,
         starbase=excluded.starbase,
         has_fleet=excluded.has_fleet,
+        is_sieged=excluded.is_sieged,
         updated_at=CURRENT_TIMESTAMP
 `);
-function upsertPlanet(gamePlanetId, systemId, planetIndex, ownerId, population, starbase, hasFleet) {
-    upsertPlanetStmt.run(gamePlanetId, systemId, planetIndex, ownerId, population, starbase, hasFleet);
+function upsertPlanet(gamePlanetId, systemId, planetIndex, ownerId, population, starbase, hasFleet, isSieged) {
+    upsertPlanetStmt.run(gamePlanetId, systemId, planetIndex, ownerId, population, starbase, hasFleet, isSieged);
 }
 
 // A planet's game_planet_id is globally UNIQUE, but it can show up at a new

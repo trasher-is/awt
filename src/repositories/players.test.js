@@ -39,9 +39,11 @@ ok('upsertAllianceMemberBasic overwrites alliance_id unconditionally', players.g
 players.upsertPlayerNameOnly(2, 'stahlburg');
 ok('upsertPlayerNameOnly creates a bare-name row', players.getPlayerBiologyByName('stahlburg').id === 2);
 
+db.prepare(`UPDATE players SET points = 500, biology = 7, has_intel = 1 WHERE id = ?`).run(1);
 players.resetPlayerOnRestart(1);
-const afterReset = db.prepare(`SELECT points, biology FROM players WHERE id = ?`).get(1);
-ok('resetPlayerOnRestart zeroes stats', afterReset.points === 0 && afterReset.biology === 0);
+const afterReset = db.prepare(`SELECT points, biology, has_intel FROM players WHERE id = ?`).get(1);
+ok('resetPlayerOnRestart zeroes public stats like points', afterReset.points === 0);
+ok('resetPlayerOnRestart does not touch intel-derived columns like biology/has_intel', afterReset.biology === 7 && afterReset.has_intel === 1);
 
 const check = players.getPlayerRestartCheck(2);
 ok('getPlayerRestartCheck returns logins/points/origin_system', 'logins' in check && 'points' in check && 'origin_system' in check);

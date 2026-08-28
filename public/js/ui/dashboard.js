@@ -109,6 +109,12 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     
     initWrapper();
+
+    // Background battle-report sync (first pull 10 s after load, then every 30 min).
+    // Loaded on demand like the galaxy map: the dashboard shell never blocks on it.
+    import('./battle-sync.js')
+        .then(({ initBattleSync }) => initBattleSync())
+        .catch(err => console.warn('[BattleSync] failed to start:', err));
 });
 
 // --- CORE UI CONTROLS ---

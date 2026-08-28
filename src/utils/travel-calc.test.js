@@ -120,6 +120,23 @@ if (uiImports && !uiHasOwnFormula && serverShares) {
     failed = true;
 }
 
+// galaxy-map.js is the OTHER travel-math consumer (isochrone rings + per-system band
+// tint): it must reach the formula through the shared model too, never keep its own copy
+// of the constants. 3600 (seconds per hour) is a UI-side unit conversion, not a travel
+// constant, so it is deliberately absent from the scanned set.
+const gmSource = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'ui', 'galaxy-map.js'), 'utf8');
+const gmImports = /import\s+['"]\.\.\/utils\/travel-model\.js['"]/.test(gmSource);
+const gmHasOwnFormula = /\b(?:0\.91|14400|36000|2700)\b/.test(
+    gmSource.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map(l => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n')
+);
+if (gmImports && !gmHasOwnFormula) {
+    console.log('✅ public/js/ui/galaxy-map.js runs the shared travel model — no formula copy.');
+} else {
+    if (!gmImports) console.log('❌ galaxy-map.js does not import the shared travel model');
+    if (gmHasOwnFormula) console.log('❌ galaxy-map.js contains formula constants of its own');
+    failed = true;
+}
+
 // Structural identity is necessary but not sufficient: exercise the thing over a grid so
 // a future divergence shows up as numbers, not as a missing import. The browser reaches
 // the formula through globalThis.AWTravelModel, the server through require — this walks
