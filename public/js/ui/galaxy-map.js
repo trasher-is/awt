@@ -664,7 +664,12 @@ async function seedFromApi() {
         }
         const systems = (Array.isArray(res.data) ? res.data : [])
             .filter(s => s && s.x != null && s.y != null)
-            .map(s => ({ id: s.id, name: s.name, x: s.x, y: s.y }));
+            .map(s => ({
+                id: s.id, name: s.name, x: s.x, y: s.y,
+                full_name: typeof s.fullName === 'string' ? s.fullName : null,
+                info: typeof s.info === 'string' ? s.info : null,
+                population_level: Number.isInteger(s.populationLevel) ? s.populationLevel : null,
+            }));
         if (!systems.length) {
             say('The game returned no systems with coordinates — nothing to index.');
             return;
@@ -686,6 +691,87 @@ async function seedFromApi() {
         say(`Seeding failed: ${err.message}`);
     } finally {
         seeding = false;
+        if (button) button.disabled = false;
+    }
+}
+
+// Seeds planets in bulk from Map/sectors, one system at a time, through the EXISTING
+// /hub-api/sync/system endpoint — same fog-of-war/owner-change/pop-drop logic a live scrape
+// already goes through, just driven from a bulk API response instead of one page. A system
+// the API marks isInVision:false gets every one of its planets marked is_unknown so the
+// merge preserves whatever was last actually seen there, exactly like a DOM scraper would.
+let seedingSectors = false;
+const SECTOR_BOUNDS = { x1: -40, y1: -40, x2: 40, y2: 40 }; // known map bounds ~-32..32, padded
+
+async function seedPlanetsFromSectors() {
+    if (seedingSectors) return;
+    seedingSectors = true;
+    const button = document.getElementById('gm-seed-sectors');
+    if (button) button.disabled = true;
+    const status = document.getElementById('gm-status');
+    const say = (msg) => { if (status) { status.classList.remove('hidden'); status.textContent = msg; } };
+    try {
+        say('Asking the game for the map sectors…');
+        const res = await AWApi.getMapSectors(SECTOR_BOUNDS);
+        if (!res.ok) {
+            say(res.reason === 'session'
+                ? 'Seeding needs your game session — log into the game first, then try again.'
+                : `The game API did not answer (${res.reason}${res.status ? `, HTTP ${res.status}` : ''}).`);
+            return;
+        }
+        const sectors = Array.isArray(res.data) ? res.data : [];
+        const allSystems = sectors.flatMap(sec => Array.isArray(sec.solarSystems) ? sec.solarSystems : []);
+        if (!allSystems.length) {
+            say('The game returned no systems in that area — nothing to seed.');
+            return;
+        }
+
+        let systemsProcessed = 0;
+        let planetsProcessed = 0;
+        const visionFlags = [];
+        for (const sys of allSystems) {
+            if (!sys || !Number.isInteger(sys.id)) continue;
+            const isInVision = !!sys.isInVision;
+            visionFlags.push({ id: sys.id, is_in_vision: isInVision });
+
+            const planets = Array.isArray(sys.planets) ? sys.planets : [];
+            const payload = AWApi.mapPlanetsToSyncPayload(sys.id, planets);
+            if (!isInVision) {
+                // Out-of-vision: the game's cache may be stale, so route every planet
+                // through the SAME "unknown" guard a live scraper uses for fog of war.
+                payload.planets = payload.planets.map(p => ({ ...p, is_unknown: true }));
+            }
+            if (!payload.planets.length) continue;
+
+            const syncRes = await fetch('/hub-api/sync/system', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            if (syncRes.ok) {
+                systemsProcessed++;
+                planetsProcessed += payload.planets.length;
+            }
+            say(`Seeding planets… ${systemsProcessed}/${allSystems.length} systems (${planetsProcessed} planets)`);
+        }
+
+        if (visionFlags.length) {
+            await fetch('/hub-api/sync/system-in-vision', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ systems: visionFlags }),
+            });
+        }
+
+        if (typeof window.showToast === 'function') {
+            window.showToast(`Seeded ${planetsProcessed} planets across ${systemsProcessed} systems`);
+        }
+        await loadData();
+    } catch (err) {
+        console.error('[GalaxyMap] Sector seed failed:', err);
+        say(`Sector seed failed: ${err.message}`);
+    } finally {
+        seedingSectors = false;
         if (button) button.disabled = false;
     }
 }
@@ -749,6 +835,7 @@ export async function initGalaxyMap(userId) {
     wireIsoInputs();
 
     document.getElementById('gm-seed-api')?.addEventListener('click', seedFromApi);
+    document.getElementById('gm-seed-sectors')?.addEventListener('click', seedPlanetsFromSectors);
     // The empty-state message offers the same seed. Its button only exists after
     // loadData() renders it, so the click is caught here by delegation instead of an id.
     document.getElementById('gm-status')?.addEventListener('click', (e) => {
