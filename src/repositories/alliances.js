@@ -33,11 +33,11 @@ function getWarRoomAlliances() {
 const searchAlliancesByTagOrNameStmt = db.prepare(`
     SELECT id, name, tag, full_name, member_count
     FROM alliances
-    WHERE name LIKE ? OR tag LIKE ? OR CAST(id AS TEXT) = ?
+    WHERE name LIKE ? OR tag LIKE ? OR full_name LIKE ? OR CAST(id AS TEXT) = ?
     LIMIT 20
 `);
 function searchAlliancesByTagOrName(likeTerm, exactTerm) {
-    return searchAlliancesByTagOrNameStmt.all(likeTerm, likeTerm, exactTerm);
+    return searchAlliancesByTagOrNameStmt.all(likeTerm, likeTerm, likeTerm, exactTerm);
 }
 
 // --- alliances: write ---
@@ -83,8 +83,8 @@ function upsertAllianceFull(alliance) {
 const upsertAllianceFromApiSearchStmt = db.prepare(`
     INSERT INTO alliances (id, name, tag, full_name, member_count) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
-        name=excluded.name,
-        tag=excluded.tag,
+        name=COALESCE(NULLIF(excluded.name, ''), alliances.name),
+        tag=COALESCE(excluded.tag, alliances.tag),
         full_name=excluded.full_name,
         member_count=excluded.member_count,
         updated_at=CURRENT_TIMESTAMP

@@ -231,6 +231,28 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
     ]);
     ok('name is carried through to the mapped planet', withName.planets[0].name === 'Rana', withName.planets[0]);
 
+    console.log('\n── mapSolarSystemsToSyncPayload: the ONE API→/sync/galaxy mapper ' + '─'.repeat(12));
+    // Synthetic systems in the getSolarSystems/searchSolarSystems shape.
+    const apiSystems = [
+        { id: 1, name: 'Rana', fullName: 'Rana Prime', info: 'A quiet system', populationLevel: 3, x: 4, y: -9 },
+        { id: 2, name: 'Nowhere', fullName: null, info: null, populationLevel: null, x: null, y: null },
+        { id: 3, name: 'Edge', fullName: 42, info: 7, populationLevel: '5', x: 0, y: 0 },
+    ];
+    const sysPayload = AWApi.mapSolarSystemsToSyncPayload(apiSystems);
+    ok('systems without both x and y are dropped', sysPayload.systems.length === 2,
+        sysPayload.systems.map(s => s.id));
+    ok('id/name/x/y carry through', sysPayload.systems[0].id === 1 && sysPayload.systems[0].name === 'Rana'
+        && sysPayload.systems[0].x === 4 && sysPayload.systems[0].y === -9, sysPayload.systems[0]);
+    ok('fullName/info/populationLevel map to full_name/info/population_level',
+        sysPayload.systems[0].full_name === 'Rana Prime' && sysPayload.systems[0].info === 'A quiet system'
+        && sysPayload.systems[0].population_level === 3, sysPayload.systems[0]);
+    const edge = sysPayload.systems.find(s => s.id === 3);
+    ok('a non-string fullName/info and non-integer populationLevel are coerced to null, not passed through',
+        edge.full_name === null && edge.info === null && edge.population_level === null, edge);
+    const degenerateSystems = AWApi.mapSolarSystemsToSyncPayload(null);
+    ok('a non-array systems answer maps to an empty, well-formed body',
+        Array.isArray(degenerateSystems.systems) && degenerateSystems.systems.length === 0, degenerateSystems);
+
     console.log('\n── Source scan: the rules this file lives under ' + '─'.repeat(28));
     // Comments stripped first so a comment describing an old rule can never trip these.
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'utils', 'aw-api.js'), 'utf8')

@@ -662,14 +662,8 @@ async function seedFromApi() {
                 : `The game API did not answer (${res.reason}${res.status ? `, HTTP ${res.status}` : ''}).`);
             return;
         }
-        const systems = (Array.isArray(res.data) ? res.data : [])
-            .filter(s => s && s.x != null && s.y != null)
-            .map(s => ({
-                id: s.id, name: s.name, x: s.x, y: s.y,
-                full_name: typeof s.fullName === 'string' ? s.fullName : null,
-                info: typeof s.info === 'string' ? s.info : null,
-                population_level: Number.isInteger(s.populationLevel) ? s.populationLevel : null,
-            }));
+        // The ONE shared API->sync mapper (aw-api.js) — never a local copy of it.
+        const { systems } = AWApi.mapSolarSystemsToSyncPayload(res.data);
         if (!systems.length) {
             say('The game returned no systems with coordinates — nothing to index.');
             return;

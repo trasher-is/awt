@@ -92,6 +92,21 @@ alliances.upsertAllianceFromApiSearch(501, 'Star Raiders', 'SR', 'Updated Full N
 const updated = alliances.searchAlliancesByTagOrName('%Star%', '501');
 ok('calling it again on the same id updates in place, not a duplicate row', updated.length === 1 && updated[0].full_name === 'Updated Full Name' && updated[0].member_count === 30);
 
+// A mismatched/empty payload (e.g. field-name drift against the real API) must not blank
+// out an already-known name/tag — only full_name/member_count are unconditionally owned
+// by this upsert.
+alliances.upsertAllianceFromApiSearch(501, '', null, 'Yet Another Full Name', 40);
+const afterBlankPayload = alliances.searchAlliancesByTagOrName('%Star%', '501');
+ok('an empty-string name does not blank the previously-set name',
+    afterBlankPayload.length === 1 && afterBlankPayload[0].name === 'Star Raiders');
+ok('a null tag does not null the previously-set tag', afterBlankPayload[0].tag === 'SR');
+ok('full_name still updates from the second call', afterBlankPayload[0].full_name === 'Yet Another Full Name');
+ok('member_count still updates from the second call', afterBlankPayload[0].member_count === 40);
+
+const byFullNameOnly = alliances.searchAlliancesByTagOrName('%Yet Another%', '999999');
+ok('a search term matching only full_name (not name or tag) finds the alliance',
+    byFullNameOnly.some(a => a.id === 501));
+
 alliances.deleteAllAlliances();
 ok('deleteAllAlliances empties the table', alliances.countAlliances() === 0);
 

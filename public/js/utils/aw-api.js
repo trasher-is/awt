@@ -210,11 +210,29 @@
         return { system_id: parseInt(systemId, 10), planets, fleets: [] };
     }
 
+    // API system objects (getSolarSystems/searchSolarSystems shape) -> the existing
+    // POST /hub-api/sync/galaxy body. The ONE shared mapper: galaxy-map.js's seedFromApi
+    // and search.js's live-search fallback both use it, so the payload can never drift
+    // between the two call sites. Systems without coordinates are dropped — x/y land in
+    // INTEGER-affinity columns and /sync/galaxy's own coord() guard would skip them
+    // anyway, but there is no reason to ship rows the server will just discard.
+    function mapSolarSystemsToSyncPayload(apiSystems) {
+        const systems = (Array.isArray(apiSystems) ? apiSystems : [])
+            .filter(s => s && s.x != null && s.y != null)
+            .map(s => ({
+                id: s.id, name: s.name, x: s.x, y: s.y,
+                full_name: typeof s.fullName === 'string' ? s.fullName : null,
+                info: typeof s.info === 'string' ? s.info : null,
+                population_level: Number.isInteger(s.populationLevel) ? s.populationLevel : null,
+            }));
+        return { systems };
+    }
+
     return {
         getSolarSystems, getSolarSystem, getSystemPlanets, getMapSectors,
         getTravelTime, searchBattleReports, putOrderGeometry,
         searchAlliances, searchSolarSystems,
-        mapPlanetsToSyncPayload,
+        mapPlanetsToSyncPayload, mapSolarSystemsToSyncPayload,
         _setFetch,
     };
 });

@@ -358,18 +358,27 @@ router.post('/sync/alliance-search', requireAuth, (req, res) => {
         return res.status(400).json({ error: 'Invalid payload' });
     }
     let stored = 0;
-    for (const a of alliances) {
-        if (!Number.isInteger(a.id) || a.id <= 0) continue;
-        alliancesRepo.upsertAllianceFromApiSearch(
-            a.id,
-            a.name == null ? '' : String(a.name),
-            a.tag == null ? null : String(a.tag),
-            typeof a.full_name === 'string' ? a.full_name : null,
-            Number.isInteger(a.member_count) ? a.member_count : null
-        );
-        stored++;
+    const syncTransaction = db.transaction((list) => {
+        for (const a of list) {
+            if (!Number.isInteger(a.id) || a.id <= 0) continue;
+            alliancesRepo.upsertAllianceFromApiSearch(
+                a.id,
+                a.name == null ? '' : String(a.name),
+                a.tag == null ? null : String(a.tag),
+                typeof a.full_name === 'string' ? a.full_name : null,
+                Number.isInteger(a.member_count) ? a.member_count : null
+            );
+            stored++;
+        }
+    });
+
+    try {
+        syncTransaction(alliances);
+        res.json({ success: true, count: stored });
+    } catch (err) {
+        console.error('[DB Error] Failed to sync alliance search results:', err);
+        res.status(500).json({ error: 'Database sync failed' });
     }
-    res.json({ success: true, count: stored });
 });
 
 // --- FLEET ID BACKFILL ---

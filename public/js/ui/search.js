@@ -5,6 +5,16 @@ import '../utils/aw-api.js';         // side-effect import: the game API client,
 
 const AWApi = globalThis.AWApi;
 
+// Same convention as system-intel.js's describeApiError: one line for an AWApi failure,
+// verbatim — the status code and reason, no guessing. Not imported from there because
+// system-intel.js does not export it; this is the small equivalent, not a local
+// reinterpretation of the shape.
+function describeApiError(r) {
+    if (r.reason === 'session') return `HTTP ${r.status} — session (log in to the game first)`;
+    if (r.reason === 'network') return 'network error (request never completed)';
+    return `HTTP ${r.status} (${r.reason})`;
+}
+
 let searchTimeout = null;
 
 export function handleSearchInput(type) { 
@@ -88,9 +98,11 @@ async function executeSearch(type) {
             });
         } else if (type === 'alliance') {
             resultsContainer.innerHTML = data.results.map(a => `
-                <button data-path="/Game/Alliance/Profile/${a.id}" class="btn-search-alliance text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-s transition-colors flex justify-between items-center shadow-sm">
-                    <span class="truncate font-medium">${a.tag ? `[${esc(a.tag)}] ` : ''}${esc(a.name || `#${a.id}`)}</span>
-                    <span class="text-s text-muted-foreground font-mono">${a.member_count != null ? `${a.member_count} members` : `#${a.id}`}</span>
+                <button data-path="/Game/Alliance/Profile/${a.id}" class="btn-search-alliance text-left w-full bg-card border border-border hover:bg-accent hover:text-accent-foreground rounded-md p-2 text-s transition-colors flex flex-col shadow-sm">
+                    <span class="w-full flex justify-between items-center">
+                        <span class="truncate font-medium">${a.tag ? `[${esc(a.tag)}] ` : ''}${esc(a.name || `#${a.id}`)}</span>
+                        <span class="text-s text-muted-foreground font-mono">${a.member_count != null ? `${a.member_count} members` : `#${a.id}`}</span>
+                    </span>${a.full_name ? `<span class="truncate w-full text-s text-muted-foreground font-normal" title="${esc(a.full_name)}">${esc(a.full_name)}</span>` : ''}
                 </button>`).join('');
 
             resultsContainer.querySelectorAll('.btn-search-alliance').forEach(btn => {
@@ -115,39 +127,46 @@ async function searchLiveViaApi(type, q, resultsContainer) {
         if (type === 'alliance') {
             const res = await AWApi.searchAlliances({ q, limit: 20 });
             if (!res.ok) {
-                resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">${res.reason === 'session' ? 'Log into the game first, then try again.' : 'The game did not answer.'}</div>`;
+                resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">${res.reason === 'session' ? 'Log into the game first, then try again.' : `The game did not answer: ${describeApiError(res)}`}</div>`;
                 return;
             }
             const alliances = (Array.isArray(res.data) ? res.data : []).map(a => ({
-                id: a.id, name: a.name, tag: a.tag, full_name: a.fullName, member_count: a.memberCount,
+                id: a.id,
+                name: typeof a.name === 'string' ? a.name : null,
+                tag: typeof a.tag === 'string' ? a.tag : null,
+                full_name: a.fullName, member_count: a.memberCount,
             }));
             if (alliances.length) {
-                await fetch('/hub-api/sync/alliance-search', {
+                const syncRes = await fetch('/hub-api/sync/alliance-search', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ alliances }),
                 });
+                const syncBody = await syncRes.json().catch(() => ({}));
+                if (!syncRes.ok || !syncBody.success) {
+                    resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">Sync failed: ${syncBody.error || `HTTP ${syncRes.status}`}</div>`;
+                    return;
+                }
             }
         } else if (type === 'system') {
             const res = await AWApi.searchSolarSystems({ q, limit: 20 });
             if (!res.ok) {
-                resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">${res.reason === 'session' ? 'Log into the game first, then try again.' : 'The game did not answer.'}</div>`;
+                resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">${res.reason === 'session' ? 'Log into the game first, then try again.' : `The game did not answer: ${describeApiError(res)}`}</div>`;
                 return;
             }
-            const systems = (Array.isArray(res.data) ? res.data : [])
-                .filter(s => s && s.x != null && s.y != null)
-                .map(s => ({
-                    id: s.id, name: s.name, x: s.x, y: s.y,
-                    full_name: typeof s.fullName === 'string' ? s.fullName : null,
-                    info: typeof s.info === 'string' ? s.info : null,
-                    population_level: Number.isInteger(s.populationLevel) ? s.populationLevel : null,
-                }));
+            // The ONE shared API->sync mapper (aw-api.js) — never a local copy of it.
+            const { systems } = AWApi.mapSolarSystemsToSyncPayload(res.data);
             if (systems.length) {
-                await fetch('/hub-api/sync/galaxy', {
+                const syncRes = await fetch('/hub-api/sync/galaxy', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ systems }),
                 });
+                const syncBody = await syncRes.json().catch(() => ({}));
+                if (!syncRes.ok || !syncBody.success) {
+                    resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">Sync failed: ${syncBody.error || `HTTP ${syncRes.status}`}</div>`;
+                    return;
+                }
             }
         }
         // Re-run the same DB-backed search now that the sync (if anything was found) landed.
