@@ -130,6 +130,22 @@
         return requestJson('/api/v1/SolarSystem/' + encodeURIComponent(id) + '/planets');
     }
 
+    // All active players (no filter): [{id, allianceId, isActivePlayer, name, allianceTag,
+    // joinedAt, playerLevel, playsFromCountryCode, pointsScored, rank}].
+    function getPlayers() {
+        return requestJson('/api/v1/Player');
+    }
+
+    // One player's full detail, including intelligenceReport when the caller has vision.
+    function getPlayer(id) {
+        return requestJson('/api/v1/Player/' + encodeURIComponent(id));
+    }
+
+    // Player name/id search: same ListPlayer shape as getPlayers(), just filtered by q.
+    function searchPlayers({ q, limit } = {}) {
+        return requestJson('/api/v1/Player/search' + query({ q, limit }));
+    }
+
     // A rectangular area of the map: [{id, rectangle, alliances, players, solarSystems}].
     // Each solarSystems[] entry additionally carries {capturedAt, format, isInVision,
     // planets[]} on top of the base SolarSystem shape.
@@ -232,6 +248,7 @@
         getSolarSystems, getSolarSystem, getSystemPlanets, getMapSectors,
         getTravelTime, searchBattleReports, putOrderGeometry,
         searchAlliances, searchSolarSystems,
+        getPlayers, getPlayer, searchPlayers,
         mapPlanetsToSyncPayload, mapSolarSystemsToSyncPayload,
         _setFetch,
     };

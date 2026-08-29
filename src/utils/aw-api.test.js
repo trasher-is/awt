@@ -223,6 +223,26 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
     ok('the request path is SolarSystem/search with q and limit', /\/api\/v1\/SolarSystem\/search\?/.test(calls[0].url)
         && /q=Rana/.test(calls[0].url) && /limit=5/.test(calls[0].url), calls[0].url);
 
+    console.log('\n── getPlayers / getPlayer / searchPlayers ' + '─'.repeat(30));
+    nextResponse = jsonRes([]);
+    calls.length = 0;
+    const listRes = await AWApi.getPlayers();
+    ok('getPlayers resolves ok', listRes.ok === true, listRes);
+    ok('the request path is plain /api/v1/Player, no query string', calls[0].url === '/api/v1/Player', calls[0].url);
+
+    nextResponse = jsonRes({ id: 701 });
+    calls.length = 0;
+    const detailRes = await AWApi.getPlayer(701);
+    ok('getPlayer resolves ok', detailRes.ok === true, detailRes);
+    ok('the request path includes the id', calls[0].url === '/api/v1/Player/701', calls[0].url);
+
+    nextResponse = jsonRes([]);
+    calls.length = 0;
+    const searchRes = await AWApi.searchPlayers({ q: 'Cave', limit: 15 });
+    ok('searchPlayers resolves ok', searchRes.ok === true, searchRes);
+    ok('the request path is Player/search with q and limit', /\/api\/v1\/Player\/search\?/.test(calls[0].url)
+        && /q=Cave/.test(calls[0].url) && /limit=15/.test(calls[0].url), calls[0].url);
+
     console.log('\n── mapPlanetsToSyncPayload also carries planet name ' + '─'.repeat(23));
     const withName = AWApi.mapPlanetsToSyncPayload('1', [
         { id: 1, index: 1, name: 'Rana', ownerId: null, ownerName: null, allianceId: null,
