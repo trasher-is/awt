@@ -84,7 +84,6 @@ db.prepare(`INSERT INTO app_users (game_name, password_hash, discord_id) VALUES 
 const reminderOwnerRow = db.prepare(`SELECT id FROM app_users WHERE game_name = 'ReminderOwner'`).get();
 const reminderOwnerId = reminderOwnerRow.id;
 
-const now = new Date().toISOString();
 const future = new Date(Date.now() + 3600000).toISOString();
 
 // Create various reminder notes to test filtering

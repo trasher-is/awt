@@ -9,6 +9,7 @@ const usersRepo = require('./repositories/users');
 const discordTimersRepo = require('./repositories/discordTimers');
 const incomingRepo = require('./repositories/incoming');
 const notesRepo = require('./repositories/notes');
+const settingsRepo = require('./repositories/settings');
 const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
 const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require('./utils/covering');
 // The battle model — the same physical file the dashboard calculator imports, so
@@ -1464,7 +1465,7 @@ function initDiscordBot(token) {
 // ----------------------------------------------------
 function getSettingValue(key) {
     try {
-        const row = db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(key);
+        const row = settingsRepo.getSetting(key);
         const v = row && row.value ? row.value.trim() : '';
         return v || null;
     } catch (err) {

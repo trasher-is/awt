@@ -58,7 +58,6 @@ const ownership = routing.getRouteOwnership(routeId);
 ok('getRouteOwnership returns id and author_id', ownership && ownership.id === routeId && ownership.author_id === author1Id);
 
 // updateRoute on an existing id changes its fields
-const beforeUpdate = routing.getRouteById(routeId);
 routing.updateRoute(routeId, 'Updated Title', 'Updated note', '2026-09-02 08:00:00', 9, 4, 0, 1, 'alliance', '2026-10-01 00:00:00');
 const afterUpdate = routing.getRouteById(routeId);
 ok('updateRoute changes title', afterUpdate.title === 'Updated Title');
@@ -131,6 +130,8 @@ ok('purgeExpiredRoutes returns count of removed rows', purgedCount === 1);
 ok('purgeExpiredRoutes removed the expired route', routing.getRouteById(pastRoute) === undefined);
 ok('purgeExpiredRoutes left the future-expiry route untouched', routing.getRouteById(futureRoute) !== undefined);
 ok('purgeExpiredRoutes left the null-expiry route untouched', routing.getRouteById(nullExpiryRoute) !== undefined);
+
+fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 console.log(failed === 0 ? 'All tests passed.' : `${failed} test(s) failed.`);
 process.exit(failed === 0 ? 0 : 1);
