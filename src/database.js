@@ -575,10 +575,28 @@ function initDatabase() {
             points INTEGER,
             level INTEGER,
             planet_count INTEGER DEFAULT 0,
+            race_growth INTEGER,
+            race_science INTEGER,
+            race_culture INTEGER,
+            race_production INTEGER,
+            race_speed INTEGER,
+            race_attack INTEGER,
+            race_defense INTEGER,
+            race_trader INTEGER,
+            race_sul INTEGER,
             PRIMARY KEY (round_id, player_id),
             FOREIGN KEY(round_id) REFERENCES rounds(id) ON DELETE CASCADE
         )
     `);
+    addColumn('round_players', 'race_growth', 'INTEGER');
+    addColumn('round_players', 'race_science', 'INTEGER');
+    addColumn('round_players', 'race_culture', 'INTEGER');
+    addColumn('round_players', 'race_production', 'INTEGER');
+    addColumn('round_players', 'race_speed', 'INTEGER');
+    addColumn('round_players', 'race_attack', 'INTEGER');
+    addColumn('round_players', 'race_defense', 'INTEGER');
+    addColumn('round_players', 'race_trader', 'INTEGER');
+    addColumn('round_players', 'race_sul', 'INTEGER');
 
     // No foreign key to players(id): the whole point is that these rows outlive the row
     // they were copied from. A reference would be deleted with it.
