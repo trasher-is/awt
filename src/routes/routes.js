@@ -4,6 +4,7 @@ const { requireAuth } = require('./_middleware');
 const { calcTravelSeconds, formatTime } = require('../utils/travel-calc');
 const { postEmbed, defuseMentions } = require('../utils/discord-post');
 const systemsRepo = require('../repositories/systems');
+const routingRepo = require('../repositories/routing');
 
 const router = express.Router();
 
@@ -103,8 +104,8 @@ function expiryFor(plannedStartAt, totalSeconds) {
 // current without needing a scheduler.
 function purgeExpired() {
     try {
-        const r = db.prepare(`DELETE FROM routes WHERE expires_at IS NOT NULL AND expires_at < datetime('now')`).run();
-        if (r.changes > 0) console.log(`[Routes] Removed ${r.changes} expired route(s).`);
+        const changes = routingRepo.purgeExpiredRoutes();
+        if (changes > 0) console.log(`[Routes] Removed ${changes} expired route(s).`);
     } catch (err) {
         console.error('[Routes] Expiry sweep failed:', err.message);
     }
@@ -113,16 +114,7 @@ function purgeExpired() {
 function hydrate(routeRows) {
     if (!routeRows.length) return [];
     const ids = routeRows.map(r => r.id);
-    const marks = ids.map(() => '?').join(',');
-    const legs = db.prepare(`
-        SELECT rl.*, sf.name AS from_system_name, sf.x AS from_x, sf.y AS from_y,
-               st.name AS to_system_name,   st.x AS to_x,   st.y AS to_y
-        FROM route_legs rl
-        LEFT JOIN systems sf ON sf.id = rl.from_system_id
-        LEFT JOIN systems st ON st.id = rl.to_system_id
-        WHERE rl.route_id IN (${marks})
-        ORDER BY rl.route_id, rl.leg_index
-    `).all(...ids);
+    const legs = routingRepo.getRouteLegsForRouteIds(ids);
 
     const byRoute = new Map(ids.map(id => [id, []]));
     for (const l of legs) {
@@ -192,13 +184,7 @@ router.post('/routes/preview', requireAuth, (req, res) => {
 router.get('/routes', requireAuth, (req, res) => {
     try {
         purgeExpired();
-        const rows = db.prepare(`
-            SELECT r.*, u.game_name AS author_name
-            FROM routes r
-            LEFT JOIN app_users u ON u.id = r.author_id
-            WHERE r.visibility = 'alliance' OR r.author_id = ?
-            ORDER BY COALESCE(r.planned_start_at, r.created_at) ASC
-        `).all(req.session.userId);
+        const rows = routingRepo.getRoutesForUser(req.session.userId);
         res.json({ success: true, routes: hydrate(rows) });
     } catch (err) {
         console.error('[DB Error] Failed to list routes:', err);
@@ -208,11 +194,7 @@ router.get('/routes', requireAuth, (req, res) => {
 
 router.get('/routes/:id', requireAuth, (req, res) => {
     try {
-        const row = db.prepare(`
-            SELECT r.*, u.game_name AS author_name
-            FROM routes r LEFT JOIN app_users u ON u.id = r.author_id
-            WHERE r.id = ?
-        `).get(req.params.id);
+        const row = routingRepo.getRouteById(req.params.id);
         if (!row) return res.status(404).json({ error: 'Route not found' });
         if (row.visibility !== 'alliance' && row.author_id !== req.session.userId) {
             return res.status(403).json({ error: 'That route is private.' });
@@ -242,29 +224,14 @@ function writeRoute(routeId, body, authorId) {
     const tx = db.transaction(() => {
         let id = routeId;
         if (id) {
-            db.prepare(`
-                UPDATE routes SET title=?, note=?, planned_start_at=?, energy=?, race_speed=?,
-                                  is_alliance_move=?, biology=?, visibility=?, expires_at=?,
-                                  updated_at=CURRENT_TIMESTAMP
-                WHERE id=?
-            `).run(title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt, id);
-            db.prepare(`DELETE FROM route_legs WHERE route_id = ?`).run(id);
+            routingRepo.updateRoute(id, title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt);
+            routingRepo.deleteRouteLegsForRoute(id);
         } else {
-            const r = db.prepare(`
-                INSERT INTO routes (author_id, title, note, planned_start_at, energy, race_speed,
-                                    is_alliance_move, biology, visibility, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(authorId, title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt);
-            id = r.lastInsertRowid;
+            id = routingRepo.insertRoute(authorId, title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt);
         }
 
-        const ins = db.prepare(`
-            INSERT INTO route_legs (route_id, leg_index, from_system_id, from_planet_index,
-                                    to_system_id, to_planet_index, travel_seconds, distance, bio_needed)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
         for (const l of built.legs) {
-            ins.run(id, l.legIndex, l.from.systemId, l.from.planetIndex,
+            routingRepo.insertRouteLeg(id, l.legIndex, l.from.systemId, l.from.planetIndex,
                     l.to.systemId, l.to.planetIndex, l.travelSeconds, l.distance, l.bioNeeded);
         }
         return id;
@@ -292,7 +259,7 @@ function mayModify(row, session) {
 
 router.put('/routes/:id', requireAuth, (req, res) => {
     try {
-        const row = db.prepare(`SELECT id, author_id FROM routes WHERE id = ?`).get(req.params.id);
+        const row = routingRepo.getRouteOwnership(req.params.id);
         if (!row) return res.status(404).json({ error: 'Route not found' });
         if (!mayModify(row, req.session)) {
             return res.status(403).json({ error: 'That route belongs to someone else. Ask them or an admin to change it.' });
@@ -308,13 +275,13 @@ router.put('/routes/:id', requireAuth, (req, res) => {
 
 router.delete('/routes/:id', requireAuth, (req, res) => {
     try {
-        const row = db.prepare(`SELECT id, author_id FROM routes WHERE id = ?`).get(req.params.id);
+        const row = routingRepo.getRouteOwnership(req.params.id);
         if (!row) return res.status(404).json({ error: 'Route not found' });
         if (!mayModify(row, req.session)) {
             return res.status(403).json({ error: 'That route belongs to someone else. Ask them or an admin to remove it.' });
         }
-        db.prepare(`DELETE FROM route_legs WHERE route_id = ?`).run(row.id);
-        db.prepare(`DELETE FROM routes WHERE id = ?`).run(row.id);
+        routingRepo.deleteRouteLegsForRoute(row.id);
+        routingRepo.deleteRoute(row.id);
         res.json({ success: true });
     } catch (err) {
         console.error('[DB Error] Failed to delete route:', err);
@@ -325,11 +292,7 @@ router.delete('/routes/:id', requireAuth, (req, res) => {
 // --- ANNOUNCE: one click to the alliance Discord channel ---
 router.post('/routes/:id/announce', requireAuth, async (req, res) => {
     try {
-        const row = db.prepare(`
-            SELECT r.*, u.game_name AS author_name
-            FROM routes r LEFT JOIN app_users u ON u.id = r.author_id
-            WHERE r.id = ?
-        `).get(req.params.id);
+        const row = routingRepo.getRouteById(req.params.id);
         if (!row) return res.status(404).json({ error: 'Route not found' });
         if (row.visibility !== 'alliance' && row.author_id !== req.session.userId) {
             return res.status(403).json({ error: 'That route is private.' });
