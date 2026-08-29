@@ -53,6 +53,9 @@ function initDatabase() {
         )
     `);
 
+    addColumn('alliances', 'full_name', 'TEXT');
+    addColumn('alliances', 'member_count', 'INTEGER');
+
     // 3. Players (Flat Table)
     db.exec(`
         CREATE TABLE IF NOT EXISTS players (
