@@ -119,6 +119,16 @@ function initDatabase() {
         )
     `);
 
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS player_name_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id INTEGER NOT NULL,
+            old_name TEXT NOT NULL,
+            changed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+        )
+    `);
+
     addColumn('players', 'eco_bonus', 'INTEGER DEFAULT 0');
     addColumn('players', 'joined', 'TEXT');
     addColumn('players', 'logins', 'INTEGER DEFAULT 0');
@@ -134,6 +144,17 @@ function initDatabase() {
     addColumn('players', 'home_system_id', 'INTEGER');
     addColumn('players', 'home_planet_index', 'INTEGER');
     addColumn('players', 'possible_homes', 'TEXT');
+    addColumn('players', 'is_active_player', 'INTEGER');
+    addColumn('players', 'last_activity_at', 'DATETIME');
+    addColumn('players', 'last_login_at', 'DATETIME');
+    addColumn('players', 'resigned_at', 'DATETIME');
+    addColumn('players', 'number_of_battles', 'INTEGER');
+    addColumn('players', 'battle_luckiness', 'REAL');
+    addColumn('players', 'multi_status', 'TEXT');
+    addColumn('players', 'is_top_permanent_ranker', 'INTEGER');
+    addColumn('players', 'has_supporter_badge', 'INTEGER');
+    addColumn('players', 'supporter_type', 'TEXT');
+    addColumn('players', 'last_api_scan_at', 'DATETIME');
 
     // NOTE: the migrations for player_logins.total_logins and fleets.arrival_at used to
     // sit here, above the CREATE TABLE statements for those two tables. On a fresh
