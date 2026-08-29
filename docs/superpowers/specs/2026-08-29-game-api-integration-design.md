@@ -138,7 +138,14 @@ DB as-is" decision):
 ### `planets`
 - `name` TEXT (planets currently have no name column at all — scraping never captured it,
   the API always provides it)
-- `is_unknown_owner` INTEGER
+
+No `is_unknown_owner` column. Checked the existing `/sync/system` route (`src/routes/sync.js`):
+`isUnknownOwner`/`is_unknown` is already a well-established concept there, but it is
+deliberately NEVER persisted as its own column — it is a payload-only fog-of-war guard that
+decides whether to overwrite `owner_id`/`population` or preserve the previously-known
+values (`systemsRepo.getOldPlanet`/`upsertPlanet`). The `Map/sectors` ingestion reuses this
+exact same guard, not a new persisted flag — consistent with how `SolarSystem/{id}/planets`
+already handles the identical field.
 
 Explicitly NOT adding a `starbase_orders` column — the API's `StarbaseOrder` schema turned
 out to be just `{id, canBeChanged}`, no actionable data worth persisting.
