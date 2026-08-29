@@ -6,6 +6,7 @@ const plansRepo = require('./repositories/plans');
 const playersRepo = require('./repositories/players');
 const alliancesRepo = require('./repositories/alliances');
 const usersRepo = require('./repositories/users');
+const discordTimersRepo = require('./repositories/discordTimers');
 const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
 const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require('./utils/covering');
 // The battle model — the same physical file the dashboard calculator imports, so
@@ -169,10 +170,7 @@ async function handleTimer({ input, userId, channelId, reply }) {
 
     const dueAt = new Date(Date.now() + delayMs);
     try {
-        db.prepare(`
-            INSERT INTO discord_timers (discord_user_id, channel_id, label, due_at)
-            VALUES (?, ?, ?, ?)
-        `).run(userId, channelId, String(input).slice(0, 200), dueAt.toISOString());
+        discordTimersRepo.insertTimer(userId, channelId, String(input).slice(0, 200), dueAt.toISOString());
     } catch (err) {
         console.error('[Discord] Could not store timer:', err.message);
         return reply('❌ Could not save that timer. Try again.');
@@ -189,20 +187,13 @@ async function handleTimer({ input, userId, channelId, reply }) {
 async function checkDueTimers() {
     let due;
     try {
-        due = db.prepare(`
-            SELECT id, discord_user_id, channel_id, label, due_at
-            FROM discord_timers
-            WHERE fired_at IS NULL AND due_at <= ?
-            ORDER BY due_at ASC
-            LIMIT 50
-        `).all(new Date().toISOString());
+        due = discordTimersRepo.getDueTimers(new Date().toISOString());
     } catch (err) {
         console.error('[Discord] Timer lookup failed:', err.message);
         return;
     }
     if (!due.length) return;
 
-    const markFired = db.prepare(`UPDATE discord_timers SET fired_at = CURRENT_TIMESTAMP WHERE id = ?`);
     for (const t of due) {
         try {
             const channel = await client.channels.fetch(t.channel_id);
@@ -217,7 +208,7 @@ async function checkDueTimers() {
             // this row to be retried forever.
             console.error(`[Discord] Timer ${t.id} ping failed:`, err.message);
         } finally {
-            markFired.run(t.id);
+            discordTimersRepo.markTimerFired(t.id);
         }
     }
 }
