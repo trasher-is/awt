@@ -129,6 +129,25 @@ function findByFormerName(db, query, { limit = 20 } = {}) {
     `).all(`%${q}%`, limit);
 }
 
+// Like findByFormerName, but only returns hits for a player who still currently exists
+// (used by the player search box, where a hit with no live account to show is noise).
+function searchFormerNamesWithCurrentPlayer(db, query, { limit = 20 } = {}) {
+    const q = String(query || '').trim();
+    if (!q) return [];
+    return db.prepare(`
+        SELECT rp.player_id AS id, p.name, a.tag AS alliance_tag,
+               rp.name AS former_name, r.label AS former_round
+        FROM round_players rp
+        JOIN rounds r ON r.id = rp.round_id
+        LEFT JOIN players p ON p.id = rp.player_id
+        LEFT JOIN alliances a ON a.id = p.alliance_id
+        WHERE rp.name LIKE ? AND p.id IS NOT NULL
+        GROUP BY rp.player_id
+        ORDER BY r.id DESC
+        LIMIT ?
+    `).all(`%${q}%`, limit);
+}
+
 /** The archive index for the admin panel. */
 function listRounds(db) {
     return db.prepare(`
@@ -158,4 +177,4 @@ function roundDetail(db, roundId, { limit = 500 } = {}) {
     return round;
 }
 
-module.exports = { archiveRound, previousNames, findByFormerName, listRounds, roundDetail };
+module.exports = { archiveRound, previousNames, findByFormerName, listRounds, roundDetail, searchFormerNamesWithCurrentPlayer };

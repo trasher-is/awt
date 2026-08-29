@@ -277,7 +277,7 @@ const cleanup = [];
 
     const search = readCode('src/routes/search.js');
     ok('player search also matches names from earlier rounds',
-        /round_players/.test(search) && /former_name/.test(search));
+        /searchFormerNamesWithCurrentPlayer/.test(search) && /former/.test(search));
 
     const ui = readCode('public/js/ui/player-intel.js');
     ok('the panel renders them', /formerNames/.test(ui) && /previously/.test(ui));
