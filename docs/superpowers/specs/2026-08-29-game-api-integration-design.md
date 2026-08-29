@@ -148,17 +148,35 @@ out to be just `{id, canBeChanged}`, no actionable data worth persisting.
 - `member_count` INTEGER
 
 ### `players`
+
+Corrected against the actual current schema (base `CREATE TABLE` plus every `addColumn`
+migration in `src/database.js`) — two of the fields originally listed as new already exist
+under different names, both added via earlier scrape-driven `addColumn` migrations:
+
+- `joined` (TEXT, already exists) — reuse for the API's `joinedAt`. The API's ISO timestamp
+  is strictly more precise than whatever the profile-page scrape produces; write it
+  whenever the API provides it, overwriting the scraped value (a join date never changes,
+  so there's no conflict to resolve — just take the better value).
+- `logins` (INTEGER, already exists) — reuse for the API's `numberOfLogins`. Same reasoning:
+  take the API's count whenever available.
+- `eco_bonus` (INTEGER, already exists, the scraped bonus *percentage*) — the API's
+  `hasEcoBonus` is a boolean flag, not a magnitude. Rather than add a redundant column,
+  derive "has an eco bonus" from `eco_bonus > 0` / `eco_bonus IS NOT NULL` in application
+  code wherever it's needed. No new column for this.
+
+Genuinely new columns (nothing existing covers these):
 - `is_active_player` INTEGER
-- `joined_at` DATETIME
-- `last_activity_at` DATETIME
-- `last_login_at` DATETIME
+- `last_activity_at` DATETIME — distinct from the existing `idle_time` (a scrape-time
+  snapshot duration string, stale the moment it's read); this is an absolute timestamp from
+  the API, self-refreshing in meaning regardless of when it's read. Both columns are kept;
+  `idle_time` is untouched.
+- `last_login_at` DATETIME — distinct from `last_activity_at` (the API exposes both
+  separately; a player can be logged in but idle, or vice versa)
 - `resigned_at` DATETIME
 - `number_of_battles` INTEGER
-- `number_of_logins` INTEGER
 - `battle_luckiness` REAL
 - `multi_status` TEXT
 - `is_top_permanent_ranker` INTEGER
-- `has_eco_bonus` INTEGER
 - `has_supporter_badge` INTEGER
 - `supporter_type` TEXT
 
