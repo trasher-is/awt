@@ -54,9 +54,12 @@ function parseBattleReportHtml(html) {
             continue;
         }
 
-        if (label === 'Victory' && cells.length >= 5) {
-            const span = cells[4].querySelector('span');
-            const text = span ? span.textContent.trim() : cells[4].textContent.trim();
+        if (label === 'Victory' && cells.length >= 3) {
+            // Row shape: [Victory, def-outcome(colspan=3), dice/win-chance, att-outcome(colspan=3)]
+            // — a colspan attribute does not create extra <td> DOM nodes, so this row has
+            // only 4 <td>s total (indices 0-3), and the win-chance value lives at index 2.
+            const span = cells[2].querySelector('span');
+            const text = span ? span.textContent.trim() : cells[2].textContent.trim();
             const n = parseFloat(text);
             if (Number.isFinite(n)) result.win_chance = n;
         }
