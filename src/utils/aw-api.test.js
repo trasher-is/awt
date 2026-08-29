@@ -208,6 +208,21 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
         && /x1=-30/.test(calls[0].url) && /y1=-30/.test(calls[0].url)
         && /x2=30/.test(calls[0].url) && /y2=30/.test(calls[0].url), calls[0].url);
 
+    console.log('\n── searchAlliances / searchSolarSystems: query strings ' + '─'.repeat(20));
+    nextResponse = jsonRes([]);
+    calls.length = 0;
+    const allianceRes = await AWApi.searchAlliances({ q: 'Star', limit: 10 });
+    ok('searchAlliances resolves ok', allianceRes.ok === true, allianceRes);
+    ok('the request path is Alliance/search with q and limit', /\/api\/v1\/Alliance\/search\?/.test(calls[0].url)
+        && /q=Star/.test(calls[0].url) && /limit=10/.test(calls[0].url), calls[0].url);
+
+    nextResponse = jsonRes([]);
+    calls.length = 0;
+    const systemRes = await AWApi.searchSolarSystems({ q: 'Rana', limit: 5 });
+    ok('searchSolarSystems resolves ok', systemRes.ok === true, systemRes);
+    ok('the request path is SolarSystem/search with q and limit', /\/api\/v1\/SolarSystem\/search\?/.test(calls[0].url)
+        && /q=Rana/.test(calls[0].url) && /limit=5/.test(calls[0].url), calls[0].url);
+
     console.log('\n── mapPlanetsToSyncPayload also carries planet name ' + '─'.repeat(23));
     const withName = AWApi.mapPlanetsToSyncPayload('1', [
         { id: 1, index: 1, name: 'Rana', ownerId: null, ownerName: null, allianceId: null,

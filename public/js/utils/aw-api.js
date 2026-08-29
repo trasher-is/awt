@@ -137,6 +137,17 @@
         return requestJson('/api/v1/Map/sectors' + query({ x1, y1, x2, y2 }));
     }
 
+    // Alliance name/tag/id search: [{id, name, tag, fullName, memberCount, pointsScored, rank}].
+    function searchAlliances({ q, limit } = {}) {
+        return requestJson('/api/v1/Alliance/search' + query({ q, limit }));
+    }
+
+    // System name/id search: [{id, name, fullName, info, populationLevel, x, y}] — same
+    // shape as getSolarSystems(), just filtered by q.
+    function searchSolarSystems({ q, limit } = {}) {
+        return requestJson('/api/v1/SolarSystem/search' + query({ q, limit }));
+    }
+
     // The game's own travel time between two planets, by SYSTEM ID (not coordinates):
     // {days, hours, minutes, seconds, timeSpan, totalSeconds}. Answers for the logged-in
     // player — their race speed is baked in, only energyLevel is a parameter.
@@ -202,6 +213,7 @@
     return {
         getSolarSystems, getSolarSystem, getSystemPlanets, getMapSectors,
         getTravelTime, searchBattleReports, putOrderGeometry,
+        searchAlliances, searchSolarSystems,
         mapPlanetsToSyncPayload,
         _setFetch,
     };
