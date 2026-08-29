@@ -76,6 +76,22 @@ ok('updateBroadcast changes the message', alliances.getBroadcasts()[0].message =
 alliances.deleteBroadcast(broadcasts[0].id);
 ok('deleteBroadcast empties the table', alliances.getBroadcasts().length === 0);
 
+alliances.upsertAllianceFromApiSearch(501, 'Star Raiders', 'SR', 'The Star Raiders Collective', 24);
+const found = alliances.searchAlliancesByTagOrName('%Star%', '501');
+ok('search by name substring finds the alliance', found.length === 1 && found[0].id === 501);
+ok('full_name is returned', found[0].full_name === 'The Star Raiders Collective');
+ok('member_count is returned', found[0].member_count === 24);
+
+const byTag = alliances.searchAlliancesByTagOrName('%SR%', '999999');
+ok('search by tag substring also finds it', byTag.some(a => a.id === 501));
+
+const byExactId = alliances.searchAlliancesByTagOrName('%nomatch%', '501');
+ok('an exact id match works even when the LIKE term matches nothing', byExactId.some(a => a.id === 501));
+
+alliances.upsertAllianceFromApiSearch(501, 'Star Raiders', 'SR', 'Updated Full Name', 30);
+const updated = alliances.searchAlliancesByTagOrName('%Star%', '501');
+ok('calling it again on the same id updates in place, not a duplicate row', updated.length === 1 && updated[0].full_name === 'Updated Full Name' && updated[0].member_count === 30);
+
 alliances.deleteAllAlliances();
 ok('deleteAllAlliances empties the table', alliances.countAlliances() === 0);
 

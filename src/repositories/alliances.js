@@ -30,6 +30,16 @@ function getWarRoomAlliances() {
     return getWarRoomAlliancesStmt.all();
 }
 
+const searchAlliancesByTagOrNameStmt = db.prepare(`
+    SELECT id, name, tag, full_name, member_count
+    FROM alliances
+    WHERE name LIKE ? OR tag LIKE ? OR CAST(id AS TEXT) = ?
+    LIMIT 20
+`);
+function searchAlliancesByTagOrName(likeTerm, exactTerm) {
+    return searchAlliancesByTagOrNameStmt.all(likeTerm, likeTerm, exactTerm);
+}
+
 // --- alliances: write ---
 
 // System-scan upsert: touches updated_at on conflict. NOT the same statement as
@@ -64,6 +74,23 @@ const upsertAllianceFullStmt = db.prepare(`
 `);
 function upsertAllianceFull(alliance) {
     upsertAllianceFullStmt.run(alliance);
+}
+
+// A fourth, distinct alliance upsert — sourced from Alliance/search, not a scrape. NOT the
+// same as upsertAllianceBasic/upsertAllianceTagOnly/upsertAllianceFull: this is the only
+// one that writes full_name/member_count, and it does not touch leader_id/ranking/points
+// (Alliance/search's response has no such fields).
+const upsertAllianceFromApiSearchStmt = db.prepare(`
+    INSERT INTO alliances (id, name, tag, full_name, member_count) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+        name=excluded.name,
+        tag=excluded.tag,
+        full_name=excluded.full_name,
+        member_count=excluded.member_count,
+        updated_at=CURRENT_TIMESTAMP
+`);
+function upsertAllianceFromApiSearch(id, name, tag, fullName, memberCount) {
+    upsertAllianceFromApiSearchStmt.run(id, name, tag, fullName, memberCount);
 }
 
 const deleteAllAlliancesStmt = db.prepare(`DELETE FROM alliances`);
@@ -217,6 +244,7 @@ function deleteStaleAllianceMembers(ids) {
 
 module.exports = {
     getWarRoomAllianceIntelTags, countAlliances, getWarRoomAlliances,
+    searchAlliancesByTagOrName, upsertAllianceFromApiSearch,
     upsertAllianceBasic, upsertAllianceTagOnly, upsertAllianceFull, deleteAllAlliances,
     insertBroadcast, getBroadcasts, updateBroadcast, deleteBroadcast,
     getAllianceMemberStatIds, getTradeAnalysisRows, getAllianceStatsForArchive,
