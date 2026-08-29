@@ -5,6 +5,7 @@ const { announceSystemChanges } = require('../discord_bot');
 const systemsRepo = require('../repositories/systems');
 const fleetsRepo = require('../repositories/fleets');
 const playersRepo = require('../repositories/players');
+const alliancesRepo = require('../repositories/alliances');
 const { mapApiReport, upsertReports, formatBattleEmbed } = require('../utils/battle-reports');
 const { postEmbed, defuseMentions, settingValue } = require('../utils/discord-post');
 const router = express.Router();
@@ -18,11 +19,6 @@ router.post('/sync/system', requireAuth, (req, res) => {
     }
 
     systemsRepo.upsertSystemStub(system_id);
-
-    const upsertAlliance = db.prepare(`
-        INSERT INTO alliances (id, tag, name) VALUES (?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET tag=excluded.tag, updated_at=CURRENT_TIMESTAMP
-    `);
 
     // Collect human-readable events for the Discord announcer (only used during a galaxy scan)
     const announceEvents = [];
@@ -125,7 +121,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 // A system scan only ever sees the tag, so it seeds `name` from the tag and
                 // leaves name alone on conflict (the alliance-profile sync owns the real
                 // name). `?? ''` because alliances.name is NOT NULL and a tag can be absent.
-                if (p.owner.alliance_id) upsertAlliance.run(p.owner.alliance_id, p.owner.alliance_tag ?? null, p.owner.alliance_tag ?? '');
+                if (p.owner.alliance_id) alliancesRepo.upsertAllianceBasic(p.owner.alliance_id, p.owner.alliance_tag ?? null, p.owner.alliance_tag ?? '');
                 playersRepo.upsertPlayerBasic(p.owner.id, p.owner.name, p.owner.alliance_id || null);
             }
 
@@ -262,8 +258,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
         if (player.alliance_id) {
             // As in the system scan above: seed name from the tag, `?? ''` because
             // alliances.name is NOT NULL and the tag may be missing.
-            db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET tag=excluded.tag`)
-                .run(player.alliance_id, player.alliance_tag ?? null, player.alliance_tag ?? '');
+            alliancesRepo.upsertAllianceTagOnly(player.alliance_id, player.alliance_tag ?? null, player.alliance_tag ?? '');
         }
 
         playersRepo.upsertPlayerFull(player);
@@ -309,17 +304,7 @@ router.post('/sync/alliance', requireAuth, (req, res) => {
 
     const syncTransaction = db.transaction((a) => {
         // 1. Upsert Alliance Data
-        db.prepare(`
-            INSERT INTO alliances (id, name, tag, leader_id, ranking, points_current)
-            VALUES (@id, @name, @tag, @leader_id, @ranking, @points)
-            ON CONFLICT(id) DO UPDATE SET
-                name=excluded.name,
-                tag=excluded.tag,
-                leader_id=excluded.leader_id,
-                ranking=excluded.ranking,
-                points_current=excluded.points_current,
-                updated_at=CURRENT_TIMESTAMP
-        `).run(a);
+        alliancesRepo.upsertAllianceFull(a);
 
         // 2. Map all members to this Alliance
         if (Array.isArray(a.members)) {
@@ -449,30 +434,7 @@ router.post('/sync/alliance-stats', requireAuth, (req, res) => {
 
     try {
         const tx = db.transaction(() => {
-            db.prepare(`
-                INSERT INTO alliance_member_stats (
-                    player_id, planets_text, next_culture_at, science_rate, culture_rate, production_rate,
-                    astro_dollars, production_points, artefact, level_text, cv_limit_text,
-                    economy, energy, mathematics, physics, population, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(player_id) DO UPDATE SET
-                    planets_text=excluded.planets_text,
-                    next_culture_at=excluded.next_culture_at,
-                    science_rate=excluded.science_rate,
-                    culture_rate=excluded.culture_rate,
-                    production_rate=excluded.production_rate,
-                    astro_dollars=excluded.astro_dollars,
-                    production_points=excluded.production_points,
-                    artefact=excluded.artefact,
-                    level_text=excluded.level_text,
-                    cv_limit_text=excluded.cv_limit_text,
-                    economy=excluded.economy,
-                    energy=excluded.energy,
-                    mathematics=excluded.mathematics,
-                    physics=excluded.physics,
-                    population=excluded.population,
-                    updated_at=CURRENT_TIMESTAMP
-            `).run(
+            alliancesRepo.upsertAllianceMemberStats(
                 s.player_id, s.planets_text, nextCultureAt, s.science_rate, s.culture_rate, s.production_rate,
                 s.astro_dollars, s.production_points, s.artefact, s.level_text, s.cv_limit_text,
                 s.economy, s.energy, s.mathematics, s.physics, s.population
@@ -516,10 +478,7 @@ router.post('/sync/alliance-roster', requireAuth, (req, res) => {
     if (ids.length === 0) return res.json({ success: true, removed: 0 });
 
     try {
-        const placeholders = ids.map(() => '?').join(',');
-        const info = db.prepare(
-            `DELETE FROM alliance_member_stats WHERE player_id NOT IN (${placeholders})`
-        ).run(...ids);
+        const info = alliancesRepo.deleteStaleAllianceMembers(ids);
         if (info.changes > 0) console.log(`[API] Alliance roster reconcile: removed ${info.changes} stale member(s).`);
         res.json({ success: true, removed: info.changes });
     } catch (err) {
