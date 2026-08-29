@@ -101,6 +101,71 @@ ok('upsertPlayerFull respected has_intel=1 for biology', players.getPlayerWithPl
 players.deleteAllPlayers();
 ok('deleteAllPlayers empties the table', players.countPlayers() === 0);
 
+ok('getPlayerName returns undefined for an unknown id', players.getPlayerName(999999) === undefined);
+
+players.upsertPlayerBasic(701, 'Original Name', null);
+const before = players.getPlayerName(701);
+ok('getPlayerName finds an existing player', before && before.name === 'Original Name', before);
+
+players.recordNameChange(701, before.name);
+// (verify via a direct query since there's no getter for this yet — that's fine, the
+// route layer in Task 4 is the real consumer; a raw check here just confirms the write)
+const historyRow = db.prepare('SELECT old_name FROM player_name_history WHERE player_id = ?').get(701);
+ok('recordNameChange writes the old name', historyRow.old_name === 'Original Name', historyRow);
+
+players.upsertPlayerFromApiList(701, 'New From List', null, 42, 5000, 3, 'US', 1, '2026-08-01T00:00:00Z');
+const afterList = players.getPlayerFullById(701);
+ok('upsertPlayerFromApiList updates name/level/points/ranking/country/is_active_player/joined',
+    afterList.name === 'New From List' && afterList.level === 42 && afterList.points === 5000
+    && afterList.ranking === 3 && afterList.country === 'US' && afterList.is_active_player === 1
+    && afterList.joined === '2026-08-01T00:00:00Z', afterList);
+ok('upsertPlayerFromApiList does not touch home_planet_id (never in its column list)', afterList.home_planet_id === null, afterList);
+
+players.upsertPlayerFromApiDetail({
+    id: 701, name: 'Detail Name', alliance_id: null, level: 50, points: 6000, ranking: 2,
+    country: 'US', is_active_player: 1, joined: '2026-08-01T00:00:00Z', logins: 12,
+    last_activity_at: '2026-08-29T10:00:00Z', last_login_at: '2026-08-29T09:00:00Z',
+    resigned_at: null, number_of_battles: 4, battle_luckiness: 0.1, multi_status: 'clean',
+    is_top_permanent_ranker: 0, has_supporter_badge: 1, supporter_type: 'gold',
+    has_intel: 0, biology: 99, economy: 99, energy: 99, mathematics: 99, physics: 99, social: 99,
+    trade_revenue: 99, artefact: 'fake',
+    race_growth: 99, race_science: 99, race_culture: 99, race_production: 99, race_speed: 99,
+    race_attack: 99, race_defense: 99, race_trader: 99, race_sul: 99,
+});
+const afterDetailNoIntel = players.getPlayerFullById(701);
+ok('upsertPlayerFromApiDetail with has_intel=0 writes activity/status fields',
+    afterDetailNoIntel.last_activity_at === '2026-08-29T10:00:00Z' && afterDetailNoIntel.number_of_battles === 4
+    && afterDetailNoIntel.has_supporter_badge === 1 && afterDetailNoIntel.supporter_type === 'gold', afterDetailNoIntel);
+ok('upsertPlayerFromApiDetail with has_intel=0 does NOT overwrite intel columns (still null/unset from before)',
+    afterDetailNoIntel.biology !== 99, afterDetailNoIntel);
+
+players.upsertPlayerFromApiDetail({
+    id: 701, name: 'Detail Name 2', alliance_id: null, level: 51, points: 6100, ranking: 2,
+    country: 'US', is_active_player: 1, joined: '2026-08-01T00:00:00Z', logins: 13,
+    last_activity_at: '2026-08-29T11:00:00Z', last_login_at: '2026-08-29T10:00:00Z',
+    resigned_at: null, number_of_battles: 5, battle_luckiness: 0.2, multi_status: 'clean',
+    is_top_permanent_ranker: 0, has_supporter_badge: 1, supporter_type: 'gold',
+    has_intel: 1, biology: 40, economy: 41, energy: 42, mathematics: 43, physics: 44, social: 45,
+    trade_revenue: 46, artefact: 'real-artefact',
+    race_growth: 1, race_science: 2, race_culture: 3, race_production: 4, race_speed: 5,
+    race_attack: 6, race_defense: 7, race_trader: 8, race_sul: 9,
+});
+const afterDetailWithIntel = players.getPlayerFullById(701);
+ok('upsertPlayerFromApiDetail with has_intel=1 DOES write intel columns',
+    afterDetailWithIntel.biology === 40 && afterDetailWithIntel.race_attack === 6
+    && afterDetailWithIntel.artefact === 'real-artefact', afterDetailWithIntel);
+
+players.upsertPlayerBasic(702, 'Second Player', null);
+players.upsertPlayerBasic(703, 'Third Player', null);
+const stale = players.getStalePlayerIdsForApiScan(10);
+ok('getStalePlayerIdsForApiScan returns players never scanned, in some order',
+    stale.includes(701) && stale.includes(702) && stale.includes(703), stale);
+
+players.markPlayersApiScanned([702, 703]);
+const staleAfterMark = players.getStalePlayerIdsForApiScan(1);
+ok('markPlayersApiScanned makes those ids less stale than 701 (never scanned)',
+    staleAfterMark[0] === 701, staleAfterMark);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {
