@@ -8,6 +8,7 @@ const playersRepo = require('../repositories/players');
 const alliancesRepo = require('../repositories/alliances');
 const settingsRepo = require('../repositories/settings');
 const { mapApiReport, upsertReports, formatBattleEmbed } = require('../utils/battle-reports');
+const battleReportsRepo = require('../repositories/battleReports');
 const { postEmbed, defuseMentions, settingValue } = require('../utils/discord-post');
 const router = express.Router();
 
@@ -517,10 +518,8 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
         // `skipped` on a re-sync and it could never announce). announced=1 is flipped only
         // when a channel is actually configured — otherwise the rows stay a retry queue.
         if (settingValue('discord_battlereport_channel')) {
-            const pending = db.prepare(
-                `SELECT * FROM battle_reports WHERE announced = 0 ORDER BY started_at ASC, id ASC`).all();
+            const pending = battleReportsRepo.getPendingAnnouncements();
             if (pending.length > 0) {
-                const markAnnounced = db.prepare(`UPDATE battle_reports SET announced = 1 WHERE id = ?`);
                 const toEmbed = pending.slice(0, 5);
                 for (const row of toEmbed) {
                     const embed = formatBattleEmbed({
@@ -544,14 +543,14 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
                 // Fire-and-forget above: the flag is flipped for every pending row now, so a
                 // Discord hiccup drops that one embed rather than replaying the whole backlog
                 // on the next sync (matches how reminders/timers mark themselves sent).
-                const flip = db.transaction((ids) => { for (const id of ids) markAnnounced.run(id); });
+                const flip = db.transaction((ids) => { for (const id of ids) battleReportsRepo.markAnnounced(id); });
                 flip(pending.map(r => r.id));
             }
         }
 
         // newest_started_at is the dashboard scheduler's contract: the next pull uses it
         // as BattleDateFrom so the search window only ever moves forward.
-        const newest = db.prepare(`SELECT MAX(started_at) AS newest FROM battle_reports`).get().newest || null;
+        const newest = battleReportsRepo.getNewestStartedAt();
 
         res.json({ success: true, inserted: inserted.length, skipped, newest_started_at: newest });
     } catch (err) {
