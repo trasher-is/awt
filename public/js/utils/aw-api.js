@@ -130,6 +130,13 @@
         return requestJson('/api/v1/SolarSystem/' + encodeURIComponent(id) + '/planets');
     }
 
+    // A rectangular area of the map: [{id, rectangle, alliances, players, solarSystems}].
+    // Each solarSystems[] entry additionally carries {capturedAt, format, isInVision,
+    // planets[]} on top of the base SolarSystem shape.
+    function getMapSectors({ x1, y1, x2, y2 } = {}) {
+        return requestJson('/api/v1/Map/sectors' + query({ x1, y1, x2, y2 }));
+    }
+
     // The game's own travel time between two planets, by SYSTEM ID (not coordinates):
     // {days, hours, minutes, seconds, timeSpan, totalSeconds}. Answers for the logged-in
     // player — their race speed is baked in, only energyLevel is a parameter.
@@ -174,6 +181,7 @@
             .map(p => ({
                 game_planet_id: p.id,
                 planet_index: p.index,
+                name: typeof p.name === 'string' ? p.name : null,
                 population: p.populationLevel,
                 starbase: p.starbaseLevel,
                 owner: p.ownerId != null
@@ -192,7 +200,7 @@
     }
 
     return {
-        getSolarSystems, getSolarSystem, getSystemPlanets,
+        getSolarSystems, getSolarSystem, getSystemPlanets, getMapSectors,
         getTravelTime, searchBattleReports, putOrderGeometry,
         mapPlanetsToSyncPayload,
         _setFetch,

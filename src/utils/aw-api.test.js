@@ -199,6 +199,23 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
     ok('a non-array planets answer maps to an empty, well-formed body',
         degenerate.system_id === 5 && Array.isArray(degenerate.planets) && degenerate.planets.length === 0, degenerate);
 
+    console.log('\n── getMapSectors: builds the right query string ' + '─'.repeat(28));
+    calls.length = 0;
+    nextResponse = jsonRes([]);
+    const sectorsRes = await AWApi.getMapSectors({ x1: -30, y1: -30, x2: 30, y2: 30 });
+    ok('getMapSectors resolves ok', sectorsRes.ok === true, sectorsRes);
+    ok('the request path carries all four bounds', /\/api\/v1\/Map\/sectors\?/.test(calls[0].url)
+        && /x1=-30/.test(calls[0].url) && /y1=-30/.test(calls[0].url)
+        && /x2=30/.test(calls[0].url) && /y2=30/.test(calls[0].url), calls[0].url);
+
+    console.log('\n── mapPlanetsToSyncPayload also carries planet name ' + '─'.repeat(23));
+    const withName = AWApi.mapPlanetsToSyncPayload('1', [
+        { id: 1, index: 1, name: 'Rana', ownerId: null, ownerName: null, allianceId: null,
+          allianceTag: null, populationLevel: 0, starbaseLevel: 0, isUnknownOwner: false,
+          hasSiege: false, starbaseOrders: [] },
+    ]);
+    ok('name is carried through to the mapped planet', withName.planets[0].name === 'Rana', withName.planets[0]);
+
     console.log('\n── Source scan: the rules this file lives under ' + '─'.repeat(28));
     // Comments stripped first so a comment describing an old rule can never trip these.
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'utils', 'aw-api.js'), 'utf8')
