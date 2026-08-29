@@ -648,6 +648,33 @@ function initDatabase() {
         )
     `);
 
+    addColumn('battle_reports', 'att_destroyers', 'INTEGER');
+    addColumn('battle_reports', 'att_destroyers_lost', 'INTEGER');
+    addColumn('battle_reports', 'att_cruisers', 'INTEGER');
+    addColumn('battle_reports', 'att_cruisers_lost', 'INTEGER');
+    addColumn('battle_reports', 'att_battleships', 'INTEGER');
+    addColumn('battle_reports', 'att_battleships_lost', 'INTEGER');
+    addColumn('battle_reports', 'att_transports', 'INTEGER');
+    addColumn('battle_reports', 'att_transports_lost', 'INTEGER');
+    addColumn('battle_reports', 'att_colony_ships', 'INTEGER');
+    addColumn('battle_reports', 'att_colony_ships_lost', 'INTEGER');
+    addColumn('battle_reports', 'att_starbases', 'INTEGER');
+    addColumn('battle_reports', 'att_starbases_lost', 'INTEGER');
+    addColumn('battle_reports', 'def_destroyers', 'INTEGER');
+    addColumn('battle_reports', 'def_destroyers_lost', 'INTEGER');
+    addColumn('battle_reports', 'def_cruisers', 'INTEGER');
+    addColumn('battle_reports', 'def_cruisers_lost', 'INTEGER');
+    addColumn('battle_reports', 'def_battleships', 'INTEGER');
+    addColumn('battle_reports', 'def_battleships_lost', 'INTEGER');
+    addColumn('battle_reports', 'def_transports', 'INTEGER');
+    addColumn('battle_reports', 'def_transports_lost', 'INTEGER');
+    addColumn('battle_reports', 'def_colony_ships', 'INTEGER');
+    addColumn('battle_reports', 'def_colony_ships_lost', 'INTEGER');
+    addColumn('battle_reports', 'def_starbases', 'INTEGER');
+    addColumn('battle_reports', 'def_starbases_lost', 'INTEGER');
+    addColumn('battle_reports', 'win_chance', 'REAL');
+    addColumn('battle_reports', 'ship_detail_scraped_at', 'DATETIME');
+
     // --- STARBASE ORDER AUDIT ---
     // One row per starbase-order geometry PUT confirmed through the hub. This is an
     // operations record of who sent what, and when — that stays true across rounds, so
