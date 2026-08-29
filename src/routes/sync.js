@@ -348,6 +348,30 @@ router.post('/sync/alliance', requireAuth, (req, res) => {
     }
 });
 
+// --- ALLIANCE SEARCH RESULT RECEIVER ---
+// API-search-sourced, distinct from /sync/alliance's scrape shape above (no leader_id,
+// ranking, points, or members[] — Alliance/search doesn't return any of those). Batch:
+// the member's browser can send everything Alliance/search returned in one call.
+router.post('/sync/alliance-search', requireAuth, (req, res) => {
+    const { alliances } = req.body;
+    if (!Array.isArray(alliances) || alliances.length === 0) {
+        return res.status(400).json({ error: 'Invalid payload' });
+    }
+    let stored = 0;
+    for (const a of alliances) {
+        if (!Number.isInteger(a.id) || a.id <= 0) continue;
+        alliancesRepo.upsertAllianceFromApiSearch(
+            a.id,
+            a.name == null ? '' : String(a.name),
+            a.tag == null ? null : String(a.tag),
+            typeof a.full_name === 'string' ? a.full_name : null,
+            Number.isInteger(a.member_count) ? a.member_count : null
+        );
+        stored++;
+    }
+    res.json({ success: true, count: stored });
+});
+
 // --- FLEET ID BACKFILL ---
 // Alliance scans give fleet positions but not game fleet ids (those only appear on the
 // system map). The News refresh parses the relevant systems and posts the ids here so we

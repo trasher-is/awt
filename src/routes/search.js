@@ -4,6 +4,7 @@ const { requireAuth } = require('./_middleware');
 const plansRepo = require('../repositories/plans');
 const systemsRepo = require('../repositories/systems');
 const playersRepo = require('../repositories/players');
+const alliancesRepo = require('../repositories/alliances');
 const { searchFormerNamesWithCurrentPlayer } = require('../utils/round-archive');
 const router = express.Router();
 
@@ -113,6 +114,21 @@ router.get('/search/system', requireAuth, (req, res) => {
         res.json({ success: true, results });
     } catch (err) {
         console.error("[DB Error] System search failed:", err);
+        res.status(500).json({ error: 'Search failed' });
+    }
+});
+
+// Search Alliances by Name, Tag, or Exact ID
+router.get('/search/alliance', requireAuth, (req, res) => {
+    const q = req.query.q;
+    if (!q) return res.json({ success: true, results: [] });
+
+    try {
+        const searchTerm = `%${q}%`;
+        const results = alliancesRepo.searchAlliancesByTagOrName(searchTerm, q);
+        res.json({ success: true, results });
+    } catch (err) {
+        console.error("[DB Error] Alliance search failed:", err);
         res.status(500).json({ error: 'Search failed' });
     }
 });
