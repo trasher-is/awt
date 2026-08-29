@@ -15,8 +15,8 @@ const fs = require('fs');
 const os = require('os');
 const Database = require('better-sqlite3');
 
-const { archiveRound, previousNames, findByFormerName, listRounds, roundDetail } =
-    require('./round-archive');
+const { archiveRound, previousNames, findByFormerName, listRounds, roundDetail,
+    searchFormerNamesWithCurrentPlayer } = require('./round-archive');
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail) => {
@@ -227,6 +227,34 @@ const cleanup = [];
         ok('deleting a round takes its rows with it',
             (db.prepare(`DELETE FROM rounds WHERE label = 'R1'`).run(),
              db.prepare(`SELECT COUNT(*) n FROM round_players`).get().n === 0));
+        db.close();
+    }
+
+    console.log('\n── The search box only surfaces former names of players who still exist ' + '─'.repeat(1));
+    {
+        const { db, dir } = freshDb(); cleanup.push(dir);
+        // 39 renamed and is still around; 12 renamed and then the account was gone for good
+        // (nuked and never came back). The search box should show the first, not the second —
+        // a hit with no live account to open is noise, not a result.
+        seedRound(db, [
+            { id: 39, name: 'Elfenlied' },
+            { id: 12, name: 'Ghost' },
+        ]);
+        db.transaction(() => { archiveRound(db, { label: 'R1' }); wipe(db); })();
+
+        // Only 39 comes back for the new round.
+        seedRound(db, [{ id: 39, name: 'Chewie' }]);
+
+        const hit = searchFormerNamesWithCurrentPlayer(db, 'Elfen');
+        ok('finds a former name for a player who currently still exists',
+            hit.length === 1 && hit[0].id === 39 && hit[0].name === 'Chewie', hit);
+
+        const noHit = searchFormerNamesWithCurrentPlayer(db, 'Ghost');
+        ok('does not return a hit for a player id that no longer exists (p.id IS NOT NULL)',
+            noHit.length === 0, noHit);
+
+        ok('an empty query returns nothing', searchFormerNamesWithCurrentPlayer(db, '').length === 0);
+        ok('a whitespace query too', searchFormerNamesWithCurrentPlayer(db, '   ').length === 0);
         db.close();
     }
 
