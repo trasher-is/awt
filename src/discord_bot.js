@@ -5,6 +5,7 @@ const fleetsRepo = require('./repositories/fleets');
 const plansRepo = require('./repositories/plans');
 const playersRepo = require('./repositories/players');
 const alliancesRepo = require('./repositories/alliances');
+const usersRepo = require('./repositories/users');
 const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
 const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require('./utils/covering');
 // The battle model — the same physical file the dashboard calculator imports, so
@@ -56,7 +57,7 @@ client.on('interactionCreate', async (interaction) => {
 
         let name = interaction.user.username;
         try {
-            const row = db.prepare(`SELECT game_name FROM app_users WHERE discord_id = ?`).get(interaction.user.id);
+            const row = usersRepo.getUserByDiscordId(interaction.user.id);
             if (row && row.game_name) name = row.game_name;
         } catch (e) { /* fall back to Discord username */ }
 
@@ -83,7 +84,7 @@ client.on('interactionCreate', async (interaction) => {
 //
 // Existing links keep working untouched: this only governs how NEW ones are made.
 async function handleLink({ code, userId, username, tag, reply }) {
-    const already = db.prepare(`SELECT game_name FROM app_users WHERE discord_id = ?`).get(userId);
+    const already = usersRepo.getUserByDiscordId(userId);
 
     if (!code) {
         if (already) {
@@ -99,15 +100,10 @@ async function handleLink({ code, userId, username, tag, reply }) {
     }
 
     // Sweep expired rows so a stale code can never be spent.
-    try { db.prepare(`DELETE FROM discord_link_codes WHERE expires_at < datetime('now')`).run(); } catch (_) {}
+    try { usersRepo.deleteExpiredLinkCodes(); } catch (_) {}
 
     const normalised = String(code).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const row = db.prepare(`
-        SELECT c.code, c.user_id, c.used_at, c.expires_at, u.game_name, u.discord_id
-        FROM discord_link_codes c
-        JOIN app_users u ON u.id = c.user_id
-        WHERE c.code = ?
-    `).get(normalised);
+    const row = usersRepo.getLinkCodeWithUser(normalised);
 
     if (!row) {
         console.warn(`[Discord] !link refused: ${tag} (${userId}) presented an unknown code.`);
@@ -128,14 +124,14 @@ async function handleLink({ code, userId, username, tag, reply }) {
         return reply(`❌ Your Discord account is already linked to **${already.game_name}**. One Discord account per Hub account — ask an admin if you need it moved.`);
     }
     if (row.discord_id === userId) {
-        db.prepare(`UPDATE discord_link_codes SET used_at = CURRENT_TIMESTAMP, used_by_discord_id = ? WHERE code = ?`).run(userId, normalised);
+        usersRepo.markLinkCodeUsed(userId, normalised);
         return reply(`ℹ️ **${row.game_name}** is already linked to you. Nothing to do.`);
     }
 
     try {
         const link = db.transaction(() => {
-            db.prepare(`UPDATE app_users SET discord_id = ?, discord_name = ? WHERE id = ?`).run(userId, username, row.user_id);
-            db.prepare(`UPDATE discord_link_codes SET used_at = CURRENT_TIMESTAMP, used_by_discord_id = ? WHERE code = ?`).run(userId, normalised);
+            usersRepo.updateUserDiscordLink(userId, username, row.user_id);
+            usersRepo.markLinkCodeUsed(userId, normalised);
         });
         link();
         console.log(`[Discord] !link: Hub account '${row.game_name}' linked to ${tag} (${userId}) with a verified code.`);
@@ -352,8 +348,7 @@ async function handleMessage(message) {
         const discordName = message.author.username;
         
         // Find the linked user session mapping
-        const user = db.prepare(`SELECT id, game_name FROM app_users WHERE LOWER(discord_name) = ? OR LOWER(discord_name) = ?`)
-                       .get(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
+        const user = usersRepo.getUserByDiscordName(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
 
         if (!user) {
             return message.reply(`❌ Your Discord username (\`${discordName}\`) is not linked to any Hub account. Add it in the Command Center first.`);
@@ -855,8 +850,7 @@ async function handleMessage(message) {
         }
 
         const discordName = message.author.username;
-        const user = db.prepare(`SELECT id, game_name FROM app_users WHERE LOWER(discord_name) = ? OR LOWER(discord_name) = ?`)
-                       .get(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
+        const user = usersRepo.getUserByDiscordName(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
 
         if (!user) {
             return message.reply(`❌ Your Discord username (\`${discordName}\`) is not linked to any Hub account. Add it in the Command Center first.`);
@@ -936,13 +930,7 @@ async function handleMessage(message) {
 
         if (!tag) {
             const discordName = message.author.username;
-            const userAlliance = db.prepare(`
-                SELECT a.tag 
-                FROM app_users u
-                JOIN players p ON u.game_name = p.name
-                JOIN alliances a ON p.alliance_id = a.id
-                WHERE LOWER(u.discord_name) = ? OR LOWER(u.discord_name) = ?
-            `).get(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
+            const userAlliance = usersRepo.getUserAllianceTagByDiscordName(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
 
             if (!userAlliance || !userAlliance.tag) {
                 return message.reply(`❌ Could not automatically detect your alliance. Provide it explicitly: \`!holes <tag>\``);
