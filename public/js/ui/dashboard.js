@@ -122,6 +122,12 @@ window.addEventListener('DOMContentLoaded', () => {
     import('./player-api-sync.js')
         .then(({ initPlayerApiSync }) => initPlayerApiSync())
         .catch(err => console.warn('[PlayerApiSync] failed to start:', err));
+
+    // Background battle-report ship-detail sweep. Same on-demand-load pattern as the
+    // other two background sync modules above.
+    import('./battle-report-detail-sync.js')
+        .then(({ initBattleReportDetailSync }) => initBattleReportDetailSync())
+        .catch(err => console.warn('[BattleReportDetailSync] failed to start:', err));
 });
 
 // --- CORE UI CONTROLS ---
