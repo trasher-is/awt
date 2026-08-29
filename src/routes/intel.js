@@ -9,6 +9,7 @@ const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
 const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
 const { previousNames, findByFormerName } = require('../utils/round-archive');
+const settingsRepo = require('../repositories/settings');
 const router = express.Router();
 
 // --- WHO USED TO BE CALLED THIS ---
@@ -388,7 +389,7 @@ router.get('/intel/trade-analysis', requireAuth, (req, res) => {
             };
         });
 
-        const ppRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'pp_price'`).get();
+        const ppRow = settingsRepo.getPpPrice();
         const pp_price = ppRow ? (parseFloat(ppRow.value) || 0) : 0;
 
         res.json({ success: true, players, pp_price });

@@ -4,6 +4,7 @@ const { requireAuth, requireAdmin } = require('./_middleware');
 const playersRepo = require('../repositories/players');
 const alliancesRepo = require('../repositories/alliances');
 const tradeRepo = require('../repositories/trade');
+const settingsRepo = require('../repositories/settings');
 const router = express.Router();
 
 const MAX_TAS = 5;
@@ -27,7 +28,7 @@ const { parseLocaleNumber } = require('../../public/js/utils/parse-number.js');
 //   hoarded_au — A$ value of artifacts + supply units held (from /Game/Trade scrape)
 //   visible_au — openly-visible liquidity: Astro Dollars + Production Points × PP price
 function getMembers() {
-    const ppRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'pp_price'`).get();
+    const ppRow = settingsRepo.getPpPrice();
     const ppPrice = ppRow ? parseFloat(ppRow.value) || 0 : 0;
 
     const rows = alliancesRepo.getMembersWithStats();

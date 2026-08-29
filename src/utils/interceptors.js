@@ -2,12 +2,12 @@
 // and the News-page "announce" button. Given an attack (target system + planet +
 // optional arrival time) it returns the allied fleets/builds that could reach the
 // target, split into on-time and late.
-const db = require('../database');
 const { calcTravelSeconds, formatTime } = require('./travel-calc');
 const systemsRepo = require('../repositories/systems');
 const fleetsRepo = require('../repositories/fleets');
 const playersRepo = require('../repositories/players');
 const usersRepo = require('../repositories/users');
+const settingsRepo = require('../repositories/settings');
 
 const ONTIME_LIMIT = 10;
 const LATE_LIMIT = 10;
@@ -39,7 +39,7 @@ const costPerCv = (economy) => destroyerCost(economy) / 3;
 
 function getPpPrice() {
     try {
-        const row = db.prepare(`SELECT value FROM app_settings WHERE key = 'pp_price'`).get();
+        const row = settingsRepo.getPpPrice();
         const v = row ? parseFloat(row.value) : NaN;
         return (!isNaN(v) && v > 0) ? v : 0.91; // sensible default until /Game/Trade is scraped
     } catch (err) {

@@ -9,7 +9,7 @@
 // no-op with a reason, never a thrown error into a request handler.
 
 const { REST, Routes } = require('discord.js');
-const db = require('../database');
+const settingsRepo = require('../repositories/settings');
 
 let rest = null;
 function client() {
@@ -22,7 +22,7 @@ function client() {
 
 function settingValue(key) {
     try {
-        const row = db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(key);
+        const row = settingsRepo.getSetting(key);
         const v = row && row.value ? String(row.value).trim() : '';
         return v || null;
     } catch (err) {
