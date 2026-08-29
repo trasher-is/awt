@@ -8,6 +8,7 @@ const alliancesRepo = require('./repositories/alliances');
 const usersRepo = require('./repositories/users');
 const discordTimersRepo = require('./repositories/discordTimers');
 const incomingRepo = require('./repositories/incoming');
+const notesRepo = require('./repositories/notes');
 const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
 const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require('./utils/covering');
 // The battle model — the same physical file the dashboard calculator imports, so
@@ -1494,13 +1495,7 @@ function getReminderChannelId() {
 async function checkNoteReminders() {
     let pending;
     try {
-        pending = db.prepare(`
-            SELECT n.id, n.text, n.due_at, u.discord_id, u.game_name, a.game_name AS author_name
-            FROM user_notes n
-            JOIN app_users u ON u.id = n.owner_id
-            LEFT JOIN app_users a ON a.id = n.author_id AND a.id != n.owner_id
-            WHERE n.done = 0 AND n.remind_15 = 1 AND n.reminded_at IS NULL AND n.due_at IS NOT NULL
-        `).all();
+        pending = notesRepo.getDueReminders();
     } catch (err) {
         console.error('[Discord] Reminder lookup failed:', err.message);
         return;
@@ -1511,7 +1506,6 @@ async function checkNoteReminders() {
     const due = pending.filter(n => new Date(n.due_at).getTime() - Date.now() <= 15 * 60 * 1000);
     if (!due.length) return;
 
-    const markSent = db.prepare(`UPDATE user_notes SET reminded_at = CURRENT_TIMESTAMP WHERE id = ?`);
     const channelId = getReminderChannelId();
     let channel = null;
     if (client.isReady() && channelId) {
@@ -1531,7 +1525,7 @@ async function checkNoteReminders() {
         } catch (err) {
             console.error('[Discord] Failed to send note reminder:', err.message);
         } finally {
-            markSent.run(note.id);
+            notesRepo.markReminderSent(note.id);
         }
     }
 }
