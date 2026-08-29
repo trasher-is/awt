@@ -4,6 +4,7 @@ const systemsRepo = require('../repositories/systems');
 const fleetsRepo = require('../repositories/fleets');
 const plansRepo = require('../repositories/plans');
 const playersRepo = require('../repositories/players');
+const alliancesRepo = require('../repositories/alliances');
 const { requireAuth } = require('./_middleware');
 const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
 const { previousNames, findByFormerName } = require('../utils/round-archive');
@@ -57,7 +58,7 @@ router.get('/intel/summary', requireAuth, (req, res) => {
         const systems = systemsRepo.countSystems();
         const planets = systemsRepo.countPlanets();
         const players = playersRepo.countPlayers();
-        const alliances = db.prepare(`SELECT COUNT(*) as count FROM alliances`).get().count;
+        const alliances = alliancesRepo.countAlliances();
         const fleets = fleetsRepo.countFleets();
 
         res.json({ success: true, systems, planets, players, alliances, fleets });
@@ -172,7 +173,7 @@ router.get('/intel/galaxy-map', requireAuth, (req, res) => {
         // The alliance this hub belongs to: the members whose stats have been collected.
         // alliance_member_stats is what the existing alliance-vision overlay treats as
         // "us", so the map agrees with it rather than inventing a second definition.
-        const memberIds = db.prepare(`SELECT player_id FROM alliance_member_stats`).all().map(r => r.player_id);
+        const memberIds = alliancesRepo.getAllianceMemberStatIds().map(r => r.player_id);
         const ownTag = (playersRepo.getAllianceTagForMembers(memberIds) || {}).tag || null;
 
         // Observers for the vision layer. Radius is NOT computed here — the rule lives in
@@ -367,15 +368,7 @@ router.get('/intel/trade-analysis', requireAuth, (req, res) => {
         // rate silently became ten times itself. Same shared parser as everywhere else.
         const toInt = parseLocaleInt;
 
-        const rows = db.prepare(`
-            SELECT p.name,
-                   ams.production_rate,
-                   ams.astro_dollars,
-                   ams.production_points,
-                   p.trade_partners
-            FROM alliance_member_stats ams
-            JOIN players p ON p.id = ams.player_id
-        `).all();
+        const rows = alliancesRepo.getTradeAnalysisRows();
 
         const players = rows.map(r => {
             let partners = [];
@@ -407,12 +400,7 @@ router.get('/intel/trade-analysis', requireAuth, (req, res) => {
 // --- ALLIANCE STATS FETCH FOR THE ARCHIVE PANEL ---
 router.get('/intel/alliance-stats', requireAuth, (req, res) => {
     try {
-        const stats = db.prepare(`
-            SELECT s.*, p.name as player_name
-            FROM alliance_member_stats s
-            LEFT JOIN players p ON s.player_id = p.id
-            ORDER BY s.player_id ASC
-        `).all();
+        const stats = alliancesRepo.getAllianceStatsForArchive();
         res.json({ success: true, stats });
     } catch (err) {
         res.status(500).json({ error: 'Failed to retrieve alliance metrics' });
@@ -423,14 +411,7 @@ router.get('/intel/alliance-stats', requireAuth, (req, res) => {
 router.get('/intel/war-room/alliances', requireAuth, (req, res) => {
     try {
         // Explicitly group by all selected non-aggregate elements to avoid engine resolution errors
-        const alliances = db.prepare(`
-            SELECT a.id, a.tag, a.name, COUNT(p.id) as active_members_count, MAX(p.updated_at) as last_scan_time
-            FROM alliances a
-            JOIN players p ON p.alliance_id = a.id
-            GROUP BY a.id, a.tag, a.name
-            HAVING COUNT(p.id) >= 1
-            ORDER BY COUNT(p.id) DESC, a.tag ASC
-        `).all();
+        const alliances = alliancesRepo.getWarRoomAlliances();
         res.json({ success: true, alliances });
     } catch (err) {
         console.error("[DB Error] Failed to fetch active alliances for War Room:", err);
