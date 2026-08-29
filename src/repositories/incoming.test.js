@@ -59,6 +59,8 @@ const missingLastOntime = incoming.getLastOntimeRow('alert-3');
 ok('getLastOntimeRow returns undefined before updateLastOntime', missingLastOntime === undefined);
 
 // Test updateLastOntime and round-trip
+// Seed the row first via upsertCovering (simulating realistic usage where row already exists)
+incoming.upsertCovering('alert-3', '');
 incoming.updateLastOntime('alert-3', 'Defender Y, Z');
 const lastOntimeAfter = incoming.getLastOntimeRow('alert-3');
 ok('updateLastOntime and getLastOntimeRow round-trip the value',

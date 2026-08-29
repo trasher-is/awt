@@ -34,12 +34,9 @@ function getLastOntimeRow(alertKey) {
     return getLastOntimeRowStmt.get(alertKey);
 }
 
-const updateLastOntimeStmt = db.prepare(`
-    INSERT INTO incoming_msgs (alert_key, last_ontime) VALUES (?, ?)
-    ON CONFLICT(alert_key) DO UPDATE SET last_ontime = excluded.last_ontime, updated_at = CURRENT_TIMESTAMP
-`);
+const updateLastOntimeStmt = db.prepare(`UPDATE incoming_msgs SET last_ontime = ? WHERE alert_key = ?`);
 function updateLastOntime(alertKey, lastOntime) {
-    updateLastOntimeStmt.run(alertKey, lastOntime);
+    updateLastOntimeStmt.run(lastOntime, alertKey);
 }
 
 module.exports = {
