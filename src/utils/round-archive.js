@@ -13,8 +13,13 @@
 // So the wipe now takes a snapshot first. Only the parts that mean something a round later
 // are kept:
 //
-//   • players: id, name, alliance tag, points, level, planet count
+//   • players: id, name, alliance tag, points, level, planet count, race picks
 //   • systems: id, name, and the coordinates they had at the time
+//
+// Race picks are kept because a race is chosen once and never changes for the life of a
+// round — losing it at the wipe was losing the one stat members specifically asked to keep
+// seeing after a round ends, or after a player restarts and later re-earns intel on a new
+// pick (the live row's race just gets overwritten by then; this snapshot is what survives).
 //
 // Nothing else. Fleets, planet ownership and events describe a map that no longer exists;
 // keeping them would be hoarding, and it would make the archive grow without bound.
@@ -49,9 +54,15 @@ function archiveRound(db, { label = null, note = null, now = null } = {}) {
     // Straight INSERT ... SELECT: one statement, no round trip per row, and it cannot
     // drift out of step with the tables it reads.
     const players = db.prepare(`
-        INSERT INTO round_players (round_id, player_id, name, alliance_tag, points, level, planet_count)
+        INSERT INTO round_players (
+            round_id, player_id, name, alliance_tag, points, level, planet_count,
+            race_growth, race_science, race_culture, race_production, race_speed,
+            race_attack, race_defense, race_trader, race_sul
+        )
         SELECT ?, p.id, p.name, a.tag, p.points, p.level,
-               (SELECT COUNT(*) FROM planets WHERE owner_id = p.id)
+               (SELECT COUNT(*) FROM planets WHERE owner_id = p.id),
+               p.race_growth, p.race_science, p.race_culture, p.race_production, p.race_speed,
+               p.race_attack, p.race_defense, p.race_trader, p.race_sul
         FROM players p
         LEFT JOIN alliances a ON a.id = p.alliance_id
     `).run(roundId).changes;

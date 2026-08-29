@@ -37,7 +37,10 @@ function freshDb() {
     db.exec(`
         CREATE TABLE alliances (id INTEGER PRIMARY KEY, tag TEXT, name TEXT);
         CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, alliance_id INTEGER,
-                              points INTEGER DEFAULT 0, level INTEGER DEFAULT 0);
+                              points INTEGER DEFAULT 0, level INTEGER DEFAULT 0,
+                              race_growth INTEGER, race_science INTEGER, race_culture INTEGER,
+                              race_production INTEGER, race_speed INTEGER, race_attack INTEGER,
+                              race_defense INTEGER, race_trader INTEGER, race_sul INTEGER);
         CREATE TABLE systems (id INTEGER PRIMARY KEY, name TEXT, x INTEGER, y INTEGER);
         CREATE TABLE planets (game_planet_id INTEGER PRIMARY KEY, system_id INTEGER,
                               planet_index INTEGER, owner_id INTEGER);
@@ -48,6 +51,9 @@ function freshDb() {
         CREATE TABLE round_players (
             round_id INTEGER NOT NULL, player_id INTEGER NOT NULL, name TEXT,
             alliance_tag TEXT, points INTEGER, level INTEGER, planet_count INTEGER DEFAULT 0,
+            race_growth INTEGER, race_science INTEGER, race_culture INTEGER,
+            race_production INTEGER, race_speed INTEGER, race_attack INTEGER,
+            race_defense INTEGER, race_trader INTEGER, race_sul INTEGER,
             PRIMARY KEY (round_id, player_id),
             FOREIGN KEY(round_id) REFERENCES rounds(id) ON DELETE CASCADE);
         CREATE TABLE round_systems (
@@ -70,8 +76,15 @@ function seedRound(db, players, { systems = 3 } = {}) {
     db.prepare(`INSERT OR IGNORE INTO alliances (id, tag, name) VALUES (1, 'INDG', 'Indigo')`).run();
     db.prepare(`INSERT OR IGNORE INTO alliances (id, tag, name) VALUES (2, 'RED', 'Red')`).run();
     for (const p of players) {
-        db.prepare(`INSERT INTO players (id, name, alliance_id, points, level) VALUES (?, ?, ?, ?, ?)`)
-            .run(p.id, p.name, p.alliance ?? 1, p.points ?? 1000, p.level ?? 10);
+        db.prepare(`
+            INSERT INTO players (id, name, alliance_id, points, level, race_growth, race_science,
+                                 race_culture, race_production, race_speed, race_attack,
+                                 race_defense, race_trader, race_sul)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(p.id, p.name, p.alliance ?? 1, p.points ?? 1000, p.level ?? 10,
+               p.race?.growth ?? null, p.race?.science ?? null, p.race?.culture ?? null,
+               p.race?.production ?? null, p.race?.speed ?? null, p.race?.attack ?? null,
+               p.race?.defense ?? null, p.race?.trader ?? null, p.race?.sul ?? null);
     }
     for (let i = 1; i <= systems; i++) {
         db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (?, ?, ?, ?)`)
@@ -87,7 +100,7 @@ const cleanup = [];
         const { db, dir } = freshDb(); cleanup.push(dir);
         // The example from the issue: id 39 played as Elfenlied, plays now as Chewie.
         seedRound(db, [
-            { id: 39, name: 'Elfenlied', points: 52000 },
+            { id: 39, name: 'Elfenlied', points: 52000, race: { growth: 3, science: -1, culture: 0, production: 2, speed: 1, attack: -2, defense: 4, trader: 0, sul: -1 } },
             { id: 77, name: 'Trasher', points: 90000, alliance: 2 },
         ]);
         db.prepare(`INSERT INTO planets VALUES (1, 1, 1, 39)`).run();
@@ -111,6 +124,12 @@ const cleanup = [];
         ok('and the alliance tag as it was then', archived.alliance_tag === 'INDG', archived);
         ok('and the points', archived.points === 52000, archived);
         ok('and how many planets they held', archived.planet_count === 2, archived);
+        ok('and the race picks, all nine fields',
+            archived.race_growth === 3 && archived.race_science === -1 && archived.race_culture === 0
+            && archived.race_production === 2 && archived.race_speed === 1 && archived.race_attack === -2
+            && archived.race_defense === 4 && archived.race_trader === 0 && archived.race_sul === -1, archived);
+        ok('a player with no race picks archives them as null, not a crash',
+            db.prepare(`SELECT race_growth FROM round_players WHERE player_id = 77`).get().race_growth === null);
 
         // Next round: the same account comes back renamed.
         seedRound(db, [{ id: 39, name: 'Chewie', points: 100 }], { systems: 2 });
@@ -194,8 +213,10 @@ const cleanup = [];
         db.transaction(() => archiveRound(db, {}))();
 
         const cols = db.prepare(`PRAGMA table_info(round_players)`).all().map(c => c.name);
-        ok('players keep id, name, tag, points, level and planet count',
-            ['player_id', 'name', 'alliance_tag', 'points', 'level', 'planet_count'].every(c => cols.includes(c)), cols);
+        ok('players keep id, name, tag, points, level, planet count, and race picks',
+            ['player_id', 'name', 'alliance_tag', 'points', 'level', 'planet_count',
+             'race_growth', 'race_science', 'race_culture', 'race_production', 'race_speed',
+             'race_attack', 'race_defense', 'race_trader', 'race_sul'].every(c => cols.includes(c)), cols);
 
         const sys = db.prepare(`SELECT * FROM round_systems WHERE system_id = 1`).get();
         ok('system names and ids are kept — those carry across a round',
