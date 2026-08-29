@@ -5,6 +5,7 @@ const fleetsRepo = require('../repositories/fleets');
 const plansRepo = require('../repositories/plans');
 const playersRepo = require('../repositories/players');
 const alliancesRepo = require('../repositories/alliances');
+const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
 const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
 const { previousNames, findByFormerName } = require('../utils/round-archive');
@@ -272,7 +273,7 @@ router.get('/intel/fleets_db', requireAuth, (req, res) => {
 // --- GET ACTIVE ALLIANCE MEMBERS (From app_users) ---
 router.get('/intel/members', requireAuth, (req, res) => {
     try {
-        const members = db.prepare(`SELECT game_name FROM app_users WHERE is_active = 1`).all();
+        const members = usersRepo.getActiveMemberNames();
         res.json({ success: true, members: members.map(m => m.game_name) });
     } catch (err) {
         console.error("[DB Error] Failed to fetch members:", err);

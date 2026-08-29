@@ -9,6 +9,7 @@
 // anyone else's.
 const express = require('express');
 const db = require('../database');
+const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
 const router = express.Router();
 
@@ -18,11 +19,7 @@ router.get('/notes/recipients', requireAuth, (req, res) => {
     try {
         // The bootstrap 'admin' account isn't a real player — hide it, unless someone is
         // actually logged in as it (edge case), so it can still assign notes to itself.
-        const rows = db.prepare(`
-            SELECT id, game_name FROM app_users
-            WHERE is_active = 1 AND (game_name != 'admin' OR id = ?)
-            ORDER BY game_name COLLATE NOCASE
-        `).all(req.session.userId);
+        const rows = usersRepo.getActiveRecipientsExcludingAdmin(req.session.userId);
         res.json({ success: true, users: rows });
     } catch (err) {
         console.error('[Notes] recipients lookup failed:', err.message);
@@ -68,10 +65,7 @@ router.post('/notes', requireAuth, (req, res) => {
             ? [...new Set(req.body.recipient_ids.map((n) => parseInt(n, 10)).filter((n) => Number.isInteger(n) && n > 0))]
             : [];
         if (recipientIds.length) {
-            const placeholders = recipientIds.map(() => '?').join(',');
-            const validIds = db.prepare(`SELECT id FROM app_users WHERE is_active = 1 AND id IN (${placeholders})`)
-                .all(...recipientIds).map((r) => r.id);
-            recipientIds = validIds;
+            recipientIds = usersRepo.getValidActiveUserIds(recipientIds).map((r) => r.id);
         }
         if (!recipientIds.length) recipientIds = [req.session.userId];
 

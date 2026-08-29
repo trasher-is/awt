@@ -7,6 +7,7 @@ const { calcTravelSeconds, formatTime } = require('./travel-calc');
 const systemsRepo = require('../repositories/systems');
 const fleetsRepo = require('../repositories/fleets');
 const playersRepo = require('../repositories/players');
+const usersRepo = require('../repositories/users');
 
 const ONTIME_LIMIT = 10;
 const LATE_LIMIT = 10;
@@ -134,12 +135,9 @@ function computeInterceptors(attack, nowUnix) {
 
     // Attach a real Discord mention where we know the player's numeric id (matched
     // game_name -> app_users.discord_id). Renders as their Discord name AND pings them.
-    const mentionFor = db.prepare(`
-        SELECT discord_id FROM app_users WHERE LOWER(game_name) = ? AND discord_id IS NOT NULL
-    `);
     for (const a of byPlayer.values()) {
         try {
-            const row = mentionFor.get(a.name.toLowerCase());
+            const row = usersRepo.getUserMentionByGameName(a.name.toLowerCase());
             a.mention = row && row.discord_id ? `<@${row.discord_id}>` : null;
         } catch (e) { a.mention = null; }
     }
