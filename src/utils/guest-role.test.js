@@ -52,6 +52,7 @@ const writePaths = [
     '/sync/best-guarded', '/sync/trade-agreements', '/sync/trade-inventory',
     '/plans', '/notes', '/intel/takeover', '/trade-agreements/propose',
     '/routes', '/incoming/announce', '/incoming/cover', '/nuke',
+    '/sync/player-list', '/sync/player-detail',
 ];
 for (const p of writePaths) {
     const r = asGuest({ method: 'POST', reqPath: p });

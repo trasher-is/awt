@@ -249,6 +249,11 @@ router.post('/sync/player', requireAuth, (req, res) => {
 
     const oldPlayer = playersRepo.getPlayerRestartCheck(p.id);
 
+    const oldName = playersRepo.getPlayerName(p.id);
+    if (oldName && oldName.name && safePlayer.name && oldName.name !== safePlayer.name) {
+        playersRepo.recordNameChange(p.id, oldName.name);
+    }
+
     const syncTransaction = db.transaction((player) => {
         // Restart detection. Planet ownership is NEVER touched here — that belongs to
         // system scans (authoritative, logged, fog-of-war guarded); nulling planets from a
@@ -300,6 +305,76 @@ router.post('/sync/player', requireAuth, (req, res) => {
         console.error(`[DB Error] Failed to sync player ${p.id}:`, err);
         res.status(500).json({ error: 'Database sync failed' });
     }
+});
+
+// --- PLAYER API-SCAN CLAIM ---
+// Hands out the next batch of stale player ids for the background Player/{id} sweep. A
+// "claim" here is just bumping last_api_scan_at now — an optimistic claim, not a locked
+// reservation. If the caller's browser fails to actually scan them, they simply become
+// stale again after one full sweep cycle and get offered to whoever asks next. See this
+// plan's Global Constraints for why a full claims table wasn't built.
+router.get('/sync/player-scan-claim', requireAuth, (req, res) => {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 200);
+    const ids = playersRepo.getStalePlayerIdsForApiScan(limit);
+    if (ids.length) playersRepo.markPlayersApiScanned(ids);
+    res.json({ success: true, ids });
+});
+
+// --- PLAYER LIST RECEIVER (ListPlayer bulk sync) ---
+router.post('/sync/player-list', requireAuth, (req, res) => {
+    const { players } = req.body;
+    if (!Array.isArray(players) || players.length === 0) {
+        return res.status(400).json({ error: 'Invalid payload' });
+    }
+    let stored = 0;
+    for (const p of players) {
+        if (!Number.isInteger(p.id) || p.id <= 0) continue;
+        const oldName = playersRepo.getPlayerName(p.id);
+        const newName = typeof p.name === 'string' ? p.name : null;
+        if (oldName && oldName.name && newName && oldName.name !== newName) {
+            playersRepo.recordNameChange(p.id, oldName.name);
+        }
+        playersRepo.upsertPlayerFromApiList(
+            p.id, newName,
+            Number.isInteger(p.alliance_id) ? p.alliance_id : null,
+            Number.isInteger(p.level) ? p.level : null,
+            Number.isInteger(p.points) ? p.points : null,
+            Number.isInteger(p.rank) ? p.rank : null,
+            typeof p.country === 'string' ? p.country : null,
+            p.is_active_player ? 1 : 0,
+            typeof p.joined === 'string' ? p.joined : null
+        );
+        stored++;
+    }
+    res.json({ success: true, count: stored });
+});
+
+// --- PLAYER DETAIL RECEIVER (Player/{id} sync) ---
+router.post('/sync/player-detail', requireAuth, (req, res) => {
+    const p = req.body && req.body.player;
+    if (!p || !Number.isInteger(p.id) || p.id <= 0) {
+        return res.status(400).json({ error: 'Invalid payload' });
+    }
+    const oldName = playersRepo.getPlayerName(p.id);
+    const newName = typeof p.name === 'string' ? p.name : null;
+    if (oldName && oldName.name && newName && oldName.name !== newName) {
+        playersRepo.recordNameChange(p.id, oldName.name);
+    }
+    try {
+        playersRepo.upsertPlayerFromApiDetail(p);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(`[DB Error] Failed to sync player detail ${p.id}:`, err);
+        res.status(500).json({ error: 'Database sync failed' });
+    }
+});
+
+// --- ROUND AGE (for client-side cadence decisions, e.g. ListPlayer pull frequency) ---
+router.get('/round-age', requireAuth, (req, res) => {
+    const row = db.prepare(`SELECT MAX(archived_at) as last_archived FROM rounds`).get();
+    if (!row || !row.last_archived) return res.json({ success: true, days_since: null });
+    const days = Math.floor((Date.now() - Date.parse(row.last_archived)) / (24 * 3600 * 1000));
+    res.json({ success: true, days_since: days });
 });
 
 // --- ALLIANCE PROFILE SCRAPER RECEIVER ---
