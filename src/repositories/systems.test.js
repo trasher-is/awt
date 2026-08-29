@@ -33,11 +33,20 @@ ok('upsertSystemFull stores full_name', detailed.full_name === 'Ceginus Prime');
 ok('upsertSystemFull stores info', detailed.info === 'A quiet frontier system');
 ok('upsertSystemFull stores population_level', detailed.population_level === 42);
 
+// A DOM scraper only ever sends (id, name, x, y) — no fullName/info/populationLevel — so a
+// scrape running after an API seed must not null out the metadata the API seed captured.
+systems.upsertSystemFull(3, 'Ceginus', 5, -5);
+const afterScrape = systems.getFullSystem(3);
+ok('a later upsertSystemFull call without fullName/info/populationLevel preserves full_name', afterScrape.full_name === 'Ceginus Prime');
+ok('a later upsertSystemFull call without fullName/info/populationLevel preserves info', afterScrape.info === 'A quiet frontier system');
+ok('a later upsertSystemFull call without fullName/info/populationLevel preserves population_level', afterScrape.population_level === 42);
+
 ok('setSystemInVision defaults to null (unknown) before any call', systems.getFullSystem(3).is_in_vision == null);
-systems.setSystemInVision(3, true);
+ok('setSystemInVision(true) returns changes=1 for an existing row', systems.setSystemInVision(3, true) === 1);
 ok('setSystemInVision(true) stores 1', systems.getFullSystem(3).is_in_vision === 1);
 systems.setSystemInVision(3, false);
 ok('setSystemInVision(false) stores 0', systems.getFullSystem(3).is_in_vision === 0);
+ok('setSystemInVision on an unknown id returns changes=0', systems.setSystemInVision(999999, true) === 0);
 
 systems.upsertSystemStub(2);
 ok('upsertSystemStub creates a bare row', systems.getFullSystem(2).id === 2);

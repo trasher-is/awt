@@ -114,9 +114,9 @@ const upsertSystemFullStmt = db.prepare(`
         name=excluded.name,
         x=excluded.x,
         y=excluded.y,
-        full_name=excluded.full_name,
-        info=excluded.info,
-        population_level=excluded.population_level,
+        full_name=COALESCE(excluded.full_name, systems.full_name),
+        info=COALESCE(excluded.info, systems.info),
+        population_level=COALESCE(excluded.population_level, systems.population_level),
         updated_at=CURRENT_TIMESTAMP
 `);
 function upsertSystemFull(id, name, x, y, fullName = null, info = null, populationLevel = null) {
@@ -125,7 +125,7 @@ function upsertSystemFull(id, name, x, y, fullName = null, info = null, populati
 
 const setSystemInVisionStmt = db.prepare(`UPDATE systems SET is_in_vision = ? WHERE id = ?`);
 function setSystemInVision(id, isInVision) {
-    setSystemInVisionStmt.run(isInVision ? 1 : 0, id);
+    return setSystemInVisionStmt.run(isInVision ? 1 : 0, id).changes;
 }
 
 const deleteAllSystemsStmt = db.prepare(`DELETE FROM systems`);

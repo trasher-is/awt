@@ -100,6 +100,7 @@ as a parse error.
 | `getSolarSystems()` | `GET /api/v1/SolarSystem` | `[{id, name, fullName, info, populationLevel, x, y}]` — `x`/`y` are nullable; filter before doing geometry |
 | `getSolarSystem(id)` | `GET /api/v1/SolarSystem/{id}` | one system, including planets and ownership when in vision |
 | `getSystemPlanets(id)` | `GET /api/v1/SolarSystem/{id}/planets` | `[{id, index, name, ownerId, ownerName, allianceId, allianceTag, populationLevel, starbaseLevel, isUnknownOwner, hasSiege, starbaseOrders}]` |
+| `getMapSectors({x1, y1, x2, y2})` | `GET /api/v1/Map/sectors` | `[{id, rectangle, alliances, players, solarSystems}]` — each `solarSystems[]` entry additionally carries `{capturedAt, format, isInVision, planets[]}` on top of the base SolarSystem shape |
 | `getTravelTime({fromSystem, fromPlanetIndex, toSystem, toPlanetIndex, energyLevel})` | `GET /api/v1/Fleet/travelTime` | `{days, hours, minutes, seconds, timeSpan, totalSeconds}` — answers for the logged-in player, by system id, race speed baked in |
 | `searchBattleReports(params)` | `GET /api/v1/BattleReport/search` | battle reports; `params` uses the spec's dotted names verbatim (`FirstParty.AllianceId`, `OrderBy`, `OrderDirection`, `Take`, `BattleDateFrom`, …) |
 | `putOrderGeometry(orderId, {range, angleDegree1, angleDegree2})` | `PUT /api/v1/Starbase/orders/{orderId}/geometry` | writes the geometry; the API exposes **no read** of the current geometry |
@@ -118,6 +119,7 @@ nothing about stationed fleets, and `null` keeps "not observed" distinct from a 
 | Feature | API calls | Feeds |
 |---|---|---|
 | Galaxy map "Seed z API" | `getSolarSystems` | `POST /hub-api/sync/galaxy` |
+| Galaxy map "Seed planets (sectors)" | `getMapSectors` | `POST /hub-api/sync/system` (one call per system, via the shared mapper, `scan_mode: 'silent'` to suppress Discord announcements) then `POST /hub-api/sync/system-in-vision` with every system's `isInVision` flag |
 | Travel calculator, game-server line | `getTravelTime`, debounced 400 ms | display only; a mismatch over 2 s against the local formula is `console.warn`ed with full inputs |
 | Travel calculator Update / system-intel refresh | `getSystemPlanets` | `POST /hub-api/sync/system` via the shared mapper |
 | Battle-report sync (dashboard, first pull 10 s after load, then every 30 min) | `searchBattleReports` twice — once per alliance side | `POST /hub-api/sync/battle-reports`; the hub stores idempotently and announces the genuinely new reports on Discord |

@@ -15,6 +15,12 @@ const router = express.Router();
 // --- MAP SCRAPER DATA RECEIVER ---
 router.post('/sync/system', requireAuth, (req, res) => {
     const { system_id, planets, fleets, scan_mode } = req.body; // <-- Added fleets, scan_mode
+    // scan_mode: 'galaxy' (mass-scanner.js) is currently only informational and does not
+    // change behavior here. 'silent' (bulk API seed via galaxy-map.js seedPlanetsFromSectors)
+    // suppresses Discord announcements below — the DB writes and planet_events history log
+    // happen exactly the same either way, only the announceEvents.push() calls are skipped,
+    // so a full-map bulk seed doesn't flood the channel with hundreds of stale-looking
+    // transitions.
 
     if (!system_id || !Array.isArray(planets)) {
         return res.status(400).json({ error: 'Invalid payload' });
@@ -60,13 +66,26 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 ? (oldP ? oldP.is_sieged : 0)
                 : (p.is_sieged ? 1 : 0);
 
-            // CRITICAL FOG OF WAR GUARD: If scan reports "Unknown", protect historical stats from being nuked
-            if (p.is_unknown && oldP) {
-                finalOwnerId = oldP.owner_id;
-                finalPopulation = oldP.population;
-                finalStarbase = oldP.starbase;
-                finalHasFleet = oldP.has_fleet;
-                finalIsSieged = oldP.is_sieged;
+            // CRITICAL FOG OF WAR GUARD: If scan reports "Unknown", protect historical stats
+            // from being nuked. When there's no prior row (oldP is null — a never-seen-before
+            // planet), there is nothing to fall back to, so fields fall back to their current
+            // "no observation" defaults instead — crucially, ownership falls back to NULL
+            // rather than trusting p.owner.id: an out-of-vision seed can report is_unknown:true
+            // while still carrying owner from the API's cached snapshot, and that owner may be
+            // a player the hub has never seen (no players row was created for them, since the
+            // upsert below also skips creating one when is_unknown is true). Inserting a
+            // planets row with owner_id pointing at a nonexistent player trips the
+            // FOREIGN KEY(owner_id) REFERENCES players(id) constraint and rolls back the
+            // WHOLE system's transaction, not just this one planet.
+            // NOTE: updated_at below still stamps CURRENT_TIMESTAMP even when the guard
+            // preserves stale values — it reflects "last synced", not "last confirmed fresh".
+            // is_in_vision (systems table) is the actual freshness signal, not updated_at.
+            if (p.is_unknown) {
+                finalOwnerId = oldP ? oldP.owner_id : null;
+                finalPopulation = oldP ? oldP.population : finalPopulation;
+                finalStarbase = oldP ? oldP.starbase : finalStarbase;
+                finalHasFleet = oldP ? oldP.has_fleet : finalHasFleet;
+                finalIsSieged = oldP ? oldP.is_sieged : finalIsSieged;
             }
 
             // SOFT-UNKNOWN GUARD: a scan can fail to pick up the owner link while the
@@ -90,7 +109,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
                     // from the old null-purge corruption every re-detected owner would look
                     // like one and flood the channel. Conquests (X->Y) and losses (X->Empty)
                     // still announce; the history event above is recorded regardless.
-                    if (oldP.owner_id != null) {
+                    if (oldP.owner_id != null && scan_mode !== 'silent') {
                         announceEvents.push({
                             planet_index: p.planet_index,
                             type: 'OWNER_CHANGE',
@@ -108,7 +127,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
                     const newPop = Number(finalPopulation);
                     if (Number.isFinite(oldPop) && Number.isFinite(newPop) && newPop < oldPop) {
                         systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, newPop); // 2 = POP_DROP
-                        announceEvents.push({
+                        if (scan_mode !== 'silent') announceEvents.push({
                             planet_index: p.planet_index,
                             type: 'POP_DROP',
                             old_pop: oldPop,
@@ -415,8 +434,7 @@ router.post('/sync/system-in-vision', requireAuth, (req, res) => {
     let updated = 0;
     for (const s of systems) {
         if (!Number.isInteger(s.id) || s.id <= 0) continue;
-        systemsRepo.setSystemInVision(s.id, !!s.is_in_vision);
-        updated++;
+        if (systemsRepo.setSystemInVision(s.id, !!s.is_in_vision) > 0) updated++;
     }
     res.json({ success: true, updated });
 });

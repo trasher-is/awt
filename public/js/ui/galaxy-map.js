@@ -742,6 +742,10 @@ async function seedPlanetsFromSectors() {
                 payload.planets = payload.planets.map(p => ({ ...p, is_unknown: true }));
             }
             if (!payload.planets.length) continue;
+            // Bulk seeding hundreds of systems at once would otherwise flood Discord with
+            // owner-change/pop-drop announcements; scan_mode: 'silent' still does every DB
+            // write and history log, it just skips the announcement.
+            payload.scan_mode = 'silent';
 
             const syncRes = await fetch('/hub-api/sync/system', {
                 method: 'POST',
