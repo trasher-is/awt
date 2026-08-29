@@ -42,7 +42,7 @@ async function executeSearch(type) {
         const data = await res.json();
 
         if (!data.success || data.results.length === 0) {
-            if (type === 'alliance' || type === 'system') {
+            if (type === 'alliance' || type === 'system' || type === 'player') {
                 resultsContainer.innerHTML = `
                     <div class="text-s text-muted-foreground text-center py-2 bg-card rounded border border-border">
                         Not found in the hub's records.
@@ -161,6 +161,26 @@ async function searchLiveViaApi(type, q, resultsContainer) {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ systems }),
+                });
+                const syncBody = await syncRes.json().catch(() => ({}));
+                if (!syncRes.ok || !syncBody.success) {
+                    resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">Sync failed: ${syncBody.error || `HTTP ${syncRes.status}`}</div>`;
+                    return;
+                }
+            }
+        } else if (type === 'player') {
+            const res = await AWApi.searchPlayers({ q, limit: 20 });
+            if (!res.ok) {
+                resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">${res.reason === 'session' ? 'Log into the game first, then try again.' : `The game did not answer: ${describeApiError(res)}`}</div>`;
+                return;
+            }
+            // The ONE shared API->sync mapper (aw-api.js) — never a local copy of it.
+            const { players } = AWApi.mapPlayersToSyncPayload(res.data);
+            if (players.length) {
+                const syncRes = await fetch('/hub-api/sync/player-list', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ players }),
                 });
                 const syncBody = await syncRes.json().catch(() => ({}));
                 if (!syncRes.ok || !syncBody.success) {

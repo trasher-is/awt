@@ -116,6 +116,18 @@ window.addEventListener('DOMContentLoaded', () => {
     import('./battle-sync.js')
         .then(({ initBattleSync }) => initBattleSync())
         .catch(err => console.warn('[BattleSync] failed to start:', err));
+
+    // Background player API sync (ListPlayer roster refresh + staleness-ordered Player/{id}
+    // detail sweep). Same on-demand-load pattern as battle-sync above.
+    import('./player-api-sync.js')
+        .then(({ initPlayerApiSync }) => initPlayerApiSync())
+        .catch(err => console.warn('[PlayerApiSync] failed to start:', err));
+
+    // Background battle-report ship-detail sweep. Same on-demand-load pattern as the
+    // other two background sync modules above.
+    import('./battle-report-detail-sync.js')
+        .then(({ initBattleReportDetailSync }) => initBattleReportDetailSync())
+        .catch(err => console.warn('[BattleReportDetailSync] failed to start:', err));
 });
 
 // --- CORE UI CONTROLS ---

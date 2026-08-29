@@ -223,6 +223,26 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
     ok('the request path is SolarSystem/search with q and limit', /\/api\/v1\/SolarSystem\/search\?/.test(calls[0].url)
         && /q=Rana/.test(calls[0].url) && /limit=5/.test(calls[0].url), calls[0].url);
 
+    console.log('\n── getPlayers / getPlayer / searchPlayers ' + '─'.repeat(30));
+    nextResponse = jsonRes([]);
+    calls.length = 0;
+    const listRes = await AWApi.getPlayers();
+    ok('getPlayers resolves ok', listRes.ok === true, listRes);
+    ok('the request path is plain /api/v1/Player, no query string', calls[0].url === '/api/v1/Player', calls[0].url);
+
+    nextResponse = jsonRes({ id: 701 });
+    calls.length = 0;
+    const detailRes = await AWApi.getPlayer(701);
+    ok('getPlayer resolves ok', detailRes.ok === true, detailRes);
+    ok('the request path includes the id', calls[0].url === '/api/v1/Player/701', calls[0].url);
+
+    nextResponse = jsonRes([]);
+    calls.length = 0;
+    const searchRes = await AWApi.searchPlayers({ q: 'Cave', limit: 15 });
+    ok('searchPlayers resolves ok', searchRes.ok === true, searchRes);
+    ok('the request path is Player/search with q and limit', /\/api\/v1\/Player\/search\?/.test(calls[0].url)
+        && /q=Cave/.test(calls[0].url) && /limit=15/.test(calls[0].url), calls[0].url);
+
     console.log('\n── mapPlanetsToSyncPayload also carries planet name ' + '─'.repeat(23));
     const withName = AWApi.mapPlanetsToSyncPayload('1', [
         { id: 1, index: 1, name: 'Rana', ownerId: null, ownerName: null, allianceId: null,
@@ -252,6 +272,36 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
     const degenerateSystems = AWApi.mapSolarSystemsToSyncPayload(null);
     ok('a non-array systems answer maps to an empty, well-formed body',
         Array.isArray(degenerateSystems.systems) && degenerateSystems.systems.length === 0, degenerateSystems);
+
+    console.log('\n── mapPlayersToSyncPayload: the ONE API→/sync/player-list mapper ' + '─'.repeat(12));
+    // Synthetic players in the getPlayers/searchPlayers (ListPlayer) shape.
+    const apiPlayers = [
+        {
+            id: 601, name: 'Zenobia', allianceId: 77, isActivePlayer: true,
+            joinedAt: '2026-08-01T00:00:00Z', playerLevel: 12, playsFromCountryCode: 'US',
+            pointsScored: 5000, rank: 3,
+        },
+        {
+            id: 602, name: null, allianceId: null, isActivePlayer: false,
+            joinedAt: null, playerLevel: null, playsFromCountryCode: null,
+            pointsScored: null, rank: null,
+        },
+    ];
+    const playersPayload = AWApi.mapPlayersToSyncPayload(apiPlayers);
+    ok('every player is mapped', playersPayload.players.length === 2, playersPayload.players.length);
+    const [pl1, pl2] = playersPayload.players;
+    ok('id/name/alliance_id/level/points/rank/country/joined carry through',
+        pl1.id === 601 && pl1.name === 'Zenobia' && pl1.alliance_id === 77 && pl1.level === 12
+        && pl1.points === 5000 && pl1.rank === 3 && pl1.country === 'US'
+        && pl1.joined === '2026-08-01T00:00:00Z', pl1);
+    ok('isActivePlayer→is_active_player as a real boolean', pl1.is_active_player === true, pl1);
+    ok('missing/null fields are coerced to null, not undefined or NaN',
+        pl2.name === null && pl2.alliance_id === null && pl2.level === null && pl2.points === null
+        && pl2.rank === null && pl2.country === null && pl2.joined === null
+        && pl2.is_active_player === false, pl2);
+    const degeneratePlayers = AWApi.mapPlayersToSyncPayload(null);
+    ok('a non-array players answer maps to an empty, well-formed body',
+        Array.isArray(degeneratePlayers.players) && degeneratePlayers.players.length === 0, degeneratePlayers);
 
     console.log('\n── Source scan: the rules this file lives under ' + '─'.repeat(28));
     // Comments stripped first so a comment describing an old rule can never trip these.

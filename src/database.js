@@ -119,6 +119,16 @@ function initDatabase() {
         )
     `);
 
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS player_name_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id INTEGER NOT NULL,
+            old_name TEXT NOT NULL,
+            changed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+        )
+    `);
+
     addColumn('players', 'eco_bonus', 'INTEGER DEFAULT 0');
     addColumn('players', 'joined', 'TEXT');
     addColumn('players', 'logins', 'INTEGER DEFAULT 0');
@@ -134,6 +144,17 @@ function initDatabase() {
     addColumn('players', 'home_system_id', 'INTEGER');
     addColumn('players', 'home_planet_index', 'INTEGER');
     addColumn('players', 'possible_homes', 'TEXT');
+    addColumn('players', 'is_active_player', 'INTEGER');
+    addColumn('players', 'last_activity_at', 'DATETIME');
+    addColumn('players', 'last_login_at', 'DATETIME');
+    addColumn('players', 'resigned_at', 'DATETIME');
+    addColumn('players', 'number_of_battles', 'INTEGER');
+    addColumn('players', 'battle_luckiness', 'REAL');
+    addColumn('players', 'multi_status', 'TEXT');
+    addColumn('players', 'is_top_permanent_ranker', 'INTEGER');
+    addColumn('players', 'has_supporter_badge', 'INTEGER');
+    addColumn('players', 'supporter_type', 'TEXT');
+    addColumn('players', 'last_api_scan_at', 'DATETIME');
 
     // NOTE: the migrations for player_logins.total_logins and fleets.arrival_at used to
     // sit here, above the CREATE TABLE statements for those two tables. On a fresh
@@ -626,6 +647,33 @@ function initDatabase() {
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     `);
+
+    addColumn('battle_reports', 'att_destroyers', 'INTEGER');
+    addColumn('battle_reports', 'att_destroyers_lost', 'INTEGER');
+    addColumn('battle_reports', 'att_cruisers', 'INTEGER');
+    addColumn('battle_reports', 'att_cruisers_lost', 'INTEGER');
+    addColumn('battle_reports', 'att_battleships', 'INTEGER');
+    addColumn('battle_reports', 'att_battleships_lost', 'INTEGER');
+    addColumn('battle_reports', 'att_transports', 'INTEGER');
+    addColumn('battle_reports', 'att_transports_lost', 'INTEGER');
+    addColumn('battle_reports', 'att_colony_ships', 'INTEGER');
+    addColumn('battle_reports', 'att_colony_ships_lost', 'INTEGER');
+    addColumn('battle_reports', 'att_starbases', 'INTEGER');
+    addColumn('battle_reports', 'att_starbases_lost', 'INTEGER');
+    addColumn('battle_reports', 'def_destroyers', 'INTEGER');
+    addColumn('battle_reports', 'def_destroyers_lost', 'INTEGER');
+    addColumn('battle_reports', 'def_cruisers', 'INTEGER');
+    addColumn('battle_reports', 'def_cruisers_lost', 'INTEGER');
+    addColumn('battle_reports', 'def_battleships', 'INTEGER');
+    addColumn('battle_reports', 'def_battleships_lost', 'INTEGER');
+    addColumn('battle_reports', 'def_transports', 'INTEGER');
+    addColumn('battle_reports', 'def_transports_lost', 'INTEGER');
+    addColumn('battle_reports', 'def_colony_ships', 'INTEGER');
+    addColumn('battle_reports', 'def_colony_ships_lost', 'INTEGER');
+    addColumn('battle_reports', 'def_starbases', 'INTEGER');
+    addColumn('battle_reports', 'def_starbases_lost', 'INTEGER');
+    addColumn('battle_reports', 'win_chance', 'REAL');
+    addColumn('battle_reports', 'ship_detail_scraped_at', 'DATETIME');
 
     // --- STARBASE ORDER AUDIT ---
     // One row per starbase-order geometry PUT confirmed through the hub. This is an

@@ -130,6 +130,22 @@
         return requestJson('/api/v1/SolarSystem/' + encodeURIComponent(id) + '/planets');
     }
 
+    // All active players (no filter): [{id, allianceId, isActivePlayer, name, allianceTag,
+    // joinedAt, playerLevel, playsFromCountryCode, pointsScored, rank}].
+    function getPlayers() {
+        return requestJson('/api/v1/Player');
+    }
+
+    // One player's full detail, including intelligenceReport when the caller has vision.
+    function getPlayer(id) {
+        return requestJson('/api/v1/Player/' + encodeURIComponent(id));
+    }
+
+    // Player name/id search: same ListPlayer shape as getPlayers(), just filtered by q.
+    function searchPlayers({ q, limit } = {}) {
+        return requestJson('/api/v1/Player/search' + query({ q, limit }));
+    }
+
     // A rectangular area of the map: [{id, rectangle, alliances, players, solarSystems}].
     // Each solarSystems[] entry additionally carries {capturedAt, format, isInVision,
     // planets[]} on top of the base SolarSystem shape.
@@ -228,11 +244,33 @@
         return { systems };
     }
 
+    // API ListPlayer objects (getPlayers/searchPlayers shape) -> the existing POST
+    // /hub-api/sync/player-list body. The ONE shared mapper: the background sweep's list
+    // pull (player-api-sync.js) and the manual live-search fallback (search.js) both use
+    // it, so the API-sourced payload can never drift between the two call sites.
+    function mapPlayersToSyncPayload(apiPlayers) {
+        const players = (Array.isArray(apiPlayers) ? apiPlayers : [])
+            .filter(p => p && typeof p === 'object')
+            .map(p => ({
+                id: p.id,
+                name: typeof p.name === 'string' ? p.name : null,
+                alliance_id: Number.isInteger(p.allianceId) ? p.allianceId : null,
+                level: Number.isInteger(p.playerLevel) ? p.playerLevel : null,
+                points: Number.isInteger(p.pointsScored) ? p.pointsScored : null,
+                rank: Number.isInteger(p.rank) ? p.rank : null,
+                country: typeof p.playsFromCountryCode === 'string' ? p.playsFromCountryCode : null,
+                is_active_player: !!p.isActivePlayer,
+                joined: typeof p.joinedAt === 'string' ? p.joinedAt : null,
+            }));
+        return { players };
+    }
+
     return {
         getSolarSystems, getSolarSystem, getSystemPlanets, getMapSectors,
         getTravelTime, searchBattleReports, putOrderGeometry,
         searchAlliances, searchSolarSystems,
-        mapPlanetsToSyncPayload, mapSolarSystemsToSyncPayload,
+        getPlayers, getPlayer, searchPlayers,
+        mapPlanetsToSyncPayload, mapSolarSystemsToSyncPayload, mapPlayersToSyncPayload,
         _setFetch,
     };
 });

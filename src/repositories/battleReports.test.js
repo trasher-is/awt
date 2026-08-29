@@ -66,6 +66,36 @@ ok('deleteAllBattleReports removes every row (pending is now empty)', afterDelet
 const afterDeleteNewest = battleReports.getNewestStartedAt();
 ok('getNewestStartedAt returns null after delete', afterDeleteNewest === null);
 
+// Test getReportsNeedingShipDetail returns [] when there are no reports
+ok('getReportsNeedingShipDetail returns [] when there are no reports', battleReports.getReportsNeedingShipDetail(10).length === 0);
+
+db.prepare(`INSERT INTO battle_reports (id, started_at) VALUES (?, ?)`).run(9001, '2026-08-20T10:00:00Z');
+db.prepare(`INSERT INTO battle_reports (id, started_at) VALUES (?, ?)`).run(9002, '2026-08-25T10:00:00Z');
+db.prepare(`INSERT INTO battle_reports (id, started_at) VALUES (?, ?)`).run(9003, '2026-08-15T10:00:00Z');
+
+const needing = battleReports.getReportsNeedingShipDetail(10);
+ok('all 3 fresh reports need ship detail', needing.length === 3 && needing.includes(9001) && needing.includes(9002) && needing.includes(9003), needing);
+ok('newest report first (started_at DESC)', needing[0] === 9002, needing);
+
+battleReports.markShipDetailScraped([9001, 9003]);
+const stillNeeding = battleReports.getReportsNeedingShipDetail(10);
+ok('scraped reports are excluded, unscraped one remains', stillNeeding.length === 1 && stillNeeding[0] === 9002, stillNeeding);
+
+battleReports.updateShipDetail(9002, {
+    att_destroyers: 100, att_destroyers_lost: 10, att_cruisers: 5, att_cruisers_lost: 1,
+    att_battleships: 2, att_battleships_lost: 0, att_transports: 3, att_transports_lost: 3,
+    att_colony_ships: 0, att_colony_ships_lost: 0, att_starbases: 0, att_starbases_lost: 0,
+    def_destroyers: 50, def_destroyers_lost: 50, def_cruisers: 0, def_cruisers_lost: 0,
+    def_battleships: 0, def_battleships_lost: 0, def_transports: 0, def_transports_lost: 0,
+    def_colony_ships: 0, def_colony_ships_lost: 0, def_starbases: 1, def_starbases_lost: 1,
+    win_chance: 62.5,
+});
+const updated = db.prepare(`SELECT * FROM battle_reports WHERE id = ?`).get(9002);
+ok('updateShipDetail writes the ship-type fields', updated.att_destroyers === 100 && updated.def_starbases_lost === 1 && updated.win_chance === 62.5, updated);
+ok('updateShipDetail also marks the report scraped', updated.ship_detail_scraped_at != null, updated);
+const noLongerNeeding = battleReports.getReportsNeedingShipDetail(10);
+ok('the updated report no longer appears in getReportsNeedingShipDetail', !noLongerNeeding.includes(9002), noLongerNeeding);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

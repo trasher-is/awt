@@ -101,6 +101,186 @@ ok('upsertPlayerFull respected has_intel=1 for biology', players.getPlayerWithPl
 players.deleteAllPlayers();
 ok('deleteAllPlayers empties the table', players.countPlayers() === 0);
 
+ok('getPlayerName returns undefined for an unknown id', players.getPlayerName(999999) === undefined);
+
+players.upsertPlayerBasic(701, 'Original Name', null);
+const before = players.getPlayerName(701);
+ok('getPlayerName finds an existing player', before && before.name === 'Original Name', before);
+
+players.recordNameChange(701, before.name);
+// (verify via a direct query since there's no getter for this yet — that's fine, the
+// route layer in Task 4 is the real consumer; a raw check here just confirms the write)
+const historyRow = db.prepare('SELECT old_name FROM player_name_history WHERE player_id = ?').get(701);
+ok('recordNameChange writes the old name', historyRow.old_name === 'Original Name', historyRow);
+
+// recordNameChangeIfDifferent: the reusable check-and-record helper now shared by all six
+// players.name write paths (finding 2).
+players.upsertPlayerBasic(720, 'NameGuardOne', null);
+players.recordNameChangeIfDifferent(720, 'NameGuardOne'); // same name: no-op
+ok('recordNameChangeIfDifferent is a no-op when the name is unchanged',
+    db.prepare('SELECT COUNT(*) as c FROM player_name_history WHERE player_id = ?').get(720).c === 0);
+
+players.recordNameChangeIfDifferent(999998, 'Anyone'); // no player/current name on record: no-op
+ok('recordNameChangeIfDifferent is a no-op when there is no current name yet',
+    db.prepare('SELECT COUNT(*) as c FROM player_name_history WHERE player_id = ?').get(999998).c === 0);
+
+players.recordNameChangeIfDifferent(720, 'NameGuardTwo');
+const nameGuardHistory = db.prepare('SELECT old_name FROM player_name_history WHERE player_id = ?').get(720);
+ok('recordNameChangeIfDifferent logs the old name when it differs',
+    nameGuardHistory && nameGuardHistory.old_name === 'NameGuardOne', nameGuardHistory);
+
+players.upsertPlayerFromApiList(701, 'New From List', null, 42, 5000, 3, 'US', 1, '2026-08-01T00:00:00Z');
+const afterList = players.getPlayerFullById(701);
+ok('upsertPlayerFromApiList updates name/level/points/ranking/country/is_active_player/joined',
+    afterList.name === 'New From List' && afterList.level === 42 && afterList.points === 5000
+    && afterList.ranking === 3 && afterList.country === 'US' && afterList.is_active_player === 1
+    && afterList.joined === '2026-08-01T00:00:00Z', afterList);
+ok('upsertPlayerFromApiList does not touch home_planet_id (never in its column list)', afterList.home_planet_id === null, afterList);
+
+// Finding 6: a later ListPlayer row that omits ranking/country/joined (e.g. now unranked,
+// no join date recorded) must not null out the previously-known values.
+players.upsertPlayerFromApiList(701, 'New From List', null, 42, 5000, null, null, 1, null);
+const afterListOmitted = players.getPlayerFullById(701);
+ok('upsertPlayerFromApiList preserves ranking/country/joined when the new payload omits them',
+    afterListOmitted.ranking === 3 && afterListOmitted.country === 'US'
+    && afterListOmitted.joined === '2026-08-01T00:00:00Z', afterListOmitted);
+
+players.upsertPlayerFromApiDetail({
+    id: 701, name: 'Detail Name', alliance_id: null, level: 50, points: 6000, ranking: 2,
+    country: 'US', is_active_player: 1, joined: '2026-08-01T00:00:00Z', logins: 12,
+    last_activity_at: '2026-08-29T10:00:00Z', last_login_at: '2026-08-29T09:00:00Z',
+    resigned_at: null, number_of_battles: 4, battle_luckiness: 0.1, multi_status: 'clean',
+    is_top_permanent_ranker: 0, has_supporter_badge: 1, supporter_type: 'gold',
+    has_intel: 0, biology: 99, economy: 99, energy: 99, mathematics: 99, physics: 99, social: 99,
+    trade_revenue: 99, artefact: 'fake',
+    race_growth: 99, race_science: 99, race_culture: 99, race_production: 99, race_speed: 99,
+    race_attack: 99, race_defense: 99, race_trader: 99, race_sul: 99,
+});
+const afterDetailNoIntel = players.getPlayerFullById(701);
+ok('upsertPlayerFromApiDetail with has_intel=0 writes activity/status fields',
+    afterDetailNoIntel.last_activity_at === '2026-08-29T10:00:00Z' && afterDetailNoIntel.number_of_battles === 4
+    && afterDetailNoIntel.has_supporter_badge === 1 && afterDetailNoIntel.supporter_type === 'gold', afterDetailNoIntel);
+ok('upsertPlayerFromApiDetail with has_intel=0 does NOT overwrite intel columns (still null/unset from before)',
+    afterDetailNoIntel.biology !== 99, afterDetailNoIntel);
+
+players.upsertPlayerFromApiDetail({
+    id: 701, name: 'Detail Name 2', alliance_id: null, level: 51, points: 6100, ranking: 2,
+    country: 'US', is_active_player: 1, joined: '2026-08-01T00:00:00Z', logins: 13,
+    last_activity_at: '2026-08-29T11:00:00Z', last_login_at: '2026-08-29T10:00:00Z',
+    resigned_at: null, number_of_battles: 5, battle_luckiness: 0.2, multi_status: 'clean',
+    is_top_permanent_ranker: 0, has_supporter_badge: 1, supporter_type: 'gold',
+    has_intel: 1, biology: 40, economy: 41, energy: 42, mathematics: 43, physics: 44, social: 45,
+    trade_revenue: 46, artefact: 'real-artefact',
+    race_growth: 1, race_science: 2, race_culture: 3, race_production: 4, race_speed: 5,
+    race_attack: 6, race_defense: 7, race_trader: 8, race_sul: 9,
+});
+const afterDetailWithIntel = players.getPlayerFullById(701);
+ok('upsertPlayerFromApiDetail with has_intel=1 DOES write intel columns',
+    afterDetailWithIntel.biology === 40 && afterDetailWithIntel.race_attack === 6
+    && afterDetailWithIntel.artefact === 'real-artefact', afterDetailWithIntel);
+
+players.upsertPlayerBasic(702, 'Second Player', null);
+players.upsertPlayerBasic(703, 'Third Player', null);
+const stale = players.getStalePlayerIdsForApiScan(10);
+ok('getStalePlayerIdsForApiScan returns players never scanned, in some order',
+    stale.includes(701) && stale.includes(702) && stale.includes(703), stale);
+
+players.markPlayersApiScanned([702, 703]);
+// Finding 5b: the staleness floor means a player scanned within the last 6 hours is
+// EXCLUDED from the queue entirely now, not merely ordered after — the sweep should go
+// idle once everyone is fresh instead of burning budget re-scanning them forever.
+const staleAfterMark = players.getStalePlayerIdsForApiScan(10);
+ok('a player scanned less than 6 hours ago is excluded from the stale queue',
+    !staleAfterMark.includes(702) && !staleAfterMark.includes(703), staleAfterMark);
+ok('a never-scanned player is still included', staleAfterMark.includes(701), staleAfterMark);
+
+db.prepare(`UPDATE players SET last_api_scan_at = datetime('now', '-7 hours') WHERE id = 702`).run();
+const staleAfterBackdate = players.getStalePlayerIdsForApiScan(10);
+ok('a player scanned more than 6 hours ago re-enters the stale queue',
+    staleAfterBackdate.includes(702), staleAfterBackdate);
+ok('a player scanned less than 6 hours ago still stays excluded',
+    !staleAfterBackdate.includes(703), staleAfterBackdate);
+
+// --- Finding 1: guarding upsertPlayerFromApiDetail against partial/malformed intel and
+// enforcing race write-once. The route layer (sync.js) is what decides has_intel and
+// normalizes race_* before calling the repo — these tests exercise the repo-level pieces
+// (the CASE guard and the new getPlayerRaceValues helper) the same way that layer does.
+
+// (a) A payload that arrives with has_intel already resolved to 0 — exactly what sync.js's
+// hasCompleteIntel guard produces for an incomplete payload (e.g. missing race_growth) even
+// though the raw API signal was truthy — must not overwrite ANY existing intel column.
+players.upsertPlayerBasic(710, 'IntelGuard', null);
+db.prepare(`UPDATE players SET biology = 55, race_growth = 3, has_intel = 1 WHERE id = 710`).run();
+players.upsertPlayerFromApiDetail({
+    id: 710, name: 'IntelGuard', alliance_id: null, level: 1, points: 0, ranking: null,
+    country: null, is_active_player: 1, joined: null, logins: 0,
+    last_activity_at: null, last_login_at: null, resigned_at: null,
+    number_of_battles: 0, battle_luckiness: 0, multi_status: null,
+    is_top_permanent_ranker: 0, has_supporter_badge: 0, supporter_type: null,
+    has_intel: 0, // forced 0 by the route guard for an incomplete payload
+    biology: 999, economy: 999, energy: 999, mathematics: 999, physics: 999, social: 999,
+    trade_revenue: 999, artefact: 'bogus',
+    race_growth: null, race_science: 999, race_culture: 999, race_production: 999, race_speed: 999,
+    race_attack: 999, race_defense: 999, race_trader: 999, race_sul: 999,
+});
+const afterGuarded = players.getPlayerFullById(710);
+ok('has_intel:0 (as produced for an incomplete payload) preserves ALL existing intel columns, not just some',
+    afterGuarded.biology === 55 && afterGuarded.race_growth === 3, afterGuarded);
+
+// (b) A player who already has race values set keeps them even given a full, validly
+// has_intel:1 payload with DIFFERENT race values — write-once enforced via
+// getPlayerRaceValues, the way the route merges before calling the repo.
+players.upsertPlayerBasic(711, 'RaceLock', null);
+db.prepare(`
+    UPDATE players SET race_growth=10, race_science=11, race_culture=12, race_production=13,
+        race_speed=14, race_attack=15, race_defense=16, race_trader=17, race_sul=18, has_intel=1
+    WHERE id = 711
+`).run();
+const existingRace = players.getPlayerRaceValues(711);
+ok('getPlayerRaceValues reads back the stored race snapshot',
+    existingRace && existingRace.race_growth === 10 && existingRace.race_sul === 18
+    && existingRace.has_intel === 1, existingRace);
+
+const raceLockDetail = {
+    id: 711, name: 'RaceLock', alliance_id: null, level: 1, points: 0, ranking: null,
+    country: null, is_active_player: 1, joined: null, logins: 0,
+    last_activity_at: null, last_login_at: null, resigned_at: null,
+    number_of_battles: 0, battle_luckiness: 0, multi_status: null,
+    is_top_permanent_ranker: 0, has_supporter_badge: 0, supporter_type: null,
+    has_intel: 1,
+    biology: 1, economy: 1, energy: 1, mathematics: 1, physics: 1, social: 1,
+    trade_revenue: 1, artefact: null,
+    race_growth: 99, race_science: 99, race_culture: 99, race_production: 99, race_speed: 99,
+    race_attack: 99, race_defense: 99, race_trader: 99, race_sul: 99,
+};
+Object.assign(raceLockDetail, existingRace); // the route's write-once merge
+players.upsertPlayerFromApiDetail(raceLockDetail);
+const afterRaceLock = players.getPlayerFullById(711);
+ok('write-once: a player with existing race values keeps the OLD ones given a new detail payload',
+    afterRaceLock.race_growth === 10 && afterRaceLock.race_sul === 18 && afterRaceLock.biology === 1, afterRaceLock);
+
+// (c) A player with NO race values yet gets the API's values written normally.
+players.upsertPlayerBasic(712, 'FreshRace', null);
+const noRace = players.getPlayerRaceValues(712);
+// Race columns default to 0 (not NULL) for a fresh row — has_intel=0 is the real "no race
+// on record yet" signal (see getPlayerRaceValues's comment).
+ok('a player with no race on record yet has has_intel=0', noRace && noRace.has_intel === 0, noRace);
+players.upsertPlayerFromApiDetail({
+    id: 712, name: 'FreshRace', alliance_id: null, level: 1, points: 0, ranking: null,
+    country: null, is_active_player: 1, joined: null, logins: 0,
+    last_activity_at: null, last_login_at: null, resigned_at: null,
+    number_of_battles: 0, battle_luckiness: 0, multi_status: null,
+    is_top_permanent_ranker: 0, has_supporter_badge: 0, supporter_type: null,
+    has_intel: 1,
+    biology: 20, economy: 21, energy: 22, mathematics: 23, physics: 24, social: 25,
+    trade_revenue: 26, artefact: null,
+    race_growth: 1, race_science: 2, race_culture: 3, race_production: 4, race_speed: 5,
+    race_attack: 6, race_defense: 7, race_trader: 8, race_sul: 9,
+});
+const afterFreshRace = players.getPlayerFullById(712);
+ok('a player with no race on record gets the new race values written normally',
+    afterFreshRace.race_growth === 1 && afterFreshRace.race_sul === 9 && afterFreshRace.biology === 20, afterFreshRace);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

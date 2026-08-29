@@ -467,6 +467,147 @@ function getInterceptHomesByActiveUsers() {
     return getInterceptHomesByActiveUsersStmt.all({});
 }
 
+// --- players / player_name_history: write (game API integration) ---
+
+const getPlayerNameStmt = db.prepare(`SELECT name FROM players WHERE id = ?`);
+function getPlayerName(id) {
+    return getPlayerNameStmt.get(id);
+}
+
+const recordNameChangeStmt = db.prepare(`INSERT INTO player_name_history (player_id, old_name) VALUES (?, ?)`);
+function recordNameChange(playerId, oldName) {
+    recordNameChangeStmt.run(playerId, oldName);
+}
+
+// Logs the OLD name to player_name_history before a write changes it — the within-round
+// complement to round-archive.js's across-round alias tracking. Call this immediately
+// before any statement that sets players.name, for every source (scrape or API).
+function recordNameChangeIfDifferent(id, newName) {
+    if (!newName) return;
+    const current = getPlayerName(id);
+    if (current && current.name && current.name !== newName) {
+        recordNameChange(id, current.name);
+    }
+}
+
+// Read-only snapshot of a player's currently-stored race_* columns (plus has_intel) — used
+// to enforce the "race is write-once per round" rule at the route layer (see
+// upsertPlayerFromApiDetail's caller in sync.js). has_intel is included deliberately: the
+// race_* columns default to 0 (not NULL) for every freshly-created player row, so a plain
+// "is this column non-null" test would treat every player as already having race on record
+// and lock in zeros forever. has_intel is only ever set to 1 alongside a genuine race write
+// (both are governed by the same CASE guard), so it is the real "race is on record yet?"
+// signal — not the raw column value.
+const getPlayerRaceValuesStmt = db.prepare(`
+    SELECT race_growth, race_science, race_culture, race_production, race_speed,
+           race_attack, race_defense, race_trader, race_sul, has_intel
+    FROM players WHERE id = ?
+`);
+function getPlayerRaceValues(id) {
+    return getPlayerRaceValuesStmt.get(id);
+}
+
+// ListPlayer-sourced upsert: writes only the fields the bulk list actually returns. Never
+// touches home_planet_id/total_*/idle_time/eco_bonus/intel columns — the bulk list has no
+// data for them, and this must not risk nulling out what a deeper scrape already knows.
+// joined/country/ranking use COALESCE(excluded.x, players.x): ListPlayer can legitimately
+// omit these per-player (unranked, no recorded join date) and a straight overwrite would
+// silently null out a previously-known value (same pattern as Plan 1's systems fix and
+// upsertPlayerFromApiDetail below). name/alliance_id/level/points/is_active_player are
+// expected to always be present in a ListPlayer response, so they stay straight overwrites.
+const upsertPlayerFromApiListStmt = db.prepare(`
+    INSERT INTO players (id, name, alliance_id, level, points, ranking, country, is_active_player, joined)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+        name=excluded.name, alliance_id=excluded.alliance_id, level=excluded.level,
+        points=excluded.points,
+        ranking=COALESCE(excluded.ranking, players.ranking),
+        country=COALESCE(excluded.country, players.country),
+        is_active_player=excluded.is_active_player,
+        joined=COALESCE(excluded.joined, players.joined),
+        updated_at=CURRENT_TIMESTAMP
+`);
+function upsertPlayerFromApiList(id, name, allianceId, level, points, ranking, country, isActivePlayer, joined) {
+    upsertPlayerFromApiListStmt.run(id, name, allianceId, level, points, ranking, country, isActivePlayer, joined);
+}
+
+// Player/{id}-sourced upsert: same has_intel-CASE-guard shape as upsertPlayerFull above,
+// a SEPARATE statement (not shared) that never touches home_planet_id/total_*/idle_time/
+// eco_bonus — those are scrape-only, the API detail response has no data for them.
+const upsertPlayerFromApiDetailStmt = db.prepare(`
+    INSERT INTO players (
+        id, name, alliance_id, level, points, ranking, country,
+        is_active_player, joined, logins, last_activity_at, last_login_at, resigned_at,
+        number_of_battles, battle_luckiness, multi_status, is_top_permanent_ranker,
+        has_supporter_badge, supporter_type,
+        biology, economy, energy, mathematics, physics, social, trade_revenue, artefact,
+        race_growth, race_science, race_culture, race_production, race_speed, race_attack,
+        race_defense, race_trader, race_sul, has_intel, intel_updated_at
+    ) VALUES (
+        @id, @name, @alliance_id, @level, @points, @ranking, @country,
+        @is_active_player, @joined, @logins, @last_activity_at, @last_login_at, @resigned_at,
+        @number_of_battles, @battle_luckiness, @multi_status, @is_top_permanent_ranker,
+        @has_supporter_badge, @supporter_type,
+        @biology, @economy, @energy, @mathematics, @physics, @social, @trade_revenue, @artefact,
+        @race_growth, @race_science, @race_culture, @race_production, @race_speed, @race_attack,
+        @race_defense, @race_trader, @race_sul, @has_intel,
+        CASE WHEN @has_intel = 1 THEN CURRENT_TIMESTAMP ELSE NULL END
+    ) ON CONFLICT(id) DO UPDATE SET
+        name=excluded.name, alliance_id=excluded.alliance_id, level=excluded.level,
+        points=excluded.points, ranking=excluded.ranking, country=excluded.country,
+        is_active_player=excluded.is_active_player, joined=excluded.joined, logins=excluded.logins,
+        last_activity_at=excluded.last_activity_at, last_login_at=excluded.last_login_at,
+        resigned_at=excluded.resigned_at, number_of_battles=excluded.number_of_battles,
+        battle_luckiness=excluded.battle_luckiness, multi_status=excluded.multi_status,
+        is_top_permanent_ranker=excluded.is_top_permanent_ranker,
+        has_supporter_badge=excluded.has_supporter_badge, supporter_type=excluded.supporter_type,
+        updated_at=CURRENT_TIMESTAMP,
+
+        biology = CASE WHEN excluded.has_intel = 1 THEN excluded.biology ELSE players.biology END,
+        economy = CASE WHEN excluded.has_intel = 1 THEN excluded.economy ELSE players.economy END,
+        energy = CASE WHEN excluded.has_intel = 1 THEN excluded.energy ELSE players.energy END,
+        mathematics = CASE WHEN excluded.has_intel = 1 THEN excluded.mathematics ELSE players.mathematics END,
+        physics = CASE WHEN excluded.has_intel = 1 THEN excluded.physics ELSE players.physics END,
+        social = CASE WHEN excluded.has_intel = 1 THEN excluded.social ELSE players.social END,
+        trade_revenue = CASE WHEN excluded.has_intel = 1 THEN excluded.trade_revenue ELSE players.trade_revenue END,
+        artefact = CASE WHEN excluded.has_intel = 1 THEN excluded.artefact ELSE players.artefact END,
+        race_growth = CASE WHEN excluded.has_intel = 1 THEN excluded.race_growth ELSE players.race_growth END,
+        race_science = CASE WHEN excluded.has_intel = 1 THEN excluded.race_science ELSE players.race_science END,
+        race_culture = CASE WHEN excluded.has_intel = 1 THEN excluded.race_culture ELSE players.race_culture END,
+        race_production = CASE WHEN excluded.has_intel = 1 THEN excluded.race_production ELSE players.race_production END,
+        race_speed = CASE WHEN excluded.has_intel = 1 THEN excluded.race_speed ELSE players.race_speed END,
+        race_attack = CASE WHEN excluded.has_intel = 1 THEN excluded.race_attack ELSE players.race_attack END,
+        race_defense = CASE WHEN excluded.has_intel = 1 THEN excluded.race_defense ELSE players.race_defense END,
+        race_trader = CASE WHEN excluded.has_intel = 1 THEN excluded.race_trader ELSE players.race_trader END,
+        race_sul = CASE WHEN excluded.has_intel = 1 THEN excluded.race_sul ELSE players.race_sul END,
+        intel_updated_at = CASE WHEN excluded.has_intel = 1 THEN CURRENT_TIMESTAMP ELSE players.intel_updated_at END,
+        has_intel = CASE WHEN excluded.has_intel = 1 THEN 1 ELSE players.has_intel END
+`);
+function upsertPlayerFromApiDetail(player) {
+    upsertPlayerFromApiDetailStmt.run(player);
+}
+
+// Floored at 6 hours: without a WHERE clause the queue never empties even once every
+// player was scanned seconds ago, so the background sweep burns its budget forever
+// re-scanning slow-changing fields instead of yielding once the roster is genuinely fresh.
+const getStalePlayerIdsForApiScanStmt = db.prepare(`
+    SELECT id FROM players
+    WHERE last_api_scan_at IS NULL OR last_api_scan_at < datetime('now', '-6 hours')
+    ORDER BY (last_api_scan_at IS NULL) DESC, last_api_scan_at ASC
+    LIMIT ?
+`);
+function getStalePlayerIdsForApiScan(limit) {
+    return getStalePlayerIdsForApiScanStmt.all(limit).map(r => r.id);
+}
+
+// Arity varies per call (ids length) — prepared fresh each call, same reasoning as
+// systems.js's getSystemsByIds/alliances.js's deleteStaleAllianceMembers.
+function markPlayersApiScanned(ids) {
+    if (!ids.length) return;
+    const placeholders = ids.map(() => '?').join(',');
+    db.prepare(`UPDATE players SET last_api_scan_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`).run(...ids);
+}
+
 // --- players: read (discord-commands.js) ---
 
 const suggestPlayersByQueryStmt = db.prepare(`
@@ -501,4 +642,7 @@ module.exports = {
     getPlayerCombatStatsById, getPlayerCombatStatsByName, getPlayerWithAllianceByNameLower,
     getPlayerAllianceIdByName, getInterceptHomesByAlliance, getInterceptHomesByActiveUsers,
     suggestPlayersByQuery, suggestPlayersTopByPoints,
+    getPlayerName, recordNameChange, recordNameChangeIfDifferent, getPlayerRaceValues,
+    upsertPlayerFromApiList, upsertPlayerFromApiDetail,
+    getStalePlayerIdsForApiScan, markPlayersApiScanned,
 };
