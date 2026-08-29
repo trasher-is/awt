@@ -182,6 +182,12 @@ function initDatabase() {
         )
     `);
 
+    addColumn('systems', 'full_name', 'TEXT');
+    addColumn('systems', 'info', 'TEXT');
+    addColumn('systems', 'population_level', 'INTEGER');
+    addColumn('systems', 'is_in_vision', 'INTEGER');
+    addColumn('planets', 'name', 'TEXT');
+
     // 4.5 Alliance Meta-Data (Planning)
     db.exec(`
         CREATE TABLE IF NOT EXISTS planet_plans (
