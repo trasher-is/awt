@@ -12,6 +12,33 @@ everything in it describes what this repository actually does today — not an i
 These are not style preferences. Each one exists because breaking it has a cost outside
 this repository.
 
+### `main` is human-gated, always
+
+No agent merges to `main`. Not a local `git merge` on `main`, not `gh pr merge`, not a
+fast-forward push, not "the checks were green so I merged it". The only route into `main`
+is: branch, pull request, a **human** approves, a **human** merges.
+
+This is not distrust of any particular diff. `main` is what gets deployed to the live hub,
+and every other non-negotiable in this section — the traffic promise, the API budget, no
+captured player data in a public repository — is a promise made by a person to a person.
+A promise nobody checks is not being kept, and the human on the PR is that check.
+
+An agent may:
+
+- create a branch and push it
+- open a pull request, and push further commits to that PR's branch
+- run `npm test` and report the result in the PR
+
+An agent must not:
+
+- push to `main`, or force-push anything on `main`
+- merge, squash or rebase a pull request into `main`
+- approve a pull request, including its own
+- bypass a failing check, or merge with `--admin`, `--no-verify` or any equivalent
+- ask a human to rubber-stamp: the approval is a review, not a formality
+
+Urgency is not an exception. Say in the PR body that it is urgent, and let a person decide.
+
 ### The rate limit is a promise to a person
 
 `MAX_PER_SECOND = 5` in `public/js/utils/game-rate-limit.js` is an agreement with the
@@ -228,6 +255,13 @@ done
 npm test
 ```
 
+### Where an agent stops
+
+Opening the pull request is the last step an agent takes. After that the PR belongs to a
+human: they review it, they approve it, they merge it. An agent that has just pushed a
+green branch is finished — it says so and waits. See "`main` is human-gated, always"
+above.
+
 ### Commits and PRs
 
 Explain **why**, not what — the diff already says what. Name the failure the change
@@ -276,3 +310,4 @@ the production server may be backing files up by name.
 - [ ] Am I committing captured game data, or a translation I guessed?
 - [ ] Does a test scan source for the thing I just changed?
 - [ ] Does `npm test` pass on the merged state, not only on my branch?
+- [ ] Am I about to merge this myself? A human approves and merges to `main`.
