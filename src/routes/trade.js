@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../database');
 const { requireAuth, requireAdmin } = require('./_middleware');
 const playersRepo = require('../repositories/players');
+const alliancesRepo = require('../repositories/alliances');
 const router = express.Router();
 
 const MAX_TAS = 5;
@@ -12,12 +13,7 @@ const pairKey = (a, b) => [String(a).toLowerCase(), String(b).toLowerCase()].sor
 // (race_trader > 0), and only when we have intel to know that. The old
 // manual ta_traders list mis-tagged people whose race isn't actually trader.
 function getTraders() {
-    const rows = db.prepare(`
-        SELECT p.name
-        FROM alliance_member_stats ams
-        JOIN players p ON p.id = ams.player_id
-        WHERE p.has_intel = 1 AND p.race_trader > 0
-    `).all();
+    const rows = alliancesRepo.getTraders();
     return rows.map(r => r.name.toLowerCase());
 }
 
@@ -33,13 +29,7 @@ function getMembers() {
     const ppRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'pp_price'`).get();
     const ppPrice = ppRow ? parseFloat(ppRow.value) || 0 : 0;
 
-    const rows = db.prepare(`
-        SELECT p.name, p.has_intel, p.race_trader,
-               ams.hoarded_au, ams.astro_dollars, ams.production_points, ams.production_rate
-        FROM alliance_member_stats ams
-        JOIN players p ON p.id = ams.player_id
-        ORDER BY p.name COLLATE NOCASE ASC
-    `).all();
+    const rows = alliancesRepo.getMembersWithStats();
 
     return rows.map(r => {
         const visible = parseLocaleNumber(r.astro_dollars) + parseLocaleNumber(r.production_points) * ppPrice;
@@ -104,11 +94,7 @@ function validatePair(aName, bName) {
 
 // Resolve a member's canonical display name (case-correct) from the roster.
 function canonicalName(name) {
-    const row = db.prepare(`
-        SELECT p.name FROM alliance_member_stats ams
-        JOIN players p ON p.id = ams.player_id
-        WHERE p.name = ? COLLATE NOCASE LIMIT 1
-    `).get(name);
+    const row = alliancesRepo.getCanonicalNameFromStats(name);
     return row ? row.name : name;
 }
 
@@ -263,11 +249,7 @@ router.post('/sync/trade-inventory', requireAuth, (req, res) => {
     try {
         const row = playersRepo.getPlayerIdByName(me);
         if (!row) return res.json({ success: true, stored: false });
-        db.prepare(`
-            INSERT INTO alliance_member_stats (player_id, hoarded_au, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(player_id) DO UPDATE SET hoarded_au = excluded.hoarded_au, updated_at = CURRENT_TIMESTAMP
-        `).run(row.id, value);
+        alliancesRepo.upsertHoardedAu(row.id, value);
         res.json({ success: true, stored: true });
     } catch (e) {
         console.error('[DB Error] sync trade-inventory:', e);

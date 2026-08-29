@@ -4,6 +4,7 @@ const systemsRepo = require('./repositories/systems');
 const fleetsRepo = require('./repositories/fleets');
 const plansRepo = require('./repositories/plans');
 const playersRepo = require('./repositories/players');
+const alliancesRepo = require('./repositories/alliances');
 const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
 const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require('./utils/covering');
 // The battle model — the same physical file the dashboard calculator imports, so
@@ -473,13 +474,7 @@ async function handleMessage(message) {
     // !intels - TEXT-BASED INTERACTIVE DRILLDOWN
     // ----------------------------------------------------
     if (command === 'intels') {
-        const alliancesWithIntel = db.prepare(`
-            SELECT DISTINCT a.id, a.tag
-            FROM alliances a
-            JOIN players p ON p.alliance_id = a.id
-            WHERE p.has_intel = 1
-            ORDER BY a.tag ASC
-        `).all();
+        const alliancesWithIntel = alliancesRepo.getWarRoomAllianceIntelTags();
 
         // FIXED: Added missing 'p' alias to prevent SQLITE_ERROR
         const solosCount = playersRepo.countUnaffiliatedIntelPlayers();
