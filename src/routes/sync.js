@@ -767,6 +767,33 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
     }
 });
 
+// --- BATTLE REPORT SHIP-DETAIL CLAIM ---
+// Same optimistic-claim pattern as /sync/player-scan-claim (Plan 3): "claiming" is just
+// bumping ship_detail_scraped_at now. A battle report's ship detail never changes once
+// scraped (it's an immutable historical record), so unlike the player sweep this needs no
+// staleness re-check — a report is either scraped or it isn't.
+router.post('/sync/battle-report-ship-detail-claim', requireAuth, (req, res) => {
+    const limit = Math.min(parseInt(req.body && req.body.limit, 10) || 10, 50);
+    const ids = battleReportsRepo.getReportsNeedingShipDetail(limit);
+    if (ids.length) battleReportsRepo.markShipDetailScraped(ids);
+    res.json({ success: true, ids });
+});
+
+// --- BATTLE REPORT SHIP-DETAIL RECEIVER ---
+router.post('/sync/battle-report-ship-detail', requireAuth, (req, res) => {
+    const { id, ...detail } = req.body || {};
+    if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: 'Invalid payload' });
+    }
+    try {
+        battleReportsRepo.updateShipDetail(id, detail);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(`[DB Error] Failed to sync battle report ship detail ${id}:`, err.message);
+        res.status(500).json({ error: 'Database sync failed' });
+    }
+});
+
 // --- STARBASE ORDER AUDIT RECEIVER ---
 // One row per starbase-order geometry PUT the member's browser confirmed against the
 // game API (the hub never sends that PUT itself). The actor comes from the session, not
