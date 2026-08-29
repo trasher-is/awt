@@ -7,6 +7,7 @@ const playersRepo = require('./repositories/players');
 const alliancesRepo = require('./repositories/alliances');
 const usersRepo = require('./repositories/users');
 const discordTimersRepo = require('./repositories/discordTimers');
+const incomingRepo = require('./repositories/incoming');
 const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
 const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require('./utils/covering');
 // The battle model — the same physical file the dashboard calculator imports, so
@@ -1639,20 +1640,12 @@ async function sendOrEditIncoming(alertKey, content) {
     // Discord hard-caps message content at 2000 chars.
     const text = content.length > 1990 ? content.slice(0, 1987) + '...' : content;
 
-    const record = (msgId) => db.prepare(`
-        INSERT INTO incoming_msgs (alert_key, channel_id, message_id) VALUES (?, ?, ?)
-        ON CONFLICT(alert_key) DO UPDATE SET
-            channel_id = excluded.channel_id,
-            message_id = excluded.message_id,
-            updated_at = CURRENT_TIMESTAMP
-    `).run(alertKey, channelId, msgId);
+    const record = (msgId) => incomingRepo.upsertMessageRef(alertKey, channelId, msgId);
 
     // Try to edit the existing alert first (same attack, same channel).
     let existing = null;
     try {
-        existing = alertKey != null
-            ? db.prepare(`SELECT message_id, channel_id FROM incoming_msgs WHERE alert_key = ?`).get(alertKey)
-            : null;
+        existing = alertKey != null ? incomingRepo.getMessageRef(alertKey) : null;
     } catch (err) { existing = null; }
 
     const components = alertKey != null ? [coverButtonRow(alertKey)] : [];
@@ -1687,7 +1680,7 @@ async function updateIncomingCover(alertKey) {
     if (!client.isReady() || alertKey == null) return false;
     let row;
     try {
-        row = db.prepare(`SELECT message_id, channel_id FROM incoming_msgs WHERE alert_key = ?`).get(alertKey);
+        row = incomingRepo.getMessageRef(alertKey);
     } catch (e) { return false; }
     if (!row || !row.message_id || !row.channel_id) return false;
 
