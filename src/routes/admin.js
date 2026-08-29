@@ -9,6 +9,7 @@ const fleetsRepo = require('../repositories/fleets');
 const plansRepo = require('../repositories/plans');
 const playersRepo = require('../repositories/players');
 const alliancesRepo = require('../repositories/alliances');
+const battleReportsRepo = require('../repositories/battleReports');
 const usersRepo = require('../repositories/users');
 const settingsRepo = require('../repositories/settings');
 const { archiveRound, listRounds, roundDetail } = require('../utils/round-archive');
@@ -311,7 +312,7 @@ router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
             // Battle reports describe battles on the map being wiped — they go with it.
             // starbase_order_audit is deliberately NOT here: it is an operations record
             // of who sent what through the hub, and that stays true across rounds.
-            db.prepare(`DELETE FROM battle_reports`).run();
+            battleReportsRepo.deleteAllBattleReports();
             systemsRepo.deleteAllPlanets();
             playersRepo.deleteAllPlayers();
             alliancesRepo.deleteAllAlliances();
