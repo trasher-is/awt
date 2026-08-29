@@ -174,17 +174,8 @@ async function searchLiveViaApi(type, q, resultsContainer) {
                 resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">${res.reason === 'session' ? 'Log into the game first, then try again.' : `The game did not answer: ${describeApiError(res)}`}</div>`;
                 return;
             }
-            const players = (Array.isArray(res.data) ? res.data : []).map(p => ({
-                id: p.id,
-                name: typeof p.name === 'string' ? p.name : null,
-                alliance_id: Number.isInteger(p.allianceId) ? p.allianceId : null,
-                level: Number.isInteger(p.playerLevel) ? p.playerLevel : null,
-                points: Number.isInteger(p.pointsScored) ? p.pointsScored : null,
-                rank: Number.isInteger(p.rank) ? p.rank : null,
-                country: typeof p.playsFromCountryCode === 'string' ? p.playsFromCountryCode : null,
-                is_active_player: !!p.isActivePlayer,
-                joined: typeof p.joinedAt === 'string' ? p.joinedAt : null,
-            }));
+            // The ONE shared API->sync mapper (aw-api.js) — never a local copy of it.
+            const { players } = AWApi.mapPlayersToSyncPayload(res.data);
             if (players.length) {
                 const syncRes = await fetch('/hub-api/sync/player-list', {
                     method: 'POST',

@@ -7,10 +7,14 @@
 //   2. Player/{id} sweep: a slow, staleness-ordered background scan filling in the
 //      activity/status fields ListPlayer doesn't have. Claims a batch via
 //      /hub-api/sync/player-scan-claim (see that route's comment for what "claim" means
-//      here), then calls Player/{id} once per claimed id, respecting a local per-account
-//      budget (game admin's 200-calls-per-5-minutes limit, of which this background job
-//      may use up to BACKGROUND_BUDGET — the rest is reserved for a member's own deliberate
-//      lookups elsewhere in the hub).
+//      here), then calls Player/{id} once per claimed id. There is no rolling per-account
+//      budget constant — SWEEP_BATCH_SIZE simply caps how many ids a single tick claims
+//      (15 calls, once a minute, well under the game admin's 200-calls-per-5-minutes
+//      limit), leaving the rest of that allowance for a member's own deliberate lookups
+//      elsewhere in the hub. A re-entrancy flag (`sweeping`) keeps a slow tick from
+//      overlapping the next scheduled one; the staleness query itself also floors out once
+//      every player was scanned within the last 6 hours, so a fully-caught-up roster lets
+//      the sweep go idle instead of burning calls re-scanning fields that haven't changed.
 //
 // Cross-tab dedup follows battle-sync.js's localStorage-lock pattern exactly.
 
@@ -62,22 +66,17 @@ async function runListPull() {
     try {
         const res = await AWApi.getPlayers();
         if (!res.ok || !Array.isArray(res.data) || !res.data.length) return;
-        const players = res.data.map(p => ({
-            id: p.id,
-            name: typeof p.name === 'string' ? p.name : null,
-            alliance_id: Number.isInteger(p.allianceId) ? p.allianceId : null,
-            level: Number.isInteger(p.playerLevel) ? p.playerLevel : null,
-            points: Number.isInteger(p.pointsScored) ? p.pointsScored : null,
-            rank: Number.isInteger(p.rank) ? p.rank : null,
-            country: typeof p.playsFromCountryCode === 'string' ? p.playsFromCountryCode : null,
-            is_active_player: !!p.isActivePlayer,
-            joined: typeof p.joinedAt === 'string' ? p.joinedAt : null,
-        }));
-        await fetch('/hub-api/sync/player-list', {
+        // The ONE shared API->sync mapper (aw-api.js) — never a local copy of it.
+        const { players } = AWApi.mapPlayersToSyncPayload(res.data);
+        const syncRes = await fetch('/hub-api/sync/player-list', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ players }),
         });
+        const syncBody = await syncRes.json().catch(() => ({}));
+        if (!syncRes.ok || !syncBody.success) {
+            console.warn('[PlayerApiSync] list sync rejected:', syncRes.status, syncBody.error || '');
+        }
     } catch (err) {
         console.warn('[PlayerApiSync] list pull failed:', err.message);
     }
@@ -92,11 +91,23 @@ async function scheduleNextListPull() {
     }, cadence);
 }
 
+let sweeping = false;
 async function runSweepTick() {
+    // Re-entrancy guard: a tick can easily run long (up to SWEEP_BATCH_SIZE sequential
+    // getPlayer calls + POSTs can exceed the 60s interval), and the cross-tab
+    // claimLock/localStorage check above solves a DIFFERENT problem (another tab/window
+    // running its own tick), not this one — an overlapping tick in the SAME tab would
+    // otherwise always re-claim successfully and ticks could stack with no ceiling.
+    if (sweeping) return;
     if (!claimLock(SWEEP_LOCK_KEY, SWEEP_LOCK_TTL_MS)) return;
+    sweeping = true;
     try {
-        const claimRes = await fetch(`/hub-api/sync/player-scan-claim?limit=${SWEEP_BATCH_SIZE}`);
+        const claimRes = await fetch(`/hub-api/sync/player-scan-claim?limit=${SWEEP_BATCH_SIZE}`, { method: 'POST' });
         const claimed = await claimRes.json().catch(() => ({}));
+        if (!claimRes.ok || !claimed.success) {
+            console.warn('[PlayerApiSync] scan-claim failed:', claimRes.status, claimed.error || '');
+            return;
+        }
         const ids = Array.isArray(claimed.ids) ? claimed.ids : [];
         for (const id of ids) {
             const res = await AWApi.getPlayer(id);
@@ -141,14 +152,20 @@ async function runSweepTick() {
                 race_trader: intel && intel.race ? intel.race.trader : null,
                 race_sul: intel && intel.race ? intel.race.sul : null,
             };
-            await fetch('/hub-api/sync/player-detail', {
+            const detailRes = await fetch('/hub-api/sync/player-detail', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ player }),
             });
+            const detailBody = await detailRes.json().catch(() => ({}));
+            if (!detailRes.ok || !detailBody.success) {
+                console.warn('[PlayerApiSync] player-detail sync failed for', id, detailRes.status, detailBody.error || '');
+            }
         }
     } catch (err) {
         console.warn('[PlayerApiSync] sweep tick failed:', err.message);
+    } finally {
+        sweeping = false;
     }
 }
 

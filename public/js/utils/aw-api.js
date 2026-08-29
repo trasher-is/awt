@@ -244,12 +244,33 @@
         return { systems };
     }
 
+    // API ListPlayer objects (getPlayers/searchPlayers shape) -> the existing POST
+    // /hub-api/sync/player-list body. The ONE shared mapper: the background sweep's list
+    // pull (player-api-sync.js) and the manual live-search fallback (search.js) both use
+    // it, so the API-sourced payload can never drift between the two call sites.
+    function mapPlayersToSyncPayload(apiPlayers) {
+        const players = (Array.isArray(apiPlayers) ? apiPlayers : [])
+            .filter(p => p && typeof p === 'object')
+            .map(p => ({
+                id: p.id,
+                name: typeof p.name === 'string' ? p.name : null,
+                alliance_id: Number.isInteger(p.allianceId) ? p.allianceId : null,
+                level: Number.isInteger(p.playerLevel) ? p.playerLevel : null,
+                points: Number.isInteger(p.pointsScored) ? p.pointsScored : null,
+                rank: Number.isInteger(p.rank) ? p.rank : null,
+                country: typeof p.playsFromCountryCode === 'string' ? p.playsFromCountryCode : null,
+                is_active_player: !!p.isActivePlayer,
+                joined: typeof p.joinedAt === 'string' ? p.joinedAt : null,
+            }));
+        return { players };
+    }
+
     return {
         getSolarSystems, getSolarSystem, getSystemPlanets, getMapSectors,
         getTravelTime, searchBattleReports, putOrderGeometry,
         searchAlliances, searchSolarSystems,
         getPlayers, getPlayer, searchPlayers,
-        mapPlanetsToSyncPayload, mapSolarSystemsToSyncPayload,
+        mapPlanetsToSyncPayload, mapSolarSystemsToSyncPayload, mapPlayersToSyncPayload,
         _setFetch,
     };
 });

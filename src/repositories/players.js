@@ -479,16 +479,52 @@ function recordNameChange(playerId, oldName) {
     recordNameChangeStmt.run(playerId, oldName);
 }
 
+// Logs the OLD name to player_name_history before a write changes it — the within-round
+// complement to round-archive.js's across-round alias tracking. Call this immediately
+// before any statement that sets players.name, for every source (scrape or API).
+function recordNameChangeIfDifferent(id, newName) {
+    if (!newName) return;
+    const current = getPlayerName(id);
+    if (current && current.name && current.name !== newName) {
+        recordNameChange(id, current.name);
+    }
+}
+
+// Read-only snapshot of a player's currently-stored race_* columns (plus has_intel) — used
+// to enforce the "race is write-once per round" rule at the route layer (see
+// upsertPlayerFromApiDetail's caller in sync.js). has_intel is included deliberately: the
+// race_* columns default to 0 (not NULL) for every freshly-created player row, so a plain
+// "is this column non-null" test would treat every player as already having race on record
+// and lock in zeros forever. has_intel is only ever set to 1 alongside a genuine race write
+// (both are governed by the same CASE guard), so it is the real "race is on record yet?"
+// signal — not the raw column value.
+const getPlayerRaceValuesStmt = db.prepare(`
+    SELECT race_growth, race_science, race_culture, race_production, race_speed,
+           race_attack, race_defense, race_trader, race_sul, has_intel
+    FROM players WHERE id = ?
+`);
+function getPlayerRaceValues(id) {
+    return getPlayerRaceValuesStmt.get(id);
+}
+
 // ListPlayer-sourced upsert: writes only the fields the bulk list actually returns. Never
 // touches home_planet_id/total_*/idle_time/eco_bonus/intel columns — the bulk list has no
 // data for them, and this must not risk nulling out what a deeper scrape already knows.
+// joined/country/ranking use COALESCE(excluded.x, players.x): ListPlayer can legitimately
+// omit these per-player (unranked, no recorded join date) and a straight overwrite would
+// silently null out a previously-known value (same pattern as Plan 1's systems fix and
+// upsertPlayerFromApiDetail below). name/alliance_id/level/points/is_active_player are
+// expected to always be present in a ListPlayer response, so they stay straight overwrites.
 const upsertPlayerFromApiListStmt = db.prepare(`
     INSERT INTO players (id, name, alliance_id, level, points, ranking, country, is_active_player, joined)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
         name=excluded.name, alliance_id=excluded.alliance_id, level=excluded.level,
-        points=excluded.points, ranking=excluded.ranking, country=excluded.country,
-        is_active_player=excluded.is_active_player, joined=excluded.joined,
+        points=excluded.points,
+        ranking=COALESCE(excluded.ranking, players.ranking),
+        country=COALESCE(excluded.country, players.country),
+        is_active_player=excluded.is_active_player,
+        joined=COALESCE(excluded.joined, players.joined),
         updated_at=CURRENT_TIMESTAMP
 `);
 function upsertPlayerFromApiList(id, name, allianceId, level, points, ranking, country, isActivePlayer, joined) {
@@ -551,8 +587,12 @@ function upsertPlayerFromApiDetail(player) {
     upsertPlayerFromApiDetailStmt.run(player);
 }
 
+// Floored at 6 hours: without a WHERE clause the queue never empties even once every
+// player was scanned seconds ago, so the background sweep burns its budget forever
+// re-scanning slow-changing fields instead of yielding once the roster is genuinely fresh.
 const getStalePlayerIdsForApiScanStmt = db.prepare(`
     SELECT id FROM players
+    WHERE last_api_scan_at IS NULL OR last_api_scan_at < datetime('now', '-6 hours')
     ORDER BY (last_api_scan_at IS NULL) DESC, last_api_scan_at ASC
     LIMIT ?
 `);
@@ -602,6 +642,7 @@ module.exports = {
     getPlayerCombatStatsById, getPlayerCombatStatsByName, getPlayerWithAllianceByNameLower,
     getPlayerAllianceIdByName, getInterceptHomesByAlliance, getInterceptHomesByActiveUsers,
     suggestPlayersByQuery, suggestPlayersTopByPoints,
-    getPlayerName, recordNameChange, upsertPlayerFromApiList, upsertPlayerFromApiDetail,
+    getPlayerName, recordNameChange, recordNameChangeIfDifferent, getPlayerRaceValues,
+    upsertPlayerFromApiList, upsertPlayerFromApiDetail,
     getStalePlayerIdsForApiScan, markPlayersApiScanned,
 };

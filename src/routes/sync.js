@@ -143,6 +143,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 // leaves name alone on conflict (the alliance-profile sync owns the real
                 // name). `?? ''` because alliances.name is NOT NULL and a tag can be absent.
                 if (p.owner.alliance_id) alliancesRepo.upsertAllianceBasic(p.owner.alliance_id, p.owner.alliance_tag ?? null, p.owner.alliance_tag ?? '');
+                playersRepo.recordNameChangeIfDifferent(p.owner.id, typeof p.owner.name === 'string' ? p.owner.name : null);
                 playersRepo.upsertPlayerBasic(p.owner.id, p.owner.name, p.owner.alliance_id || null);
             }
 
@@ -249,10 +250,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
 
     const oldPlayer = playersRepo.getPlayerRestartCheck(p.id);
 
-    const oldName = playersRepo.getPlayerName(p.id);
-    if (oldName && oldName.name && safePlayer.name && oldName.name !== safePlayer.name) {
-        playersRepo.recordNameChange(p.id, oldName.name);
-    }
+    playersRepo.recordNameChangeIfDifferent(p.id, safePlayer.name);
 
     const syncTransaction = db.transaction((player) => {
         // Restart detection. Planet ownership is NEVER touched here — that belongs to
@@ -313,8 +311,12 @@ router.post('/sync/player', requireAuth, (req, res) => {
 // reservation. If the caller's browser fails to actually scan them, they simply become
 // stale again after one full sweep cycle and get offered to whoever asks next. See this
 // plan's Global Constraints for why a full claims table wasn't built.
-router.get('/sync/player-scan-claim', requireAuth, (req, res) => {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 200);
+// POST, not GET: this mutates last_api_scan_at for up to 200 rows on every call, which
+// would otherwise be a write reachable via a bare GET (accidental browser prefetch/retry),
+// bypassing the guest-write gate that only inspects the verb (see _middleware.js).
+router.post('/sync/player-scan-claim', requireAuth, (req, res) => {
+    const rawLimit = (req.body && req.body.limit != null) ? req.body.limit : req.query.limit;
+    const limit = Math.min(parseInt(rawLimit, 10) || 20, 200);
     const ids = playersRepo.getStalePlayerIdsForApiScan(limit);
     if (ids.length) playersRepo.markPlayersApiScanned(ids);
     res.json({ success: true, ids });
@@ -329,11 +331,8 @@ router.post('/sync/player-list', requireAuth, (req, res) => {
     let stored = 0;
     for (const p of players) {
         if (!Number.isInteger(p.id) || p.id <= 0) continue;
-        const oldName = playersRepo.getPlayerName(p.id);
         const newName = typeof p.name === 'string' ? p.name : null;
-        if (oldName && oldName.name && newName && oldName.name !== newName) {
-            playersRepo.recordNameChange(p.id, oldName.name);
-        }
+        playersRepo.recordNameChangeIfDifferent(p.id, newName);
         playersRepo.upsertPlayerFromApiList(
             p.id, newName,
             Number.isInteger(p.alliance_id) ? p.alliance_id : null,
@@ -349,19 +348,69 @@ router.post('/sync/player-list', requireAuth, (req, res) => {
     res.json({ success: true, count: stored });
 });
 
+// Every intel field a valid API IntelligenceReport is expected to carry when it's present
+// at all. artefact is deliberately excluded from the "must be a finite number" check below
+// (it's a nullable string column — legitimately null whenever the player has no active
+// artefact, same as the scrape path's safePlayer treats it) — it's checked separately.
+const INTEL_NUMERIC_FIELDS = [
+    'biology', 'economy', 'energy', 'mathematics', 'physics', 'social', 'trade_revenue',
+    'race_growth', 'race_science', 'race_culture', 'race_production', 'race_speed',
+    'race_attack', 'race_defense', 'race_trader', 'race_sul',
+];
+const RACE_FIELDS = [
+    'race_growth', 'race_science', 'race_culture', 'race_production', 'race_speed',
+    'race_attack', 'race_defense', 'race_trader', 'race_sul',
+];
+
+// Guards against Finding 1's failure class (see issues #46/#48): the scrape path normalizes
+// every field before binding (safePlayer above), so upsertPlayerFull's has_intel CASE guard
+// is only ever fed a fully-formed row. The API detail path has no equivalent normalization
+// upstream — player-api-sync.js maps each intel field independently from the API's
+// IntelligenceReport, so a missing/misnamed sub-object (e.g. `race`) can silently produce a
+// payload with has_intel:1 and every race_* field null. Trusting that signal would permanently
+// null out a player's hard-won intel through the CASE guard. So: has_intel is only honored
+// when EVERY numeric intel field actually arrived as a real number, and artefact is either a
+// string or explicitly null.
+function hasCompleteIntel(p) {
+    if (!INTEL_NUMERIC_FIELDS.every(f => typeof p[f] === 'number' && Number.isFinite(p[f]))) return false;
+    if (p.artefact !== null && typeof p.artefact !== 'string') return false;
+    return true;
+}
+
 // --- PLAYER DETAIL RECEIVER (Player/{id} sync) ---
 router.post('/sync/player-detail', requireAuth, (req, res) => {
     const p = req.body && req.body.player;
     if (!p || !Number.isInteger(p.id) || p.id <= 0) {
         return res.status(400).json({ error: 'Invalid payload' });
     }
-    const oldName = playersRepo.getPlayerName(p.id);
+
     const newName = typeof p.name === 'string' ? p.name : null;
-    if (oldName && oldName.name && newName && oldName.name !== newName) {
-        playersRepo.recordNameChange(p.id, oldName.name);
+    playersRepo.recordNameChangeIfDifferent(p.id, newName);
+
+    // Normalize before touching SQL — see hasCompleteIntel above. Never trust the API
+    // path's own has_intel flag directly; only honor it when every intel field it implies
+    // actually arrived intact. A partial/malformed payload falls back to has_intel:0, so
+    // the upsert's CASE guard preserves ALL existing intel columns together rather than
+    // risking a partial (silently corrupting) overwrite.
+    const detail = { ...p, name: newName, has_intel: (p.has_intel && hasCompleteIntel(p)) ? 1 : 0 };
+
+    // Race is write-once per round: once a player has ANY race_* value on record, a later
+    // detail sync must not be allowed to change it, even when has_intel validly resolves to
+    // 1. Overwrite the incoming payload's race_* fields with whatever is already stored, so
+    // the upsert's own CASE guard just re-writes the same values (a no-op in effect). A
+    // player with no race on record yet still gets the API's values written normally.
+    if (detail.has_intel === 1) {
+        const existingRace = playersRepo.getPlayerRaceValues(p.id);
+        // has_intel, not "is the column non-zero", is the real "race already on record"
+        // signal — race_* columns default to 0 for every player row, so testing the raw
+        // value would lock in zeros for every player on their very first detail sync.
+        if (existingRace && existingRace.has_intel) {
+            for (const f of RACE_FIELDS) detail[f] = existingRace[f];
+        }
     }
+
     try {
-        playersRepo.upsertPlayerFromApiDetail(p);
+        playersRepo.upsertPlayerFromApiDetail(detail);
         res.json({ success: true });
     } catch (err) {
         console.error(`[DB Error] Failed to sync player detail ${p.id}:`, err);
@@ -409,6 +458,7 @@ router.post('/sync/alliance', requireAuth, (req, res) => {
         // 2. Map all members to this Alliance
         if (Array.isArray(a.members)) {
             for (const member of a.members) {
+                playersRepo.recordNameChangeIfDifferent(member.id, typeof member.name === 'string' ? member.name : null);
                 playersRepo.upsertAllianceMemberBasic(member.id, member.name, a.id);
             }
         }
@@ -599,6 +649,7 @@ router.post('/sync/alliance-stats', requireAuth, (req, res) => {
                 s.economy, s.energy, s.mathematics, s.physics, s.population
             );
 
+            playersRepo.recordNameChangeIfDifferent(s.player_id, typeof s.name === 'string' ? s.name : null);
             playersRepo.upsertPlayerNameOnly(s.player_id, s.name);
 
             // Replace this member's stationed fleets so positions stay fresh and stale
