@@ -8,6 +8,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const db = require('../database');
+const settingsRepo = require('../repositories/settings');
 const router = express.Router();
 
 // Shared password + the opaque token stored in the cookie once you've entered it. Low
@@ -99,7 +100,7 @@ router.post('/plans', (req, res) => {
 //   { players: [{ name, production }], done: ["a|b", ...] }  (done keys are sorted names)
 router.get('/ta', (req, res) => {
     try {
-        const row = db.prepare(`SELECT value FROM app_settings WHERE key = 'rz_ta'`).get();
+        const row = settingsRepo.getSetting('rz_ta');
         const data = row && row.value ? JSON.parse(row.value) : { players: [], done: [] };
         res.json({ success: true, data });
     } catch (err) {
@@ -134,10 +135,7 @@ router.post('/ta', (req, res) => {
             })).filter(p => p.name),
             trades
         };
-        db.prepare(`
-            INSERT INTO app_settings (key, value, updated_at) VALUES ('rz_ta', ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-        `).run(JSON.stringify(clean));
+        settingsRepo.setSetting('rz_ta', JSON.stringify(clean));
         res.json({ success: true });
     } catch (err) {
         console.error('[rzhub] TA save failed:', err.message);
