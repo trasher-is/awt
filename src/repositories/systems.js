@@ -108,15 +108,24 @@ function upsertSystemStub(id) {
 }
 
 const upsertSystemFullStmt = db.prepare(`
-    INSERT INTO systems (id, name, x, y) VALUES (?, ?, ?, ?)
+    INSERT INTO systems (id, name, x, y, full_name, info, population_level)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
         name=excluded.name,
         x=excluded.x,
         y=excluded.y,
+        full_name=excluded.full_name,
+        info=excluded.info,
+        population_level=excluded.population_level,
         updated_at=CURRENT_TIMESTAMP
 `);
-function upsertSystemFull(id, name, x, y) {
-    upsertSystemFullStmt.run(id, name, x, y);
+function upsertSystemFull(id, name, x, y, fullName = null, info = null, populationLevel = null) {
+    upsertSystemFullStmt.run(id, name, x, y, fullName, info, populationLevel);
+}
+
+const setSystemInVisionStmt = db.prepare(`UPDATE systems SET is_in_vision = ? WHERE id = ?`);
+function setSystemInVision(id, isInVision) {
+    setSystemInVisionStmt.run(isInVision ? 1 : 0, id);
 }
 
 const deleteAllSystemsStmt = db.prepare(`DELETE FROM systems`);
@@ -242,8 +251,8 @@ function getPlanetOwnerName(systemId, planetIndex) {
 }
 
 const upsertPlanetStmt = db.prepare(`
-    INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet, is_sieged)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet, is_sieged, name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(system_id, planet_index) DO UPDATE SET
         game_planet_id=excluded.game_planet_id,
         owner_id=excluded.owner_id,
@@ -251,10 +260,11 @@ const upsertPlanetStmt = db.prepare(`
         starbase=excluded.starbase,
         has_fleet=excluded.has_fleet,
         is_sieged=excluded.is_sieged,
+        name=COALESCE(excluded.name, planets.name),
         updated_at=CURRENT_TIMESTAMP
 `);
-function upsertPlanet(gamePlanetId, systemId, planetIndex, ownerId, population, starbase, hasFleet, isSieged) {
-    upsertPlanetStmt.run(gamePlanetId, systemId, planetIndex, ownerId, population, starbase, hasFleet, isSieged);
+function upsertPlanet(gamePlanetId, systemId, planetIndex, ownerId, population, starbase, hasFleet, isSieged, name = null) {
+    upsertPlanetStmt.run(gamePlanetId, systemId, planetIndex, ownerId, population, starbase, hasFleet, isSieged, name);
 }
 
 // A planet's game_planet_id is globally UNIQUE, but it can show up at a new
@@ -344,7 +354,7 @@ module.exports = {
     countSystems, countPlanets, getSystemCoords, getFullSystem, listSystemIds, getSystemsByIds,
     listSystemsWithCoordsLimited, searchSystemsByQueryPrefix, searchSystemsByNameOrId,
     getSystemsDbSummary, getGalaxyMapSystems, getGalaxyMapOwnership, upsertSystemStub,
-    upsertSystemFull, deleteAllSystems, countBestGuardedAt, clearBestGuarded, insertBestGuarded,
+    upsertSystemFull, setSystemInVision, deleteAllSystems, countBestGuardedAt, clearBestGuarded, insertBestGuarded,
     getSystemPlanetsWithIntel, getSystemPlanetsForBot, getPlanetsFullDb,
     getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getOldPlanet, upsertPlanet,
     getPlanetsForAllianceTag, getPlanetOwnerName,
