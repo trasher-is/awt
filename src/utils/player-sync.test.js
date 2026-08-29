@@ -9,6 +9,12 @@
 // of its reach, so a misfiring heuristic can no longer erase hard-won intel. This is a
 // source-scan because the property is about which columns the statement names — it cannot be
 // probed without a live restart against a real scraped payload.
+//
+// The reset UPDATE and the upsert now live in src/repositories/players.js (extracted from
+// sync.js by the database-call refactor), not in sync.js itself — sync.js just calls
+// playersRepo.resetPlayerOnRestart()/playersRepo.upsertPlayerFull(). This suite checks the
+// repository module directly, plus that sync.js still wires the restart-detection block to
+// the fleets-clear and the reset in the right order.
 
 const path = require('path');
 const fs = require('fs');
@@ -23,16 +29,23 @@ const readCode = rel => fs.readFileSync(path.join(__dirname, '..', '..', rel), '
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .split('\n').map(l => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n');
 
-const src = readCode('src/routes/sync.js');
+const syncSrc = readCode('src/routes/sync.js');
+const playersRepoSrc = readCode('src/repositories/players.js');
 
-// Isolate the restart-reset UPDATE: from the DELETE FROM fleets that opens the block to the
-// WHERE id = ? that closes its UPDATE.
-const resetStart = src.indexOf('DELETE FROM fleets WHERE owner_id = ?');
-ok('the restart-reset block exists', resetStart !== -1);
-const updateStart = src.indexOf('UPDATE players SET', resetStart);
-const updateEnd = src.indexOf('WHERE id = ?', updateStart);
-ok('the reset UPDATE exists', updateStart !== -1 && updateEnd !== -1);
-const resetUpdate = src.slice(updateStart, updateEnd);
+// The restart-detection block in sync.js must still clear fleets before resetting the
+// player, via the repository layer (not raw SQL — that moved to players.js/fleets.js).
+const deleteFleetsIdx = syncSrc.indexOf('fleetsRepo.deleteFleetsByOwner(player.id)');
+ok('the restart-reset block clears fleets via the repository layer', deleteFleetsIdx !== -1);
+const resetCallIdx = syncSrc.indexOf('playersRepo.resetPlayerOnRestart(player.id)', deleteFleetsIdx);
+ok('and resets the player via the repository layer, after clearing fleets',
+    deleteFleetsIdx !== -1 && resetCallIdx > deleteFleetsIdx);
+
+// Isolate the restart-reset UPDATE inside players.js: from its statement declaration to the
+// WHERE id = ? that closes it.
+const updateStart = playersRepoSrc.indexOf('UPDATE players SET', playersRepoSrc.indexOf('resetPlayerOnRestartStmt'));
+const updateEnd = playersRepoSrc.indexOf('WHERE id = ?', updateStart);
+ok('the reset UPDATE exists in the players repository', updateStart !== -1 && updateEnd !== -1);
+const resetUpdate = playersRepoSrc.slice(updateStart, updateEnd);
 
 // Intel-derived columns — governed ONLY by the has_intel CASE guard. None may appear as an
 // assignment target inside the reset UPDATE.
@@ -58,8 +71,8 @@ for (const col of ['level', 'points', 'ranking', 'origin_system', 'total_planets
 // The has_intel CASE guard on the upsert is the load-bearing preservation mechanism — if it
 // were ever removed, the reset restraint above would be moot.
 ok('the upsert still guards intel columns behind excluded.has_intel = 1',
-    /race_speed\s*=\s*CASE WHEN excluded\.has_intel = 1/.test(src)
-    && /has_intel\s*=\s*CASE WHEN excluded\.has_intel = 1 THEN 1 ELSE players\.has_intel END/.test(src));
+    /race_speed\s*=\s*CASE WHEN excluded\.has_intel = 1/.test(playersRepoSrc)
+    && /has_intel\s*=\s*CASE WHEN excluded\.has_intel = 1 THEN 1 ELSE players\.has_intel END/.test(playersRepoSrc));
 
 console.log('\n' + '─'.repeat(75));
 console.log(`${pass} passed, ${fail} failed`);

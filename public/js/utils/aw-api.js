@@ -130,6 +130,24 @@
         return requestJson('/api/v1/SolarSystem/' + encodeURIComponent(id) + '/planets');
     }
 
+    // A rectangular area of the map: [{id, rectangle, alliances, players, solarSystems}].
+    // Each solarSystems[] entry additionally carries {capturedAt, format, isInVision,
+    // planets[]} on top of the base SolarSystem shape.
+    function getMapSectors({ x1, y1, x2, y2 } = {}) {
+        return requestJson('/api/v1/Map/sectors' + query({ x1, y1, x2, y2 }));
+    }
+
+    // Alliance name/tag/id search: [{id, name, tag, fullName, memberCount, pointsScored, rank}].
+    function searchAlliances({ q, limit } = {}) {
+        return requestJson('/api/v1/Alliance/search' + query({ q, limit }));
+    }
+
+    // System name/id search: [{id, name, fullName, info, populationLevel, x, y}] — same
+    // shape as getSolarSystems(), just filtered by q.
+    function searchSolarSystems({ q, limit } = {}) {
+        return requestJson('/api/v1/SolarSystem/search' + query({ q, limit }));
+    }
+
     // The game's own travel time between two planets, by SYSTEM ID (not coordinates):
     // {days, hours, minutes, seconds, timeSpan, totalSeconds}. Answers for the logged-in
     // player — their race speed is baked in, only energyLevel is a parameter.
@@ -174,6 +192,7 @@
             .map(p => ({
                 game_planet_id: p.id,
                 planet_index: p.index,
+                name: typeof p.name === 'string' ? p.name : null,
                 population: p.populationLevel,
                 starbase: p.starbaseLevel,
                 owner: p.ownerId != null
@@ -191,10 +210,29 @@
         return { system_id: parseInt(systemId, 10), planets, fleets: [] };
     }
 
+    // API system objects (getSolarSystems/searchSolarSystems shape) -> the existing
+    // POST /hub-api/sync/galaxy body. The ONE shared mapper: galaxy-map.js's seedFromApi
+    // and search.js's live-search fallback both use it, so the payload can never drift
+    // between the two call sites. Systems without coordinates are dropped — x/y land in
+    // INTEGER-affinity columns and /sync/galaxy's own coord() guard would skip them
+    // anyway, but there is no reason to ship rows the server will just discard.
+    function mapSolarSystemsToSyncPayload(apiSystems) {
+        const systems = (Array.isArray(apiSystems) ? apiSystems : [])
+            .filter(s => s && s.x != null && s.y != null)
+            .map(s => ({
+                id: s.id, name: s.name, x: s.x, y: s.y,
+                full_name: typeof s.fullName === 'string' ? s.fullName : null,
+                info: typeof s.info === 'string' ? s.info : null,
+                population_level: Number.isInteger(s.populationLevel) ? s.populationLevel : null,
+            }));
+        return { systems };
+    }
+
     return {
-        getSolarSystems, getSolarSystem, getSystemPlanets,
+        getSolarSystems, getSolarSystem, getSystemPlanets, getMapSectors,
         getTravelTime, searchBattleReports, putOrderGeometry,
-        mapPlanetsToSyncPayload,
+        searchAlliances, searchSolarSystems,
+        mapPlanetsToSyncPayload, mapSolarSystemsToSyncPayload,
         _setFetch,
     };
 });

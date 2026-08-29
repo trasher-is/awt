@@ -187,11 +187,11 @@ const cleanup = [];
     // battle_reports describes the round's map, so the round wipe takes it.
     // starbase_order_audit records who sent what through the hub — that outlives rounds.
     const admin = readCode('src/routes/admin.js');
-    ok('the round wipe clears battle reports', /DELETE FROM battle_reports/.test(admin));
+    ok('the round wipe clears battle reports', /battleReportsRepo\.deleteAllBattleReports\(\)/.test(admin));
     ok('inside the same transaction as the other deletes',
-        admin.indexOf('DELETE FROM battle_reports') > admin.indexOf('archiveRound(db')
-        && admin.indexOf('DELETE FROM battle_reports') < admin.indexOf('nukeTx()'),
-        [admin.indexOf('archiveRound(db'), admin.indexOf('DELETE FROM battle_reports'), admin.indexOf('nukeTx()')]);
+        admin.indexOf('battleReportsRepo.deleteAllBattleReports()') > admin.indexOf('archiveRound(db')
+        && admin.indexOf('battleReportsRepo.deleteAllBattleReports()') < admin.indexOf('nukeTx()'),
+        [admin.indexOf('archiveRound(db'), admin.indexOf('battleReportsRepo.deleteAllBattleReports()'), admin.indexOf('nukeTx()')]);
     ok('but never touches the starbase order audit', !/DELETE FROM starbase_order_audit/.test(admin));
 
     const schema = readCode('src/database.js');

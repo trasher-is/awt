@@ -39,6 +39,7 @@ window.addEventListener('DOMContentLoaded', () => {
     
     document.getElementById('search-player-input')?.addEventListener('input', () => handleSearchInput('player'));
     document.getElementById('search-system-input')?.addEventListener('input', () => handleSearchInput('system'));
+    document.getElementById('search-alliance-input')?.addEventListener('input', () => handleSearchInput('alliance'));
 
     document.getElementById('admin-panel-btn')?.addEventListener('click', () => {
         window.location.href = '/admin';

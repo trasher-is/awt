@@ -15,8 +15,8 @@ const fs = require('fs');
 const os = require('os');
 const Database = require('better-sqlite3');
 
-const { archiveRound, previousNames, findByFormerName, listRounds, roundDetail } =
-    require('./round-archive');
+const { archiveRound, previousNames, findByFormerName, listRounds, roundDetail,
+    searchFormerNamesWithCurrentPlayer } = require('./round-archive');
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail) => {
@@ -230,6 +230,34 @@ const cleanup = [];
         db.close();
     }
 
+    console.log('\n── The search box only surfaces former names of players who still exist ' + '─'.repeat(1));
+    {
+        const { db, dir } = freshDb(); cleanup.push(dir);
+        // 39 renamed and is still around; 12 renamed and then the account was gone for good
+        // (nuked and never came back). The search box should show the first, not the second —
+        // a hit with no live account to open is noise, not a result.
+        seedRound(db, [
+            { id: 39, name: 'Elfenlied' },
+            { id: 12, name: 'Ghost' },
+        ]);
+        db.transaction(() => { archiveRound(db, { label: 'R1' }); wipe(db); })();
+
+        // Only 39 comes back for the new round.
+        seedRound(db, [{ id: 39, name: 'Chewie' }]);
+
+        const hit = searchFormerNamesWithCurrentPlayer(db, 'Elfen');
+        ok('finds a former name for a player who currently still exists',
+            hit.length === 1 && hit[0].id === 39 && hit[0].name === 'Chewie', hit);
+
+        const noHit = searchFormerNamesWithCurrentPlayer(db, 'Ghost');
+        ok('does not return a hit for a player id that no longer exists (p.id IS NOT NULL)',
+            noHit.length === 0, noHit);
+
+        ok('an empty query returns nothing', searchFormerNamesWithCurrentPlayer(db, '').length === 0);
+        ok('a whitespace query too', searchFormerNamesWithCurrentPlayer(db, '   ').length === 0);
+        db.close();
+    }
+
     console.log('\n── Inputs that must not throw ' + '─'.repeat(45));
     {
         const { db, dir } = freshDb(); cleanup.push(dir);
@@ -264,10 +292,10 @@ const cleanup = [];
     // A snapshot nothing invokes protects nothing.
     const admin = readCode('src/routes/admin.js');
     ok('nuke-intel archives before deleting',
-        admin.indexOf('archiveRound(db') < admin.indexOf('DELETE FROM players')
-        && admin.indexOf('archiveRound(db') !== -1, [admin.indexOf('archiveRound(db'), admin.indexOf('DELETE FROM players')]);
+        admin.indexOf('archiveRound(db') < admin.indexOf('playersRepo.deleteAllPlayers()')
+        && admin.indexOf('archiveRound(db') !== -1, [admin.indexOf('archiveRound(db'), admin.indexOf('playersRepo.deleteAllPlayers()')]);
     ok('and it does so inside the same transaction as the deletes',
-        /db\.transaction\(\(\) => \{[\s\S]{0,400}archiveRound\(db[\s\S]{0,400}DELETE FROM fleets/.test(admin));
+        /db\.transaction\(\(\) => \{[\s\S]{0,400}archiveRound\(db[\s\S]{0,400}fleetsRepo\.deleteAllFleets\(\)/.test(admin));
     ok('the admin panel can snapshot without wiping', /\/admin\/rounds\/archive/.test(admin));
     ok('and can list what has been archived', /router\.get\('\/admin\/rounds'/.test(admin));
 
@@ -277,7 +305,7 @@ const cleanup = [];
 
     const search = readCode('src/routes/search.js');
     ok('player search also matches names from earlier rounds',
-        /round_players/.test(search) && /former_name/.test(search));
+        /searchFormerNamesWithCurrentPlayer\(db, q,/.test(search));
 
     const ui = readCode('public/js/ui/player-intel.js');
     ok('the panel renders them', /formerNames/.test(ui) && /previously/.test(ui));

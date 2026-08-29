@@ -2,8 +2,12 @@
 // and the News-page "announce" button. Given an attack (target system + planet +
 // optional arrival time) it returns the allied fleets/builds that could reach the
 // target, split into on-time and late.
-const db = require('../database');
 const { calcTravelSeconds, formatTime } = require('./travel-calc');
+const systemsRepo = require('../repositories/systems');
+const fleetsRepo = require('../repositories/fleets');
+const playersRepo = require('../repositories/players');
+const usersRepo = require('../repositories/users');
+const settingsRepo = require('../repositories/settings');
 
 const ONTIME_LIMIT = 10;
 const LATE_LIMIT = 10;
@@ -35,7 +39,7 @@ const costPerCv = (economy) => destroyerCost(economy) / 3;
 
 function getPpPrice() {
     try {
-        const row = db.prepare(`SELECT value FROM app_settings WHERE key = 'pp_price'`).get();
+        const row = settingsRepo.getPpPrice();
         const v = row ? parseFloat(row.value) : NaN;
         return (!isNaN(v) && v > 0) ? v : 0.91; // sensible default until /Game/Trade is scraped
     } catch (err) {
@@ -45,41 +49,23 @@ function getPpPrice() {
 
 // attack: { systemId, planetIndex, defenderName, arrivalUnix }
 function computeInterceptors(attack, nowUnix) {
-    const target = db.prepare(`SELECT x, y FROM systems WHERE id = ?`).get(attack.systemId);
+    const target = systemsRepo.getSystemCoords(attack.systemId);
     if (!target || target.x == null || target.y == null) return null;
 
     const defender = attack.defenderName
-        ? db.prepare(`SELECT alliance_id FROM players WHERE name = ? COLLATE NOCASE`).get(attack.defenderName)
+        ? playersRepo.getPlayerAllianceIdByName(attack.defenderName)
         : null;
     const allianceId = defender && defender.alliance_id ? defender.alliance_id : null;
 
-    const whereClause = allianceId
-        ? `p.alliance_id = @aid`
-        : `LOWER(p.name) IN (SELECT LOWER(game_name) FROM app_users WHERE is_active = 1)`;
-
-    const fleets = db.prepare(`
-        SELECT f.system_id AS origin_sys, f.planet_index, f.game_fleet_id,
-               f.destroyers, f.cruisers, f.battleships, f.arrival_at,
-               p.id AS owner_id, p.name AS owner_name, p.energy, p.race_speed,
-               s.x AS sx, s.y AS sy
-        FROM fleets f
-        JOIN players p ON f.owner_id = p.id
-        JOIN systems s ON f.system_id = s.id
-        WHERE ${whereClause} AND s.x IS NOT NULL AND s.y IS NOT NULL
-    `).all(allianceId ? { aid: allianceId } : {});
+    const fleets = allianceId
+        ? fleetsRepo.getInterceptFleetsByAlliance(allianceId)
+        : fleetsRepo.getInterceptFleetsByActiveUsers();
 
     const ppPrice = getPpPrice();
 
-    const homes = db.prepare(`
-        SELECT p.name AS owner_name, p.energy, p.race_speed, p.economy,
-               COALESCE(p.home_planet_index, 1) AS launch_planet,
-               ams.production_points, ams.astro_dollars,
-               s.x AS sx, s.y AS sy
-        FROM players p
-        JOIN alliance_member_stats ams ON ams.player_id = p.id
-        JOIN systems s ON s.id = COALESCE(p.home_system_id, p.origin_system)
-        WHERE ${whereClause} AND s.x IS NOT NULL AND s.y IS NOT NULL
-    `).all(allianceId ? { aid: allianceId } : {});
+    const homes = allianceId
+        ? playersRepo.getInterceptHomesByAlliance(allianceId)
+        : playersRepo.getInterceptHomesByActiveUsers();
 
     const timeUntilImpact = attack.arrivalUnix > 0 ? attack.arrivalUnix - nowUnix : null;
 
@@ -149,12 +135,9 @@ function computeInterceptors(attack, nowUnix) {
 
     // Attach a real Discord mention where we know the player's numeric id (matched
     // game_name -> app_users.discord_id). Renders as their Discord name AND pings them.
-    const mentionFor = db.prepare(`
-        SELECT discord_id FROM app_users WHERE LOWER(game_name) = ? AND discord_id IS NOT NULL
-    `);
     for (const a of byPlayer.values()) {
         try {
-            const row = mentionFor.get(a.name.toLowerCase());
+            const row = usersRepo.getUserMentionByGameName(a.name.toLowerCase());
             a.mention = row && row.discord_id ? `<@${row.discord_id}>` : null;
         } catch (e) { a.mention = null; }
     }

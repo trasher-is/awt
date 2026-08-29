@@ -48,6 +48,7 @@ for (const p of ['/intel/players', '/routes', '/plans/10', '/notes', '/me', '/se
 console.log('\n── Guests are blocked on every mutating verb ' + '─'.repeat(31));
 const writePaths = [
     '/sync/player', '/sync/system', '/sync/galaxy', '/sync/alliance', '/sync/alliance-stats',
+    '/sync/alliance-search',
     '/sync/best-guarded', '/sync/trade-agreements', '/sync/trade-inventory',
     '/plans', '/notes', '/intel/takeover', '/trade-agreements/propose',
     '/routes', '/incoming/announce', '/incoming/cover', '/nuke',

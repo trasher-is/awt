@@ -1,6 +1,10 @@
 const express = require('express');
 const db = require('../database');
 const { requireAuth, requireAdmin } = require('./_middleware');
+const playersRepo = require('../repositories/players');
+const alliancesRepo = require('../repositories/alliances');
+const tradeRepo = require('../repositories/trade');
+const settingsRepo = require('../repositories/settings');
 const router = express.Router();
 
 const MAX_TAS = 5;
@@ -11,12 +15,7 @@ const pairKey = (a, b) => [String(a).toLowerCase(), String(b).toLowerCase()].sor
 // (race_trader > 0), and only when we have intel to know that. The old
 // manual ta_traders list mis-tagged people whose race isn't actually trader.
 function getTraders() {
-    const rows = db.prepare(`
-        SELECT p.name
-        FROM alliance_member_stats ams
-        JOIN players p ON p.id = ams.player_id
-        WHERE p.has_intel = 1 AND p.race_trader > 0
-    `).all();
+    const rows = alliancesRepo.getTraders();
     return rows.map(r => r.name.toLowerCase());
 }
 
@@ -29,16 +28,10 @@ const { parseLocaleNumber } = require('../../public/js/utils/parse-number.js');
 //   hoarded_au — A$ value of artifacts + supply units held (from /Game/Trade scrape)
 //   visible_au — openly-visible liquidity: Astro Dollars + Production Points × PP price
 function getMembers() {
-    const ppRow = db.prepare(`SELECT value FROM app_settings WHERE key = 'pp_price'`).get();
+    const ppRow = settingsRepo.getPpPrice();
     const ppPrice = ppRow ? parseFloat(ppRow.value) || 0 : 0;
 
-    const rows = db.prepare(`
-        SELECT p.name, p.has_intel, p.race_trader,
-               ams.hoarded_au, ams.astro_dollars, ams.production_points, ams.production_rate
-        FROM alliance_member_stats ams
-        JOIN players p ON p.id = ams.player_id
-        ORDER BY p.name COLLATE NOCASE ASC
-    `).all();
+    const rows = alliancesRepo.getMembersWithStats();
 
     return rows.map(r => {
         const visible = parseLocaleNumber(r.astro_dollars) + parseLocaleNumber(r.production_points) * ppPrice;
@@ -56,17 +49,14 @@ function getMembers() {
 
 // How many active agreements (proposed/confirmed/done) a player is involved in.
 function countFor(nameLower) {
-    const rows = db.prepare(`
-        SELECT pair_key FROM trade_agreements
-        WHERE status IN ('proposed','confirmed','done')
-    `).all();
+    const rows = tradeRepo.getActivePairKeys();
     return rows.filter(r => r.pair_key.split('|').includes(nameLower)).length;
 }
 
 // --- LIST EVERYTHING NEEDED TO RENDER THE BOARD ---
 router.get('/trade-agreements', requireAuth, (req, res) => {
     try {
-        const agreements = db.prepare(`SELECT * FROM trade_agreements WHERE status != 'cancelled' ORDER BY id ASC`).all();
+        const agreements = tradeRepo.getActiveAgreements();
         res.json({
             success: true,
             me: req.session.gameName,
@@ -92,7 +82,7 @@ function validatePair(aName, bName) {
         return 'Two traders cannot trade with each other.';
     }
 
-    const existing = db.prepare(`SELECT status FROM trade_agreements WHERE pair_key = ?`).get(pairKey(aName, bName));
+    const existing = tradeRepo.getAgreementStatusByPairKey(pairKey(aName, bName));
     if (existing && existing.status !== 'cancelled') return 'This pairing already exists.';
 
     if (countFor(aName.toLowerCase()) >= MAX_TAS) return `${aName} already has ${MAX_TAS} agreements.`;
@@ -103,11 +93,7 @@ function validatePair(aName, bName) {
 
 // Resolve a member's canonical display name (case-correct) from the roster.
 function canonicalName(name) {
-    const row = db.prepare(`
-        SELECT p.name FROM alliance_member_stats ams
-        JOIN players p ON p.id = ams.player_id
-        WHERE p.name = ? COLLATE NOCASE LIMIT 1
-    `).get(name);
+    const row = alliancesRepo.getCanonicalNameFromStats(name);
     return row ? row.name : name;
 }
 
@@ -121,12 +107,7 @@ router.post('/trade-agreements/propose', requireAuth, (req, res) => {
 
     try {
         const [a, b] = [me, partner].sort((x, y) => x.toLowerCase().localeCompare(y.toLowerCase()));
-        db.prepare(`
-            INSERT INTO trade_agreements (pair_key, player_a, player_b, status, initiator, is_admin_set)
-            VALUES (?, ?, ?, 'proposed', ?, 0)
-            ON CONFLICT(pair_key) DO UPDATE SET status='proposed', initiator=excluded.initiator, updated_at=CURRENT_TIMESTAMP
-                WHERE trade_agreements.status='cancelled'
-        `).run(pairKey(me, partner), a, b, me);
+        tradeRepo.proposeAgreement(pairKey(me, partner), a, b, me);
         res.json({ success: true });
     } catch (e) {
         console.error('[DB Error] propose:', e);
@@ -136,7 +117,7 @@ router.post('/trade-agreements/propose', requireAuth, (req, res) => {
 
 // --- CONFIRM: the counterpart accepts a proposed TA ---
 router.post('/trade-agreements/:id/confirm', requireAuth, (req, res) => {
-    const ta = db.prepare(`SELECT * FROM trade_agreements WHERE id = ?`).get(req.params.id);
+    const ta = tradeRepo.getAgreementById(req.params.id);
     if (!ta) return res.status(404).json({ error: 'Agreement not found' });
     if (ta.status !== 'proposed') return res.status(400).json({ error: 'Only proposed agreements can be confirmed.' });
 
@@ -148,13 +129,13 @@ router.post('/trade-agreements/:id/confirm', requireAuth, (req, res) => {
         return res.status(403).json({ error: 'Only the other player (or an admin) can confirm this.' });
     }
 
-    db.prepare(`UPDATE trade_agreements SET status='confirmed', updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(ta.id);
+    tradeRepo.confirmAgreement(ta.id);
     res.json({ success: true });
 });
 
 // --- CANCEL/REMOVE: either participant or an admin ---
 router.post('/trade-agreements/:id/cancel', requireAuth, (req, res) => {
-    const ta = db.prepare(`SELECT * FROM trade_agreements WHERE id = ?`).get(req.params.id);
+    const ta = tradeRepo.getAgreementById(req.params.id);
     if (!ta) return res.status(404).json({ error: 'Agreement not found' });
 
     const me = (req.session.gameName || '').toLowerCase();
@@ -163,7 +144,7 @@ router.post('/trade-agreements/:id/cancel', requireAuth, (req, res) => {
         return res.status(403).json({ error: 'You are not part of this agreement.' });
     }
 
-    db.prepare(`DELETE FROM trade_agreements WHERE id=?`).run(ta.id);
+    tradeRepo.cancelAgreement(ta.id);
     res.json({ success: true });
 });
 
@@ -176,11 +157,7 @@ router.post('/admin/trade-agreements', requireAdmin, (req, res) => {
     if (err) return res.status(400).json({ error: err });
 
     const [pa, pb] = [a, b].sort((x, y) => x.toLowerCase().localeCompare(y.toLowerCase()));
-    db.prepare(`
-        INSERT INTO trade_agreements (pair_key, player_a, player_b, status, initiator, is_admin_set)
-        VALUES (?, ?, ?, 'confirmed', 'admin', 1)
-        ON CONFLICT(pair_key) DO UPDATE SET status='confirmed', is_admin_set=1, initiator='admin', updated_at=CURRENT_TIMESTAMP
-    `).run(pairKey(a, b), pa, pb);
+    tradeRepo.forceSetAgreement(pairKey(a, b), pa, pb);
     res.json({ success: true });
 });
 
@@ -191,18 +168,12 @@ router.post('/sync/trade-agreements', requireAuth, (req, res) => {
     const partners = Array.isArray(req.body.partners) ? req.body.partners : [];
     if (!me) return res.status(400).json({ error: 'No session identity' });
 
-    const markDone = db.prepare(`
-        INSERT INTO trade_agreements (pair_key, player_a, player_b, status, initiator, is_admin_set)
-        VALUES (?, ?, ?, 'done', ?, 0)
-        ON CONFLICT(pair_key) DO UPDATE SET status='done', updated_at=CURRENT_TIMESTAMP
-    `);
-
     const tx = db.transaction((list) => {
         for (const raw of list) {
             const partner = canonicalName(String(raw).trim());
             if (!partner || partner.toLowerCase() === me.toLowerCase()) continue;
             const [a, b] = [me, partner].sort((x, y) => x.toLowerCase().localeCompare(y.toLowerCase()));
-            markDone.run(pairKey(me, partner), a, b, me);
+            tradeRepo.markAgreementDoneByInitiator(pairKey(me, partner), a, b, me);
         }
     });
 
@@ -221,12 +192,6 @@ router.post('/sync/trade-agreements', requireAuth, (req, res) => {
 router.post('/sync/trade-partners', requireAuth, (req, res) => {
     const pairs = Array.isArray(req.body.pairs) ? req.body.pairs : [];
 
-    const markDone = db.prepare(`
-        INSERT INTO trade_agreements (pair_key, player_a, player_b, status, initiator, is_admin_set)
-        VALUES (?, ?, ?, 'done', 'scan', 0)
-        ON CONFLICT(pair_key) DO UPDATE SET status='done', updated_at=CURRENT_TIMESTAMP
-    `);
-
     const tx = db.transaction((list) => {
         let n = 0;
         for (const pair of list) {
@@ -235,7 +200,7 @@ router.post('/sync/trade-partners', requireAuth, (req, res) => {
             const b = canonicalName(String(pair[1]).trim());
             if (!a || !b || a.toLowerCase() === b.toLowerCase()) continue;
             const [pa, pb] = [a, b].sort((x, y) => x.toLowerCase().localeCompare(y.toLowerCase()));
-            markDone.run(pairKey(a, b), pa, pb);
+            tradeRepo.markAgreementDoneByScan(pairKey(a, b), pa, pb);
             n++;
         }
         return n;
@@ -260,13 +225,9 @@ router.post('/sync/trade-inventory', requireAuth, (req, res) => {
     const value = isNaN(n) ? 0 : Math.max(0, n);
 
     try {
-        const row = db.prepare(`SELECT id FROM players WHERE name = ? COLLATE NOCASE`).get(me);
+        const row = playersRepo.getPlayerIdByName(me);
         if (!row) return res.json({ success: true, stored: false });
-        db.prepare(`
-            INSERT INTO alliance_member_stats (player_id, hoarded_au, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(player_id) DO UPDATE SET hoarded_au = excluded.hoarded_au, updated_at = CURRENT_TIMESTAMP
-        `).run(row.id, value);
+        alliancesRepo.upsertHoardedAu(row.id, value);
         res.json({ success: true, stored: true });
     } catch (e) {
         console.error('[DB Error] sync trade-inventory:', e);

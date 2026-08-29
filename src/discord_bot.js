@@ -1,5 +1,15 @@
 const { Client, GatewayIntentBits, EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const db = require('./database');
+const systemsRepo = require('./repositories/systems');
+const fleetsRepo = require('./repositories/fleets');
+const plansRepo = require('./repositories/plans');
+const playersRepo = require('./repositories/players');
+const alliancesRepo = require('./repositories/alliances');
+const usersRepo = require('./repositories/users');
+const discordTimersRepo = require('./repositories/discordTimers');
+const incomingRepo = require('./repositories/incoming');
+const notesRepo = require('./repositories/notes');
+const settingsRepo = require('./repositories/settings');
 const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
 const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require('./utils/covering');
 // The battle model — the same physical file the dashboard calculator imports, so
@@ -51,7 +61,7 @@ client.on('interactionCreate', async (interaction) => {
 
         let name = interaction.user.username;
         try {
-            const row = db.prepare(`SELECT game_name FROM app_users WHERE discord_id = ?`).get(interaction.user.id);
+            const row = usersRepo.getUserByDiscordId(interaction.user.id);
             if (row && row.game_name) name = row.game_name;
         } catch (e) { /* fall back to Discord username */ }
 
@@ -78,7 +88,7 @@ client.on('interactionCreate', async (interaction) => {
 //
 // Existing links keep working untouched: this only governs how NEW ones are made.
 async function handleLink({ code, userId, username, tag, reply }) {
-    const already = db.prepare(`SELECT game_name FROM app_users WHERE discord_id = ?`).get(userId);
+    const already = usersRepo.getUserByDiscordId(userId);
 
     if (!code) {
         if (already) {
@@ -94,15 +104,10 @@ async function handleLink({ code, userId, username, tag, reply }) {
     }
 
     // Sweep expired rows so a stale code can never be spent.
-    try { db.prepare(`DELETE FROM discord_link_codes WHERE expires_at < datetime('now')`).run(); } catch (_) {}
+    try { usersRepo.deleteExpiredLinkCodes(); } catch (_) {}
 
     const normalised = String(code).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const row = db.prepare(`
-        SELECT c.code, c.user_id, c.used_at, c.expires_at, u.game_name, u.discord_id
-        FROM discord_link_codes c
-        JOIN app_users u ON u.id = c.user_id
-        WHERE c.code = ?
-    `).get(normalised);
+    const row = usersRepo.getLinkCodeWithUser(normalised);
 
     if (!row) {
         console.warn(`[Discord] !link refused: ${tag} (${userId}) presented an unknown code.`);
@@ -123,14 +128,14 @@ async function handleLink({ code, userId, username, tag, reply }) {
         return reply(`❌ Your Discord account is already linked to **${already.game_name}**. One Discord account per Hub account — ask an admin if you need it moved.`);
     }
     if (row.discord_id === userId) {
-        db.prepare(`UPDATE discord_link_codes SET used_at = CURRENT_TIMESTAMP, used_by_discord_id = ? WHERE code = ?`).run(userId, normalised);
+        usersRepo.markLinkCodeUsed(userId, normalised);
         return reply(`ℹ️ **${row.game_name}** is already linked to you. Nothing to do.`);
     }
 
     try {
         const link = db.transaction(() => {
-            db.prepare(`UPDATE app_users SET discord_id = ?, discord_name = ? WHERE id = ?`).run(userId, username, row.user_id);
-            db.prepare(`UPDATE discord_link_codes SET used_at = CURRENT_TIMESTAMP, used_by_discord_id = ? WHERE code = ?`).run(userId, normalised);
+            usersRepo.updateUserDiscordLink(userId, username, row.user_id);
+            usersRepo.markLinkCodeUsed(userId, normalised);
         });
         link();
         console.log(`[Discord] !link: Hub account '${row.game_name}' linked to ${tag} (${userId}) with a verified code.`);
@@ -168,10 +173,7 @@ async function handleTimer({ input, userId, channelId, reply }) {
 
     const dueAt = new Date(Date.now() + delayMs);
     try {
-        db.prepare(`
-            INSERT INTO discord_timers (discord_user_id, channel_id, label, due_at)
-            VALUES (?, ?, ?, ?)
-        `).run(userId, channelId, String(input).slice(0, 200), dueAt.toISOString());
+        discordTimersRepo.insertTimer(userId, channelId, String(input).slice(0, 200), dueAt.toISOString());
     } catch (err) {
         console.error('[Discord] Could not store timer:', err.message);
         return reply('❌ Could not save that timer. Try again.');
@@ -188,20 +190,13 @@ async function handleTimer({ input, userId, channelId, reply }) {
 async function checkDueTimers() {
     let due;
     try {
-        due = db.prepare(`
-            SELECT id, discord_user_id, channel_id, label, due_at
-            FROM discord_timers
-            WHERE fired_at IS NULL AND due_at <= ?
-            ORDER BY due_at ASC
-            LIMIT 50
-        `).all(new Date().toISOString());
+        due = discordTimersRepo.getDueTimers(new Date().toISOString());
     } catch (err) {
         console.error('[Discord] Timer lookup failed:', err.message);
         return;
     }
     if (!due.length) return;
 
-    const markFired = db.prepare(`UPDATE discord_timers SET fired_at = CURRENT_TIMESTAMP WHERE id = ?`);
     for (const t of due) {
         try {
             const channel = await client.channels.fetch(t.channel_id);
@@ -216,7 +211,7 @@ async function checkDueTimers() {
             // this row to be retried forever.
             console.error(`[Discord] Timer ${t.id} ping failed:`, err.message);
         } finally {
-            markFired.run(t.id);
+            discordTimersRepo.markTimerFired(t.id);
         }
     }
 }
@@ -347,15 +342,14 @@ async function handleMessage(message) {
         const discordName = message.author.username;
         
         // Find the linked user session mapping
-        const user = db.prepare(`SELECT id, game_name FROM app_users WHERE LOWER(discord_name) = ? OR LOWER(discord_name) = ?`)
-                       .get(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
+        const user = usersRepo.getUserByDiscordName(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
 
         if (!user) {
             return message.reply(`❌ Your Discord username (\`${discordName}\`) is not linked to any Hub account. Add it in the Command Center first.`);
         }
 
         // Pull the author's own recorded profiles to extract baseline values
-        const me = db.prepare(`SELECT id, biology FROM players WHERE LOWER(name) = ?`).get(user.game_name.toLowerCase());
+        const me = playersRepo.getPlayerBiologyByName(user.game_name.toLowerCase());
         if (!me) {
             return message.reply(`❌ Could not locate your player profile data (\`${user.game_name}\`) in the synced database tracking array. Please scan your profile in-game first.`);
         }
@@ -364,24 +358,10 @@ async function handleMessage(message) {
         const threatThreshold = myBio + 6;
 
         // 1. Confirmed High Biology (has_intel = 1) -> Match bio directly
-        const confirmedThreats = db.prepare(`
-            SELECT p.name, p.biology, a.tag as ally_tag
-            FROM players p
-            LEFT JOIN alliances a ON p.alliance_id = a.id
-            WHERE p.has_intel = 1 AND p.biology >= ? AND p.id != ?
-            ORDER BY p.biology DESC, p.name ASC
-            LIMIT 25
-        `).all(threatThreshold, me.id);
+        const confirmedThreats = playersRepo.getThreatPlayersByBiology(threatThreshold, me.id);
 
         // 2. Suspected High Biology (has_intel = 0) -> Match science level as proxy ceiling
-        const suspectedThreats = db.prepare(`
-            SELECT p.name, p.science_level, a.tag as ally_tag
-            FROM players p
-            LEFT JOIN alliances a ON p.alliance_id = a.id
-            WHERE p.has_intel = 0 AND p.science_level >= ? AND p.id != ?
-            ORDER BY p.science_level DESC, p.name ASC
-            LIMIT 25
-        `).all(threatThreshold, me.id);
+        const suspectedThreats = playersRepo.getThreatPlayersByScience(threatThreshold, me.id);
 
         const embed = new EmbedBuilder()
             .setTitle(`🧬 Biology Threat Matrix (Your Bio: ${myBio})`)
@@ -444,7 +424,7 @@ async function handleMessage(message) {
         } else {
             // Semi-manual: look up player stats from the database
             const playerName = args.slice(4).join(' ');
-            const player = db.prepare(`SELECT name, race_speed, energy FROM players WHERE name LIKE ?`).get(playerName);
+            const player = playersRepo.getPlayerTravelStatsByName(playerName);
             
             if (!player) {
                 return message.reply(`❌ Player **${playerName}** not found in the database. Please provide valid stats manually or check the spelling.`);
@@ -455,8 +435,8 @@ async function handleMessage(message) {
             playerNameDisplay = player.name;
         }
 
-        const sys1 = db.prepare(`SELECT name, x, y FROM systems WHERE id = ?`).get(sysA);
-        const sys2 = db.prepare(`SELECT name, x, y FROM systems WHERE id = ?`).get(sysB);
+        const sys1 = systemsRepo.getSystemCoords(sysA);
+        const sys2 = systemsRepo.getSystemCoords(sysB);
 
         if (!sys1) return message.reply(`❌ Origin System #${sysA} not found in the database.`);
         if (!sys2) return message.reply(`❌ Destination System #${sysB} not found in the database.`);
@@ -483,20 +463,10 @@ async function handleMessage(message) {
     // !intels - TEXT-BASED INTERACTIVE DRILLDOWN
     // ----------------------------------------------------
     if (command === 'intels') {
-        const alliancesWithIntel = db.prepare(`
-            SELECT DISTINCT a.id, a.tag
-            FROM alliances a
-            JOIN players p ON p.alliance_id = a.id
-            WHERE p.has_intel = 1
-            ORDER BY a.tag ASC
-        `).all();
+        const alliancesWithIntel = alliancesRepo.getWarRoomAllianceIntelTags();
 
         // FIXED: Added missing 'p' alias to prevent SQLITE_ERROR
-        const solosCount = db.prepare(`
-            SELECT COUNT(*) as count FROM players p
-            WHERE p.alliance_id IS NULL
-            AND p.has_intel = 1
-        `).get().count;
+        const solosCount = playersRepo.countUnaffiliatedIntelPlayers();
 
         if (alliancesWithIntel.length === 0 && solosCount === 0) {
             return message.reply('📭 No intelligence records found with active intel in the database.');
@@ -546,17 +516,9 @@ async function handleMessage(message) {
                 chosenGroup = groups[idx];
                 
                 if (chosenGroup.type === 'solos') {
-                    groupPlayers = db.prepare(`
-                        SELECT id, name FROM players
-                        WHERE alliance_id IS NULL AND has_intel = 1
-                        ORDER BY name ASC
-                    `).all();
+                    groupPlayers = playersRepo.listUnaffiliatedIntelPlayers();
                 } else {
-                    groupPlayers = db.prepare(`
-                        SELECT id, name FROM players
-                        WHERE alliance_id = ? AND has_intel = 1
-                        ORDER BY name ASC
-                    `).all(chosenGroup.id);
+                    groupPlayers = playersRepo.listAllianceIntelPlayers(chosenGroup.id);
                 }
 
                 if (groupPlayers.length === 0) {
@@ -597,14 +559,7 @@ async function handleMessage(message) {
 
                 const targetPlayer = groupPlayers[pIdx];
                 
-                const player = db.prepare(`
-                    SELECT p.*, a.tag as ally_tag,
-                           (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as actual_planets,
-                           (SELECT SUM(population) FROM planets WHERE owner_id = p.id) as actual_pop
-                    FROM players p 
-                    LEFT JOIN alliances a ON p.alliance_id = a.id 
-                    WHERE p.id = ?
-                `).get(targetPlayer.id);
+                const player = playersRepo.getPlayerFullById(targetPlayer.id);
 
                 if (!player) {
                     await menuMessage.edit({ content: '❌ Selected target file no longer matches raw database hashes.', embeds: [] });
@@ -672,31 +627,12 @@ async function handleMessage(message) {
         const sysId = args[0];
         if (!sysId || isNaN(sysId)) return message.reply('❌ Usage: `!sys <system_id>`');
 
-        const sys = db.prepare(`SELECT * FROM systems WHERE id = ?`).get(sysId);
+        const sys = systemsRepo.getFullSystem(sysId);
         if (!sys) return message.reply(`❌ System #${sysId} is not in the Hub database. Scan it in-game first.`);
 
-        const planets = db.prepare(`
-            SELECT p.*, u.name as owner_name, a.tag as ally_tag
-            FROM planets p
-            LEFT JOIN players u ON p.owner_id = u.id
-            LEFT JOIN alliances a ON u.alliance_id = a.id
-            WHERE p.system_id = ? ORDER BY p.planet_index ASC
-        `).all(sysId);
-
-        const plans = db.prepare(`
-            SELECT pp.*, u.game_name as author_name 
-            FROM planet_plans pp
-            LEFT JOIN app_users u ON pp.author_id = u.id
-            WHERE pp.system_id = ?
-        `).all(sysId);
-
-        const fleets = db.prepare(`
-            SELECT f.*, u.name as owner_name, a.tag as ally_tag
-            FROM fleets f
-            LEFT JOIN players u ON f.owner_id = u.id
-            LEFT JOIN alliances a ON u.alliance_id = a.id
-            WHERE f.system_id = ?
-        `).all(sysId);
+        const planets = systemsRepo.getSystemPlanetsForBot(sysId);
+        const plans = plansRepo.getPlansForSystemForBot(sysId);
+        const fleets = fleetsRepo.getFleetsForSystemFull(sysId);
 
         const systemUrl = process.env.PROXY_DOMAIN
             ? `https://${process.env.PROXY_DOMAIN}/Game/Map/SolarSystem/${sysId}`
@@ -794,14 +730,7 @@ async function handleMessage(message) {
         const playerName = args.join(' ');
         if (!playerName) return message.reply('❌ Usage: `!intel <player_name>`');
 
-        const player = db.prepare(`
-            SELECT p.*, a.tag as ally_tag,
-                   (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as actual_planets,
-                   (SELECT SUM(population) FROM planets WHERE owner_id = p.id) as actual_pop
-            FROM players p 
-            LEFT JOIN alliances a ON p.alliance_id = a.id 
-            WHERE p.name LIKE ?
-        `).get(playerName);
+        const player = playersRepo.getPlayerFullByName(playerName);
 
         if (!player) return message.reply(`❌ Player **${playerName}** not found in the database.`);
 
@@ -879,8 +808,8 @@ async function handleMessage(message) {
             return message.reply('❌ Usage: `!dist <sys1_id> <sys2_id>`');
         }
 
-        const sys1 = db.prepare(`SELECT name, x, y FROM systems WHERE id = ?`).get(id1);
-        const sys2 = db.prepare(`SELECT name, x, y FROM systems WHERE id = ?`).get(id2);
+        const sys1 = systemsRepo.getSystemCoords(id1);
+        const sys2 = systemsRepo.getSystemCoords(id2);
 
         if (!sys1) return message.reply(`❌ System #${id1} not found.`);
         if (!sys2) return message.reply(`❌ System #${id2} not found.`);
@@ -915,18 +844,14 @@ async function handleMessage(message) {
         }
 
         const discordName = message.author.username;
-        const user = db.prepare(`SELECT id, game_name FROM app_users WHERE LOWER(discord_name) = ? OR LOWER(discord_name) = ?`)
-                       .get(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
+        const user = usersRepo.getUserByDiscordName(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
 
         if (!user) {
             return message.reply(`❌ Your Discord username (\`${discordName}\`) is not linked to any Hub account. Add it in the Command Center first.`);
         }
 
         try {
-            db.prepare(`
-                INSERT INTO planet_plans (system_id, planet_index, author_id, note) 
-                VALUES (?, ?, ?, ?)
-            `).run(sysId, pIdx, user.id, note);
+            plansRepo.createPlan(sysId, pIdx, user.id, note);
             
             message.react('✅');
             message.reply(`✅ Plan saved for System **#${sysId}** Planet **${pIdx}** by ${user.game_name}.`);
@@ -946,18 +871,10 @@ async function handleMessage(message) {
         const targetSysId = parseInt(sysId, 10);
         const tag = args[1] ? args[1].toUpperCase() : 'RAID';
 
-        const targetSys = db.prepare("SELECT name, x, y FROM systems WHERE id = ?").get(targetSysId);
+        const targetSys = systemsRepo.getSystemCoords(targetSysId);
         if (!targetSys) return message.reply(`❌ System **[${targetSysId}]** not found in the database. Scan or fly near it first.`);
 
-        const players = db.prepare(`
-            SELECT p.name, p.biology, p.science_level, s.x, s.y
-            FROM players p
-            JOIN alliances a ON p.alliance_id = a.id
-            JOIN systems s ON p.origin_system = s.id
-            WHERE a.tag = ?
-            AND p.origin_system IS NOT NULL 
-            AND p.origin_system > 0
-        `).all(tag);
+        const players = playersRepo.getAllianceOriginPlayersBrief(tag);
 
         if (!players || players.length === 0) {
             return message.reply(`❌ No players found for alliance [${tag}] with a recorded Origin System.`);
@@ -1007,13 +924,7 @@ async function handleMessage(message) {
 
         if (!tag) {
             const discordName = message.author.username;
-            const userAlliance = db.prepare(`
-                SELECT a.tag 
-                FROM app_users u
-                JOIN players p ON u.game_name = p.name
-                JOIN alliances a ON p.alliance_id = a.id
-                WHERE LOWER(u.discord_name) = ? OR LOWER(u.discord_name) = ?
-            `).get(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
+            const userAlliance = usersRepo.getUserAllianceTagByDiscordName(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
 
             if (!userAlliance || !userAlliance.tag) {
                 return message.reply(`❌ Could not automatically detect your alliance. Provide it explicitly: \`!holes <tag>\``);
@@ -1022,22 +933,9 @@ async function handleMessage(message) {
         }
 
         // FETCHES BOTH OWNER NAME AND OWNER ALLIANCE TAG FOR COMPREHENSIVE SECTOR SCANNING
-        const rows = db.prepare(`
-            SELECT p.system_id, s.name as sys_name, p.planet_index, u.name as owner_name, a.tag as owner_alliance_tag
-            FROM planets p
-            JOIN systems s ON p.system_id = s.id
-            LEFT JOIN players u ON p.owner_id = u.id
-            LEFT JOIN alliances a ON u.alliance_id = a.id
-            WHERE p.system_id IN (
-                SELECT DISTINCT p2.system_id
-                FROM planets p2
-                JOIN players u2 ON p2.owner_id = u2.id
-                JOIN alliances a2 ON u2.alliance_id = a2.id
-                WHERE a2.tag = ?
-            )
-        `).all(tag);
+        const rows = systemsRepo.getPlanetsForAllianceTag(tag);
 
-        const planRows = db.prepare(`SELECT system_id, planet_index FROM planet_plans`).all();
+        const planRows = plansRepo.getAllPlanIndex();
 
         if (!rows || rows.length === 0) {
             return message.reply(`❌ No scanned systems found with an active presence for alliance [${tag}].`);
@@ -1136,17 +1034,11 @@ async function handleMessage(message) {
             return message.reply('❌ **Usage:** `!ghosts <system_id> <planet_num> <alliance_tag>`\n*Example: `!ghosts 1 10 AO`*');
         }
 
-        const targetSys = db.prepare("SELECT name, x, y FROM systems WHERE id = ?").get(sysId);
+        const targetSys = systemsRepo.getSystemCoords(sysId);
         if (!targetSys) return message.reply(`❌ System **[${sysId}]** not found in the database.`);
 
         // Find all players in that alliance with an origin system recorded
-        const alliancePlayers = db.prepare(`
-            SELECT p.id, p.name, p.biology, p.science_level, p.energy, p.race_speed, s.id as orig_sys_id, s.x as orig_x, s.y as orig_y
-            FROM players p
-            JOIN alliances a ON p.alliance_id = a.id
-            JOIN systems s ON p.origin_system = s.id
-            WHERE a.tag = ?
-        `).all(tag);
+        const alliancePlayers = playersRepo.getAllianceOriginPlayersDetailed(tag);
 
         if (!alliancePlayers || alliancePlayers.length === 0) {
             return message.reply(`❌ No tracked players found for alliance [${tag}] with known origin systems.`);
@@ -1169,12 +1061,7 @@ async function handleMessage(message) {
             const launchPoints = [];
             launchPoints.push({ x: p.orig_x, y: p.orig_y, planet_index: 1 }); // Default fallback slot
 
-            const scrapedPlanets = db.prepare(`
-                SELECT p.planet_index, s.x, s.y
-                FROM planets p
-                JOIN systems s ON p.system_id = s.id
-                WHERE p.owner_id = ?
-            `).all(p.id);
+            const scrapedPlanets = systemsRepo.getPlanetCoordsForPlayer(p.id);
 
             scrapedPlanets.forEach(sp => {
                 if (!launchPoints.some(lp => lp.x === sp.x && lp.y === sp.y && lp.planet_index === sp.planet_index)) {
@@ -1277,7 +1164,7 @@ async function handleMessage(message) {
         // Auto-fill mods from DB if player names given
         let defPlayerLabel = null, atkPlayerLabel = null;
         if (defPlayerName) {
-            const p = db.prepare(`SELECT name, level, physics, mathematics, race_attack, race_defense FROM players WHERE name LIKE ?`).get(defPlayerName);
+            const p = playersRepo.getPlayerCombatStats(defPlayerName);
             if (p) {
                 defPhys    = sci(p.physics || 0);
                 defMath    = sci(p.mathematics || 0);
@@ -1288,7 +1175,7 @@ async function handleMessage(message) {
             }
         }
         if (atkPlayerName) {
-            const p = db.prepare(`SELECT name, level, physics, mathematics, race_attack, race_defense FROM players WHERE name LIKE ?`).get(atkPlayerName);
+            const p = playersRepo.getPlayerCombatStats(atkPlayerName);
             if (p) {
                 atkPhys    = sci(p.physics || 0);
                 atkMath    = sci(p.mathematics || 0);
@@ -1578,7 +1465,7 @@ function initDiscordBot(token) {
 // ----------------------------------------------------
 function getSettingValue(key) {
     try {
-        const row = db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(key);
+        const row = settingsRepo.getSetting(key);
         const v = row && row.value ? row.value.trim() : '';
         return v || null;
     } catch (err) {
@@ -1609,13 +1496,7 @@ function getReminderChannelId() {
 async function checkNoteReminders() {
     let pending;
     try {
-        pending = db.prepare(`
-            SELECT n.id, n.text, n.due_at, u.discord_id, u.game_name, a.game_name AS author_name
-            FROM user_notes n
-            JOIN app_users u ON u.id = n.owner_id
-            LEFT JOIN app_users a ON a.id = n.author_id AND a.id != n.owner_id
-            WHERE n.done = 0 AND n.remind_15 = 1 AND n.reminded_at IS NULL AND n.due_at IS NOT NULL
-        `).all();
+        pending = notesRepo.getDueReminders();
     } catch (err) {
         console.error('[Discord] Reminder lookup failed:', err.message);
         return;
@@ -1626,7 +1507,6 @@ async function checkNoteReminders() {
     const due = pending.filter(n => new Date(n.due_at).getTime() - Date.now() <= 15 * 60 * 1000);
     if (!due.length) return;
 
-    const markSent = db.prepare(`UPDATE user_notes SET reminded_at = CURRENT_TIMESTAMP WHERE id = ?`);
     const channelId = getReminderChannelId();
     let channel = null;
     if (client.isReady() && channelId) {
@@ -1646,7 +1526,7 @@ async function checkNoteReminders() {
         } catch (err) {
             console.error('[Discord] Failed to send note reminder:', err.message);
         } finally {
-            markSent.run(note.id);
+            notesRepo.markReminderSent(note.id);
         }
     }
 }
@@ -1755,20 +1635,12 @@ async function sendOrEditIncoming(alertKey, content) {
     // Discord hard-caps message content at 2000 chars.
     const text = content.length > 1990 ? content.slice(0, 1987) + '...' : content;
 
-    const record = (msgId) => db.prepare(`
-        INSERT INTO incoming_msgs (alert_key, channel_id, message_id) VALUES (?, ?, ?)
-        ON CONFLICT(alert_key) DO UPDATE SET
-            channel_id = excluded.channel_id,
-            message_id = excluded.message_id,
-            updated_at = CURRENT_TIMESTAMP
-    `).run(alertKey, channelId, msgId);
+    const record = (msgId) => incomingRepo.upsertMessageRef(alertKey, channelId, msgId);
 
     // Try to edit the existing alert first (same attack, same channel).
     let existing = null;
     try {
-        existing = alertKey != null
-            ? db.prepare(`SELECT message_id, channel_id FROM incoming_msgs WHERE alert_key = ?`).get(alertKey)
-            : null;
+        existing = alertKey != null ? incomingRepo.getMessageRef(alertKey) : null;
     } catch (err) { existing = null; }
 
     const components = alertKey != null ? [coverButtonRow(alertKey)] : [];
@@ -1803,7 +1675,7 @@ async function updateIncomingCover(alertKey) {
     if (!client.isReady() || alertKey == null) return false;
     let row;
     try {
-        row = db.prepare(`SELECT message_id, channel_id FROM incoming_msgs WHERE alert_key = ?`).get(alertKey);
+        row = incomingRepo.getMessageRef(alertKey);
     } catch (e) { return false; }
     if (!row || !row.message_id || !row.channel_id) return false;
 

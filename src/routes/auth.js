@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const db = require('../database');
+const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
 const router = express.Router();
 
@@ -10,7 +11,7 @@ router.post('/login', (req, res) => {
     const { game_name, password } = req.body;
 
     // Find the user
-    const user = db.prepare(`SELECT * FROM app_users WHERE game_name = ?`).get(game_name);
+    const user = usersRepo.getUserByGameName(game_name);
 
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
     if (user.is_active === 0) return res.status(403).json({ error: 'Account has been deactivated' });
@@ -41,12 +42,7 @@ router.post('/logout', (req, res) => {
 router.get('/me', requireAuth, (req, res) => {
     let allianceId = null;
     try {
-        const row = db.prepare(`
-            SELECT p.alliance_id AS alliance_id
-            FROM app_users u
-            JOIN players p ON LOWER(u.game_name) = LOWER(p.name)
-            WHERE u.id = ?
-        `).get(req.session.userId);
+        const row = usersRepo.getUserAllianceIdBridge(req.session.userId);
         if (row && row.alliance_id != null) allianceId = row.alliance_id;
     } catch (err) {
         // Purely additive field: a broken bridge must never break /me itself.
@@ -73,7 +69,7 @@ const LINK_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no O/0, I/1 â€
 
 router.post('/link-code', requireAuth, (req, res) => {
     try {
-        const me = db.prepare(`SELECT id, game_name, discord_id, discord_name FROM app_users WHERE id = ?`).get(req.session.userId);
+        const me = usersRepo.getUserById(req.session.userId);
         if (!me) return res.status(404).json({ error: 'Account not found' });
         if (me.discord_id) {
             return res.json({
@@ -90,9 +86,9 @@ router.post('/link-code', requireAuth, (req, res) => {
 
         const expiresAt = new Date(Date.now() + LINK_CODE_TTL_MS).toISOString();
         db.transaction(() => {
-            db.prepare(`DELETE FROM discord_link_codes WHERE user_id = ? AND used_at IS NULL`).run(me.id);
-            db.prepare(`DELETE FROM discord_link_codes WHERE expires_at < datetime('now')`).run();
-            db.prepare(`INSERT INTO discord_link_codes (code, user_id, expires_at) VALUES (?, ?, ?)`).run(code, me.id, expiresAt);
+            usersRepo.deleteUnusedLinkCodesForUser(me.id);
+            usersRepo.deleteExpiredLinkCodes();
+            usersRepo.mintLinkCode(code, me.id, expiresAt);
         })();
 
         res.json({
@@ -135,7 +131,7 @@ router.post('/nuke', requireAuth, (req, res) => {
     console.error(`Action: PERMANENT BAN EXECUTED.\n`);
 
     // Ban the account
-    db.prepare(`UPDATE app_users SET is_active = 0 WHERE id = ?`).run(userId);
+    usersRepo.banUser(userId);
 
     // Destroy their session
     req.session.destroy();

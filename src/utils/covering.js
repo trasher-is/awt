@@ -2,7 +2,7 @@
 // incoming from either the News panel or the Discord alert button; both funnel through
 // here so the covering roster is one source of truth, stored on incoming_msgs.covering
 // (newline-joined game names) and rendered as a "Covering:" line on the alert.
-const db = require('../database');
+const incomingRepo = require('../repositories/incoming');
 
 // Prefix that identifies the covering line inside a rendered alert body. Distinct from
 // the "🛡️ **Can defend in time:**" defender header so stripping one never touches it.
@@ -10,7 +10,7 @@ const COVER_MARKER = '🛡️ **Covering:**';
 
 function getCovering(alertKey) {
     try {
-        const row = db.prepare(`SELECT covering FROM incoming_msgs WHERE alert_key = ?`).get(alertKey);
+        const row = incomingRepo.getCoveringRow(alertKey);
         return row && row.covering ? row.covering.split('\n').filter(Boolean) : [];
     } catch (e) {
         return [];
@@ -20,10 +20,7 @@ function getCovering(alertKey) {
 function setCovering(alertKey, names) {
     // The incoming_msgs row usually already exists (created when the alert was first sent),
     // but a News-panel claim can race ahead of that — upsert so it's never lost.
-    db.prepare(`
-        INSERT INTO incoming_msgs (alert_key, covering) VALUES (?, ?)
-        ON CONFLICT(alert_key) DO UPDATE SET covering = excluded.covering, updated_at = CURRENT_TIMESTAMP
-    `).run(alertKey, names.join('\n'));
+    incomingRepo.upsertCovering(alertKey, names.join('\n'));
 }
 
 // Add or remove a name from the covering roster (clicking again retracts). Case-insensitive

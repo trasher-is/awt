@@ -4,6 +4,14 @@ const fs = require('fs');
 const path = require('path');
 const db = require('../database');
 const { requireAuth, requireAdmin } = require('./_middleware');
+const systemsRepo = require('../repositories/systems');
+const fleetsRepo = require('../repositories/fleets');
+const plansRepo = require('../repositories/plans');
+const playersRepo = require('../repositories/players');
+const alliancesRepo = require('../repositories/alliances');
+const battleReportsRepo = require('../repositories/battleReports');
+const usersRepo = require('../repositories/users');
+const settingsRepo = require('../repositories/settings');
 const { archiveRound, listRounds, roundDetail } = require('../utils/round-archive');
 const router = express.Router();
 
@@ -54,12 +62,7 @@ router.get('/admin/logs', requireAdmin, (req, res) => {
 // Get all users (joined with players table for idle_time)
 router.get('/admin/users', requireAdmin, (req, res) => {
     try {
-        const users = db.prepare(`
-            SELECT u.id, u.game_name, u.role, u.is_active, u.discord_name, p.idle_time
-            FROM app_users u
-            LEFT JOIN players p ON LOWER(u.game_name) = LOWER(p.name)
-            ORDER BY u.id ASC
-        `).all();
+        const users = usersRepo.getAllUsersWithIdle();
         res.json({ success: true, users });
     } catch (err) {
         res.status(500).json({ error: 'Database error' });
@@ -72,12 +75,12 @@ router.post('/admin/users/:id/name', requireAdmin, (req, res) => {
     if (!new_name || new_name.trim() === '') return res.status(400).json({ error: 'Name cannot be empty' });
 
     try {
-        const user = db.prepare(`SELECT game_name FROM app_users WHERE id = ?`).get(req.params.id);
+        const user = usersRepo.getUserNameById(req.params.id);
         if (!user) return res.status(404).json({ error: 'User not found' });
         if (user.game_name === 'admin') return res.status(403).json({ error: 'Cannot rename the master admin' });
         if (new_name.toLowerCase() === 'admin') return res.status(400).json({ error: 'Cannot use reserved name' });
 
-        db.prepare(`UPDATE app_users SET game_name = ? WHERE id = ?`).run(new_name.trim(), req.params.id);
+        usersRepo.updateUserGameName(req.params.id, new_name.trim());
         res.json({ success: true });
     } catch (err) {
         if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(400).json({ error: 'Username already exists' });
@@ -88,11 +91,11 @@ router.post('/admin/users/:id/name', requireAdmin, (req, res) => {
 // Delete User
 router.delete('/admin/users/:id', requireAdmin, (req, res) => {
     try {
-        const user = db.prepare(`SELECT game_name FROM app_users WHERE id = ?`).get(req.params.id);
+        const user = usersRepo.getUserNameById(req.params.id);
         if (!user) return res.status(404).json({ error: 'User not found' });
         if (user.game_name === 'admin') return res.status(403).json({ error: 'Cannot delete the master admin' });
 
-        db.prepare(`DELETE FROM app_users WHERE id = ?`).run(req.params.id);
+        usersRepo.deleteUser(req.params.id);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Failed to delete user' });
@@ -114,7 +117,7 @@ router.post('/admin/users', requireAdmin, (req, res) => {
 
     try {
         const hash = bcrypt.hashSync(password, 10);
-        db.prepare(`INSERT INTO app_users (game_name, password_hash, role, discord_name) VALUES (?, ?, ?, ?)`).run(game_name, hash, role || 'user', discord_name || null);
+        usersRepo.createUser(game_name, hash, role || 'user', discord_name || null);
         res.json({ success: true });
     } catch (err) {
         if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(400).json({ error: 'Username already exists' });
@@ -126,7 +129,7 @@ router.post('/admin/users', requireAdmin, (req, res) => {
 router.post('/admin/users/:id/discord', requireAdmin, (req, res) => {
     const { discord_name } = req.body;
     try {
-        db.prepare(`UPDATE app_users SET discord_name = ? WHERE id = ?`).run(discord_name, req.params.id);
+        usersRepo.updateUserDiscordName(req.params.id, discord_name);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Failed to update discord name' });
@@ -139,15 +142,15 @@ router.post('/admin/users/:id/discord', requireAdmin, (req, res) => {
 // wrong Hub account before the code flow existed.
 router.delete('/admin/users/:id/discord', requireAdmin, (req, res) => {
     try {
-        const user = db.prepare(`SELECT game_name, discord_id, discord_name FROM app_users WHERE id = ?`).get(req.params.id);
+        const user = usersRepo.getUserDiscordInfoById(req.params.id);
         if (!user) return res.status(404).json({ error: 'User not found' });
         if (!user.discord_id && !user.discord_name) {
             return res.json({ success: true, changed: false, message: 'That account has no Discord link.' });
         }
         db.transaction(() => {
-            db.prepare(`UPDATE app_users SET discord_id = NULL, discord_name = NULL WHERE id = ?`).run(req.params.id);
+            usersRepo.clearUserDiscordFields(req.params.id);
             // Any pending link codes for this account are void once an admin intervenes.
-            db.prepare(`DELETE FROM discord_link_codes WHERE user_id = ?`).run(req.params.id);
+            usersRepo.deleteLinkCodesByUserId(req.params.id);
         })();
         console.log(`[Admin] Discord link cleared for '${user.game_name}' (was ${user.discord_id || user.discord_name}).`);
         res.json({ success: true, changed: true });
@@ -160,12 +163,12 @@ router.delete('/admin/users/:id/discord', requireAdmin, (req, res) => {
 // Toggle Active Status (Ban/Unban)
 router.post('/admin/users/:id/toggle', requireAdmin, (req, res) => {
     try {
-        const user = db.prepare(`SELECT game_name, is_active FROM app_users WHERE id = ?`).get(req.params.id);
+        const user = usersRepo.getUserActiveStatusById(req.params.id);
         if (!user) return res.status(404).json({ error: 'User not found' });
         if (user.game_name === 'admin') return res.status(403).json({ error: 'Cannot ban the master admin' });
 
         const newStatus = user.is_active === 1 ? 0 : 1;
-        db.prepare(`UPDATE app_users SET is_active = ? WHERE id = ?`).run(newStatus, req.params.id);
+        usersRepo.setUserActive(req.params.id, newStatus);
         res.json({ success: true, is_active: newStatus });
     } catch (err) {
         console.error('[DB Error] Failed to toggle user:', err);
@@ -180,11 +183,11 @@ router.post('/admin/users/:id/role', requireAdmin, (req, res) => {
     if (!validRoles.includes(role)) return res.status(400).json({ error: 'Invalid role' });
 
     try {
-        const user = db.prepare(`SELECT game_name FROM app_users WHERE id = ?`).get(req.params.id);
+        const user = usersRepo.getUserNameById(req.params.id);
         if (!user) return res.status(404).json({ error: 'User not found' });
         if (user.game_name === 'admin') return res.status(403).json({ error: 'Cannot change the master admin role' });
 
-        db.prepare(`UPDATE app_users SET role = ? WHERE id = ?`).run(role, req.params.id);
+        usersRepo.setUserRole(req.params.id, role);
         res.json({ success: true, role });
     } catch (err) {
         console.error('[DB Error] Failed to change role:', err);
@@ -200,7 +203,7 @@ router.post('/admin/users/:id/password', requireAdmin, (req, res) => {
     if (pwError) return res.status(400).json({ error: pwError });
 
     try {
-        const targetUser = db.prepare(`SELECT game_name FROM app_users WHERE id = ?`).get(req.params.id);
+        const targetUser = usersRepo.getUserNameById(req.params.id);
         if (!targetUser) return res.status(404).json({ error: 'User not found' });
 
         // SECURITY: Only the session holding the 'admin' game_name can change the master admin password
@@ -209,7 +212,7 @@ router.post('/admin/users/:id/password', requireAdmin, (req, res) => {
         }
 
         const hash = bcrypt.hashSync(new_password, 10);
-        db.prepare(`UPDATE app_users SET password_hash = ? WHERE id = ?`).run(hash, req.params.id);
+        usersRepo.setUserPasswordHash(req.params.id, hash);
         res.json({ success: true });
     } catch (err) {
         console.error('[DB Error] Failed to change password:', err);
@@ -223,10 +226,10 @@ router.post('/admin/users/:id/password', requireAdmin, (req, res) => {
 router.get('/admin/status', requireAdmin, (req, res) => {
     try {
         const stats = {
-            systems: db.prepare(`SELECT COUNT(*) as count FROM systems`).get().count,
-            planets: db.prepare(`SELECT COUNT(*) as count FROM planets`).get().count,
-            players: db.prepare(`SELECT COUNT(*) as count FROM players`).get().count,
-            fleets: db.prepare(`SELECT COUNT(*) as count FROM fleets`).get().count,
+            systems: systemsRepo.countSystems(),
+            planets: systemsRepo.countPlanets(),
+            players: playersRepo.countPlayers(),
+            fleets: fleetsRepo.countFleets(),
             uptime: process.uptime()
         };
         res.json({ success: true, stats });
@@ -238,7 +241,7 @@ router.get('/admin/status', requireAdmin, (req, res) => {
 // Clear Old Fleets (> 10 Days)
 router.post('/admin/clear-fleets', requireAdmin, (req, res) => {
     try {
-        const result = db.prepare(`DELETE FROM fleets WHERE updated_at <= datetime('now', '-10 days')`).run();
+        const result = fleetsRepo.deleteFleetsOlderThan10Days();
         res.json({ success: true, deleted: result.changes });
     } catch (err) {
         res.status(500).json({ error: 'Failed to clear fleets' });
@@ -289,7 +292,7 @@ router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
         return res.status(403).json({ error: 'Only the Master Admin can execute a database nuke.' });
     }
 
-    const adminUser = db.prepare(`SELECT password_hash FROM app_users WHERE game_name = 'admin'`).get();
+    const adminUser = usersRepo.getAdminPasswordHash();
     if (!bcrypt.compareSync(password, adminUser.password_hash)) {
         return res.status(401).json({ error: 'Invalid master password. Aborting nuke.' });
     }
@@ -303,17 +306,17 @@ router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
             // round as Elfenlied. If the snapshot throws, nothing is deleted.
             archived = archiveRound(db, { label, note });
 
-            db.prepare(`DELETE FROM fleets`).run();
-            db.prepare(`DELETE FROM planet_plans`).run();
-            db.prepare(`DELETE FROM planet_events`).run();
+            fleetsRepo.deleteAllFleets();
+            plansRepo.deleteAllPlans();
+            systemsRepo.deleteAllPlanetEvents();
             // Battle reports describe battles on the map being wiped — they go with it.
             // starbase_order_audit is deliberately NOT here: it is an operations record
             // of who sent what through the hub, and that stays true across rounds.
-            db.prepare(`DELETE FROM battle_reports`).run();
-            db.prepare(`DELETE FROM planets`).run();
-            db.prepare(`DELETE FROM players`).run();
-            db.prepare(`DELETE FROM alliances`).run();
-            db.prepare(`DELETE FROM systems`).run();
+            battleReportsRepo.deleteAllBattleReports();
+            systemsRepo.deleteAllPlanets();
+            playersRepo.deleteAllPlayers();
+            alliancesRepo.deleteAllAlliances();
+            systemsRepo.deleteAllSystems();
         });
 
         nukeTx();
@@ -331,10 +334,7 @@ router.post('/admin/broadcasts', requireAdmin, (req, res) => {
     if (!message || !author_name || !display_time) return res.status(400).json({ error: 'Missing required parameters.' });
 
     try {
-        db.prepare(`
-            INSERT INTO alliance_broadcasts (title, message, author_name, display_time)
-            VALUES (?, ?, ?, ?)
-        `).run(title || 'Attention!!!', message, author_name, display_time);
+        alliancesRepo.insertBroadcast(title || 'Attention!!!', message, author_name, display_time);
         res.json({ success: true });
     } catch (err) {
         console.error("[DB Error] Failed to insert broadcast:", err);
@@ -345,11 +345,7 @@ router.post('/admin/broadcasts', requireAdmin, (req, res) => {
 // --- USER & ADMIN: FETCH ALL BROADCASTS ---
 router.get('/broadcasts', requireAuth, (req, res) => {
     try {
-        const activeAlerts = db.prepare(`
-            SELECT id, title, message, author_name, display_time
-            FROM alliance_broadcasts
-            ORDER BY id DESC
-        `).all();
+        const activeAlerts = alliancesRepo.getBroadcasts();
         res.json({ success: true, broadcasts: activeAlerts });
     } catch (err) {
         console.error("[DB Error] Failed to fetch broadcasts:", err);
@@ -363,11 +359,7 @@ router.put('/admin/broadcasts/:id', requireAdmin, (req, res) => {
     if (!message || !author_name || !display_time) return res.status(400).json({ error: 'Missing fields.' });
 
     try {
-        db.prepare(`
-            UPDATE alliance_broadcasts
-            SET title = ?, message = ?, author_name = ?, display_time = ?
-            WHERE id = ?
-        `).run(title || 'Attention!!!', message, author_name, display_time, req.params.id);
+        alliancesRepo.updateBroadcast(title || 'Attention!!!', message, author_name, display_time, req.params.id);
         res.json({ success: true });
     } catch (err) {
         console.error("[DB Error] Failed to update broadcast:", err);
@@ -378,7 +370,7 @@ router.put('/admin/broadcasts/:id', requireAdmin, (req, res) => {
 // --- ADMIN: DELETE BROADCAST ---
 router.delete('/admin/broadcasts/:id', requireAdmin, (req, res) => {
     try {
-        db.prepare(`DELETE FROM alliance_broadcasts WHERE id = ?`).run(req.params.id);
+        alliancesRepo.deleteBroadcast(req.params.id);
         res.json({ success: true });
     } catch (err) {
         console.error("[DB Error] Failed to delete broadcast:", err);
@@ -389,7 +381,7 @@ router.delete('/admin/broadcasts/:id', requireAdmin, (req, res) => {
 // --- ADMIN: APP SETTINGS (key/value) ---
 router.get('/admin/settings', requireAdmin, (req, res) => {
     try {
-        const rows = db.prepare(`SELECT key, value FROM app_settings`).all();
+        const rows = settingsRepo.getAllSettings();
         const settings = {};
         rows.forEach(r => { settings[r.key] = r.value; });
         res.json({ success: true, settings });
@@ -405,10 +397,7 @@ router.post('/admin/settings', requireAdmin, (req, res) => {
     if (!allowedKeys.includes(key)) return res.status(400).json({ error: 'Unknown setting key' });
 
     try {
-        db.prepare(`
-            INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-        `).run(key, value == null ? '' : String(value).trim());
+        settingsRepo.setSetting(key, value == null ? '' : String(value).trim());
         res.json({ success: true });
     } catch (err) {
         console.error("[DB Error] Failed to save setting:", err);

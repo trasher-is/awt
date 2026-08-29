@@ -124,12 +124,23 @@ const capture = () => { const out = []; return { out, reply: (t) => { out.push(t
     // discord_name matched their username — an automatic link with no proof, which
     // silently defeated the code challenge.
     const fs = require('fs');
-    const src = fs.readFileSync(path.join(__dirname, '..', 'discord_bot.js'), 'utf8')
+    const stripComments = (text) => text
         .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map(l => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n');
+    // The discord_id write path moved out of discord_bot.js into repositories/users.js
+    // (updateUserDiscordLink). Scan both files so this check still verifies the real
+    // property: exactly one write path for discord_id, wherever it lives.
+    const src = [
+        stripComments(fs.readFileSync(path.join(__dirname, '..', 'discord_bot.js'), 'utf8')),
+        stripComments(fs.readFileSync(path.join(__dirname, '..', 'repositories', 'users.js'), 'utf8')),
+    ].join('\n');
     ok('no code writes discord_id from a username match',
         !/UPDATE app_users SET discord_id[\s\S]{0,200}LOWER\(discord_name\)/.test(src));
+    // "= ?" (a real, parameterised value) excludes admin.js's unlink path
+    // (clearUserDiscordFields, now also in users.js), which sets discord_id = NULL and
+    // was never in scope here — clearing a link grants nothing, so it isn't the
+    // vulnerability this check guards against.
     ok('discord_id is only ever written by the verified link path',
-        (src.match(/UPDATE app_users SET discord_id/g) || []).length === 1,
+        (src.match(/UPDATE app_users SET discord_id = \?/g) || []).length === 1,
         (src.match(/UPDATE app_users SET discord_id/g) || []).length);
 
     // ─── #16 SLASH COMMANDS ───────────────────────────────────────────────────

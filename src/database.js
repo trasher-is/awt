@@ -2,7 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const crypto = require('crypto');
 
-const dbPath = path.join(__dirname, '..', 'awt.db');
+const dbPath = process.env.AWT_DB_PATH || path.join(__dirname, '..', 'awt.db');
 const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
@@ -52,6 +52,9 @@ function initDatabase() {
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     `);
+
+    addColumn('alliances', 'full_name', 'TEXT');
+    addColumn('alliances', 'member_count', 'INTEGER');
 
     // 3. Players (Flat Table)
     db.exec(`
@@ -181,6 +184,12 @@ function initDatabase() {
             FOREIGN KEY(owner_id) REFERENCES players(id) ON DELETE SET NULL
         )
     `);
+
+    addColumn('systems', 'full_name', 'TEXT');
+    addColumn('systems', 'info', 'TEXT');
+    addColumn('systems', 'population_level', 'INTEGER');
+    addColumn('systems', 'is_in_vision', 'INTEGER');
+    addColumn('planets', 'name', 'TEXT');
 
     // 4.5 Alliance Meta-Data (Planning)
     db.exec(`

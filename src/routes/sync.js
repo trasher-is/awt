@@ -2,77 +2,37 @@ const express = require('express');
 const db = require('../database');
 const { requireAuth } = require('./_middleware');
 const { announceSystemChanges } = require('../discord_bot');
+const systemsRepo = require('../repositories/systems');
+const fleetsRepo = require('../repositories/fleets');
+const playersRepo = require('../repositories/players');
+const alliancesRepo = require('../repositories/alliances');
+const settingsRepo = require('../repositories/settings');
 const { mapApiReport, upsertReports, formatBattleEmbed } = require('../utils/battle-reports');
+const battleReportsRepo = require('../repositories/battleReports');
 const { postEmbed, defuseMentions, settingValue } = require('../utils/discord-post');
 const router = express.Router();
 
 // --- MAP SCRAPER DATA RECEIVER ---
 router.post('/sync/system', requireAuth, (req, res) => {
     const { system_id, planets, fleets, scan_mode } = req.body; // <-- Added fleets, scan_mode
+    // scan_mode: 'galaxy' (mass-scanner.js) is currently only informational and does not
+    // change behavior here. 'silent' (bulk API seed via galaxy-map.js seedPlanetsFromSectors)
+    // suppresses Discord announcements below — the DB writes and planet_events history log
+    // happen exactly the same either way, only the announceEvents.push() calls are skipped,
+    // so a full-map bulk seed doesn't flood the channel with hundreds of stale-looking
+    // transitions.
 
     if (!system_id || !Array.isArray(planets)) {
         return res.status(400).json({ error: 'Invalid payload' });
     }
 
-    db.prepare(`INSERT INTO systems (id) VALUES (?) ON CONFLICT(id) DO NOTHING`).run(system_id);
-
-    const upsertAlliance = db.prepare(`
-        INSERT INTO alliances (id, tag, name) VALUES (?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET tag=excluded.tag, updated_at=CURRENT_TIMESTAMP
-    `);
-
-    const upsertPlayer = db.prepare(`
-        INSERT INTO players (id, name, alliance_id) VALUES (?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            name = excluded.name,
-            alliance_id = CASE WHEN excluded.alliance_id IS NOT NULL THEN excluded.alliance_id ELSE players.alliance_id END,
-            updated_at = CURRENT_TIMESTAMP
-    `);
-
-    const upsertPlanet = db.prepare(`
-        INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet, is_sieged)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(system_id, planet_index) DO UPDATE SET
-            game_planet_id=excluded.game_planet_id,
-            owner_id=excluded.owner_id,
-            population=excluded.population,
-            starbase=excluded.starbase,
-            has_fleet=excluded.has_fleet,
-            is_sieged=excluded.is_sieged,
-            updated_at=CURRENT_TIMESTAMP
-    `);
-
-    // A planet's game_planet_id is globally UNIQUE, but it can show up at a new
-    // (system_id, planet_index) slot when a planet is re-slotted/relocated. The upsert
-    // above only resolves the (system_id, planet_index) conflict, so without this the
-    // INSERT path would trip the game_planet_id UNIQUE constraint and abort the whole
-    // system's transaction (losing all of that system's updates). Clear the stale row
-    // at the old location first.
-    const clearMovedPlanet = db.prepare(`
-        DELETE FROM planets WHERE game_planet_id = ? AND (system_id != ? OR planet_index != ?)
-    `);
-
-    // --- NEW: History Logging Prep ---
-    // starbase/has_fleet/is_sieged are selected because the fog-of-war guard below
-    // restores them: reading them off a row that never carried them bound `undefined`
-    // (-> NULL) and quietly erased the very values the guard exists to preserve.
-    const getOldPlanet = db.prepare(`SELECT owner_id, population, starbase, has_fleet, is_sieged FROM planets WHERE system_id = ? AND planet_index = ?`);
-    const getPlayerName = db.prepare(`
-        SELECT p.name, a.tag AS alliance_tag
-        FROM players p
-        LEFT JOIN alliances a ON p.alliance_id = a.id
-        WHERE p.id = ?
-    `);
-    const logEvent = db.prepare(`
-        INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value)
-        VALUES (?, ?, ?, ?, ?)
-    `);
+    systemsRepo.upsertSystemStub(system_id);
 
     // Collect human-readable events for the Discord announcer (only used during a galaxy scan)
     const announceEvents = [];
     const nameOf = (id) => {
         if (!id) return null;
-        const row = getPlayerName.get(id);
+        const row = playersRepo.getPlayerNameWithTag(id);
         if (!row) return `#${id}`;
         return row.alliance_tag ? `[${row.alliance_tag}] ${row.name}` : row.name;
     };
@@ -88,7 +48,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
             if (!Number.isInteger(p.planet_index) || p.planet_index < 1 || p.planet_index > 99) continue;
 
             // Check for history events BEFORE upserting
-            const oldP = getOldPlanet.get(system_id, p.planet_index);
+            const oldP = systemsRepo.getOldPlanet(system_id, p.planet_index);
 
             let finalOwnerId = p.owner ? p.owner.id : null;
             let finalPopulation = p.population;
@@ -106,13 +66,26 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 ? (oldP ? oldP.is_sieged : 0)
                 : (p.is_sieged ? 1 : 0);
 
-            // CRITICAL FOG OF WAR GUARD: If scan reports "Unknown", protect historical stats from being nuked
-            if (p.is_unknown && oldP) {
-                finalOwnerId = oldP.owner_id;
-                finalPopulation = oldP.population;
-                finalStarbase = oldP.starbase;
-                finalHasFleet = oldP.has_fleet;
-                finalIsSieged = oldP.is_sieged;
+            // CRITICAL FOG OF WAR GUARD: If scan reports "Unknown", protect historical stats
+            // from being nuked. When there's no prior row (oldP is null — a never-seen-before
+            // planet), there is nothing to fall back to, so fields fall back to their current
+            // "no observation" defaults instead — crucially, ownership falls back to NULL
+            // rather than trusting p.owner.id: an out-of-vision seed can report is_unknown:true
+            // while still carrying owner from the API's cached snapshot, and that owner may be
+            // a player the hub has never seen (no players row was created for them, since the
+            // upsert below also skips creating one when is_unknown is true). Inserting a
+            // planets row with owner_id pointing at a nonexistent player trips the
+            // FOREIGN KEY(owner_id) REFERENCES players(id) constraint and rolls back the
+            // WHOLE system's transaction, not just this one planet.
+            // NOTE: updated_at below still stamps CURRENT_TIMESTAMP even when the guard
+            // preserves stale values — it reflects "last synced", not "last confirmed fresh".
+            // is_in_vision (systems table) is the actual freshness signal, not updated_at.
+            if (p.is_unknown) {
+                finalOwnerId = oldP ? oldP.owner_id : null;
+                finalPopulation = oldP ? oldP.population : finalPopulation;
+                finalStarbase = oldP ? oldP.starbase : finalStarbase;
+                finalHasFleet = oldP ? oldP.has_fleet : finalHasFleet;
+                finalIsSieged = oldP ? oldP.is_sieged : finalIsSieged;
             }
 
             // SOFT-UNKNOWN GUARD: a scan can fail to pick up the owner link while the
@@ -130,13 +103,13 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 if (oldP.owner_id !== finalOwnerId) {
                     // OWNER CHANGE — takes precedence; a pop drop that comes with a new
                     // owner is really just the conquest, already captured here.
-                    logEvent.run(system_id, p.planet_index, 1, oldP.owner_id, finalOwnerId); // 1 = OWNER_CHANGE (history)
+                    systemsRepo.logPlanetEvent(system_id, p.planet_index, 1, oldP.owner_id, finalOwnerId); // 1 = OWNER_CHANGE (history)
                     // Announce genuine transitions to Discord, but NOT "Empty -> owner":
                     // those are low-value new colonies, and while the planets table heals
                     // from the old null-purge corruption every re-detected owner would look
                     // like one and flood the channel. Conquests (X->Y) and losses (X->Empty)
                     // still announce; the history event above is recorded regardless.
-                    if (oldP.owner_id != null) {
+                    if (oldP.owner_id != null && scan_mode !== 'silent') {
                         announceEvents.push({
                             planet_index: p.planet_index,
                             type: 'OWNER_CHANGE',
@@ -153,8 +126,8 @@ router.post('/sync/system', requireAuth, (req, res) => {
                     const oldPop = Number(oldP.population);
                     const newPop = Number(finalPopulation);
                     if (Number.isFinite(oldPop) && Number.isFinite(newPop) && newPop < oldPop) {
-                        logEvent.run(system_id, p.planet_index, 2, oldPop, newPop); // 2 = POP_DROP
-                        announceEvents.push({
+                        systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, newPop); // 2 = POP_DROP
+                        if (scan_mode !== 'silent') announceEvents.push({
                             planet_index: p.planet_index,
                             type: 'POP_DROP',
                             old_pop: oldPop,
@@ -169,17 +142,21 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 // A system scan only ever sees the tag, so it seeds `name` from the tag and
                 // leaves name alone on conflict (the alliance-profile sync owns the real
                 // name). `?? ''` because alliances.name is NOT NULL and a tag can be absent.
-                if (p.owner.alliance_id) upsertAlliance.run(p.owner.alliance_id, p.owner.alliance_tag ?? null, p.owner.alliance_tag ?? '');
-                upsertPlayer.run(p.owner.id, p.owner.name, p.owner.alliance_id || null);
+                if (p.owner.alliance_id) alliancesRepo.upsertAllianceBasic(p.owner.alliance_id, p.owner.alliance_tag ?? null, p.owner.alliance_tag ?? '');
+                playersRepo.upsertPlayerBasic(p.owner.id, p.owner.name, p.owner.alliance_id || null);
             }
 
             // Pass the calculated final parameters securely down to the table updater.
             // Re-home the planet if its id currently lives at another slot (avoids the
             // game_planet_id UNIQUE collision that would otherwise roll back the system).
             if (p.game_planet_id != null) {
-                clearMovedPlanet.run(p.game_planet_id, system_id, p.planet_index);
+                systemsRepo.clearMovedPlanet(p.game_planet_id, system_id, p.planet_index);
             }
-            upsertPlanet.run(p.game_planet_id, system_id, p.planet_index, finalOwnerId, finalPopulation, finalStarbase, finalHasFleet, finalIsSieged);
+            systemsRepo.upsertPlanet(
+                p.game_planet_id, system_id, p.planet_index, finalOwnerId, finalPopulation,
+                finalStarbase, finalHasFleet, finalIsSieged,
+                typeof p.name === 'string' ? p.name : null
+            );
         }
 
         // NOTE: Fleet positions are no longer derived from system scans. They are now
@@ -195,7 +172,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
         // Announce detected planet events to Discord — both during a full galaxy scan
         // and during normal map browsing.
         if (announceEvents.length > 0) {
-            const sys = db.prepare(`SELECT id, name, x, y FROM systems WHERE id = ?`).get(system_id) || { id: system_id };
+            const sys = systemsRepo.getSystemCoords(system_id) || { id: system_id };
             announceSystemChanges(sys, announceEvents).catch(err =>
                 console.error('[Discord] announce error:', err.message)
             );
@@ -270,7 +247,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
         cv_limit: p.cv_limit || 0
     };
 
-    const oldPlayer = db.prepare('SELECT logins, points, origin_system FROM players WHERE id = ?').get(p.id);
+    const oldPlayer = playersRepo.getPlayerRestartCheck(p.id);
 
     const syncTransaction = db.transaction((player) => {
         // Restart detection. Planet ownership is NEVER touched here — that belongs to
@@ -299,90 +276,20 @@ router.post('/sync/player', requireAuth, (req, res) => {
         if (originChanged || loginsReset) {
             console.log(`[SYSTEM] Player ${player.id} restart detected (${originChanged ? 'origin moved' : 'logins reset'}); resetting stale profile stats.`);
 
-            db.prepare(`DELETE FROM fleets WHERE owner_id = ?`).run(player.id);
-            // The reset is a HEURISTIC and heuristics misfire (see issues #46/#48: a false
-            // restart once zeroed a player's race picks). So it may only clear columns the
-            // upsert below writes UNCONDITIONALLY — the public stats anyone can read off the
-            // profile/ranking. It must NOT touch the intel-derived columns (sciences per
-            // field, race picks, artefact, eco bonus, has_intel), because those are governed
-            // solely by the `has_intel` CASE guard in the upsert: hard-won intel must never
-            // be destroyed by a guess. A genuinely restarted player keeps stale intel (with
-            // its old intel_updated_at) until the next scan with vision overwrites it —
-            // cosmetic staleness beats irreversible data loss. origin_system IS reset here so
-            // the originChanged signal can re-arm on the next move.
-            db.prepare(`
-                UPDATE players SET
-                    level=0, points=0, ranking=NULL, science_level=0, culture_level=0,
-                    origin_system=NULL,
-                    home_planet_id=NULL, home_system_id=NULL, home_planet_index=NULL, possible_homes='[]',
-                    total_planets=0, total_population=0, total_farms=0, total_factories=0, total_labs=0, total_cybernetics=0, cv_used=0, cv_limit=0
-                WHERE id = ?
-            `).run(player.id);
+            fleetsRepo.deleteFleetsByOwner(player.id);
+            playersRepo.resetPlayerOnRestart(player.id);
         }
 
         if (player.alliance_id) {
             // As in the system scan above: seed name from the tag, `?? ''` because
             // alliances.name is NOT NULL and the tag may be missing.
-            db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET tag=excluded.tag`)
-                .run(player.alliance_id, player.alliance_tag ?? null, player.alliance_tag ?? '');
+            alliancesRepo.upsertAllianceTagOnly(player.alliance_id, player.alliance_tag ?? null, player.alliance_tag ?? '');
         }
 
-        db.prepare(`
-            INSERT INTO players (
-                id, name, alliance_id, country, local_time, idle_time, origin_system,
-                level, ranking, points, science_level, culture_level,
-                biology, economy, energy, mathematics, physics, social,
-                trade_revenue, artefact, eco_bonus,
-                race_growth, race_science, race_culture, race_production, race_speed, race_attack, race_defense,
-                race_trader, race_sul, joined, logins, has_intel, intel_updated_at,
-                home_planet_id, home_system_id, home_planet_index, possible_homes,
-                total_planets, total_population, total_farms, total_factories, total_labs, total_cybernetics, cv_used, cv_limit
-            ) VALUES (
-                @id, @name, @alliance_id, @country, @local_time, @idle_time, @origin_system,
-                @level, @ranking, @points, @science_level, @culture_level,
-                @biology, @economy, @energy, @mathematics, @physics, @social,
-                @trade_revenue, @artefact, @eco_bonus,
-                @race_growth, @race_science, @race_culture, @race_production, @race_speed, @race_attack, @race_defense,
-                @race_trader, @race_sul, @joined, @logins, @has_intel,
-                CASE WHEN @has_intel = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
-                @home_planet_id, @home_system_id, @home_planet_index, @possible_homes,
-                @total_planets, @total_population, @total_farms, @total_factories, @total_labs, @total_cybernetics, @cv_used, @cv_limit
-            ) ON CONFLICT(id) DO UPDATE SET
-                name=excluded.name, alliance_id=excluded.alliance_id, country=excluded.country,
-                local_time=excluded.local_time, idle_time=excluded.idle_time, origin_system=excluded.origin_system,
-                level=excluded.level, ranking=excluded.ranking, points=excluded.points,
-                science_level=excluded.science_level, culture_level=excluded.culture_level,
-                joined=excluded.joined, logins=excluded.logins,
-                home_planet_id=excluded.home_planet_id, home_system_id=excluded.home_system_id, home_planet_index=excluded.home_planet_index,
-                possible_homes=excluded.possible_homes, total_planets=excluded.total_planets, total_population=excluded.total_population,
-                total_farms=excluded.total_farms, total_factories=excluded.total_factories, total_labs=excluded.total_labs,
-                total_cybernetics=excluded.total_cybernetics, cv_used=excluded.cv_used, cv_limit=excluded.cv_limit,
-                updated_at=CURRENT_TIMESTAMP,
-
-                biology = CASE WHEN excluded.has_intel = 1 THEN excluded.biology ELSE players.biology END,
-                economy = CASE WHEN excluded.has_intel = 1 THEN excluded.economy ELSE players.economy END,
-                energy = CASE WHEN excluded.has_intel = 1 THEN excluded.energy ELSE players.energy END,
-                mathematics = CASE WHEN excluded.has_intel = 1 THEN excluded.mathematics ELSE players.mathematics END,
-                physics = CASE WHEN excluded.has_intel = 1 THEN excluded.physics ELSE players.physics END,
-                social = CASE WHEN excluded.has_intel = 1 THEN excluded.social ELSE players.social END,
-                trade_revenue = CASE WHEN excluded.has_intel = 1 THEN excluded.trade_revenue ELSE players.trade_revenue END,
-                artefact = CASE WHEN excluded.has_intel = 1 THEN excluded.artefact ELSE players.artefact END,
-                eco_bonus = CASE WHEN excluded.has_intel = 1 THEN excluded.eco_bonus ELSE players.eco_bonus END,
-                race_growth = CASE WHEN excluded.has_intel = 1 THEN excluded.race_growth ELSE players.race_growth END,
-                race_science = CASE WHEN excluded.has_intel = 1 THEN excluded.race_science ELSE players.race_science END,
-                race_culture = CASE WHEN excluded.has_intel = 1 THEN excluded.race_culture ELSE players.race_culture END,
-                race_production = CASE WHEN excluded.has_intel = 1 THEN excluded.race_production ELSE players.race_production END,
-                race_speed = CASE WHEN excluded.has_intel = 1 THEN excluded.race_speed ELSE players.race_speed END,
-                race_attack = CASE WHEN excluded.has_intel = 1 THEN excluded.race_attack ELSE players.race_attack END,
-                race_defense = CASE WHEN excluded.has_intel = 1 THEN excluded.race_defense ELSE players.race_defense END,
-                race_trader = CASE WHEN excluded.has_intel = 1 THEN excluded.race_trader ELSE players.race_trader END,
-                race_sul = CASE WHEN excluded.has_intel = 1 THEN excluded.race_sul ELSE players.race_sul END,
-                intel_updated_at = CASE WHEN excluded.has_intel = 1 THEN CURRENT_TIMESTAMP ELSE players.intel_updated_at END,
-                has_intel = CASE WHEN excluded.has_intel = 1 THEN 1 ELSE players.has_intel END
-        `).run(player);
+        playersRepo.upsertPlayerFull(player);
 
         if (player.logins > 0 && (!oldPlayer || oldPlayer.logins !== player.logins)) {
-            db.prepare(`INSERT INTO player_logins (player_id, total_logins) VALUES (?, ?)`).run(player.id, player.logins);
+            playersRepo.insertPlayerLogin(player.id, player.logins);
         }
     });
 
@@ -422,30 +329,12 @@ router.post('/sync/alliance', requireAuth, (req, res) => {
 
     const syncTransaction = db.transaction((a) => {
         // 1. Upsert Alliance Data
-        db.prepare(`
-            INSERT INTO alliances (id, name, tag, leader_id, ranking, points_current)
-            VALUES (@id, @name, @tag, @leader_id, @ranking, @points)
-            ON CONFLICT(id) DO UPDATE SET
-                name=excluded.name,
-                tag=excluded.tag,
-                leader_id=excluded.leader_id,
-                ranking=excluded.ranking,
-                points_current=excluded.points_current,
-                updated_at=CURRENT_TIMESTAMP
-        `).run(a);
+        alliancesRepo.upsertAllianceFull(a);
 
         // 2. Map all members to this Alliance
-        const upsertPlayer = db.prepare(`
-            INSERT INTO players (id, name, alliance_id) VALUES (?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                name=excluded.name,
-                alliance_id=excluded.alliance_id,
-                updated_at=CURRENT_TIMESTAMP
-        `);
-
         if (Array.isArray(a.members)) {
             for (const member of a.members) {
-                upsertPlayer.run(member.id, member.name, a.id);
+                playersRepo.upsertAllianceMemberBasic(member.id, member.name, a.id);
             }
         }
     });
@@ -459,6 +348,39 @@ router.post('/sync/alliance', requireAuth, (req, res) => {
     }
 });
 
+// --- ALLIANCE SEARCH RESULT RECEIVER ---
+// API-search-sourced, distinct from /sync/alliance's scrape shape above (no leader_id,
+// ranking, points, or members[] — Alliance/search doesn't return any of those). Batch:
+// the member's browser can send everything Alliance/search returned in one call.
+router.post('/sync/alliance-search', requireAuth, (req, res) => {
+    const { alliances } = req.body;
+    if (!Array.isArray(alliances) || alliances.length === 0) {
+        return res.status(400).json({ error: 'Invalid payload' });
+    }
+    let stored = 0;
+    const syncTransaction = db.transaction((list) => {
+        for (const a of list) {
+            if (!Number.isInteger(a.id) || a.id <= 0) continue;
+            alliancesRepo.upsertAllianceFromApiSearch(
+                a.id,
+                a.name == null ? '' : String(a.name),
+                a.tag == null ? null : String(a.tag),
+                typeof a.full_name === 'string' ? a.full_name : null,
+                Number.isInteger(a.member_count) ? a.member_count : null
+            );
+            stored++;
+        }
+    });
+
+    try {
+        syncTransaction(alliances);
+        res.json({ success: true, count: stored });
+    } catch (err) {
+        console.error('[DB Error] Failed to sync alliance search results:', err);
+        res.status(500).json({ error: 'Database sync failed' });
+    }
+});
+
 // --- FLEET ID BACKFILL ---
 // Alliance scans give fleet positions but not game fleet ids (those only appear on the
 // system map). The News refresh parses the relevant systems and posts the ids here so we
@@ -467,16 +389,12 @@ router.post('/sync/fleet-ids', requireAuth, (req, res) => {
     const list = Array.isArray(req.body.fleets) ? req.body.fleets : [];
     if (!list.length) return res.json({ success: true, updated: 0 });
     try {
-        const upd = db.prepare(`
-            UPDATE fleets SET game_fleet_id = ?
-            WHERE owner_id = ? AND system_id = ? AND planet_index = ?
-        `);
         let updated = 0;
         const tx = db.transaction((rows) => {
             for (const f of rows) {
                 if (!Number.isInteger(f.game_fleet_id) || !Number.isInteger(f.owner_id)) continue;
                 if (!Number.isInteger(f.system_id) || !Number.isInteger(f.planet_index)) continue;
-                updated += upd.run(f.game_fleet_id, f.owner_id, f.system_id, f.planet_index).changes;
+                updated += fleetsRepo.updateFleetGameId(f.game_fleet_id, f.owner_id, f.system_id, f.planet_index).changes;
             }
         });
         tx(list);
@@ -497,15 +415,6 @@ router.post('/sync/galaxy', requireAuth, (req, res) => {
 
     console.log(`\n[API] Incoming Galaxy Index sync (${systems.length} systems)`);
 
-    const upsertSystem = db.prepare(`
-        INSERT INTO systems (id, name, x, y) VALUES (?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            name=excluded.name,
-            x=excluded.x,
-            y=excluded.y,
-            updated_at=CURRENT_TIMESTAMP
-    `);
-
     // x/y land in INTEGER-affinity columns, but a bound non-numeric string is stored as
     // TEXT and later reaches the map UI, so coerce here at the trust boundary: a system id
     // must be a positive integer, and x/y become real numbers or the row is skipped. This
@@ -523,7 +432,14 @@ router.post('/sync/galaxy', requireAuth, (req, res) => {
             const x = coord(s.x);
             const y = coord(s.y);
             if (x === null || y === null) continue;
-            upsertSystem.run(s.id, typeof s.name === 'string' ? s.name : null, x, y);
+            systemsRepo.upsertSystemFull(
+                s.id,
+                typeof s.name === 'string' ? s.name : null,
+                x, y,
+                typeof s.full_name === 'string' ? s.full_name : null,
+                typeof s.info === 'string' ? s.info : null,
+                Number.isInteger(s.population_level) ? s.population_level : null
+            );
             stored++;
         }
     });
@@ -537,6 +453,25 @@ router.post('/sync/galaxy', requireAuth, (req, res) => {
     }
 });
 
+// --- SYSTEM VISIBILITY FLAG RECEIVER ---
+// Map/sectors reports isInVision per system: whether the returned planet data is live or
+// the game's last-known cache for territory outside anyone's current vision. This is
+// purely a staleness signal for later UI use — it does not affect the fog-of-war merge in
+// /sync/system (the client marks affected planets is_unknown before calling that route);
+// this route only records the flag itself for display.
+router.post('/sync/system-in-vision', requireAuth, (req, res) => {
+    const { systems } = req.body;
+    if (!Array.isArray(systems) || systems.length === 0) {
+        return res.status(400).json({ error: 'Invalid payload' });
+    }
+    let updated = 0;
+    for (const s of systems) {
+        if (!Number.isInteger(s.id) || s.id <= 0) continue;
+        if (systemsRepo.setSystemInVision(s.id, !!s.is_in_vision) > 0) updated++;
+    }
+    res.json({ success: true, updated });
+});
+
 // --- RANKING: BEST GUARDED DATA INGESTION SYNC LAYER ---
 router.post('/sync/best-guarded', requireAuth, (req, res) => {
     const { last_update, entries } = req.body;
@@ -545,7 +480,7 @@ router.post('/sync/best-guarded', requireAuth, (req, res) => {
     }
 
     // Daily lock guard check against the exact server tick date signature
-    const existingCheck = db.prepare("SELECT COUNT(*) as count FROM best_guarded WHERE updated_at = ?").get(last_update);
+    const existingCheck = { count: systemsRepo.countBestGuardedAt(last_update) };
     if (existingCheck.count > 0) {
         return res.json({ success: true, skipped: true, message: 'Rankings already updated for today.' });
     }
@@ -553,15 +488,10 @@ router.post('/sync/best-guarded', requireAuth, (req, res) => {
     console.log(`[API] Processing fresh Best Guarded ranking sync batch updated at: ${last_update}`);
 
     const syncTx = db.transaction((rows) => {
-        db.prepare("DELETE FROM best_guarded").run(); // Clear stale indices safely
-
-        const insertStmt = db.prepare(`
-            INSERT INTO best_guarded (game_planet_id, cv, updated_at)
-            VALUES (?, ?, ?)
-        `);
+        systemsRepo.clearBestGuarded(); // Clear stale indices safely
 
         for (const row of rows) {
-            insertStmt.run(row.planet_id, row.cv, last_update);
+            systemsRepo.insertBestGuarded(row.planet_id, row.cv, last_update);
         }
     });
 
@@ -588,52 +518,22 @@ router.post('/sync/alliance-stats', requireAuth, (req, res) => {
 
     try {
         const tx = db.transaction(() => {
-            db.prepare(`
-                INSERT INTO alliance_member_stats (
-                    player_id, planets_text, next_culture_at, science_rate, culture_rate, production_rate,
-                    astro_dollars, production_points, artefact, level_text, cv_limit_text,
-                    economy, energy, mathematics, physics, population, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(player_id) DO UPDATE SET
-                    planets_text=excluded.planets_text,
-                    next_culture_at=excluded.next_culture_at,
-                    science_rate=excluded.science_rate,
-                    culture_rate=excluded.culture_rate,
-                    production_rate=excluded.production_rate,
-                    astro_dollars=excluded.astro_dollars,
-                    production_points=excluded.production_points,
-                    artefact=excluded.artefact,
-                    level_text=excluded.level_text,
-                    cv_limit_text=excluded.cv_limit_text,
-                    economy=excluded.economy,
-                    energy=excluded.energy,
-                    mathematics=excluded.mathematics,
-                    physics=excluded.physics,
-                    population=excluded.population,
-                    updated_at=CURRENT_TIMESTAMP
-            `).run(
+            alliancesRepo.upsertAllianceMemberStats(
                 s.player_id, s.planets_text, nextCultureAt, s.science_rate, s.culture_rate, s.production_rate,
                 s.astro_dollars, s.production_points, s.artefact, s.level_text, s.cv_limit_text,
                 s.economy, s.energy, s.mathematics, s.physics, s.population
             );
 
-            db.prepare(`
-                INSERT INTO players (id, name, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(id) DO UPDATE SET name=excluded.name, updated_at=CURRENT_TIMESTAMP
-            `).run(s.player_id, s.name);
+            playersRepo.upsertPlayerNameOnly(s.player_id, s.name);
 
             // Replace this member's stationed fleets so positions stay fresh and stale
             // ones are dropped. Only touch fleets when the scrape actually carried a
             // fleet array (avoids wiping data on a stats-only payload).
             if (fleets) {
-                db.prepare(`DELETE FROM fleets WHERE owner_id = ?`).run(s.player_id);
-                const ins = db.prepare(`
-                    INSERT INTO fleets (owner_id, system_id, planet_index, transports, colony_ships, destroyers, cruisers, battleships, arrival_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                `);
+                fleetsRepo.deleteFleetsByOwner(s.player_id);
                 for (const f of fleets) {
                     if (!Number.isInteger(f.system_id) || !Number.isInteger(f.planet_index)) continue;
-                    ins.run(
+                    fleetsRepo.insertFleetForAllianceStats(
                         s.player_id, f.system_id, f.planet_index,
                         f.transports || 0, f.colony_ships || 0, f.destroyers || 0, f.cruisers || 0, f.battleships || 0,
                         f.arrival_at || null
@@ -662,10 +562,7 @@ router.post('/sync/alliance-roster', requireAuth, (req, res) => {
     if (ids.length === 0) return res.json({ success: true, removed: 0 });
 
     try {
-        const placeholders = ids.map(() => '?').join(',');
-        const info = db.prepare(
-            `DELETE FROM alliance_member_stats WHERE player_id NOT IN (${placeholders})`
-        ).run(...ids);
+        const info = alliancesRepo.deleteStaleAllianceMembers(ids);
         if (info.changes > 0) console.log(`[API] Alliance roster reconcile: removed ${info.changes} stale member(s).`);
         res.json({ success: true, removed: info.changes });
     } catch (err) {
@@ -703,10 +600,8 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
         // `skipped` on a re-sync and it could never announce). announced=1 is flipped only
         // when a channel is actually configured — otherwise the rows stay a retry queue.
         if (settingValue('discord_battlereport_channel')) {
-            const pending = db.prepare(
-                `SELECT * FROM battle_reports WHERE announced = 0 ORDER BY started_at ASC, id ASC`).all();
+            const pending = battleReportsRepo.getPendingAnnouncements();
             if (pending.length > 0) {
-                const markAnnounced = db.prepare(`UPDATE battle_reports SET announced = 1 WHERE id = ?`);
                 const toEmbed = pending.slice(0, 5);
                 for (const row of toEmbed) {
                     const embed = formatBattleEmbed({
@@ -730,14 +625,14 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
                 // Fire-and-forget above: the flag is flipped for every pending row now, so a
                 // Discord hiccup drops that one embed rather than replaying the whole backlog
                 // on the next sync (matches how reminders/timers mark themselves sent).
-                const flip = db.transaction((ids) => { for (const id of ids) markAnnounced.run(id); });
+                const flip = db.transaction((ids) => { for (const id of ids) battleReportsRepo.markAnnounced(id); });
                 flip(pending.map(r => r.id));
             }
         }
 
         // newest_started_at is the dashboard scheduler's contract: the next pull uses it
         // as BattleDateFrom so the search window only ever moves forward.
-        const newest = db.prepare(`SELECT MAX(started_at) AS newest FROM battle_reports`).get().newest || null;
+        const newest = battleReportsRepo.getNewestStartedAt();
 
         res.json({ success: true, inserted: inserted.length, skipped, newest_started_at: newest });
     } catch (err) {
@@ -782,14 +677,9 @@ router.post('/sync/starbase-audit', requireAuth, (req, res) => {
 router.post('/sync/trade-prices', requireAuth, (req, res) => {
     const { pp_price, su_price } = req.body;
 
-    const upsert = db.prepare(`
-        INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-    `);
-
     try {
-        if (pp_price != null && !isNaN(pp_price)) upsert.run('pp_price', String(pp_price));
-        if (su_price != null && !isNaN(su_price)) upsert.run('su_price', String(su_price));
+        if (pp_price != null && !isNaN(pp_price)) settingsRepo.setSetting('pp_price', String(pp_price));
+        if (su_price != null && !isNaN(su_price)) settingsRepo.setSetting('su_price', String(su_price));
         res.json({ success: true });
     } catch (err) {
         console.error('[DB Error] Failed to store trade prices:', err);

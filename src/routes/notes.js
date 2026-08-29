@@ -9,6 +9,8 @@
 // anyone else's.
 const express = require('express');
 const db = require('../database');
+const usersRepo = require('../repositories/users');
+const notesRepo = require('../repositories/notes');
 const { requireAuth } = require('./_middleware');
 const router = express.Router();
 
@@ -18,11 +20,7 @@ router.get('/notes/recipients', requireAuth, (req, res) => {
     try {
         // The bootstrap 'admin' account isn't a real player — hide it, unless someone is
         // actually logged in as it (edge case), so it can still assign notes to itself.
-        const rows = db.prepare(`
-            SELECT id, game_name FROM app_users
-            WHERE is_active = 1 AND (game_name != 'admin' OR id = ?)
-            ORDER BY game_name COLLATE NOCASE
-        `).all(req.session.userId);
+        const rows = usersRepo.getActiveRecipientsExcludingAdmin(req.session.userId);
         res.json({ success: true, users: rows });
     } catch (err) {
         console.error('[Notes] recipients lookup failed:', err.message);
@@ -34,14 +32,7 @@ router.get('/notes/recipients', requireAuth, (req, res) => {
 // GET /hub-api/notes
 router.get('/notes', requireAuth, (req, res) => {
     try {
-        const rows = db.prepare(`
-            SELECT n.id, n.text, n.due_at, n.remind_15, n.done, n.done_at, n.created_at,
-                   a.game_name AS author_name
-            FROM user_notes n
-            LEFT JOIN app_users a ON a.id = n.author_id AND a.id != n.owner_id
-            WHERE n.owner_id = ? AND n.done = 0
-            ORDER BY (n.due_at IS NULL), n.due_at ASC, n.created_at ASC
-        `).all(req.session.userId);
+        const rows = notesRepo.getActiveNotesForOwner(req.session.userId);
         res.json({ success: true, notes: rows });
     } catch (err) {
         console.error('[Notes] list failed:', err.message);
@@ -68,21 +59,14 @@ router.post('/notes', requireAuth, (req, res) => {
             ? [...new Set(req.body.recipient_ids.map((n) => parseInt(n, 10)).filter((n) => Number.isInteger(n) && n > 0))]
             : [];
         if (recipientIds.length) {
-            const placeholders = recipientIds.map(() => '?').join(',');
-            const validIds = db.prepare(`SELECT id FROM app_users WHERE is_active = 1 AND id IN (${placeholders})`)
-                .all(...recipientIds).map((r) => r.id);
-            recipientIds = validIds;
+            recipientIds = usersRepo.getValidActiveUserIds(recipientIds).map((r) => r.id);
         }
         if (!recipientIds.length) recipientIds = [req.session.userId];
 
-        const insert = db.prepare(`
-            INSERT INTO user_notes (owner_id, author_id, text, due_at, remind_15) VALUES (?, ?, ?, ?, ?)
-        `);
         const insertAll = db.transaction((ids) => {
             const created = [];
             for (const ownerId of ids) {
-                const info = insert.run(ownerId, req.session.userId, text, dueAt ? dueAt.toISOString() : null, remind15);
-                created.push(info.lastInsertRowid);
+                created.push(notesRepo.insertNote(ownerId, req.session.userId, text, dueAt ? dueAt.toISOString() : null, remind15));
             }
             return created;
         });
@@ -98,11 +82,8 @@ router.post('/notes', requireAuth, (req, res) => {
 // PATCH /hub-api/notes/:id/done
 router.patch('/notes/:id/done', requireAuth, (req, res) => {
     try {
-        const info = db.prepare(`
-            UPDATE user_notes SET done = 1, done_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND owner_id = ?
-        `).run(req.params.id, req.session.userId);
-        if (info.changes === 0) return res.status(404).json({ success: false, error: 'Note not found' });
+        const changes = notesRepo.markNoteDone(req.params.id, req.session.userId);
+        if (changes === 0) return res.status(404).json({ success: false, error: 'Note not found' });
         res.json({ success: true });
     } catch (err) {
         console.error('[Notes] mark-done failed:', err.message);
@@ -114,8 +95,8 @@ router.patch('/notes/:id/done', requireAuth, (req, res) => {
 // DELETE /hub-api/notes/:id
 router.delete('/notes/:id', requireAuth, (req, res) => {
     try {
-        const info = db.prepare(`DELETE FROM user_notes WHERE id = ? AND owner_id = ?`).run(req.params.id, req.session.userId);
-        if (info.changes === 0) return res.status(404).json({ success: false, error: 'Note not found' });
+        const changes = notesRepo.deleteNote(req.params.id, req.session.userId);
+        if (changes === 0) return res.status(404).json({ success: false, error: 'Note not found' });
         res.json({ success: true });
     } catch (err) {
         console.error('[Notes] delete failed:', err.message);
