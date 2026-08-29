@@ -779,14 +779,36 @@ router.post('/sync/battle-report-ship-detail-claim', requireAuth, (req, res) => 
     res.json({ success: true, ids });
 });
 
+// The 24 per-ship-type integer columns updateShipDetail writes (6 ship types x
+// att/def x count/lost) — kept in one place so the coercion loop below and the schema
+// can't silently drift apart.
+const SHIP_DETAIL_INT_FIELDS = [
+    'att_destroyers', 'att_destroyers_lost', 'def_destroyers', 'def_destroyers_lost',
+    'att_cruisers', 'att_cruisers_lost', 'def_cruisers', 'def_cruisers_lost',
+    'att_battleships', 'att_battleships_lost', 'def_battleships', 'def_battleships_lost',
+    'att_transports', 'att_transports_lost', 'def_transports', 'def_transports_lost',
+    'att_colony_ships', 'att_colony_ships_lost', 'def_colony_ships', 'def_colony_ships_lost',
+    'att_starbases', 'att_starbases_lost', 'def_starbases', 'def_starbases_lost',
+];
+
 // --- BATTLE REPORT SHIP-DETAIL RECEIVER ---
 router.post('/sync/battle-report-ship-detail', requireAuth, (req, res) => {
     const { id, ...detail } = req.body || {};
     if (!Number.isInteger(id) || id <= 0) {
         return res.status(400).json({ error: 'Invalid payload' });
     }
+    // Coerce every field before it reaches SQL — a string value could otherwise bind
+    // straight into an INTEGER column. Matches the coercion discipline already used by
+    // /sync/player-list and /sync/player-detail above.
+    const normalized = {};
+    for (const field of SHIP_DETAIL_INT_FIELDS) {
+        normalized[field] = Number.isInteger(detail[field]) ? detail[field] : null;
+    }
+    normalized.win_chance = typeof detail.win_chance === 'number' && Number.isFinite(detail.win_chance)
+        ? detail.win_chance
+        : null;
     try {
-        battleReportsRepo.updateShipDetail(id, detail);
+        battleReportsRepo.updateShipDetail(id, normalized);
         res.json({ success: true });
     } catch (err) {
         console.error(`[DB Error] Failed to sync battle report ship detail ${id}:`, err.message);

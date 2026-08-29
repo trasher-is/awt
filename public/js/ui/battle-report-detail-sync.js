@@ -7,7 +7,7 @@
 // filling in the one thing the API doesn't provide.
 
 import '../utils/game-rate-limit.js'; // must load before either gameFetch or aw-api resolves the gate
-import './battle-report-parser.js';
+import '../scrapers/battle-report-parser.js';
 
 const { scrapeBattleReportShipDetail } = globalThis.BattleReportParser;
 
