@@ -1,7 +1,7 @@
 const express = require('express');
-const db = require('../database');
 const systemsRepo = require('../repositories/systems');
 const playersRepo = require('../repositories/players');
+const incomingRepo = require('../repositories/incoming');
 const { requireAuth } = require('./_middleware');
 const { sendOrEditIncoming, replyToIncoming, updateIncomingCover } = require('../discord_bot');
 const { formatTime } = require('../utils/travel-calc');
@@ -259,7 +259,7 @@ async function announceIncoming(data) {
     let replied = false;
     const current = onTimeNames(defenders);
     try {
-        const prevRow = db.prepare(`SELECT last_ontime FROM incoming_msgs WHERE alert_key = ?`).get(alertKey);
+        const prevRow = incomingRepo.getLastOntimeRow(alertKey);
         const prev = prevRow && prevRow.last_ontime ? prevRow.last_ontime.split(',').filter(Boolean) : [];
         const prevSet = new Set(prev);
         const newcomers = current.filter(n => !prevSet.has(n));
@@ -269,7 +269,7 @@ async function announceIncoming(data) {
             const reply = buildReply(defenders, planetLabel, data.target);
             if (reply) replied = await replyToIncoming(sent.channelId, sent.messageId, reply);
         }
-        db.prepare(`UPDATE incoming_msgs SET last_ontime = ? WHERE alert_key = ?`).run(current.join(','), alertKey);
+        incomingRepo.updateLastOntime(alertKey, current.join(','));
     } catch (e) {
         console.error('[Incoming] reply bookkeeping failed:', e.message);
     }
