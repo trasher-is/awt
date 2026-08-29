@@ -6,6 +6,7 @@ const systemsRepo = require('../repositories/systems');
 const fleetsRepo = require('../repositories/fleets');
 const playersRepo = require('../repositories/players');
 const alliancesRepo = require('../repositories/alliances');
+const settingsRepo = require('../repositories/settings');
 const { mapApiReport, upsertReports, formatBattleEmbed } = require('../utils/battle-reports');
 const { postEmbed, defuseMentions, settingValue } = require('../utils/discord-post');
 const router = express.Router();
@@ -595,14 +596,9 @@ router.post('/sync/starbase-audit', requireAuth, (req, res) => {
 router.post('/sync/trade-prices', requireAuth, (req, res) => {
     const { pp_price, su_price } = req.body;
 
-    const upsert = db.prepare(`
-        INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-    `);
-
     try {
-        if (pp_price != null && !isNaN(pp_price)) upsert.run('pp_price', String(pp_price));
-        if (su_price != null && !isNaN(su_price)) upsert.run('su_price', String(su_price));
+        if (pp_price != null && !isNaN(pp_price)) settingsRepo.setSetting('pp_price', String(pp_price));
+        if (su_price != null && !isNaN(su_price)) settingsRepo.setSetting('su_price', String(su_price));
         res.json({ success: true });
     } catch (err) {
         console.error('[DB Error] Failed to store trade prices:', err);

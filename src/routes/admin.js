@@ -10,6 +10,7 @@ const plansRepo = require('../repositories/plans');
 const playersRepo = require('../repositories/players');
 const alliancesRepo = require('../repositories/alliances');
 const usersRepo = require('../repositories/users');
+const settingsRepo = require('../repositories/settings');
 const { archiveRound, listRounds, roundDetail } = require('../utils/round-archive');
 const router = express.Router();
 
@@ -379,7 +380,7 @@ router.delete('/admin/broadcasts/:id', requireAdmin, (req, res) => {
 // --- ADMIN: APP SETTINGS (key/value) ---
 router.get('/admin/settings', requireAdmin, (req, res) => {
     try {
-        const rows = db.prepare(`SELECT key, value FROM app_settings`).all();
+        const rows = settingsRepo.getAllSettings();
         const settings = {};
         rows.forEach(r => { settings[r.key] = r.value; });
         res.json({ success: true, settings });
@@ -395,10 +396,7 @@ router.post('/admin/settings', requireAdmin, (req, res) => {
     if (!allowedKeys.includes(key)) return res.status(400).json({ error: 'Unknown setting key' });
 
     try {
-        db.prepare(`
-            INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-        `).run(key, value == null ? '' : String(value).trim());
+        settingsRepo.setSetting(key, value == null ? '' : String(value).trim());
         res.json({ success: true });
     } catch (err) {
         console.error("[DB Error] Failed to save setting:", err);
