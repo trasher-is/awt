@@ -133,7 +133,11 @@ router.post('/sync/system', requireAuth, (req, res) => {
             if (p.game_planet_id != null) {
                 systemsRepo.clearMovedPlanet(p.game_planet_id, system_id, p.planet_index);
             }
-            systemsRepo.upsertPlanet(p.game_planet_id, system_id, p.planet_index, finalOwnerId, finalPopulation, finalStarbase, finalHasFleet, finalIsSieged);
+            systemsRepo.upsertPlanet(
+                p.game_planet_id, system_id, p.planet_index, finalOwnerId, finalPopulation,
+                finalStarbase, finalHasFleet, finalIsSieged,
+                typeof p.name === 'string' ? p.name : null
+            );
         }
 
         // NOTE: Fleet positions are no longer derived from system scans. They are now
@@ -376,7 +380,14 @@ router.post('/sync/galaxy', requireAuth, (req, res) => {
             const x = coord(s.x);
             const y = coord(s.y);
             if (x === null || y === null) continue;
-            systemsRepo.upsertSystemFull(s.id, typeof s.name === 'string' ? s.name : null, x, y);
+            systemsRepo.upsertSystemFull(
+                s.id,
+                typeof s.name === 'string' ? s.name : null,
+                x, y,
+                typeof s.full_name === 'string' ? s.full_name : null,
+                typeof s.info === 'string' ? s.info : null,
+                Number.isInteger(s.population_level) ? s.population_level : null
+            );
             stored++;
         }
     });
@@ -388,6 +399,26 @@ router.post('/sync/galaxy', requireAuth, (req, res) => {
         console.error(`[DB Error] Failed to sync galaxy index:`, err);
         res.status(500).json({ error: 'Database sync failed' });
     }
+});
+
+// --- SYSTEM VISIBILITY FLAG RECEIVER ---
+// Map/sectors reports isInVision per system: whether the returned planet data is live or
+// the game's last-known cache for territory outside anyone's current vision. This is
+// purely a staleness signal for later UI use — it does not affect the fog-of-war merge in
+// /sync/system (the client marks affected planets is_unknown before calling that route);
+// this route only records the flag itself for display.
+router.post('/sync/system-in-vision', requireAuth, (req, res) => {
+    const { systems } = req.body;
+    if (!Array.isArray(systems) || systems.length === 0) {
+        return res.status(400).json({ error: 'Invalid payload' });
+    }
+    let updated = 0;
+    for (const s of systems) {
+        if (!Number.isInteger(s.id) || s.id <= 0) continue;
+        systemsRepo.setSystemInVision(s.id, !!s.is_in_vision);
+        updated++;
+    }
+    res.json({ success: true, updated });
 });
 
 // --- RANKING: BEST GUARDED DATA INGESTION SYNC LAYER ---
