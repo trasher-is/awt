@@ -162,7 +162,8 @@ const resetPlayerOnRestartStmt = db.prepare(`
         level=0, points=0, ranking=NULL, science_level=0, culture_level=0,
         origin_system=NULL,
         home_planet_id=NULL, home_system_id=NULL, home_planet_index=NULL, possible_homes='[]',
-        total_planets=0, total_population=0, total_farms=0, total_factories=0, total_labs=0, total_cybernetics=0, cv_used=0, cv_limit=0
+        total_planets=0, total_population=0, total_farms=0, total_factories=0, total_labs=0, total_cybernetics=0, cv_used=0, cv_limit=0,
+        stats_scraped_at=NULL
     WHERE id = ?
 `);
 function resetPlayerOnRestart(id) {
@@ -178,7 +179,8 @@ const upsertPlayerFullStmt = db.prepare(`
         race_growth, race_science, race_culture, race_production, race_speed, race_attack, race_defense,
         race_trader, race_sul, joined, logins, has_intel, intel_updated_at,
         home_planet_id, home_system_id, home_planet_index, possible_homes,
-        total_planets, total_population, total_farms, total_factories, total_labs, total_cybernetics, cv_used, cv_limit
+        total_planets, total_population, total_farms, total_factories, total_labs, total_cybernetics, cv_used, cv_limit,
+        stats_scraped_at
     ) VALUES (
         @id, @name, @alliance_id, @country, @local_time, @idle_time, @origin_system,
         @level, @ranking, @points, @science_level, @culture_level,
@@ -188,7 +190,8 @@ const upsertPlayerFullStmt = db.prepare(`
         @race_trader, @race_sul, @joined, @logins, @has_intel,
         CASE WHEN @has_intel = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
         @home_planet_id, @home_system_id, @home_planet_index, @possible_homes,
-        @total_planets, @total_population, @total_farms, @total_factories, @total_labs, @total_cybernetics, @cv_used, @cv_limit
+        @total_planets, @total_population, @total_farms, @total_factories, @total_labs, @total_cybernetics, @cv_used, @cv_limit,
+        CURRENT_TIMESTAMP
     ) ON CONFLICT(id) DO UPDATE SET
         name=excluded.name, alliance_id=excluded.alliance_id, country=excluded.country,
         local_time=excluded.local_time, idle_time=excluded.idle_time, origin_system=excluded.origin_system,
@@ -199,6 +202,7 @@ const upsertPlayerFullStmt = db.prepare(`
         possible_homes=excluded.possible_homes, total_planets=excluded.total_planets, total_population=excluded.total_population,
         total_farms=excluded.total_farms, total_factories=excluded.total_factories, total_labs=excluded.total_labs,
         total_cybernetics=excluded.total_cybernetics, cv_used=excluded.cv_used, cv_limit=excluded.cv_limit,
+        stats_scraped_at=CURRENT_TIMESTAMP,
         updated_at=CURRENT_TIMESTAMP,
 
         biology = CASE WHEN excluded.has_intel = 1 THEN excluded.biology ELSE players.biology END,

@@ -700,6 +700,15 @@ router.post('/sync/alliance-roster', requireAuth, (req, res) => {
     }
 });
 
+// --- BATTLE REPORT WATERMARK (for the sidebar "synced through" label) ---
+// Same value POST /sync/battle-reports already returns as newest_started_at — exposed as
+// its own GET so the dashboard can show it on page load, before any sync has run this
+// session (battle-sync.js's own newestStartedAt is a per-tab module variable that starts
+// null on every fresh load; this reads the hub-wide truth straight from the DB instead).
+router.get('/sync/battle-reports-watermark', requireAuth, (req, res) => {
+    res.json({ newest_started_at: battleReportsRepo.getNewestStartedAt() });
+});
+
 // --- BATTLE REPORT RECEIVER (game REST API) ---
 // Body: { reports: [<raw /api/v1 battle-report objects>] }. Mapping/validation lives in
 // src/utils/battle-reports.js: a malformed report is skipped, never aborts the batch,

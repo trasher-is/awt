@@ -677,23 +677,11 @@ export async function initProfileHubIntel() {
     wrap.id = 'awt-hub-intel-block';
     wrap.innerHTML = `
         <div class="row">
-            <div class="col-md-3">${buildActivityLogCard(data.heatmap, p.last_activity_at)}</div>
+            <div class="col-md-3">${buildActivityLogCard(data.heatmap)}</div>
             <div class="col-md-3">${buildBuildingsCard(p)}</div>
         </div>`
         + (!hasLiveIntel && p.has_intel ? buildStaleIntelCard(p) : '');
     anchor.parentNode.insertBefore(wrap, anchor);
-}
-
-// "3h 12m ago" / "2d ago" — coarse enough that it doesn't need a live-updating timer.
-function formatRelativeTime(iso) {
-    const then = Date.parse(iso);
-    if (!Number.isFinite(then)) return null;
-    const diffMin = Math.round((Date.now() - then) / 60000);
-    if (diffMin < 1) return 'just now';
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHr = Math.round(diffMin / 60);
-    if (diffHr < 48) return `${diffHr}h ago`;
-    return `${Math.round(diffHr / 24)}d ago`;
 }
 
 function hideSupporterPromo() {
@@ -708,13 +696,13 @@ function hideSupporterPromo() {
     });
 }
 
-function buildActivityLogCard(heatmap, lastActivityAt) {
+// No last-active line here on purpose — the game's own "Idle" field on this same page
+// already says that, more precisely (live seconds/minutes, not our own polling cadence).
+function buildActivityLogCard(heatmap) {
     const counts = Array.isArray(heatmap) && heatmap.length === 24 ? heatmap : Array(24).fill(0);
     const max = Math.max(1, ...counts);
     const offsetHours = Math.round(-new Date().getTimezoneOffset() / 60);
     const bars = counts.map((_, i) => {
-        // Same local-time rotation as the sidebar heatmap used to (removed), so a viewer
-        // who remembers that panel sees the same bar line up with "now".
         // Rotate UTC hours into the viewer's local time, same as intel.js's raw
         // per-hour counts assume UTC storage.
         const localHour = (i + offsetHours + 24) % 24;
@@ -723,17 +711,11 @@ function buildActivityLogCard(heatmap, lastActivityAt) {
         return `<div title="${localHour}:00 — ${count} login(s)" style="flex:1;height:${Math.max(pct, 2)}%;background:#22c55e;border-radius:1px 1px 0 0;"></div>`;
     }).join('');
 
-    const relative = lastActivityAt ? formatRelativeTime(lastActivityAt) : null;
-    const lastSeenLine = relative
-        ? `<div style="font-size:11px;color:#aaa;margin-bottom:4px;" title="${esc(new Date(lastActivityAt).toLocaleString())}">Last active: <b style="color:#fff;">${esc(relative)}</b></div>`
-        : '';
-
     return `
         <table class="table">
             <thead><tr><th><i class="bi bi-activity"></i> Activity <span style="font-weight:normal;font-size:10px;color:#888;">(local time)</span></th></tr></thead>
             <tbody>
                 <tr><td>
-                    ${lastSeenLine}
                     <div style="display:flex;align-items:flex-end;gap:1px;height:50px;">${bars}</div>
                     <div style="display:flex;justify-content:space-between;font-size:9px;color:#888;margin-top:2px;">
                         <span>00h</span><span>12h</span><span>23h</span>
@@ -745,9 +727,16 @@ function buildActivityLogCard(heatmap, lastActivityAt) {
 
 function buildBuildingsCard(p) {
     const row = (label, val) => `<tr><td>${esc(label)}</td><td class="lowlight">${val ?? 0}</td></tr>`;
+    // The disclaimer is about the GAME's own Statistics page, not our scrape timing: it
+    // reports building counts up to ~4 days behind live, so even a scrape taken this
+    // second would still show old numbers. stats_scraped_at (when the Hub itself last
+    // captured this) is real but secondary info — a hover tooltip, not the headline.
+    const scrapedTitle = p.stats_scraped_at
+        ? ` title="Hub last scraped this: ${esc(new Date(p.stats_scraped_at).toLocaleString())}"`
+        : '';
     return `
         <table class="table">
-            <thead><tr><th colspan="2"><i class="bi bi-building"></i> Buildings <span style="font-weight:normal;font-size:10px;color:#888;">(last scan)</span></th></tr></thead>
+            <thead><tr${scrapedTitle}><th colspan="2"><i class="bi bi-building"></i> Buildings <span style="font-weight:normal;font-size:10px;color:#c96;">(Statistics page, up to ~4d behind live)</span></th></tr></thead>
             <tbody>
                 ${row('Farms', p.total_farms)}
                 ${row('Factories', p.total_factories)}
