@@ -77,13 +77,14 @@ const readCode = rel => read(rel)
 
     console.log('\n── There is exactly ONE copy of the rule ' + '─'.repeat(35));
     // This is the bug the module exists to close: !vision fell back to science_level and
-    // the dashboard overlay did not, so members with an unscraped biology were reported as
-    // seeing a system on Discord and were missing from the overlay at the same time.
+    // the dashboard's "Alliance Map Vision" overlay did not, so members with an unscraped
+    // biology were reported as seeing a system on Discord and were missing from the
+    // overlay at the same time. That overlay (the "Map Overlays" sidebar block and its
+    // handleAllianceVisionToggle) was removed 2026-08-30 — galaxy-map.js is the only
+    // remaining consumer of visionRadius() on the client, checked below.
     const dashboard = readCode('public/js/ui/dashboard.js');
-    ok('the dashboard overlay asks the model instead of spelling the rule out',
-        /visionRadius\(p\)/.test(dashboard) && !/p\.biology > 0/.test(dashboard));
-    ok('and it no longer drops members whose biology is 0',
-        !/biology > 0[\s\S]{0,200}range: p\.biology/.test(dashboard));
+    ok('the dashboard no longer spells out the old broken rule inline',
+        !/p\.biology > 0/.test(dashboard) && !/visionRadius/.test(dashboard));
 
     const mapUi = readCode('public/js/ui/galaxy-map.js');
     ok('the map uses the shared model too',

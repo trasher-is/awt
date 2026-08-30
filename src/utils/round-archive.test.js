@@ -328,10 +328,12 @@ const cleanup = [];
     ok('player search also matches names from earlier rounds',
         /searchFormerNamesWithCurrentPlayer\(db, q,/.test(search));
 
-    const ui = readCode('public/js/ui/player-intel.js');
-    ok('the panel renders them', /formerNames/.test(ui) && /previously/.test(ui));
-    ok('through the escaper, since these are player-supplied strings',
-        /esc\(f\.name\)/.test(ui));
+    // Frontend rendering of formerNames (the sidebar player-intel panel) was removed
+    // 2026-08-30 along with the panel itself — the profile page is now populated via
+    // page-injections.js's initProfileHubIntel instead, and former-name history is a
+    // planned addition there, not yet built. The backend contract above (intel.js's
+    // formerNames field, search.js's former-name search) is untouched and still real;
+    // only the "does some UI actually render it" check is gone until that lands.
 
     for (const dir of cleanup) {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (err) { /* best effort */ }
