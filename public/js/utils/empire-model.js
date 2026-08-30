@@ -37,9 +37,11 @@
     const TRAVEL = isNode ? require('./travel-model.js') : globalThis.AWTravelModel;
 
     // Per-point race trait rates. Deliberately not all equal — do not unify them.
+    // attack/defence raised 7%/11% -> 8%/12% by patch 6.0.0-beta (2026-08-28 changelog,
+    // "Combat Balance Changes") — see docs/game-rules.md's Race picks table.
     const TRAIT_PCT = {
         growth: 0.08, science: 0.08, culture: 0.04,
-        production: 0.04, speed: 0.11, attack: 0.07, defence: 0.11
+        production: 0.04, speed: 0.11, attack: 0.08, defence: 0.12
     };
 
     const BUILDINGS = ['HF', 'RF', 'GC', 'RL', 'SB'];
