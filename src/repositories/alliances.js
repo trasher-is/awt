@@ -100,6 +100,26 @@ function upsertAllianceFromApiSearch(id, name, tag, fullName, memberCount) {
     upsertAllianceFromApiSearchStmt.run(id, name, tag, fullName, memberCount);
 }
 
+// A fifth alliance upsert — sourced from Map/sectors (galaxy-wide, not per-alliance), which
+// is the ONLY endpoint that hands back every alliance in one call (no dedicated "list
+// alliances" API exists). Its alliance objects are {id, name, tag, color} — no full_name,
+// no member_count, unlike Alliance/search — so this must NOT touch those two columns at
+// all (not even to null), or a sector-seed run after a real Alliance/search sync would
+// silently erase it. Unlike upsertAllianceTagOnly (used by the player/system scan paths,
+// where name is a placeholder equal to the tag because that's all those sources carry),
+// this DOES update name on conflict — Map/sectors' name is a real display name, not a
+// stand-in, so it's always worth trusting over an older placeholder.
+const upsertAllianceFromMapSectorStmt = db.prepare(`
+    INSERT INTO alliances (id, name, tag) VALUES (?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+        name=COALESCE(NULLIF(excluded.name, ''), alliances.name),
+        tag=COALESCE(excluded.tag, alliances.tag),
+        updated_at=CURRENT_TIMESTAMP
+`);
+function upsertAllianceFromMapSector(id, name, tag) {
+    upsertAllianceFromMapSectorStmt.run(id, name == null ? '' : String(name), tag == null ? null : String(tag));
+}
+
 const deleteAllAlliancesStmt = db.prepare(`DELETE FROM alliances`);
 function deleteAllAlliances() {
     deleteAllAlliancesStmt.run();
@@ -261,7 +281,7 @@ function deleteAllAllianceMemberStats() {
 
 module.exports = {
     getWarRoomAllianceIntelTags, getAllianceIdByTag, countAlliances, getWarRoomAlliances,
-    searchAlliancesByTagOrName, upsertAllianceFromApiSearch,
+    searchAlliancesByTagOrName, upsertAllianceFromApiSearch, upsertAllianceFromMapSector,
     upsertAllianceBasic, upsertAllianceTagOnly, upsertAllianceFull, deleteAllAlliances,
     insertBroadcast, getBroadcasts, updateBroadcast, deleteBroadcast,
     getAllianceMemberStatIds, getTradeAnalysisRows, getAllianceStatsForArchive,

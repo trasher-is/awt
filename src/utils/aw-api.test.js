@@ -289,6 +289,28 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
     ok('a non-array systems answer maps to an empty, well-formed body',
         Array.isArray(degenerateSystems.systems) && degenerateSystems.systems.length === 0, degenerateSystems);
 
+    console.log('\n── mapSectorAlliancesToSyncPayload: the ONE API→/sync/alliances-from-map mapper ' + '─'.repeat(3));
+    // Real shape confirmed against a live /api/v1/Map/sectors response (2026-08-30):
+    // {id, name, tag, color} — no full_name/member_count, unlike Alliance/search. The SAME
+    // alliance can appear in more than one sector (it holds territory across several).
+    const apiSectors = [
+        { id: '-1/-1', alliances: [{ id: 14, name: 'Alliance Orange', tag: 'AO', color: '#FF8C00' }], solarSystems: [] },
+        { id: '-1/0', alliances: [{ id: 14, name: 'Alliance Orange', tag: 'AO', color: '#FF8C00' }, { id: 9, name: 'SSPX', tag: 'SSPX', color: '#00F' }], solarSystems: [] },
+        { id: '0/0', solarSystems: [] }, // a sector with no alliances[] at all
+    ];
+    const alliancePayload = AWApi.mapSectorAlliancesToSyncPayload(apiSectors);
+    ok('the same alliance appearing in two sectors is deduped to one entry',
+        alliancePayload.alliances.length === 2, alliancePayload.alliances.map(a => a.id));
+    const orange = alliancePayload.alliances.find(a => a.id === 14);
+    ok('id/name/tag carry through', orange && orange.name === 'Alliance Orange' && orange.tag === 'AO', orange);
+    ok('color is not carried through — not a column the hub tracks', orange && !('color' in orange), orange);
+    const degenerateSectors = AWApi.mapSectorAlliancesToSyncPayload(null);
+    ok('a non-array sectors answer maps to an empty, well-formed body',
+        Array.isArray(degenerateSectors.alliances) && degenerateSectors.alliances.length === 0, degenerateSectors);
+    const noAlliancesField = AWApi.mapSectorAlliancesToSyncPayload([{ id: '0/0', solarSystems: [] }]);
+    ok('a sector with no alliances[] field at all does not throw, just contributes nothing',
+        noAlliancesField.alliances.length === 0, noAlliancesField);
+
     console.log('\n── mapPlayersToSyncPayload: the ONE API→/sync/player-list mapper ' + '─'.repeat(12));
     // Synthetic players in the getPlayers/searchPlayers (ListPlayer) shape.
     const apiPlayers = [

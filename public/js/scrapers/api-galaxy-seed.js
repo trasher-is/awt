@@ -48,6 +48,18 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
         }
     }
 
+    // No dedicated "list every alliance" API exists — each sector's own alliances[] is the
+    // only bulk source, so piggyback it on the call this seed already makes rather than a
+    // separate request.
+    const { alliances: alliancePayload } = AWApi.mapSectorAlliancesToSyncPayload(sectors);
+    if (alliancePayload.length) {
+        await fetch('/hub-api/sync/alliances-from-map', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ alliances: alliancePayload }),
+        });
+    }
+
     let systemsProcessed = 0;
     let planetsProcessed = 0;
     const visionFlags = [];
@@ -89,5 +101,5 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
         });
     }
 
-    return { ok: true, systemsIndexed: indexPayload.length, systemsProcessed, planetsProcessed };
+    return { ok: true, systemsIndexed: indexPayload.length, alliancesIndexed: alliancePayload.length, systemsProcessed, planetsProcessed };
 }

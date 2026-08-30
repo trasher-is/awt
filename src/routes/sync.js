@@ -537,6 +537,37 @@ router.post('/sync/alliance-search', requireAuth, (req, res) => {
     }
 });
 
+// --- ALLIANCE LIST RECEIVER (Map/sectors-sourced) ---
+// There is no dedicated "list every alliance" API — Map/sectors is the only endpoint that
+// hands back every alliance active on the map in one call (each sector object carries its
+// own alliances[], deduped client-side before this hits the wire). Its shape is sparser
+// than Alliance/search (no full_name/member_count), so this uses upsertAllianceFromMapSector
+// — NOT upsertAllianceFromApiSearch — specifically because that one unconditionally
+// overwrites full_name/member_count and would null them out for every alliance this route
+// ever touches.
+router.post('/sync/alliances-from-map', requireAuth, (req, res) => {
+    const { alliances } = req.body;
+    if (!Array.isArray(alliances) || alliances.length === 0) {
+        return res.status(400).json({ error: 'Invalid payload' });
+    }
+    let stored = 0;
+    const syncTransaction = db.transaction((list) => {
+        for (const a of list) {
+            if (!Number.isInteger(a.id) || a.id <= 0) continue;
+            alliancesRepo.upsertAllianceFromMapSector(a.id, a.name, a.tag);
+            stored++;
+        }
+    });
+
+    try {
+        syncTransaction(alliances);
+        res.json({ success: true, count: stored });
+    } catch (err) {
+        console.error('[DB Error] Failed to sync alliances from Map/sectors:', err);
+        res.status(500).json({ error: 'Database sync failed' });
+    }
+});
+
 // --- FLEET ID BACKFILL ---
 // Alliance scans give fleet positions but not game fleet ids (those only appear on the
 // system map). The News refresh parses the relevant systems and posts the ids here so we

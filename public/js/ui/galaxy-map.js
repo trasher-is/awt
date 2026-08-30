@@ -656,7 +656,7 @@ async function seedPlanetsFromSectors() {
             return;
         }
         if (typeof window.showToast === 'function') {
-            window.showToast(`Indexed ${result.systemsIndexed} systems and seeded ${result.planetsProcessed} planets across ${result.systemsProcessed} of them`);
+            window.showToast(`Indexed ${result.systemsIndexed} systems, ${result.alliancesIndexed} alliances, and seeded ${result.planetsProcessed} planets across ${result.systemsProcessed} of them`);
         }
         await loadData();
     } catch (err) {
