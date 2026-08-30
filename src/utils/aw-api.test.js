@@ -199,6 +199,35 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
     ok('a non-array planets answer maps to an empty, well-formed body',
         degenerate.system_id === 5 && Array.isArray(degenerate.planets) && degenerate.planets.length === 0, degenerate);
 
+    console.log('\n── Regression: name/ownerName are NOT bare in the real API ' + '─'.repeat(15));
+    // Confirmed against a real /api/v1/Map/sectors response (2026-08-30): p.name is
+    // "Rasaben #10" (bare name + the SAME index this row already carries separately as
+    // p.index) and p.ownerName is "MrChuckleupagus [SSPX]" (bare name + the SAME tag this
+    // row already carries separately as p.allianceTag). Before this fix both were used
+    // verbatim — every caller that already appends "#{index}" or "[{tag}]" itself would
+    // double up, and players.name would get permanently corrupted with a baked-in
+    // alliance suffix the first time this ever synced real data (it never had, prior to
+    // this fix — confirmed no "[...]"-suffixed player name existed in production).
+    const real = AWApi.mapPlanetsToSyncPayload(288, [{
+        id: 16714, index: 10, name: 'Rasaben #10', ownerId: 40, ownerName: 'MrChuckleupagus [SSPX]',
+        allianceId: 9, allianceTag: 'SSPX', populationLevel: 17, starbaseLevel: 10,
+        isUnknownOwner: false, hasSiege: false, starbaseOrders: [],
+    }]);
+    ok('planet name has the trailing "#{index}" stripped back to bare',
+        real.planets[0].name === 'Rasaben', real.planets[0].name);
+    ok('owner name has the trailing "[{tag}]" stripped back to bare',
+        real.planets[0].owner.name === 'MrChuckleupagus', real.planets[0].owner);
+    ok('alliance_tag itself is untouched (it was already bare)',
+        real.planets[0].owner.alliance_tag === 'SSPX', real.planets[0].owner);
+
+    const noAlliance = AWApi.mapPlanetsToSyncPayload(50, [{
+        id: 17575, index: 10, name: 'Ras Alhague #10', ownerId: 407, ownerName: 'Omniwalker',
+        allianceId: null, allianceTag: null, populationLevel: 5, starbaseLevel: 6,
+        isUnknownOwner: false, hasSiege: false, starbaseOrders: [],
+    }]);
+    ok('an owner with no alliance (no bracket suffix to begin with) is left exactly as-is',
+        noAlliance.planets[0].owner.name === 'Omniwalker', noAlliance.planets[0].owner);
+
     console.log('\n── getMapSectors: builds the right query string ' + '─'.repeat(28));
     calls.length = 0;
     nextResponse = jsonRes([]);
