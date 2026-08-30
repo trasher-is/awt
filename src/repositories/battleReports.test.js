@@ -96,6 +96,19 @@ ok('updateShipDetail also marks the report scraped', updated.ship_detail_scraped
 const noLongerNeeding = battleReports.getReportsNeedingShipDetail(10);
 ok('the updated report no longer appears in getReportsNeedingShipDetail', !noLongerNeeding.includes(9002), noLongerNeeding);
 
+// --- findByPlayerPairNear ---
+db.prepare(`INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id) VALUES (?, ?, ?, ?)`)
+    .run(9101, '2026-08-24T10:00:00Z', 1, 2);
+
+ok('finds a match with the pair in (att, def) order, within the window',
+    battleReports.findByPlayerPairNear(1, 2, '2026-08-24T10:10:00Z', 15) === 9101);
+ok('finds a match with the pair reversed (def, att) — direction does not matter',
+    battleReports.findByPlayerPairNear(2, 1, '2026-08-24T10:10:00Z', 15) === 9101);
+ok('no match when the timestamp is outside the window',
+    battleReports.findByPlayerPairNear(1, 2, '2026-08-24T11:00:00Z', 15) === null);
+ok('no match for a different player pair entirely',
+    battleReports.findByPlayerPairNear(1, 3, '2026-08-24T10:10:00Z', 15) === null);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {
