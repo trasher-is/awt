@@ -91,6 +91,31 @@ function postJson(server, urlPath, body) {
         ok('other_player_id stored as the resolvable player', rowA && rowA.other_player_id === 2, rowA);
         ok('credited_player_id resolved to the scraping player (direction: killed)', rowA && rowA.credited_player_id === 1, rowA);
 
+        console.log('\n── (a2) self-bombing row with no other_player_id at all still credits the scraper ' + '─'.repeat(2));
+        // Regression test for a real News-page example: "You killed N population" rows
+        // carry no player-profile link, so other_player_id is null from the client. The
+        // scraping player must still get credited (see resolveBombardmentCredit); only the
+        // battle_reports cross-reference is skipped since there's no opponent to match on.
+        const resA2 = await postJson(server, '/hub-api/sync/news', {
+            entries: [{
+                message_type: 'battle-bombarded',
+                occurred_at: '2026-08-24T20:55:00.000Z',
+                game_planet_id: 112,
+                system_id: 5,
+                other_player_id: null,
+                population_delta: 5,
+                direction: 'killed',
+            }],
+        });
+        ok('responds 200', resA2.status === 200, resA2);
+        ok('inserted count is 1', resA2.body && resA2.body.inserted === 1, resA2.body);
+
+        const rowA2 = db.prepare(`SELECT * FROM news_events WHERE player_id = 1 AND game_planet_id = 112`).get();
+        ok('row was stored', !!rowA2, rowA2);
+        ok('other_player_id stays NULL (never known)', rowA2 && rowA2.other_player_id === null, rowA2);
+        ok('credited_player_id STILL resolves to the scraping player despite no other_player_id', rowA2 && rowA2.credited_player_id === 1, rowA2);
+        ok('matched_battle_report_id stays NULL (no opponent to cross-reference against)', rowA2 && rowA2.matched_battle_report_id === null, rowA2);
+
         console.log('\n── (b) other_player_id with no players row does not throw/500 ' + '─'.repeat(10));
         const resB = await postJson(server, '/hub-api/sync/news', {
             entries: [{

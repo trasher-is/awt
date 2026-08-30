@@ -9,7 +9,12 @@ import '../utils/game-rate-limit.js';
 const { gameFetch } = globalThis.AWGameRate;
 
 const MAX_PAGES_PER_VISIT = 20;
-const NEWS_TYPES = ['battle-conquer', 'battle-conquered', 'battle-bombarded'];
+// CSS classes as the game actually emits them ("battle-bombard", not "-bombarded" —
+// confirmed against a real News-page row). TYPE_TO_MESSAGE_TYPE maps that class to the
+// message_type string stored server-side/in news_events, which keeps the "-bombarded"
+// spelling everywhere else in the codebase (DB rows, matching, tests) unchanged.
+const NEWS_TYPES = ['battle-conquer', 'battle-conquered', 'battle-bombard'];
+const TYPE_TO_MESSAGE_TYPE = { 'battle-bombard': 'battle-bombarded' };
 
 function idFromHref(href) {
     if (!href) return null;
@@ -54,9 +59,12 @@ function parseConquestRow(tr) {
     };
 }
 
-// Wording for the "you were the attacker" case is not yet confirmed against a real
-// example (see the design spec) — this deliberately keys off "killed"/"lost" next to
-// "population" rather than one exact sentence, so it survives that uncertainty.
+// Confirmed against a real News-page row: the "you were the attacker" wording is "Your
+// fleet has bombed <planet>. You killed N population..." and carries NO player-profile
+// link at all (only system/planet links) — unlike the design spec's assumption.
+// other_player_id is legitimately null for this wording; see resolveBombardmentCredit,
+// which still credits the scraping player in that case. This deliberately keys off
+// "killed"/"lost" next to "population" rather than one exact sentence.
 function parseBombardmentRow(tr) {
     const div = bodyDivFor(tr);
     if (!div) return null;
@@ -91,11 +99,11 @@ function collectEntriesFromDoc(doc, now) {
         const occurred_at = parseNewsTimestamp(timeText, now);
         if (!occurred_at) return;
 
-        const parsed = type === 'battle-bombarded' ? parseBombardmentRow(tr) : parseConquestRow(tr);
+        const parsed = type === 'battle-bombard' ? parseBombardmentRow(tr) : parseConquestRow(tr);
         if (!parsed) return;
 
         tr.setAttribute('data-aw-newsbattle', '1');
-        entries.push({ message_type: type, occurred_at, ...parsed });
+        entries.push({ message_type: TYPE_TO_MESSAGE_TYPE[type] || type, occurred_at, ...parsed });
     });
     return entries;
 }
