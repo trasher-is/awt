@@ -1,5 +1,6 @@
 import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initFleetTimers } from './page-injections.js';
 import { initNewsIncomingTools } from '../ui/news-incoming.js';
+import { initNewsBattleEvents } from '../ui/news-battle-events.js';
 import '../utils/game-rate-limit.js';
 const { gameFetch } = globalThis.AWGameRate;
 
@@ -608,6 +609,7 @@ export function initSpy() {
             if (pathLower.includes('/game/news')) {
                 initAllianceNewsAlerts();
                 initNewsIncomingTools();
+                initNewsBattleEvents().catch(err => console.error('[News] battle-events scrape failed:', err.message));
             }
             if (pathLower.includes('/game/planets')) {
                 initPlanetPopTimers();
