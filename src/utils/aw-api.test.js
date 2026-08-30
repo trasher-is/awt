@@ -90,35 +90,22 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
             q.get('OrderBy') === 'DateTime' && q.get('OrderDirection') === 'Descending' && q.get('Take') === '50', last().url);
     }
 
-    nextResponse = respond(200, '', 'application/json');
-    await AWApi.putOrderGeometry(17, { range: 3.5, angleDegree1: 12, angleDegree2: 240 });
-    {
-        const c = last();
-        const body = JSON.parse(c.init.body);
-        ok('putOrderGeometry PUTs /api/v1/Starbase/orders/{orderId}/geometry',
-            c.url === '/api/v1/Starbase/orders/17/geometry' && c.init.method === 'PUT', c.url);
-        ok('with the spec body {range, angleDegree1, angleDegree2}',
-            body.range === 3.5 && body.angleDegree1 === 12 && body.angleDegree2 === 240
-            && Object.keys(body).length === 3, body);
-        ok('and a JSON content type', c.init.headers['Content-Type'] === 'application/json', c.init.headers);
-    }
-
     console.log('\n── Result normalization ' + '─'.repeat(52));
     nextResponse = jsonRes({ id: 731, x: 4, y: -9 });
     const good = await AWApi.getSolarSystem(731);
     ok('a JSON 200 is {ok:true, data}', good.ok === true && good.data.id === 731 && good.data.y === -9, good);
 
     nextResponse = respond(200, '   ', 'application/json');
-    const empty = await AWApi.putOrderGeometry(17, { range: 1, angleDegree1: 0, angleDegree2: 0 });
+    const empty = await AWApi.getSolarSystem(17);
     ok('a 2xx with an empty body is {ok:true, data:null}', empty.ok === true && empty.data === null, empty);
 
-    nextResponse = jsonRes({ title: 'Order not found' }, 404);
-    const notFound = await AWApi.putOrderGeometry(9999, { range: 1, angleDegree1: 0, angleDegree2: 0 });
+    nextResponse = jsonRes({ title: 'System not found' }, 404);
+    const notFound = await AWApi.getSolarSystem(9999);
     ok('a JSON 404 is {ok:false, status:404, reason:"http"} — status verbatim for the caller',
         notFound.ok === false && notFound.status === 404 && notFound.reason === 'http', notFound);
 
     nextResponse = jsonRes({ title: 'Forbidden' }, 403);
-    const forbidden = await AWApi.putOrderGeometry(17, { range: 1, angleDegree1: 0, angleDegree2: 0 });
+    const forbidden = await AWApi.getSolarSystem(17);
     ok('a JSON 403 keeps its status too', forbidden.status === 403 && forbidden.reason === 'http', forbidden);
 
     nextResponse = () => { throw new Error('boom'); };

@@ -14,7 +14,10 @@ import {
     openBuildOrderPanel
 } from './archives.js';
 import { runPlayerScan } from '../scrapers/mass-scanner.js';
+import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
 import '../utils/vision-model.js';   // side-effect import: the !vision rule, defined once
+
+const { formatSqliteUtc } = globalThis.AWSqliteTime;
 
 let toolUser = null;
 let currentSystemId = null;
@@ -374,7 +377,7 @@ async function refreshDeepScanStatus() {
         const data = await res.json();
         if (!data.success) { el.textContent = ''; return; }
         const fresh = data.total - data.stale;
-        const lastScan = data.last_scan_at ? new Date(data.last_scan_at).toLocaleString() : 'never';
+        const lastScan = formatSqliteUtc(data.last_scan_at, undefined, 'never');
         el.textContent = `${fresh}/${data.total} players fresh · last scan: ${lastScan}`;
     } catch (err) {
         el.textContent = '';

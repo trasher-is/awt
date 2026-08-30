@@ -1,6 +1,8 @@
 import { esc } from '../utils/escape.js';
+import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
 import '../utils/game-rate-limit.js';
 const { gameFetch } = globalThis.AWGameRate;
+const { formatSqliteUtc } = globalThis.AWSqliteTime;
 
 export function initPlanetPopTimers() {
     if (!window.location.pathname.toLowerCase().includes('/game/planets')) return;
@@ -732,7 +734,7 @@ function buildBuildingsCard(p) {
     // second would still show old numbers. stats_scraped_at (when the Hub itself last
     // captured this) is real but secondary info — a hover tooltip, not the headline.
     const scrapedTitle = p.stats_scraped_at
-        ? ` title="Hub last scraped this: ${esc(new Date(p.stats_scraped_at).toLocaleString())}"`
+        ? ` title="Hub last scraped this: ${esc(formatSqliteUtc(p.stats_scraped_at))}"`
         : '';
     return `
         <table class="table">
@@ -752,7 +754,7 @@ function buildStaleIntelCard(p) {
         const n = val || 0;
         return row(label, `${n > 0 ? '+' : ''}${n}`);
     };
-    const updatedAt = p.intel_updated_at ? new Date(p.intel_updated_at).toLocaleString() : 'unknown date';
+    const updatedAt = formatSqliteUtc(p.intel_updated_at, undefined, 'unknown date');
 
     return `
         <table class="table">
