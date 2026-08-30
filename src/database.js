@@ -693,6 +693,14 @@ function initDatabase() {
     addColumn('battle_reports', 'def_starbases_lost', 'INTEGER');
     addColumn('battle_reports', 'win_chance', 'REAL');
     addColumn('battle_reports', 'ship_detail_scraped_at', 'DATETIME');
+    // Where the battle happened. The BattleReport/search API has no planet field at all;
+    // this comes from the report's own page header (/About/BattleReport/{id}, the same
+    // page the ship-detail scraper already fetches for CV data) — see
+    // public/js/scrapers/battle-report-parser.js. (system_id, planet_index) matches the
+    // planets table's own primary key, not a game_planet_id — the header link is
+    // /Game/Map/SolarSystem/{system_id}/{planet_index}, no /Planets/Planet/{id} link.
+    addColumn('battle_reports', 'system_id', 'INTEGER');
+    addColumn('battle_reports', 'planet_index', 'INTEGER');
 
     // --- NEWS-PAGE INGESTION ---
     // Populated by each member's own /Game/News feed (client-side scrape, POSTed through

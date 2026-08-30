@@ -1,6 +1,7 @@
 // Extracts what BattleReport/search's API response does NOT provide from a rendered
-// /About/BattleReport/{id} page: per-ship-type counts/losses/survivors and the
-// win-probability value. Everything else visible on that page (population change,
+// /About/BattleReport/{id} page: per-ship-type counts/losses/survivors, the
+// win-probability value, and the planet the battle happened at (the search API has no
+// planet field of any kind). Everything else visible on that page (population change,
 // conquered flag, luckiness, XP/level gained) is already covered by the existing API
 // integration (src/utils/battle-reports.js) and is deliberately NOT re-extracted here.
 //
@@ -27,6 +28,19 @@ function parseCount(text) {
     return Number.isFinite(n) ? n : null;
 }
 
+// The page header ("Battle Report [30,145]: [243] (23/-18) Dsiban #12") links to
+// /Game/Map/SolarSystem/{system_id}/{planet_index} — that pair is the planets table's
+// own primary key (system_id, planet_index), not a game_planet_id: there is no
+// /Game/Planets/Planet/{id} link anywhere on this page. Confirmed against a real example
+// (report 30145, https://astrowars.games/About/BattleReport/30145).
+function parsePlanetLink(doc) {
+    const link = doc.querySelector('h4 a[href*="/Game/Map/SolarSystem/"]');
+    if (!link) return { system_id: null, planet_index: null };
+    const m = link.getAttribute('href').match(/\/Game\/Map\/SolarSystem\/(\d+)\/(\d+)/);
+    if (!m) return { system_id: null, planet_index: null };
+    return { system_id: parseInt(m[1], 10), planet_index: parseInt(m[2], 10) };
+}
+
 function normalizeCellText(text) {
     return typeof text === 'string' ? text.replace(/ /g, ' ').trim() : '';
 }
@@ -50,6 +64,7 @@ function parseBattleReportHtml(html) {
         result[`def_${t.col}_lost`] = null;
     }
     result.win_chance = null;
+    Object.assign(result, parsePlanetLink(doc));
 
     let matchedAnyShipRow = false;
     let orientationMismatch = false;

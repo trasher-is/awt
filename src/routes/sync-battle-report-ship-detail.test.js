@@ -94,11 +94,30 @@ function postJson(server, urlPath, body) {
             def_starbases: 3,
             def_starbases_lost: 1,
             win_chance: 62.5,
+            system_id: 243,
+            planet_index: 12,
         });
         ok('sync succeeds (200)', res2.status === 200, res2);
         const row2 = db.prepare('SELECT * FROM battle_reports WHERE id = ?').get(9001);
         ok('valid integers and win_chance stored as-is',
             row2.att_destroyers === 100 && row2.def_starbases === 3 && row2.win_chance === 62.5, row2);
+        ok('the battle-happened-here location is stored',
+            row2.system_id === 243 && row2.planet_index === 12, row2);
+
+        console.log('\n── system_id/planet_index omitted from the payload (older client) ' + '─'.repeat(5));
+        // Regression test: updateShipDetail's SQL binds @system_id/@planet_index as named
+        // parameters — an omitted key (not even null) throws "Missing named parameter" in
+        // better-sqlite3, which would 500 every ship-detail sync from a client that hasn't
+        // picked up the planet-scraping change yet. The route must coerce absence to null.
+        const res3 = await postJson(server, '/hub-api/sync/battle-report-ship-detail', {
+            id: 9001,
+            att_destroyers: 200,
+        });
+        ok('sync still succeeds (200) with no system_id/planet_index in the payload at all',
+            res3.status === 200, res3);
+        const row3 = db.prepare('SELECT * FROM battle_reports WHERE id = ?').get(9001);
+        ok('missing location fields are coerced to NULL, not left as a bind error',
+            row3.system_id === null && row3.planet_index === null, row3);
     } finally {
         server.close();
     }

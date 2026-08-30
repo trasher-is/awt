@@ -88,10 +88,11 @@ battleReports.updateShipDetail(9002, {
     def_destroyers: 50, def_destroyers_lost: 50, def_cruisers: 0, def_cruisers_lost: 0,
     def_battleships: 0, def_battleships_lost: 0, def_transports: 0, def_transports_lost: 0,
     def_colony_ships: 0, def_colony_ships_lost: 0, def_starbases: 1, def_starbases_lost: 1,
-    win_chance: 62.5,
+    win_chance: 62.5, system_id: 243, planet_index: 12,
 });
 const updated = db.prepare(`SELECT * FROM battle_reports WHERE id = ?`).get(9002);
 ok('updateShipDetail writes the ship-type fields', updated.att_destroyers === 100 && updated.def_starbases_lost === 1 && updated.win_chance === 62.5, updated);
+ok('updateShipDetail writes the planet location fields', updated.system_id === 243 && updated.planet_index === 12, updated);
 ok('updateShipDetail also marks the report scraped', updated.ship_detail_scraped_at != null, updated);
 const noLongerNeeding = battleReports.getReportsNeedingShipDetail(10);
 ok('the updated report no longer appears in getReportsNeedingShipDetail', !noLongerNeeding.includes(9002), noLongerNeeding);
@@ -108,6 +109,50 @@ ok('no match when the timestamp is outside the window',
     battleReports.findByPlayerPairNear(1, 2, '2026-08-24T11:00:00Z', 15) === null);
 ok('no match for a different player pair entirely',
     battleReports.findByPlayerPairNear(1, 3, '2026-08-24T10:10:00Z', 15) === null);
+
+// --- getLastSeenPlanet ---
+ok('no last-seen record for a player with no history', battleReports.getLastSeenPlanet(500) === null);
+
+// Player 500 shows up as att_player_id in an OLDER battle report...
+db.prepare(`
+    INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, system_id, planet_index)
+    VALUES (9201, '2026-08-20T10:00:00Z', 500, 501, 10, 3)
+`).run();
+const afterBr = battleReports.getLastSeenPlanet(500);
+ok('battle_reports-only: resolves system_id/planet_index and source', afterBr &&
+    afterBr.system_id === 10 && afterBr.planet_index === 3 && afterBr.source === 'battle_report' && afterBr.source_id === 9201, afterBr);
+
+// ...and as def_player_id in a NEWER one (also proves att/def are both checked).
+db.prepare(`
+    INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, system_id, planet_index)
+    VALUES (9202, '2026-08-25T10:00:00Z', 502, 500, 20, 7)
+`).run();
+const afterNewerBr = battleReports.getLastSeenPlanet(500);
+ok('picks the MORE RECENT battle_reports row, and matches on def_player_id too', afterNewerBr &&
+    afterNewerBr.system_id === 20 && afterNewerBr.planet_index === 7 && afterNewerBr.source_id === 9202, afterNewerBr);
+
+// A News-page bombardment even newer than both battle_reports rows must win, and must
+// match by other_player_id too (not just player_id) — matches how news-battle-matching.js
+// stores the counterpart.
+db.prepare(`INSERT INTO players (id, name) VALUES (500, 'Target'), (503, 'Scout')`).run();
+db.prepare(`
+    INSERT INTO news_events (id, player_id, message_type, occurred_at, game_planet_id, system_id, other_player_id)
+    VALUES (9301, 503, 'battle-bombarded', '2026-08-28T10:00:00Z', 77777, 30, 500)
+`).run();
+const afterNews = battleReports.getLastSeenPlanet(500);
+ok('a more recent news_events row (matched via other_player_id) wins over both battle_reports rows',
+    afterNews && afterNews.system_id === 30 && afterNews.game_planet_id === 77777
+    && afterNews.planet_index === null && afterNews.source === 'news_event' && afterNews.source_id === 9301, afterNews);
+
+// A row with no system_id at all (e.g. an unresolved location) must never win by having a
+// later timestamp — it carries no usable location, so it must be filtered out entirely.
+db.prepare(`
+    INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, system_id, planet_index)
+    VALUES (9203, '2026-08-29T10:00:00Z', 500, 502, NULL, NULL)
+`).run();
+const afterNullLocation = battleReports.getLastSeenPlanet(500);
+ok('a row with no system_id is ignored even though it is the newest by timestamp',
+    afterNullLocation && afterNullLocation.source_id === 9301, afterNullLocation);
 
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 

@@ -55,11 +55,43 @@ const updateShipDetailStmt = db.prepare(`
         def_colony_ships=@def_colony_ships, def_colony_ships_lost=@def_colony_ships_lost,
         def_starbases=@def_starbases, def_starbases_lost=@def_starbases_lost,
         win_chance=@win_chance,
+        system_id=@system_id, planet_index=@planet_index,
         ship_detail_scraped_at=CURRENT_TIMESTAMP
     WHERE id=@id
 `);
 function updateShipDetail(id, detail) {
     updateShipDetailStmt.run({ id, ...detail });
+}
+
+// "Last seen" for a player: the most recent event of ANY kind that names them, on
+// either side (attacker/defender in battle_reports; either party in news_events — see
+// news-battle-matching.js's other_player_id/player_id convention). Two different sources
+// with two different location shapes: battle_reports gives (system_id, planet_index) —
+// the planets table's own primary key, from the report page header (no game_planet_id
+// available there at all); news_events gives (system_id, game_planet_id) from the
+// News-page row's own links. Both are returned as-is; the caller resolves display text
+// (see discord_bot.js's !lastseen), since resolving a human-readable planet name needs
+// the systems/planets tables this repository doesn't own.
+const lastSeenBattleReportStmt = db.prepare(`
+    SELECT started_at AS occurred_at, system_id, planet_index, NULL AS game_planet_id, id AS source_id, 'battle_report' AS source
+    FROM battle_reports
+    WHERE (att_player_id = ? OR def_player_id = ?) AND system_id IS NOT NULL
+    ORDER BY started_at DESC LIMIT 1
+`);
+const lastSeenNewsEventStmt = db.prepare(`
+    SELECT occurred_at, system_id, NULL AS planet_index, game_planet_id, id AS source_id, 'news_event' AS source
+    FROM news_events
+    WHERE (player_id = ? OR other_player_id = ?) AND system_id IS NOT NULL
+    ORDER BY occurred_at DESC LIMIT 1
+`);
+function getLastSeenPlanet(playerId) {
+    const candidates = [
+        lastSeenBattleReportStmt.get(playerId, playerId),
+        lastSeenNewsEventStmt.get(playerId, playerId),
+    ].filter(Boolean);
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : a.occurred_at > b.occurred_at ? -1 : 0));
+    return candidates[0];
 }
 
 const findByPlayerPairNearStmt = db.prepare(`
@@ -89,4 +121,5 @@ module.exports = {
     markShipDetailScraped,
     updateShipDetail,
     findByPlayerPairNear,
+    getLastSeenPlanet,
 };
