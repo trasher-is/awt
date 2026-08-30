@@ -108,28 +108,6 @@
                 </div>
             </div>
 
-            <div id="player-context-tools" class="flex flex-col pb-4 border-b border-border hidden">
-                <div class="px-4 py-2 text-s text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed flex justify-between items-center">
-                    <span>Player Intel</span><span id="ui-player-id" class="text-foreground font-mono">--</span>
-                </div>
-                <div id="player-intel-container" class="px-4 py-2 hide-collapsed flex flex-col gap-4 text-sm">
-                    <div>
-                        <div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Overview</div>
-                        <div id="player-stats-list" class="flex flex-col gap-1.5 text-sm"></div>
-                    </div>
-                    <div>
-                        <div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Planets</div>
-                        <div id="player-planets-list" class="flex flex-col gap-1"></div>
-                    </div>
-                    <div>
-                        <div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Activity Log</div>
-                        <div class="bg-card border border-border rounded p-2 shadow-sm h-28 w-full">
-                            <canvas id="playerHeatmapChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
             <div class="flex flex-col py-4 border-b border-border hide-collapsed">
                 <div class="px-4 pb-2 text-s text-muted-foreground font-semibold uppercase tracking-wider">Database Search</div>
                 <div class="px-4 mb-3 relative">
@@ -146,14 +124,6 @@
                     <input type="text" id="search-alliance-input" placeholder="Alliance Name or Tag..." class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus:outline-none pe-8">
                     <i class="fa-solid fa-magnifying-glass absolute right-7 top-2.5 text-muted-foreground text-sm pointer-events-none"></i>
                     <div id="search-alliance-results" class="mt-2 flex flex-col gap-1 max-h-40 overflow-y-auto empty:hidden"></div>
-                </div>
-            </div>
-
-            <div class="flex flex-col py-3 border-b border-border hide-collapsed">
-                <div class="px-4 pb-2 text-s text-muted-foreground font-semibold uppercase tracking-wider">Map Overlays</div>
-                <div class="px-4 flex items-center justify-between">
-                    <span class="text-sm text-muted-foreground">Alliance Map Vision</span>
-                    <input type="checkbox" id="toggle-alliance-vision" class="w-4 h-4 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
                 </div>
             </div>
 

@@ -1,6 +1,5 @@
 import { handleSearchInput, navToIframe } from './search.js';
 import { loadPlans, savePlan, deletePlan, setIntelSystemId } from './system-intel.js';
-import { loadPlayerIntel } from './player-intel.js';
 import {
     openDatabasePanel,
     openSystemDatabasePanel,
@@ -17,8 +16,6 @@ import {
 import { runMassScan, runPlayerScan } from '../scrapers/mass-scanner.js';
 import '../utils/vision-model.js';   // side-effect import: the !vision rule, defined once
 
-const { visionRadius } = globalThis.AWVision;
-
 let toolUser = null;
 let currentSystemId = null;
 
@@ -34,8 +31,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('sidebar-toggle-btn')?.addEventListener('click', toggleSidebar);
     document.getElementById('save-plan-btn')?.addEventListener('click', savePlan);
     document.getElementById('logout-btn')?.addEventListener('click', logout);
-    document.getElementById('toggle-alliance-vision')?.addEventListener('change', handleAllianceVisionToggle);
-    
+
     document.getElementById('search-player-input')?.addEventListener('input', () => handleSearchInput('player'));
     document.getElementById('search-system-input')?.addEventListener('input', () => handleSearchInput('system'));
     document.getElementById('search-alliance-input')?.addEventListener('input', () => handleSearchInput('alliance'));
@@ -73,12 +69,7 @@ window.addEventListener('DOMContentLoaded', () => {
             const id = btn.getAttribute('data-player-id');
             document.getElementById('search-player-input').value = '';
             document.getElementById('search-player-results').innerHTML = '';
-            loadPlayerIntel(id);
             navToIframe(`/Game/Players/Profile/${id}`);
-
-            // Ensure the player block shows up in the sidebar
-            document.getElementById('player-context-tools')?.classList.remove('hidden');
-            document.getElementById('context-tools')?.classList.add('hidden');
         }
     });
 
@@ -224,52 +215,6 @@ async function refreshDbStats() {
     } catch (err) {}
 }
 
-async function handleAllianceVisionToggle() {
-    const isChecked = document.getElementById('toggle-alliance-vision').checked;
-    const iframe = document.getElementById('game-frame');
-    if (!iframe || !iframe.contentWindow) return;
-
-    if (!isChecked) {
-        iframe.contentWindow.postMessage({ type: 'CLEAR_ALLIANCE_VISION' }, window.location.origin);
-        return;
-    }
-
-    showToast('Collecting alliance radar data...');
-    try {
-        const [statsRes, playersRes] = await Promise.all([
-            fetch('/hub-api/intel/alliance-stats'),
-            fetch('/hub-api/intel/players')
-        ]);
-        const statsData = await statsRes.json();
-        const playersData = await playersRes.json();
-
-        if (statsData.success && playersData.success) {
-            // The radius rule comes from vision-model.js rather than being spelled out
-            // here. It used to be `p.biology > 0` with `range: p.biology`, which silently
-            // dropped every member whose biology has never been scraped — the column
-            // defaults to 0 — while `!vision` on Discord still reported them using their
-            // science level. Two answers to one question, and this was the quiet one.
-            const memberIds = new Set(statsData.stats.map(row => Number(row.player_id)));
-            const allianceVisionData = playersData.players
-                .filter(p => memberIds.has(Number(p.id)) && p.origin_system)
-                .map(p => ({
-                    playerId: p.id,
-                    playerName: p.name,
-                    originSystemId: p.origin_system,
-                    range: visionRadius(p)
-                }));
-
-            iframe.contentWindow.postMessage({ type: 'SHOW_ALLIANCE_VISION', payload: { visions: allianceVisionData } }, window.location.origin);
-        } else {
-            showToast('Failed to merge radar network');
-            document.getElementById('toggle-alliance-vision').checked = false;
-        }
-    } catch (err) {
-        showToast('Data streams unavailable');
-        document.getElementById('toggle-alliance-vision').checked = false;
-    }
-}
-
 // --- MULTI-FRAME LISTENER (lenient guard) ---
 window.addEventListener('message', async (event) => {
     if (event.origin !== window.location.origin) return;
@@ -295,47 +240,38 @@ window.addEventListener('message', async (event) => {
         }
 
         const ctxContainer = document.getElementById('context-tools');
-        const playerCtxContainer = document.getElementById('player-context-tools');
         const btnMap = document.getElementById('btn-ctx-map');
         const sysLabel = document.getElementById('ui-sys-id');
-        const playerLabel = document.getElementById('ui-player-id');
-        
+
         // Relaxed check that won't break the rest of the code if elements are missing in the wrapper file
-        if (ctxContainer && playerCtxContainer) {
+        if (ctxContainer) {
             const isIntel = p.isSystemView || p.isPlayerView || p.isMap;
             if (isIntel) {
                 ctxContainer.classList.add('hidden');
-                playerCtxContainer.classList.add('hidden');
                 if (btnMap) btnMap.classList.add('hidden');
                 if (sysLabel) sysLabel.classList.add('hidden');
-                if (playerLabel) playerLabel.classList.add('hidden');
 
                 if (p.isSystemView && p.systemId) {
                     currentSystemId = p.systemId;
-                    ctxContainer.classList.remove('hidden'); 
+                    ctxContainer.classList.remove('hidden');
                     if (sysLabel) {
                         sysLabel.classList.remove('hidden');
                         sysLabel.innerText = `System #${p.systemId}`;
                     }
                     loadPlans(p.systemId);
-                } 
-                if (p.isPlayerView && p.playerId) { 
-                    playerCtxContainer.classList.remove('hidden');
-                    if (playerLabel) {
-                        playerLabel.classList.remove('hidden');
-                        playerLabel.innerText = `#${p.playerId}`;
-                    }
-                    loadPlayerIntel(p.playerId);
                 }
+                // p.isPlayerView: no sidebar panel to populate anymore — the profile page
+                // shows Hub data injected directly (page-injections.js's
+                // initProfileHubIntel). Still counts as "intel" above so ctxContainer
+                // (system tools) hides while viewing a profile, same as before.
                 if (p.isMap && p.mapX && p.mapY) {
-                    ctxContainer.classList.remove('hidden'); 
+                    ctxContainer.classList.remove('hidden');
                     if (btnMap) btnMap.classList.remove('hidden');
                     const mapCoords = document.getElementById('ui-map-coords');
                     if (mapCoords) mapCoords.innerText = `${p.mapX} / ${p.mapY}`;
                 }
             } else if (p.path && !p.path.includes('/Profile/') && !p.path.includes('/SolarSystem/')) {
                 ctxContainer.classList.add('hidden');
-                playerCtxContainer.classList.add('hidden');
                 if (btnMap) btnMap.classList.add('hidden');
             }
         }
