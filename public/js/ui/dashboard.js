@@ -74,7 +74,8 @@ window.addEventListener('DOMContentLoaded', () => {
             document.getElementById('search-player-input').value = '';
             document.getElementById('search-player-results').innerHTML = '';
             loadPlayerIntel(id);
-            
+            navToIframe(`/Game/Players/Profile/${id}`);
+
             // Ensure the player block shows up in the sidebar
             document.getElementById('player-context-tools')?.classList.remove('hidden');
             document.getElementById('context-tools')?.classList.add('hidden');
