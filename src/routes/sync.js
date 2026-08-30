@@ -811,6 +811,20 @@ router.post('/sync/battle-report-ship-detail-claim', requireAuth, (req, res) => 
     res.json({ success: true, ids });
 });
 
+// --- BATTLE REPORT LOCATION BACKFILL CLAIM ---
+// One-time legacy pass for reports already marked ship_detail_scraped_at but with no
+// system_id (scraped before planet capture shipped, or by a stale browser tab still
+// running old JS — see getReportsNeedingLocationBackfill). The RECEIVER is the same
+// /sync/battle-report-ship-detail route below — re-sending the ship-count/win_chance
+// fields for an already-scraped report is a harmless idempotent overwrite with identical
+// values; only system_id/planet_index are actually new for these rows.
+router.post('/sync/battle-report-location-backfill-claim', requireAuth, (req, res) => {
+    const limit = Math.min(parseInt(req.body && req.body.limit, 10) || 10, 50);
+    const ids = battleReportsRepo.getReportsNeedingLocationBackfill(limit);
+    if (ids.length) battleReportsRepo.markLocationBackfillAttempted(ids);
+    res.json({ success: true, ids });
+});
+
 // The 24 per-ship-type integer columns updateShipDetail writes (6 ship types x
 // att/def x count/lost) — kept in one place so the coercion loop below and the schema
 // can't silently drift apart.

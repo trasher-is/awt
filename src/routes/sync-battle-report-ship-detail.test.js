@@ -118,6 +118,26 @@ function postJson(server, urlPath, body) {
         const row3 = db.prepare('SELECT * FROM battle_reports WHERE id = ?').get(9001);
         ok('missing location fields are coerced to NULL, not left as a bind error',
             row3.system_id === null && row3.planet_index === null, row3);
+
+        console.log('\n── /sync/battle-report-location-backfill-claim ' + '─'.repeat(30));
+        // Report 9001 above is scraped (ship_detail_scraped_at set by the syncs above) but
+        // still has no system_id (row3) — exactly the legacy-gap shape this route targets.
+        // A never-scraped report (9002) must NOT be claimed here — that's the sibling
+        // ship-detail-claim route's job.
+        db.prepare('INSERT INTO battle_reports (id, started_at) VALUES (?, ?)').run(9002, '2026-08-29T00:00:00Z');
+
+        const claimRes = await postJson(server, '/hub-api/sync/battle-report-location-backfill-claim', { limit: 10 });
+        ok('claim responds 200', claimRes.status === 200, claimRes);
+        ok('claims the scraped-but-locationless report (9001)', claimRes.body.ids.includes(9001), claimRes.body);
+        ok('does NOT claim the never-scraped report (9002)', !claimRes.body.ids.includes(9002), claimRes.body);
+
+        const claimedRow = db.prepare('SELECT location_backfill_attempted_at FROM battle_reports WHERE id = ?').get(9001);
+        ok('claiming marks location_backfill_attempted_at immediately (optimistic claim, same pattern as ship-detail-claim)',
+            claimedRow.location_backfill_attempted_at != null, claimedRow);
+
+        const reClaimRes = await postJson(server, '/hub-api/sync/battle-report-location-backfill-claim', { limit: 10 });
+        ok('a second claim does not re-select the same report — one attempt, not retried forever',
+            !reClaimRes.body.ids.includes(9001), reClaimRes.body);
     } finally {
         server.close();
     }

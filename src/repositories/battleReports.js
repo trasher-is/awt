@@ -40,6 +40,29 @@ function markShipDetailScraped(ids) {
     db.prepare(`UPDATE battle_reports SET ship_detail_scraped_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`).run(...ids);
 }
 
+// One-time legacy backfill: a report already marked ship_detail_scraped_at but with no
+// system_id — either scraped before planet capture shipped, or by a stale browser tab
+// still running the old scraper module (an already-open dashboard tab keeps running
+// whatever JS it loaded at page-open time; it does not hot-reload on a server deploy).
+// location_backfill_attempted_at guards against retrying this forever for a report whose
+// page genuinely has no planet link (if any such report exists) — one attempt, then done,
+// success or not.
+const getReportsNeedingLocationBackfillStmt = db.prepare(`
+    SELECT id FROM battle_reports
+    WHERE ship_detail_scraped_at IS NOT NULL AND system_id IS NULL AND location_backfill_attempted_at IS NULL
+    ORDER BY started_at DESC
+    LIMIT ?
+`);
+function getReportsNeedingLocationBackfill(limit) {
+    return getReportsNeedingLocationBackfillStmt.all(limit).map(r => r.id);
+}
+
+function markLocationBackfillAttempted(ids) {
+    if (!ids.length) return;
+    const placeholders = ids.map(() => '?').join(',');
+    db.prepare(`UPDATE battle_reports SET location_backfill_attempted_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`).run(...ids);
+}
+
 const updateShipDetailStmt = db.prepare(`
     UPDATE battle_reports SET
         att_destroyers=@att_destroyers, att_destroyers_lost=@att_destroyers_lost,
@@ -131,6 +154,8 @@ module.exports = {
     getNewestStartedAt,
     getReportsNeedingShipDetail,
     markShipDetailScraped,
+    getReportsNeedingLocationBackfill,
+    markLocationBackfillAttempted,
     updateShipDetail,
     findByPlayerPairNear,
     getRecentPlanets,

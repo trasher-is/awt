@@ -701,6 +701,13 @@ function initDatabase() {
     // /Game/Map/SolarSystem/{system_id}/{planet_index}, no /Planets/Planet/{id} link.
     addColumn('battle_reports', 'system_id', 'INTEGER');
     addColumn('battle_reports', 'planet_index', 'INTEGER');
+    // ship_detail_scraped_at is a permanent "done" flag (see getReportsNeedingShipDetail's
+    // comment) — a report scraped before planet capture shipped, or scraped by a stale
+    // browser tab still running old JS, gets system_id/planet_index left NULL forever with
+    // no way to tell "genuinely has no location" apart from "never actually attempted it".
+    // This tracks a SEPARATE one-time backfill attempt for exactly that legacy gap — see
+    // getReportsNeedingLocationBackfill/markLocationBackfillAttempted.
+    addColumn('battle_reports', 'location_backfill_attempted_at', 'DATETIME');
 
     // --- NEWS-PAGE INGESTION ---
     // Populated by each member's own /Game/News feed (client-side scrape, POSTed through

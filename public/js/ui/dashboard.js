@@ -397,15 +397,23 @@ async function runManualBattleSync() {
         }
 
         if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Scraping details...';
-        const { triggerManualSweep } = await import('./battle-report-detail-sync.js');
+        const { triggerManualSweep, triggerManualLocationBackfill } = await import('./battle-report-detail-sync.js');
         const sweepResult = await triggerManualSweep();
 
+        // Legacy gap: reports already scraped before planet capture existed, or by a
+        // stale browser tab still running old JS, are stuck with ship_detail_scraped_at
+        // set but no location — triggerManualSweep's claim never revisits them (it only
+        // looks at ship_detail_scraped_at IS NULL). This is the separate one-time pass.
+        if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Backfilling locations...';
+        const backfillResult = await triggerManualLocationBackfill();
+
         const syncMsg = syncResult.inserted > 0 ? `Synced ${syncResult.inserted} new report(s)` : 'Reports up to date';
-        if (!sweepResult.ok) {
-            showToast(`${syncMsg}. Ship-detail sweep failed: ${sweepResult.error || 'unknown error'}`);
-        } else {
-            showToast(`${syncMsg}. Scraped location/CV for ${sweepResult.scraped} report(s).`);
+        const parts = [syncMsg];
+        parts.push(sweepResult.ok ? `scraped location/CV for ${sweepResult.scraped} report(s)` : `ship-detail sweep failed (${sweepResult.error || 'unknown error'})`);
+        if (backfillResult.claimed > 0 || !backfillResult.ok) {
+            parts.push(backfillResult.ok ? `backfilled location for ${backfillResult.scraped}/${backfillResult.claimed} legacy report(s)` : `location backfill failed (${backfillResult.error || 'unknown error'})`);
         }
+        showToast(parts.join('. ') + '.');
     } finally {
         if (btn) { btn.disabled = false; btn.innerHTML = originalHtml; }
     }

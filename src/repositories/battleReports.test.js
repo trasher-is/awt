@@ -97,6 +97,33 @@ ok('updateShipDetail also marks the report scraped', updated.ship_detail_scraped
 const noLongerNeeding = battleReports.getReportsNeedingShipDetail(10);
 ok('the updated report no longer appears in getReportsNeedingShipDetail', !noLongerNeeding.includes(9002), noLongerNeeding);
 
+// --- getReportsNeedingLocationBackfill / markLocationBackfillAttempted ---
+// Regression coverage for the legacy-gap fix: a report already ship_detail_scraped_at but
+// with no system_id (scraped before planet capture existed, or by a stale browser tab).
+ok('a fully-detailed report (9002, has system_id) never needs a location backfill',
+    !battleReports.getReportsNeedingLocationBackfill(10).includes(9002));
+
+db.prepare(`
+    INSERT INTO battle_reports (id, started_at, ship_detail_scraped_at, system_id, planet_index)
+    VALUES (9004, '2026-08-22T10:00:00Z', '2026-08-22T10:05:00Z', NULL, NULL)
+`).run();
+// A never-scraped report (ship_detail_scraped_at NULL) — getReportsNeedingShipDetail's
+// job, not this one's — to prove the two queries stay disjoint.
+db.prepare(`INSERT INTO battle_reports (id, started_at) VALUES (9005, '2026-08-23T10:00:00Z')`).run();
+const needingBackfill = battleReports.getReportsNeedingLocationBackfill(10);
+ok('a report scraped (ship_detail_scraped_at set) but with no system_id needs a location backfill',
+    needingBackfill.includes(9004), needingBackfill);
+ok('an unscraped report (ship_detail_scraped_at NULL) is NOT a backfill candidate — that is getReportsNeedingShipDetail\'s job',
+    !needingBackfill.includes(9005), needingBackfill);
+
+battleReports.markLocationBackfillAttempted([9004]);
+const rowAfterAttempt = db.prepare(`SELECT location_backfill_attempted_at FROM battle_reports WHERE id = ?`).get(9004);
+ok('markLocationBackfillAttempted sets the timestamp', rowAfterAttempt.location_backfill_attempted_at != null, rowAfterAttempt);
+
+const noLongerNeedingBackfill = battleReports.getReportsNeedingLocationBackfill(10);
+ok('once attempted, the report is never re-selected — even though system_id is STILL null (one attempt, not retried forever)',
+    !noLongerNeedingBackfill.includes(9004), noLongerNeedingBackfill);
+
 // --- findByPlayerPairNear ---
 db.prepare(`INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id) VALUES (?, ?, ?, ?)`)
     .run(9101, '2026-08-24T10:00:00Z', 1, 2);

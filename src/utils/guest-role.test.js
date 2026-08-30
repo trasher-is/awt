@@ -55,6 +55,7 @@ const writePaths = [
     '/sync/player-list', '/sync/player-detail',
     '/sync/player-scan-claim',
     '/sync/battle-report-ship-detail-claim', '/sync/battle-report-ship-detail',
+    '/sync/battle-report-location-backfill-claim',
 ];
 for (const p of writePaths) {
     const r = asGuest({ method: 'POST', reqPath: p });
