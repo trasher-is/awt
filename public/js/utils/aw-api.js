@@ -202,19 +202,34 @@
     // has_fleet is null: the API says nothing about stationed fleets, and NULL keeps
     // "not observed" distinct from a fabricated "observed absent". No fleet rows either —
     // /sync/system ignores its fleets array anyway (alliance scans own fleet data).
+    //
+    // Confirmed against a real /api/v1/Map/sectors response (2026-08-30): the API's own
+    // p.name is NOT bare — it's "Rasaben #10" (name + the same index this row already
+    // carries separately as p.index), and p.ownerName is NOT bare either — it's
+    // "MrChuckleupagus [SSPX]" (name + the same tag this row already carries separately
+    // as p.allianceTag). Storing either verbatim would double up everywhere a caller
+    // already appends "#{index}" or "[{tag}]" itself (e.g. !lastseen's planet label,
+    // sync.js's own nameOf() helper) and would corrupt players.name with a baked-in
+    // alliance suffix. Both are stripped back to bare before they reach the sync payload.
+    function stripTrailingIndex(name) {
+        return typeof name === 'string' ? name.replace(/\s*#\d+\s*$/, '') : null;
+    }
+    function stripTrailingAllianceTag(name) {
+        return typeof name === 'string' ? name.replace(/\s*\[[^\]]*\]\s*$/, '') : name;
+    }
     function mapPlanetsToSyncPayload(systemId, apiPlanets) {
         const planets = (Array.isArray(apiPlanets) ? apiPlanets : [])
             .filter(p => p && typeof p === 'object')
             .map(p => ({
                 game_planet_id: p.id,
                 planet_index: p.index,
-                name: typeof p.name === 'string' ? p.name : null,
+                name: stripTrailingIndex(p.name),
                 population: p.populationLevel,
                 starbase: p.starbaseLevel,
                 owner: p.ownerId != null
                     ? {
                         id: p.ownerId,
-                        name: p.ownerName,
+                        name: stripTrailingAllianceTag(p.ownerName),
                         alliance_id: p.allianceId != null ? p.allianceId : null,
                         alliance_tag: p.allianceTag != null ? p.allianceTag : null,
                     }
