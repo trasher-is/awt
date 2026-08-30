@@ -23,7 +23,7 @@ ok('getPopRatio defaults to 100', battlePoints.getPopRatio() === 100);
 ok('getExcludedAllianceTags defaults to []', Array.isArray(battlePoints.getExcludedAllianceTags()) && battlePoints.getExcludedAllianceTags().length === 0);
 
 // Empty leaderboards when there are no battle_reports rows
-const emptyBoards = battlePoints.getLeaderboards(null, 10);
+const emptyBoards = battlePoints.getLeaderboards(null, 10, 'all');
 ok('cv leaderboard empty with no data', Array.isArray(emptyBoards.cv) && emptyBoards.cv.length === 0);
 ok('pop leaderboard empty with no data', Array.isArray(emptyBoards.pop) && emptyBoards.pop.length === 0);
 
@@ -78,7 +78,10 @@ insert.run({
     killed_population: 9999,
 });
 
-const boards = battlePoints.getLeaderboards(null, 10);
+// scope='all' throughout this section — these tests exercise the leaderboard math/
+// exclusion logic itself, not the new member/alliance scoping (covered separately below),
+// and none of these synthetic players are linked to an app_users row.
+const boards = battlePoints.getLeaderboards(null, 10, 'all');
 ok('cv leaderboard has exactly Alice, Bob, and Frank (battles 1 and 4; battle 2/3 excluded)',
     boards.cv.length === 3, boards.cv); // Alice attacked in both battle 1 (vs Bob) and battle 4 (vs Frank)
 
@@ -99,12 +102,12 @@ ok('Alice pop points from battle 1 + battle 4 (300 + 9999), attacker-credited on
 ok('Bob never appears on pop leaderboard (only attacker is credited)', !boards.pop.some(r => r.player_name === 'Bob'), boards.pop);
 
 // "since" windowing excludes battle 4 but keeps battle 1
-const windowed = battlePoints.getLeaderboards('2026-01-01T00:00:00Z', 10);
+const windowed = battlePoints.getLeaderboards('2026-01-01T00:00:00Z', 10, 'all');
 const aliceWindowed = windowed.cv.find(r => r.player_name === 'Alice');
 ok('with a recent "since", Alice only gets battle 1\'s cv (2000)', aliceWindowed && aliceWindowed.raw === 2000, aliceWindowed);
 
 // limit is honored
-const limited = battlePoints.getCvLeaderboard(null, 1);
+const limited = battlePoints.getCvLeaderboard(null, 1, 'all');
 ok('limit=1 returns exactly one row (the top scorer)', limited.length === 1 && limited[0].player_name === 'Alice', limited);
 
 // --- News-page bombardment credit (unmatched only — see the "no battle_reports link"
@@ -127,7 +130,7 @@ db.prepare(`
     VALUES (10, 'battle-conquer', '2026-08-06T00:00:00Z', 10, NULL, NULL)
 `).run();
 
-const boardsWithNews = battlePoints.getLeaderboards(null, 10);
+const boardsWithNews = battlePoints.getLeaderboards(null, 10, 'all');
 const gina = boardsWithNews.pop.find(r => r.player_name === 'Gina');
 ok('Gina gets population points from her unmatched bombardment (400)', gina && gina.raw === 400, gina);
 ok('Hank never appears — his bombardment is already covered by a real battle report',
@@ -155,7 +158,7 @@ db.prepare(`
     VALUES (21, 'battle-bombarded', '2026-08-07T00:00:00Z', 20, 20, 750, NULL)
 `).run();
 
-const boardsWithLostDirection = battlePoints.getLeaderboards(null, 10);
+const boardsWithLostDirection = battlePoints.getLeaderboards(null, 10, 'all');
 const ivan = boardsWithLostDirection.pop.find(r => r.player_name === 'Ivan');
 ok('Ivan (attacker, credited via a direction:lost-style row) is INCLUDED — tags legitimately differ and are not excluded',
     ivan && ivan.raw === 750, boardsWithLostDirection.pop);
@@ -172,10 +175,36 @@ db.prepare(`
     VALUES (30, 'battle-bombarded', '2026-08-08T00:00:00Z', NULL, 30, 5, NULL)
 `).run();
 
-const boardsWithUnknownOpponent = battlePoints.getLeaderboards(null, 10);
+const boardsWithUnknownOpponent = battlePoints.getLeaderboards(null, 10, 'all');
 const kate = boardsWithUnknownOpponent.pop.find(r => r.player_name === 'Kate');
 ok('Kate is credited for a self-bombing row with no known opponent (other_player_id NULL)',
     kate && kate.raw === 5, boardsWithUnknownOpponent.pop);
+
+// --- scope: 'members' (default) vs 'alliance' vs 'all' ---
+// Alice (tool user, alliance 100) and Ivan (NOT a tool user, alliance 100) are both in
+// alliance 100. Bob (enemy, never a tool user) only ever appears as a CV defender.
+// Alice was only ever referenced via battle_reports.att_player_name so far (no FK to
+// players) — a real players row is required for the membership/alliance JOINs to find her.
+db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (1, 'Alice', 100)`).run();
+db.prepare(`INSERT INTO app_users (id, game_name, password_hash) VALUES (900, 'Alice', 'x')`).run();
+
+const defaultScope = battlePoints.getLeaderboards(null, 10);
+ok("default scope ('members') includes Alice (a tool user)",
+    defaultScope.cv.some(r => r.player_name === 'Alice'), defaultScope.cv);
+ok("default scope ('members') excludes Ivan (same alliance as Alice, but not a tool user)",
+    !defaultScope.pop.some(r => r.player_name === 'Ivan'), defaultScope.pop);
+ok("default scope ('members') excludes Bob (never a tool user, only ever a CV defender)",
+    !defaultScope.cv.some(r => r.player_name === 'Bob'), defaultScope.cv);
+
+const allianceScope = battlePoints.getLeaderboards(null, 10, 'alliance', 100);
+ok("scope 'alliance' includes Ivan (alliance 100, not a tool user, but in-scope by alliance)",
+    allianceScope.pop.some(r => r.player_name === 'Ivan'), allianceScope.pop);
+ok("scope 'alliance' still excludes Bob (a different alliance entirely)",
+    !allianceScope.cv.some(r => r.player_name === 'Bob'), allianceScope.cv);
+
+const allScope = battlePoints.getLeaderboards(null, 10, 'all');
+ok("scope 'all' includes Bob (no membership/alliance filter at all)",
+    allScope.cv.some(r => r.player_name === 'Bob'), allScope.cv);
 
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 

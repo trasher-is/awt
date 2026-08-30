@@ -67,6 +67,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('btn-mass-scan')?.addEventListener('click', runMassGalaxyScan);
     document.getElementById('btn-mass-scan-players')?.addEventListener('click', runMassPlayerScan);
+    document.getElementById('btn-sync-battles')?.addEventListener('click', runManualBattleSync);
 
     // --- EVENT DELEGATION FOR DYNAMIC ELEMENTS ---
     document.getElementById('search-player-results')?.addEventListener('click', (e) => {
@@ -376,4 +377,25 @@ async function runMassPlayerScan() {
     document.getElementById('btn-mass-scan').disabled = false;
     document.getElementById('btn-mass-scan-players').disabled = false;
     setTimeout(() => refreshDbStats(), 500);
+}
+
+// Manual "sync now" for battle reports — the background battle-sync.js module already
+// pulls every 30 min; this just runs that same pull immediately on click, for a member
+// who doesn't want to wait (e.g. checking !mortal/!lastseen right after a fight).
+async function runManualBattleSync() {
+    const btn = document.getElementById('btn-sync-battles');
+    if (btn) btn.disabled = true;
+    try {
+        const { triggerManualSync } = await import('./battle-sync.js');
+        const result = await triggerManualSync();
+        if (result.ok) {
+            showToast(result.inserted > 0
+                ? `Synced ${result.inserted} new battle report(s).`
+                : 'Battle reports up to date — nothing new.');
+        } else {
+            showToast(`Battle-report sync failed: ${result.error || 'unknown error'}`);
+        }
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }

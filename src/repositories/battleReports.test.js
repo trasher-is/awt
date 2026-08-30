@@ -110,49 +110,84 @@ ok('no match when the timestamp is outside the window',
 ok('no match for a different player pair entirely',
     battleReports.findByPlayerPairNear(1, 3, '2026-08-24T10:10:00Z', 15) === null);
 
-// --- getLastSeenPlanet ---
-ok('no last-seen record for a player with no history', battleReports.getLastSeenPlanet(500) === null);
+// --- getRecentPlanets / hasAnyBattleHistory ---
+ok('no recent planets for a player with no history', battleReports.getRecentPlanets(500).length === 0);
+ok('hasAnyBattleHistory is false for a player with no history at all', battleReports.hasAnyBattleHistory(500) === false);
 
 // Player 500 shows up as att_player_id in an OLDER battle report...
 db.prepare(`
     INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, system_id, planet_index)
     VALUES (9201, '2026-08-20T10:00:00Z', 500, 501, 10, 3)
 `).run();
-const afterBr = battleReports.getLastSeenPlanet(500);
-ok('battle_reports-only: resolves system_id/planet_index and source', afterBr &&
-    afterBr.system_id === 10 && afterBr.planet_index === 3 && afterBr.source === 'battle_report' && afterBr.source_id === 9201, afterBr);
+const afterBr = battleReports.getRecentPlanets(500);
+ok('battle_reports-only: resolves system_id/planet_index and source', afterBr.length === 1 &&
+    afterBr[0].system_id === 10 && afterBr[0].planet_index === 3 && afterBr[0].source === 'battle_report' && afterBr[0].source_id === 9201, afterBr);
 
 // ...and as def_player_id in a NEWER one (also proves att/def are both checked).
 db.prepare(`
     INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, system_id, planet_index)
     VALUES (9202, '2026-08-25T10:00:00Z', 502, 500, 20, 7)
 `).run();
-const afterNewerBr = battleReports.getLastSeenPlanet(500);
-ok('picks the MORE RECENT battle_reports row, and matches on def_player_id too', afterNewerBr &&
-    afterNewerBr.system_id === 20 && afterNewerBr.planet_index === 7 && afterNewerBr.source_id === 9202, afterNewerBr);
+const afterNewerBr = battleReports.getRecentPlanets(500);
+ok('both battle_reports rows come back, newest first, and def_player_id matches too', afterNewerBr.length === 2 &&
+    afterNewerBr[0].source_id === 9202 && afterNewerBr[0].system_id === 20 && afterNewerBr[0].planet_index === 7
+    && afterNewerBr[1].source_id === 9201, afterNewerBr);
 
-// A News-page bombardment even newer than both battle_reports rows must win, and must
-// match by other_player_id too (not just player_id) — matches how news-battle-matching.js
-// stores the counterpart.
+// A News-page bombardment even newer than both battle_reports rows must lead the list, and
+// must match by other_player_id too (not just player_id) — matches how
+// news-battle-matching.js stores the counterpart. Also carries credited_player_id/
+// population_delta, which battle_report rows never do.
 db.prepare(`INSERT INTO players (id, name) VALUES (500, 'Target'), (503, 'Scout')`).run();
 db.prepare(`
-    INSERT INTO news_events (id, player_id, message_type, occurred_at, game_planet_id, system_id, other_player_id)
-    VALUES (9301, 503, 'battle-bombarded', '2026-08-28T10:00:00Z', 77777, 30, 500)
+    INSERT INTO news_events (id, player_id, message_type, occurred_at, game_planet_id, system_id, other_player_id, credited_player_id, population_delta)
+    VALUES (9301, 503, 'battle-bombarded', '2026-08-28T10:00:00Z', 77777, 30, 500, 503, 12)
 `).run();
-const afterNews = battleReports.getLastSeenPlanet(500);
-ok('a more recent news_events row (matched via other_player_id) wins over both battle_reports rows',
-    afterNews && afterNews.system_id === 30 && afterNews.game_planet_id === 77777
-    && afterNews.planet_index === null && afterNews.source === 'news_event' && afterNews.source_id === 9301, afterNews);
+const afterNews = battleReports.getRecentPlanets(500);
+ok('the news_events row leads the list (most recent), all three occurrences present, newest first',
+    afterNews.length === 3 && afterNews[0].source_id === 9301 && afterNews[1].source_id === 9202 && afterNews[2].source_id === 9201, afterNews);
+ok('the news_events row carries its own shape: system_id/game_planet_id, credited_player_id, population_delta, message_type',
+    afterNews[0].system_id === 30 && afterNews[0].game_planet_id === 77777 && afterNews[0].planet_index === null
+    && afterNews[0].credited_player_id === 503 && afterNews[0].population_delta === 12 && afterNews[0].source === 'news_event'
+    && afterNews[0].message_type === 'battle-bombarded', afterNews[0]);
+ok('a battle_report-sourced row has a null message_type (that field only applies to news_events)',
+    afterNews[1].message_type === null, afterNews[1]);
 
-// A row with no system_id at all (e.g. an unresolved location) must never win by having a
-// later timestamp — it carries no usable location, so it must be filtered out entirely.
+// Regression test: a battle-conquer/battle-conquered News row never carries
+// credited_player_id/population_delta at all (no opponent link exists on those rows —
+// see news-battle-events.js's parseConquestRow), but the caller (discord_bot.js's
+// !lastseen) still needs message_type to format it correctly instead of a nonsensical
+// "Unknown popkilled ? population" line.
+db.prepare(`
+    INSERT INTO news_events (id, player_id, message_type, occurred_at, game_planet_id, system_id)
+    VALUES (9302, 503, 'battle-conquer', '2026-08-29T10:00:00Z', 88888, 40)
+`).run();
+// Player 503 (Scout) now has TWO news_events rows: the earlier bombardment (9301) and
+// this newer conquest (9302) — both must appear, newest (the conquest) first.
+const afterConquer = battleReports.getRecentPlanets(503);
+ok('the newer battle-conquer row leads, with its message_type and null credited_player_id/population_delta',
+    afterConquer.length === 2 && afterConquer[0].source_id === 9302 && afterConquer[0].message_type === 'battle-conquer'
+    && afterConquer[0].credited_player_id === null && afterConquer[0].population_delta === null, afterConquer);
+ok('the older bombardment row still follows behind it', afterConquer[1].source_id === 9301, afterConquer);
+
+ok('hasAnyBattleHistory is true once any row (located or not) names the player', battleReports.hasAnyBattleHistory(500) === true);
+
+// A row with no system_id at all (e.g. an unresolved location — the ship-detail scrape
+// hasn't reached it yet) must never appear in getRecentPlanets, but MUST still register in
+// hasAnyBattleHistory — that's the whole point of the two-function split: distinguishing
+// "never in a battle" from "in a battle, but location not scraped yet".
+db.prepare(`INSERT INTO players (id, name) VALUES (504, 'NoLocationYet')`).run();
 db.prepare(`
     INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, system_id, planet_index)
-    VALUES (9203, '2026-08-29T10:00:00Z', 500, 502, NULL, NULL)
+    VALUES (9203, '2026-08-29T10:00:00Z', 504, 502, NULL, NULL)
 `).run();
-const afterNullLocation = battleReports.getLastSeenPlanet(500);
-ok('a row with no system_id is ignored even though it is the newest by timestamp',
-    afterNullLocation && afterNullLocation.source_id === 9301, afterNullLocation);
+ok('a row with no system_id contributes nothing to getRecentPlanets', battleReports.getRecentPlanets(504).length === 0);
+ok('...but IS visible via hasAnyBattleHistory (distinguishes "no location yet" from "never seen")',
+    battleReports.hasAnyBattleHistory(504) === true);
+
+// limit is honored
+const limited = battleReports.getRecentPlanets(500, 2);
+ok('limit=2 returns exactly the 2 most recent occurrences', limited.length === 2 &&
+    limited[0].source_id === 9301 && limited[1].source_id === 9202, limited);
 
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 

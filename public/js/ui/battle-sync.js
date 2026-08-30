@@ -71,6 +71,21 @@ async function runPull() {
     }
 }
 
+// Manual "sync now" — a sidebar button, not the background clock. Bypasses the
+// cross-dashboard lock (an explicit click should always run, unlike the periodic timer)
+// but still refreshes it afterward so the next automatic tick doesn't immediately re-pull.
+// Unlike runPull, this surfaces a result to the caller (for a toast) instead of only
+// console.warn'ing — a user who clicked a button deserves to see what happened.
+export async function triggerManualSync() {
+    try {
+        const result = await pullOnce();
+        try { localStorage.setItem(LOCK_KEY, String(Date.now())); } catch (err) { /* no-op */ }
+        return result || { ok: true, inserted: 0 };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
 // The search-response envelope is SPEC-DERIVED (OpenAPI 3.0.1), never observed against
 // production — so accept a bare array or the usual paged-envelope keys, and complain
 // loudly when a non-empty answer matches neither (silently reading "unrecognized" as
@@ -92,12 +107,12 @@ async function pullOnce() {
     const meRes = await fetch('/hub-api/me');
     if (!meRes.ok) {
         console.warn('[BattleSync] /hub-api/me failed:', meRes.status);
-        return;
+        return { ok: false, error: `/hub-api/me failed (${meRes.status})` };
     }
     const me = await meRes.json();
     if (me.allianceId == null) {
         console.warn('[BattleSync] no allianceId for this account (name bridge unresolved) — skipping sync.');
-        return;
+        return { ok: false, error: 'no allianceId for this account' };
     }
 
     const { searchBattleReports } = globalThis.AWApi;
@@ -144,7 +159,7 @@ async function pullOnce() {
             reports.push(r);
         }
     }
-    if (!anySearchOk) return; // both searches failed — nothing to say to the hub
+    if (!anySearchOk) return { ok: false, error: 'both battle-report searches failed' };
 
     // POST even when empty: the response's newest_started_at is the only way to learn
     // the hub's watermark (including advances other members' dashboards pushed), and
@@ -156,9 +171,10 @@ async function pullOnce() {
     });
     if (!syncRes.ok) {
         console.warn('[BattleSync] /hub-api/sync/battle-reports failed:', syncRes.status);
-        return;
+        return { ok: false, error: `/hub-api/sync/battle-reports failed (${syncRes.status})` };
     }
     const d = await syncRes.json();
     if (d.newest_started_at) newestStartedAt = d.newest_started_at;
     if (d.inserted > 0) console.log(`[BattleSync] synced ${d.inserted} new battle report(s).`);
+    return { ok: true, inserted: d.inserted || 0, skipped: d.skipped || 0 };
 }
