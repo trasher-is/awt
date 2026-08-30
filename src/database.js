@@ -155,6 +155,7 @@ function initDatabase() {
     addColumn('players', 'has_supporter_badge', 'INTEGER');
     addColumn('players', 'supporter_type', 'TEXT');
     addColumn('players', 'last_api_scan_at', 'DATETIME');
+    addColumn('players', 'last_news_scraped_at', 'DATETIME');
 
     // NOTE: the migrations for player_logins.total_logins and fleets.arrival_at used to
     // sit here, above the CREATE TABLE statements for those two tables. On a fresh
@@ -693,6 +694,32 @@ function initDatabase() {
     addColumn('battle_reports', 'win_chance', 'REAL');
     addColumn('battle_reports', 'ship_detail_scraped_at', 'DATETIME');
 
+    // --- NEWS-PAGE INGESTION ---
+    // Populated by each member's own /Game/News feed (client-side scrape, POSTed through
+    // /sync/news). Exists because an undefended-planet conquest or bombardment produces no
+    // battle_reports row at all — see docs/superpowers/specs/2026-08-30-battle-challenge-
+    // tracker-design.md section 3 for why. Describes events on the map being wiped, so it
+    // goes with the round wipe exactly like battle_reports (see src/routes/admin.js).
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS news_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id INTEGER NOT NULL,
+            message_type TEXT NOT NULL,
+            occurred_at DATETIME NOT NULL,
+            game_planet_id INTEGER,
+            system_id INTEGER,
+            other_player_id INTEGER,
+            population_delta INTEGER,
+            credited_player_id INTEGER,
+            matched_battle_report_id INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(player_id, game_planet_id, message_type, occurred_at),
+            FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE,
+            FOREIGN KEY(other_player_id) REFERENCES players(id) ON DELETE SET NULL,
+            FOREIGN KEY(matched_battle_report_id) REFERENCES battle_reports(id) ON DELETE SET NULL
+        )
+    `);
+
     // --- STARBASE ORDER AUDIT ---
     // One row per starbase-order geometry PUT confirmed through the hub. This is an
     // operations record of who sent what, and when — that stays true across rounds, so
@@ -719,6 +746,7 @@ function initDatabase() {
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_battle_reports_started ON battle_reports(started_at);
         CREATE INDEX IF NOT EXISTS idx_starbase_audit_actor   ON starbase_order_audit(actor_user_id);
+        CREATE INDEX IF NOT EXISTS idx_news_events_credited   ON news_events(credited_player_id, occurred_at);
     `);
 
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
