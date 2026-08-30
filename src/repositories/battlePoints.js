@@ -108,7 +108,21 @@ function getPopLeaderboard(sinceIso, limit) {
             SELECT ne.credited_player_id AS player_id, cp.name AS player_name, ne.population_delta AS pop_credit
             FROM news_events ne
             JOIN players cp ON cp.id = ne.credited_player_id
-            LEFT JOIN players op ON op.id = ne.other_player_id
+            -- op must resolve to the VICTIM of the bombardment, not other_player_id
+            -- verbatim. other_player_id is stored as "the counterpart named in the News
+            -- row" regardless of direction: when the scraping member was bombarded
+            -- (direction: 'lost'), credited_player_id is set TO other_player_id (the
+            -- attacker gets the credit) — so credited_player_id and other_player_id are
+            -- the SAME player on those rows, and joining op via other_player_id would make
+            -- ca.tag = oa.tag trivially true, wrongly firing the friendly-fire exclusion
+            -- for every tagged attacker. The victim is whoever is NOT credited_player_id:
+            -- other_player_id when the scraper was the attacker (credited_player_id =
+            -- player_id), or player_id when the scraper was the victim (credited_player_id
+            -- = other_player_id).
+            LEFT JOIN players op ON op.id = (CASE
+                WHEN ne.credited_player_id = ne.player_id THEN ne.other_player_id
+                ELSE ne.player_id
+            END)
             LEFT JOIN alliances ca ON ca.id = cp.alliance_id
             LEFT JOIN alliances oa ON oa.id = op.alliance_id
             WHERE ne.message_type = 'battle-bombarded'

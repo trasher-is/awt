@@ -919,40 +919,78 @@ router.post('/sync/news', requireAuth, (req, res) => {
     let inserted = 0;
     let maxOccurredAt = null;
 
-    for (const raw of entries) {
-        if (!raw || !raw.message_type || !raw.occurred_at) continue;
-        if (maxOccurredAt === null || raw.occurred_at > maxOccurredAt) maxOccurredAt = raw.occurred_at;
+    try {
+        for (const raw of entries) {
+            if (!raw || !raw.message_type || !raw.occurred_at) continue;
 
-        let credited_player_id = null;
-        let matched_battle_report_id = null;
+            // A garbage/unparseable timestamp must never reach matching (new Date(NaN...)
+            // throws RangeError) or the watermark (a string that string-compares as
+            // "greater than" every real ISO-8601 value would push the watermark past all
+            // real events, permanently halting this player's News pagination). Validate
+            // BEFORE this entry touches anything else, so one bad entry never sinks the
+            // good entries around it.
+            if (isNaN(Date.parse(raw.occurred_at))) {
+                console.warn(`[News Sync] player ${playerId}: skipping entry with unparseable occurred_at`, raw.occurred_at);
+                continue;
+            }
 
-        if (raw.message_type === 'battle-bombarded') {
-            const credit = resolveBombardmentCredit(raw, playerId);
-            if (credit) {
-                credited_player_id = credit.credited_player_id;
-                matched_battle_report_id = battleReportsRepo.findByPlayerPairNear(
-                    credit.credited_player_id, credit.otherPlayerId, raw.occurred_at, 15
-                );
+            if (maxOccurredAt === null || raw.occurred_at > maxOccurredAt) maxOccurredAt = raw.occurred_at;
+
+            // A News row can name a player the hub has never scanned (no players row
+            // exists for them yet) — other_player_id has a FOREIGN KEY to players(id), so
+            // using it verbatim would throw on INSERT. Never fabricate a players row for
+            // them; just drop the reference. For battle-bombarded rows this also nulls out
+            // credited_player_id (via resolveBombardmentCredit's own "no other_player_id"
+            // guard below) — population credit needs a valid, existing player to attribute
+            // to.
+            let otherPlayerId = raw.other_player_id || null;
+            if (otherPlayerId && !playersRepo.playerExistsById(otherPlayerId)) {
+                console.warn(`[News Sync] player ${playerId}: other_player_id ${otherPlayerId} has no players row, dropping reference`);
+                otherPlayerId = null;
+            }
+
+            let credited_player_id = null;
+            let matched_battle_report_id = null;
+
+            if (raw.message_type === 'battle-bombarded') {
+                const credit = otherPlayerId ? resolveBombardmentCredit({ ...raw, other_player_id: otherPlayerId }, playerId) : null;
+                if (credit) {
+                    credited_player_id = credit.credited_player_id;
+                    matched_battle_report_id = battleReportsRepo.findByPlayerPairNear(
+                        credit.credited_player_id, credit.otherPlayerId, raw.occurred_at, 15
+                    );
+                }
+            }
+
+            // Insert each entry independently — a constraint violation on one bad entry
+            // (however it slipped past the guards above) must not abort the rest of the
+            // batch. insertNewsEvent's own INSERT OR IGNORE dedup semantics are unchanged;
+            // this only adds a safety net around it.
+            try {
+                const wasInserted = newsEventsRepo.insertNewsEvent({
+                    player_id: playerId,
+                    message_type: raw.message_type,
+                    occurred_at: raw.occurred_at,
+                    game_planet_id: raw.game_planet_id || null,
+                    system_id: raw.system_id || null,
+                    other_player_id: otherPlayerId,
+                    population_delta: raw.population_delta || null,
+                    credited_player_id,
+                    matched_battle_report_id,
+                });
+                if (wasInserted) inserted++;
+            } catch (entryErr) {
+                console.warn(`[News Sync] player ${playerId}: skipping entry that failed to insert:`, entryErr.message);
             }
         }
 
-        const wasInserted = newsEventsRepo.insertNewsEvent({
-            player_id: playerId,
-            message_type: raw.message_type,
-            occurred_at: raw.occurred_at,
-            game_planet_id: raw.game_planet_id || null,
-            system_id: raw.system_id || null,
-            other_player_id: raw.other_player_id || null,
-            population_delta: raw.population_delta || null,
-            credited_player_id,
-            matched_battle_report_id,
-        });
-        if (wasInserted) inserted++;
+        if (maxOccurredAt) newsEventsRepo.advanceWatermark(playerId, maxOccurredAt);
+
+        res.json({ success: true, inserted });
+    } catch (err) {
+        console.error(`[DB Error] News sync failed for player ${playerId}:`, err);
+        res.status(500).json({ error: 'Database sync failed' });
     }
-
-    if (maxOccurredAt) newsEventsRepo.advanceWatermark(playerId, maxOccurredAt);
-
-    res.json({ success: true, inserted });
 });
 
 module.exports = router;

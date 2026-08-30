@@ -14,7 +14,13 @@ function insertNewsEvent(entry) {
         player_id: entry.player_id,
         message_type: entry.message_type,
         occurred_at: entry.occurred_at,
-        game_planet_id: entry.game_planet_id ?? null,
+        // The UNIQUE(player_id, game_planet_id, message_type, occurred_at) dedup key is
+        // inert whenever game_planet_id is NULL — SQLite treats every NULL as distinct from
+        // every other NULL in a UNIQUE constraint, so INSERT OR IGNORE would never actually
+        // catch a "duplicate" row whose planet link wasn't resolvable (a real, recurring
+        // case for News-page rows). Substitute a sentinel (-1, never a real game planet id)
+        // so the dedup key stays meaningful for these rows too.
+        game_planet_id: entry.game_planet_id == null ? -1 : entry.game_planet_id,
         system_id: entry.system_id ?? null,
         other_player_id: entry.other_player_id ?? null,
         population_delta: entry.population_delta ?? null,

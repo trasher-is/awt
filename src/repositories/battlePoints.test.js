@@ -136,6 +136,30 @@ ok('Hank never appears — his bombardment is already covered by a real battle r
 ok('cv leaderboard is unaffected by news_events (still only Alice/Bob/Frank from battle_reports)',
     boardsWithNews.cv.length === 3, boardsWithNews.cv);
 
+// --- Regression test for finding I1 of the "battle challenge tracker news" final-review
+// fix wave (2026-08-30): a defender-recorded bombardment (direction 'lost' on the scraping
+// member's own News row) sets credited_player_id = other_player_id (the attacker gets pop
+// credit). The old SQL joined "op" via other_player_id unconditionally, which for these
+// rows made op resolve to the SAME player as credited_player_id (cp) — so ca.tag = oa.tag
+// was trivially true and the friendly-fire exclusion wrongly fired whenever the attacker
+// had ANY alliance tag, silently dropping the row. This test uses players with real,
+// DIFFERENT, non-excluded alliance tags on both sides specifically because the prior test
+// coverage above only used alliance_id = NULL players (exactly why this bug went uncaught).
+db.prepare(`INSERT INTO alliances (id, name, tag) VALUES (100, 'Raiders', 'RAID2'), (101, 'Victims', 'VICT')`).run();
+db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (20, 'Ivan', 100), (21, 'Jill', 101)`).run();
+// Jill (id 21, tag VICT) was bombarded by Ivan (id 20, tag RAID2) — her own News row
+// records direction 'lost', so credited_player_id (20) was set to what was originally
+// other_player_id, and player_id (21, Jill, the victim) stays as-is.
+db.prepare(`
+    INSERT INTO news_events (player_id, message_type, occurred_at, other_player_id, credited_player_id, population_delta, matched_battle_report_id)
+    VALUES (21, 'battle-bombarded', '2026-08-07T00:00:00Z', 20, 20, 750, NULL)
+`).run();
+
+const boardsWithLostDirection = battlePoints.getLeaderboards(null, 10);
+const ivan = boardsWithLostDirection.pop.find(r => r.player_name === 'Ivan');
+ok('Ivan (attacker, credited via a direction:lost-style row) is INCLUDED — tags legitimately differ and are not excluded',
+    ivan && ivan.raw === 750, boardsWithLostDirection.pop);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

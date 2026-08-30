@@ -48,8 +48,26 @@ ok('watermark advances to a later timestamp', newsEvents.getWatermark(1) === '20
 
 ok('a second player still has no watermark', newsEvents.getWatermark(2) === null);
 
+// --- Regression test for finding I2 (2026-08-30 final-review fix wave): SQLite treats
+// every NULL as distinct from every other NULL in a UNIQUE constraint, so two "duplicate"
+// bombardments with game_planet_id: null (a real case — not every News row resolves a
+// planet link) would never actually be deduped by INSERT OR IGNORE. insertNewsEvent now
+// substitutes a -1 sentinel for a null game_planet_id so the dedup key stays meaningful.
+const nullPlanetEntry = {
+    player_id: 2, message_type: 'battle-bombarded', occurred_at: '2026-08-26T10:00:00Z',
+    game_planet_id: null, system_id: 9, other_player_id: 1, population_delta: 500,
+    credited_player_id: 2, matched_battle_report_id: null,
+};
+ok('first insert of an event with a null game_planet_id returns true', newsEvents.insertNewsEvent(nullPlanetEntry) === true);
+ok('an identical second insert (same null game_planet_id) is ignored (dedup) and returns false',
+    newsEvents.insertNewsEvent({ ...nullPlanetEntry }) === false);
+ok('exactly one row was stored for the null-game_planet_id entries',
+    db.prepare(`SELECT COUNT(*) AS n FROM news_events WHERE player_id = 2`).get().n === 1);
+ok('the stored row has the -1 sentinel, not a real NULL',
+    db.prepare(`SELECT game_planet_id FROM news_events WHERE player_id = 2`).get().game_planet_id === -1);
+
 const deletedCount = newsEvents.deleteAllNewsEvents();
-ok('deleteAllNewsEvents returns the count deleted', deletedCount === 2, deletedCount);
+ok('deleteAllNewsEvents returns the count deleted', deletedCount === 3, deletedCount);
 ok('the table is empty afterward', db.prepare(`SELECT COUNT(*) AS n FROM news_events`).get().n === 0);
 
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });

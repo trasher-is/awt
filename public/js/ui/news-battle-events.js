@@ -148,9 +148,27 @@ async function walkFromPage(doc, pageNumber, watermark, now) {
     await walkFromPage(nextDoc, pageNumber + 1, watermark, now);
 }
 
+// Guards against re-entrant calls stacking up concurrent walks. runViewHooks() (spy.js)
+// can fire repeatedly on MutationObserver bursts while initNewsBattleEvents() is still
+// mid-flight; without this, a second call re-fetches and re-walks pages 2..20 from
+// scratch via fresh DOMParser documents each time, burning the game's rate-limited API
+// budget for no benefit — the first walk already covers the current document. This only
+// needs to survive the CURRENT document/visit; a real page navigation is a legitimate new
+// visit and should walk again (module state resets on navigation regardless).
+let activeWalk = null;
+
 export async function initNewsBattleEvents() {
     if (!window.location.pathname.toLowerCase().startsWith('/game/news')) return;
+    if (activeWalk) return activeWalk;
 
-    const watermark = await fetchWatermark();
-    await walkFromPage(document, 1, watermark, new Date());
+    activeWalk = (async () => {
+        const watermark = await fetchWatermark();
+        await walkFromPage(document, 1, watermark, new Date());
+    })();
+
+    try {
+        await activeWalk;
+    } finally {
+        activeWalk = null;
+    }
 }
