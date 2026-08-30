@@ -138,6 +138,15 @@ function getPlayerRestartCheck(id) {
     return getPlayerRestartCheckStmt.get(id);
 }
 
+// Existence check only — used by /sync/news (sync.js) to guard other_player_id before it
+// is stored or used for crediting: a News row can name a player the hub has never scanned
+// (no players row exists yet), and news_events.other_player_id has a FOREIGN KEY to
+// players(id) that would otherwise abort the insert.
+const playerExistsByIdStmt = db.prepare(`SELECT 1 FROM players WHERE id = ?`);
+function playerExistsById(id) {
+    return playerExistsByIdStmt.get(id) !== undefined;
+}
+
 // The reset is a HEURISTIC and heuristics misfire (see issues #46/#48: a false
 // restart once zeroed a player's race picks). So it may only clear columns the
 // upsert below writes UNCONDITIONALLY — the public stats anyone can read off the
@@ -632,7 +641,7 @@ module.exports = {
     getWarRoomPlayers, getAllianceIntelPlayerIds, countPlayers, listPlayerIds, getFullPlayersDb,
     getAllianceTagForMembers, getVisionObservers, getPlayerWithPlanetCount,
     getPlayerLoginHistory, getPlayerLoginHeatmap,
-    upsertPlayerBasic, getPlayerNameWithTag, getPlayerRestartCheck, resetPlayerOnRestart,
+    upsertPlayerBasic, getPlayerNameWithTag, getPlayerRestartCheck, playerExistsById, resetPlayerOnRestart,
     upsertPlayerFull, insertPlayerLogin, upsertAllianceMemberBasic, upsertPlayerNameOnly,
     getPlayerBiologyByName, getThreatPlayersByBiology, getThreatPlayersByScience,
     getPlayerTravelStatsByName, countUnaffiliatedIntelPlayers, listUnaffiliatedIntelPlayers,

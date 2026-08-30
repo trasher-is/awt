@@ -9,7 +9,10 @@ const alliancesRepo = require('../repositories/alliances');
 const settingsRepo = require('../repositories/settings');
 const { mapApiReport, upsertReports, formatBattleEmbed } = require('../utils/battle-reports');
 const battleReportsRepo = require('../repositories/battleReports');
-const { postEmbed, defuseMentions, settingValue } = require('../utils/discord-post');
+const newsEventsRepo = require('../repositories/newsEvents');
+const { resolveBombardmentCredit } = require('../utils/news-battle-matching');
+const battlePointsRepo = require('../repositories/battlePoints');
+const { postEmbed, postBattleEmbed, defuseMentions, settingValue } = require('../utils/discord-post');
 const router = express.Router();
 
 // --- MAP SCRAPER DATA RECEIVER ---
@@ -756,6 +759,35 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
             }
         }
 
+        // --- BATTLE POINTS: automated twice-daily leaderboard post ---
+        // This app has no server-side scheduler anywhere (every periodic-feeling behavior
+        // here is actually driven by client sync traffic) — so this piggybacks on real
+        // battle-report sync activity instead of adding a new timer. Any sync that
+        // actually inserts new rows is treated as "fresh data just arrived"; if at least
+        // 12 hours have passed since the last automated post, it fires again. In practice
+        // this lands once after the first sync following local midnight (when yesterday's
+        // reports become visible) and again roughly 12 hours later.
+        if (inserted.length > 0 && settingValue('discord_battlepoints_channel')) {
+            const lastPostRaw = settingValue('battle_points_last_auto_post_at');
+            const lastPostMs = lastPostRaw ? Date.parse(lastPostRaw) : NaN;
+            const hoursSince = Number.isFinite(lastPostMs) ? (Date.now() - lastPostMs) / (60 * 60 * 1000) : Infinity;
+            if (hoursSince >= 12) {
+                const { cv, pop } = battlePointsRepo.getLeaderboards(null, 10);
+                const formatLines = (rows, unit) => rows.length
+                    ? rows.map((r, i) => `**${i + 1}.** ${r.player_name || 'Unknown'} — ${r.points} pts (${r.raw.toLocaleString()} ${unit})`).join('\n')
+                    : '_No battles recorded yet._';
+                postBattleEmbed('discord_battlepoints_channel', {
+                    title: '⚔️ Battle Challenge Update',
+                    fields: [
+                        { name: '💥 CV Killed', value: formatLines(cv, 'CV') },
+                        { name: '☠️ Population Killed', value: formatLines(pop, 'pop') },
+                    ],
+                    color: 0xe11d48,
+                }).catch(err => console.error('[Discord] battle-points auto-post error:', err.message));
+                settingsRepo.setSetting('battle_points_last_auto_post_at', new Date().toISOString());
+            }
+        }
+
         // newest_started_at is the dashboard scheduler's contract: the next pull uses it
         // as BattleDateFrom so the search window only ever moves forward.
         const newest = battleReportsRepo.getNewestStartedAt();
@@ -859,6 +891,105 @@ router.post('/sync/trade-prices', requireAuth, (req, res) => {
     } catch (err) {
         console.error('[DB Error] Failed to store trade prices:', err);
         res.status(500).json({ error: 'Failed to store trade prices' });
+    }
+});
+
+// --- NEWS-PAGE WATERMARK (for the client's pagination-walk stop condition) ---
+router.get('/sync/news-watermark', requireAuth, (req, res) => {
+    const row = playersRepo.getPlayerIdByName(req.session.gameName || '');
+    const playerId = row ? row.id : null;
+    if (!playerId) return res.json({ watermark: null });
+    res.json({ watermark: newsEventsRepo.getWatermark(playerId) });
+});
+
+// --- NEWS-PAGE EVENT RECEIVER ---
+// Body: { entries: [{ message_type, occurred_at, game_planet_id, system_id,
+// other_player_id, population_delta, direction }] }. Parsing lives entirely on the
+// client (public/js/ui/news-battle-events.js reading the member's own /Game/News page);
+// this route only resolves crediting/matching and stores the result. `direction`
+// ('killed'|'lost') only matters for battle-bombarded rows.
+router.post('/sync/news', requireAuth, (req, res) => {
+    const entries = Array.isArray(req.body.entries) ? req.body.entries : null;
+    if (!entries) return res.status(400).json({ error: 'Invalid payload' });
+
+    const row = playersRepo.getPlayerIdByName(req.session.gameName || '');
+    const playerId = row ? row.id : null;
+    if (!playerId) return res.status(400).json({ error: 'Session player not recognized' });
+
+    let inserted = 0;
+    let maxOccurredAt = null;
+
+    try {
+        for (const raw of entries) {
+            if (!raw || !raw.message_type || !raw.occurred_at) continue;
+
+            // A garbage/unparseable timestamp must never reach matching (new Date(NaN...)
+            // throws RangeError) or the watermark (a string that string-compares as
+            // "greater than" every real ISO-8601 value would push the watermark past all
+            // real events, permanently halting this player's News pagination). Validate
+            // BEFORE this entry touches anything else, so one bad entry never sinks the
+            // good entries around it.
+            if (isNaN(Date.parse(raw.occurred_at))) {
+                console.warn(`[News Sync] player ${playerId}: skipping entry with unparseable occurred_at`, raw.occurred_at);
+                continue;
+            }
+
+            if (maxOccurredAt === null || raw.occurred_at > maxOccurredAt) maxOccurredAt = raw.occurred_at;
+
+            // A News row can name a player the hub has never scanned (no players row
+            // exists for them yet) — other_player_id has a FOREIGN KEY to players(id), so
+            // using it verbatim would throw on INSERT. Never fabricate a players row for
+            // them; just drop the reference. For battle-bombarded rows this also nulls out
+            // credited_player_id (via resolveBombardmentCredit's own "no other_player_id"
+            // guard below) — population credit needs a valid, existing player to attribute
+            // to.
+            let otherPlayerId = raw.other_player_id || null;
+            if (otherPlayerId && !playersRepo.playerExistsById(otherPlayerId)) {
+                console.warn(`[News Sync] player ${playerId}: other_player_id ${otherPlayerId} has no players row, dropping reference`);
+                otherPlayerId = null;
+            }
+
+            let credited_player_id = null;
+            let matched_battle_report_id = null;
+
+            if (raw.message_type === 'battle-bombarded') {
+                const credit = otherPlayerId ? resolveBombardmentCredit({ ...raw, other_player_id: otherPlayerId }, playerId) : null;
+                if (credit) {
+                    credited_player_id = credit.credited_player_id;
+                    matched_battle_report_id = battleReportsRepo.findByPlayerPairNear(
+                        credit.credited_player_id, credit.otherPlayerId, raw.occurred_at, 15
+                    );
+                }
+            }
+
+            // Insert each entry independently — a constraint violation on one bad entry
+            // (however it slipped past the guards above) must not abort the rest of the
+            // batch. insertNewsEvent's own INSERT OR IGNORE dedup semantics are unchanged;
+            // this only adds a safety net around it.
+            try {
+                const wasInserted = newsEventsRepo.insertNewsEvent({
+                    player_id: playerId,
+                    message_type: raw.message_type,
+                    occurred_at: raw.occurred_at,
+                    game_planet_id: raw.game_planet_id || null,
+                    system_id: raw.system_id || null,
+                    other_player_id: otherPlayerId,
+                    population_delta: raw.population_delta || null,
+                    credited_player_id,
+                    matched_battle_report_id,
+                });
+                if (wasInserted) inserted++;
+            } catch (entryErr) {
+                console.warn(`[News Sync] player ${playerId}: skipping entry that failed to insert:`, entryErr.message);
+            }
+        }
+
+        if (maxOccurredAt) newsEventsRepo.advanceWatermark(playerId, maxOccurredAt);
+
+        res.json({ success: true, inserted });
+    } catch (err) {
+        console.error(`[DB Error] News sync failed for player ${playerId}:`, err);
+        res.status(500).json({ error: 'Database sync failed' });
     }
 });
 

@@ -191,6 +191,45 @@
             </div>
 
             <div class="bg-card border border-border rounded-lg p-4 shadow-sm">
+                <h3 class="font-bold text-foreground mb-1"><i class="fa-solid fa-ranking-star text-rose-400 mr-1"></i> Battle Challenge Tracker</h3>
+                <p class="text-xs text-muted-foreground mb-3">Twice-daily CV/population leaderboard posts to this channel. CV/pop ratios control how raw kills convert to points; excluded alliance tags (comma-separated) are left out of both leaderboards entirely, in addition to always-excluded friendly fire. Leave the channel empty to disable posting.</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div class="flex flex-col md:flex-row gap-2 md:items-end">
+                        <div class="flex-1">
+                            <label class="text-xs text-muted-foreground mb-1 block">Battle Points Channel ID</label>
+                            <input type="text" id="battlepointsChannelId" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm font-mono" placeholder="e.g. 123456789012345678">
+                        </div>
+                        <button onclick="saveBattlepointsChannel()" class="h-9 px-4 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Save</button>
+                    </div>
+                    <div class="flex flex-col md:flex-row gap-2 md:items-end">
+                        <div class="flex-1">
+                            <label class="text-xs text-muted-foreground mb-1 block">Excluded Alliance Tags</label>
+                            <input type="text" id="battlepointsExcludedTags" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm" placeholder="e.g. RAID, NAP1">
+                        </div>
+                        <button onclick="saveBattlepointsExcludedTags()" class="h-9 px-4 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Save</button>
+                    </div>
+                    <div class="flex flex-col md:flex-row gap-2 md:items-end">
+                        <div class="flex-1">
+                            <label class="text-xs text-muted-foreground mb-1 block">CV Ratio (CV per point, default 1000)</label>
+                            <input type="text" id="battlepointsCvRatio" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm font-mono" placeholder="1000">
+                        </div>
+                        <button onclick="saveBattlepointsCvRatio()" class="h-9 px-4 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Save</button>
+                    </div>
+                    <div class="flex flex-col md:flex-row gap-2 md:items-end">
+                        <div class="flex-1">
+                            <label class="text-xs text-muted-foreground mb-1 block">Population Ratio (pop per point, default 100)</label>
+                            <input type="text" id="battlepointsPopRatio" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm font-mono" placeholder="100">
+                        </div>
+                        <button onclick="saveBattlepointsPopRatio()" class="h-9 px-4 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Save</button>
+                    </div>
+                </div>
+                <span id="battlepointsChannelStatus" class="text-xs text-muted-foreground mt-2 block"></span>
+                <span id="battlepointsExcludedTagsStatus" class="text-xs text-muted-foreground mt-1 block"></span>
+                <span id="battlepointsCvRatioStatus" class="text-xs text-muted-foreground mt-1 block"></span>
+                <span id="battlepointsPopRatioStatus" class="text-xs text-muted-foreground mt-1 block"></span>
+            </div>
+
+            <div class="bg-card border border-border rounded-lg p-4 shadow-sm">
                 <h3 class="font-bold text-foreground mb-1"><i class="fa-solid fa-triangle-exclamation text-aw-warning mr-1"></i> Incoming Attack Alerts</h3>
                 <p class="text-xs text-muted-foreground mb-3">Incoming-attack notifications (from the in-game forwarder webhook) are posted here, with the list of allied fleets that can defend in time. Leave empty to disable.</p>
                 <div class="flex flex-col md:flex-row gap-2 md:items-end">
@@ -356,6 +395,10 @@
                     document.getElementById('discordChannelId').value = data.settings.discord_announce_channel || '';
                     document.getElementById('popdropChannelId').value = data.settings.discord_popdrop_channel || '';
                     document.getElementById('battlereportChannelId').value = data.settings.discord_battlereport_channel || '';
+                    document.getElementById('battlepointsChannelId').value = data.settings.discord_battlepoints_channel || '';
+                    document.getElementById('battlepointsExcludedTags').value = data.settings.battle_points_excluded_alliance_tags || '';
+                    document.getElementById('battlepointsCvRatio').value = data.settings.battle_points_cv_ratio || '';
+                    document.getElementById('battlepointsPopRatio').value = data.settings.battle_points_pop_ratio || '';
                     document.getElementById('incomingChannelId').value = data.settings.discord_incoming_channel || '';
                     document.getElementById('reminderChannelId').value = data.settings.discord_reminder_channel || '';
                     document.getElementById('blockedChannels').value = data.settings.discord_blocked_channels || '';
@@ -396,6 +439,22 @@
 
         function saveBattlereportChannel() {
             return saveSetting('discord_battlereport_channel', 'battlereportChannelId', 'battlereportChannelStatus');
+        }
+
+        function saveBattlepointsChannel() {
+            return saveSetting('discord_battlepoints_channel', 'battlepointsChannelId', 'battlepointsChannelStatus');
+        }
+
+        function saveBattlepointsExcludedTags() {
+            return saveSetting('battle_points_excluded_alliance_tags', 'battlepointsExcludedTags', 'battlepointsExcludedTagsStatus');
+        }
+
+        function saveBattlepointsCvRatio() {
+            return saveSetting('battle_points_cv_ratio', 'battlepointsCvRatio', 'battlepointsCvRatioStatus');
+        }
+
+        function saveBattlepointsPopRatio() {
+            return saveSetting('battle_points_pop_ratio', 'battlepointsPopRatio', 'battlepointsPopRatioStatus');
         }
 
         function saveReminderChannel() {

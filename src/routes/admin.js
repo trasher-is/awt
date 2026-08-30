@@ -10,6 +10,7 @@ const plansRepo = require('../repositories/plans');
 const playersRepo = require('../repositories/players');
 const alliancesRepo = require('../repositories/alliances');
 const battleReportsRepo = require('../repositories/battleReports');
+const newsEventsRepo = require('../repositories/newsEvents');
 const usersRepo = require('../repositories/users');
 const settingsRepo = require('../repositories/settings');
 const { archiveRound, listRounds, roundDetail } = require('../utils/round-archive');
@@ -310,9 +311,12 @@ router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
             plansRepo.deleteAllPlans();
             systemsRepo.deleteAllPlanetEvents();
             // Battle reports describe battles on the map being wiped — they go with it.
-            // starbase_order_audit is deliberately NOT here: it is an operations record
-            // of who sent what through the hub, and that stays true across rounds.
+            // News events are the same kind of record (walkover conquests/bombardments on
+            // the same wiped map). starbase_order_audit is deliberately NOT here: it is an
+            // operations record of who sent what through the hub, and that stays true
+            // across rounds.
             battleReportsRepo.deleteAllBattleReports();
+            newsEventsRepo.deleteAllNewsEvents();
             systemsRepo.deleteAllPlanets();
             playersRepo.deleteAllPlayers();
             alliancesRepo.deleteAllAlliances();
@@ -393,7 +397,7 @@ router.get('/admin/settings', requireAdmin, (req, res) => {
 
 router.post('/admin/settings', requireAdmin, (req, res) => {
     const { key, value } = req.body;
-    const allowedKeys = ['discord_announce_channel', 'discord_popdrop_channel', 'discord_incoming_channel', 'discord_reminder_channel', 'discord_battlereport_channel', 'discord_blocked_channels'];
+    const allowedKeys = ['discord_announce_channel', 'discord_popdrop_channel', 'discord_incoming_channel', 'discord_reminder_channel', 'discord_battlereport_channel', 'discord_blocked_channels', 'discord_battlepoints_channel', 'battle_points_cv_ratio', 'battle_points_pop_ratio', 'battle_points_excluded_alliance_tags'];
     if (!allowedKeys.includes(key)) return res.status(400).json({ error: 'Unknown setting key' });
 
     try {

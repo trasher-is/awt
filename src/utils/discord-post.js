@@ -20,6 +20,18 @@ function client() {
     return rest;
 }
 
+// The battle/leaderboard bot is purely cosmetic (a distinct avatar for battle posts) and
+// optional: unset, it silently falls back to the main bot's token, exactly like every
+// other optional integration in this app (see .env.example's DISCORD_TOKEN convention).
+let battleRest = null;
+function battleClient() {
+    if (battleRest) return battleRest;
+    const token = process.env.BATTLE_DISCORD_TOKEN;
+    if (!token) return null;
+    battleRest = new REST({ version: '10' }).setToken(token);
+    return battleRest;
+}
+
 function settingValue(key) {
     try {
         const row = settingsRepo.getSetting(key);
@@ -38,15 +50,8 @@ function defuseMentions(value) {
         .replace(/<@([!&]?\d+)>/g, '<@​$1>');
 }
 
-/**
- * Post an embed to a channel taken from app_settings.
- * @param {string} settingKey  app_settings key holding the channel id
- * @param {object} embed       a plain Discord embed object
- * @returns {Promise<{ok: boolean, reason?: string, messageId?: string}>}
- */
-async function postEmbed(settingKey, embed) {
-    const api = client();
-    if (!api) return { ok: false, reason: 'DISCORD_TOKEN is not set' };
+async function postEmbedVia(api, settingKey, embed) {
+    if (!api) return { ok: false, reason: 'no Discord token configured' };
 
     const channelId = settingValue(settingKey);
     if (!channelId) return { ok: false, reason: `no channel configured for ${settingKey}` };
@@ -60,4 +65,23 @@ async function postEmbed(settingKey, embed) {
     }
 }
 
-module.exports = { postEmbed, defuseMentions, settingValue };
+/**
+ * Post an embed to a channel taken from app_settings, using the main bot's token.
+ * @param {string} settingKey  app_settings key holding the channel id
+ * @param {object} embed       a plain Discord embed object
+ * @returns {Promise<{ok: boolean, reason?: string, messageId?: string}>}
+ */
+async function postEmbed(settingKey, embed) {
+    return postEmbedVia(client(), settingKey, embed);
+}
+
+/**
+ * Post an embed for battle/leaderboard content, preferring BATTLE_DISCORD_TOKEN's
+ * identity when configured and falling back to the main bot's token otherwise.
+ * Same signature and return shape as postEmbed.
+ */
+async function postBattleEmbed(settingKey, embed) {
+    return postEmbedVia(battleClient() || client(), settingKey, embed);
+}
+
+module.exports = { postEmbed, postBattleEmbed, defuseMentions, settingValue };
