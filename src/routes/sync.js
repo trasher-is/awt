@@ -396,6 +396,16 @@ router.post('/sync/player-detail', requireAuth, (req, res) => {
     // the upsert's CASE guard preserves ALL existing intel columns together rather than
     // risking a partial (silently corrupting) overwrite.
     const detail = { ...p, name: newName, has_intel: (p.has_intel && hasCompleteIntel(p)) ? 1 : 0 };
+    // upsertPlayerFromApiDetail's statement binds every one of these as a named parameter
+    // regardless of has_intel (the CASE guards only decide which value WINS, not whether one
+    // must be bound) — better-sqlite3 throws "Missing named parameter" if a key is absent
+    // rather than merely null. Not every player race carries all nine race_* bonuses, and a
+    // JS `undefined` for a present-but-incomplete sub-object is dropped entirely by
+    // JSON.stringify on the way from the client, so this can't rely on the client always
+    // sending every key.
+    for (const f of [...INTEL_NUMERIC_FIELDS, 'artefact']) {
+        if (detail[f] === undefined) detail[f] = null;
+    }
 
     // Race is write-once per round: once a player has ANY race_* value on record, a later
     // detail sync must not be allowed to change it, even when has_intel validly resolves to
