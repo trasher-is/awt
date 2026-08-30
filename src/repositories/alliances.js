@@ -249,6 +249,16 @@ function deleteStaleAllianceMembers(ids) {
     return db.prepare(`DELETE FROM alliance_member_stats WHERE player_id NOT IN (${placeholders})`).run(...ids);
 }
 
+// Full wipe for a round reset (admin.js's nuke-intel) — unlike deleteStaleAllianceMembers
+// above (which prunes members who dropped out of an alliance mid-round, keyed by an ids
+// list still worth keeping), a new round invalidates every row: player_id is stable across
+// rounds, so leftover rows here survive a nuke and rejoin against the fresh players table
+// as an "Unknown" member with last round's stats still attached.
+const deleteAllAllianceMemberStatsStmt = db.prepare(`DELETE FROM alliance_member_stats`);
+function deleteAllAllianceMemberStats() {
+    deleteAllAllianceMemberStatsStmt.run();
+}
+
 module.exports = {
     getWarRoomAllianceIntelTags, getAllianceIdByTag, countAlliances, getWarRoomAlliances,
     searchAlliancesByTagOrName, upsertAllianceFromApiSearch,
@@ -257,4 +267,5 @@ module.exports = {
     getAllianceMemberStatIds, getTradeAnalysisRows, getAllianceStatsForArchive,
     getTraders, getMembersWithStats, getCanonicalNameFromStats,
     upsertHoardedAu, upsertAllianceMemberStats, deleteStaleAllianceMembers,
+    deleteAllAllianceMemberStats,
 };
