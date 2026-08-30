@@ -345,6 +345,15 @@ router.post('/sync/player-list', requireAuth, (req, res) => {
         if (!Number.isInteger(p.id) || p.id <= 0) continue;
         const newName = typeof p.name === 'string' ? p.name : null;
         playersRepo.recordNameChangeIfDifferent(p.id, newName);
+        // As in the single-player scan and system scan: seed the alliances row (FOREIGN
+        // KEY on players.alliance_id) BEFORE writing a player who belongs to an alliance
+        // this sync has never seen before, or the INSERT throws SqliteError: FOREIGN KEY
+        // constraint failed — this is exactly what happened on a brand-new round's first
+        // ListPlayer pull (2026-08-30). `?? ''` because alliances.name is NOT NULL and the
+        // tag may be missing.
+        if (Number.isInteger(p.alliance_id) && p.alliance_id) {
+            alliancesRepo.upsertAllianceTagOnly(p.alliance_id, p.alliance_tag ?? null, p.alliance_tag ?? '');
+        }
         playersRepo.upsertPlayerFromApiList(
             p.id, newName,
             Number.isInteger(p.alliance_id) ? p.alliance_id : null,

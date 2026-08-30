@@ -260,6 +260,13 @@
                 id: p.id,
                 name: typeof p.name === 'string' ? p.name : null,
                 alliance_id: Number.isInteger(p.allianceId) ? p.allianceId : null,
+                // Needed so the server can seed the alliances row (FOREIGN KEY on
+                // players.alliance_id) before writing a player who belongs to an alliance
+                // this sync has never seen before — see the real production crash this
+                // fixed (2026-08-30): a brand-new round's first ListPlayer pull hit a
+                // fresh alliance id with no matching alliances row yet, and the INSERT
+                // threw SqliteError: FOREIGN KEY constraint failed.
+                alliance_tag: typeof p.allianceTag === 'string' ? p.allianceTag : null,
                 level: Number.isInteger(p.playerLevel) ? p.playerLevel : null,
                 points: Number.isInteger(p.pointsScored) ? p.pointsScored : null,
                 rank: Number.isInteger(p.rank) ? p.rank : null,
