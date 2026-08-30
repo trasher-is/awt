@@ -70,3 +70,52 @@ export function initBattleReportDetailSync() {
     started = true;
     setInterval(runSweepTick, SWEEP_INTERVAL_MS);
 }
+
+// Manual "scrape now" — a sidebar button paired with battle-sync.js's triggerManualSync,
+// so clicking once both pulls new reports AND immediately backfills their planet/CV
+// location instead of waiting up to SWEEP_INTERVAL_MS for the background timer. Unlike
+// runSweepTick this loops across multiple claim batches (a fresh resync can easily bring
+// in more than SWEEP_BATCH_SIZE reports at once) until it catches up or hits the safety
+// cap, and it bypasses the lock — an explicit click should always run even if the
+// background timer just claimed the lock a moment ago.
+let manualSweeping = false;
+export async function triggerManualSweep(maxBatches = 10) {
+    if (manualSweeping) return { ok: false, error: 'a sweep is already running' };
+    manualSweeping = true;
+    let scraped = 0;
+    let claimed = 0;
+    try {
+        for (let i = 0; i < maxBatches; i++) {
+            const claimRes = await fetch('/hub-api/sync/battle-report-ship-detail-claim', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ limit: SWEEP_BATCH_SIZE }),
+            });
+            if (!claimRes.ok) return { ok: false, error: `claim failed (${claimRes.status})`, scraped, claimed };
+            const claimedBody = await claimRes.json().catch(() => ({}));
+            if (!claimedBody.success) return { ok: false, error: 'claim response not successful', scraped, claimed };
+            const ids = Array.isArray(claimedBody.ids) ? claimedBody.ids : [];
+            if (!ids.length) break; // caught up
+            claimed += ids.length;
+
+            for (const id of ids) {
+                const detail = await scrapeBattleReportShipDetail(id);
+                if (!detail) continue; // scrape/parse failed — stays claimed, same acceptable gap as the periodic sweep
+                const syncRes = await fetch('/hub-api/sync/battle-report-ship-detail', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, ...detail }),
+                });
+                if (!syncRes.ok) continue;
+                const syncBody = await syncRes.json().catch(() => ({}));
+                if (syncBody.success) scraped++;
+            }
+            if (ids.length < SWEEP_BATCH_SIZE) break; // a partial page means nothing is left to claim
+        }
+        return { ok: true, scraped, claimed };
+    } catch (err) {
+        return { ok: false, error: err.message, scraped, claimed };
+    } finally {
+        manualSweeping = false;
+    }
+}
