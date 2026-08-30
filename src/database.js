@@ -140,6 +140,12 @@ function initDatabase() {
     addColumn('app_users', 'discord_id', 'TEXT');
     addColumn('players', 'has_intel', 'INTEGER DEFAULT 0');
     addColumn('players', 'intel_updated_at', 'TEXT');
+    // Set only by upsertPlayerFull (the deep profile/Statistics-page scrape) — unlike
+    // updated_at, which every player-touching sync bumps (system scans, the API roster
+    // list, etc.), this is specific to when total_farms/factories/labs/cybernetics were
+    // actually last captured, so the profile page can show accurate staleness for them
+    // instead of reusing updated_at and understating how old the building counts are.
+    addColumn('players', 'stats_scraped_at', 'DATETIME');
     addColumn('players', 'home_planet_id', 'INTEGER');
     addColumn('players', 'home_system_id', 'INTEGER');
     addColumn('players', 'home_planet_index', 'INTEGER');

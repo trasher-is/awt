@@ -61,6 +61,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-mass-scan')?.addEventListener('click', runMassGalaxyScan);
     document.getElementById('btn-mass-scan-players')?.addEventListener('click', runMassPlayerScan);
     document.getElementById('btn-sync-battles')?.addEventListener('click', runManualBattleSync);
+    refreshBattleReportsWatermark();
 
     // --- EVENT DELEGATION FOR DYNAMIC ELEMENTS ---
     document.getElementById('search-player-results')?.addEventListener('click', (e) => {
@@ -348,7 +349,26 @@ async function runManualBattleSync() {
             parts.push(backfillResult.ok ? `backfilled location for ${backfillResult.scraped}/${backfillResult.claimed} legacy report(s)` : `location backfill failed (${backfillResult.error || 'unknown error'})`);
         }
         showToast(parts.join('. ') + '.');
+        refreshBattleReportsWatermark();
     } finally {
         if (btn) { btn.disabled = false; btn.innerHTML = originalHtml; }
+    }
+}
+
+// "Synced through: <date>" under the button — the date battle-sync.js's next pull will
+// use as BattleDateFrom. Reads the hub-wide DB value via a GET, not battle-sync.js's own
+// newestStartedAt (a per-tab module variable that resets to null on every fresh load), so
+// it reflects reality even before this tab has run a sync of its own.
+async function refreshBattleReportsWatermark() {
+    const el = document.getElementById('battle-reports-watermark');
+    if (!el) return;
+    try {
+        const res = await fetch('/hub-api/sync/battle-reports-watermark');
+        const data = await res.json();
+        el.textContent = data.newest_started_at
+            ? `Synced through: ${new Date(data.newest_started_at).toLocaleString()}`
+            : 'No reports synced yet';
+    } catch (err) {
+        el.textContent = '';
     }
 }

@@ -97,6 +97,12 @@ players.upsertPlayerFull({
 });
 ok('upsertPlayerFull created the player', players.countPlayers() === 3);
 ok('upsertPlayerFull respected has_intel=1 for biology', players.getPlayerWithPlanetCount(3).biology === 3);
+ok('upsertPlayerFull stamps stats_scraped_at — the profile page uses this for building-count staleness, not updated_at',
+    players.getPlayerWithPlanetCount(3).stats_scraped_at != null);
+
+players.resetPlayerOnRestart(3);
+ok('resetPlayerOnRestart also clears stats_scraped_at — the buildings it timestamped were just zeroed',
+    players.getPlayerWithPlanetCount(3).stats_scraped_at === null);
 
 players.deleteAllPlayers();
 ok('deleteAllPlayers empties the table', players.countPlayers() === 0);
