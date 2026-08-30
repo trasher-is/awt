@@ -24,13 +24,10 @@
 import { esc } from '../utils/escape.js';
 import '../utils/vision-model.js';   // side-effect import: the !vision rule, defined once
 import '../utils/travel-model.js';   // side-effect import: THE travel formula, defined once
-import '../utils/game-rate-limit.js'; // side-effect import: the shared 5/s gate AWApi rides
-import '../utils/aw-api.js';         // side-effect import: the game API client, gate included
 
 const { coverage: visionCoverage, visionRadius } = globalThis.AWVision;
 // All travel math comes from the shared model — this file holds no formula constants.
 const { calcTravelSeconds, isochroneRadius } = globalThis.AWTravelModel;
-const AWApi = globalThis.AWApi;
 
 const PREFS_KEY = 'awt.galaxyMap.layers.v1';
 
@@ -640,17 +637,9 @@ async function loadData() {
 }
 
 // Seeds the ENTIRE galaxy — system index (coordinates/names) AND every system's planets —
-// from a SINGLE Map/sectors call. Each solarSystems[] entry the sector endpoint returns
-// already carries the full base SolarSystem shape (id/name/fullName/info/populationLevel/
-// x/y) on top of planets[]/isInVision, i.e. exactly what getSolarSystems() returns plus
-// more — so there is no need for a separate system-index API call (that's what the old
-// old two-button split cost: one game request for coordinates, a second for planets).
-// mapSolarSystemsToSyncPayload works unmodified against these objects since
-// the field names line up. Systems still go through /hub-api/sync/system one at a time
-// (same fog-of-war/owner-change/pop-drop logic a live scrape already goes through) — only
-// the game-facing API call itself is collapsed to one.
+// from a SINGLE Map/sectors call. Shared with the sidebar's "Galaxy" scraper button
+// (dashboard.js) via api-galaxy-seed.js so the two can never drift apart.
 let seedingSectors = false;
-const SECTOR_BOUNDS = { x1: -40, y1: -40, x2: 40, y2: 40 }; // known map bounds ~-32..32, padded
 
 async function seedPlanetsFromSectors() {
     if (seedingSectors) return;
@@ -660,78 +649,14 @@ async function seedPlanetsFromSectors() {
     const status = document.getElementById('gm-status');
     const say = (msg) => { if (status) { status.classList.remove('hidden'); status.textContent = msg; } };
     try {
-        say('Asking the game for the map sectors…');
-        const res = await AWApi.getMapSectors(SECTOR_BOUNDS);
-        if (!res.ok) {
-            say(res.reason === 'session'
-                ? 'Seeding needs your game session — log into the game first, then try again.'
-                : `The game API did not answer (${res.reason}${res.status ? `, HTTP ${res.status}` : ''}).`);
+        const { seedGalaxyFromApi } = await import('../scrapers/api-galaxy-seed.js');
+        const result = await seedGalaxyFromApi(say);
+        if (!result.ok) {
+            say(result.error);
             return;
         }
-        const sectors = Array.isArray(res.data) ? res.data : [];
-        const allSystems = sectors.flatMap(sec => Array.isArray(sec.solarSystems) ? sec.solarSystems : []);
-        if (!allSystems.length) {
-            say('The game returned no systems in that area — nothing to seed.');
-            return;
-        }
-
-        say(`Indexing ${allSystems.length} systems…`);
-        const { systems: indexPayload } = AWApi.mapSolarSystemsToSyncPayload(allSystems);
-        if (indexPayload.length) {
-            const indexRes = await fetch('/hub-api/sync/galaxy', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ systems: indexPayload }),
-            });
-            if (!indexRes.ok) {
-                say(`The archive rejected the system index (HTTP ${indexRes.status}) — aborting before touching planets.`);
-                return;
-            }
-        }
-
-        let systemsProcessed = 0;
-        let planetsProcessed = 0;
-        const visionFlags = [];
-        for (const sys of allSystems) {
-            if (!sys || !Number.isInteger(sys.id)) continue;
-            const isInVision = !!sys.isInVision;
-            visionFlags.push({ id: sys.id, is_in_vision: isInVision });
-
-            const planets = Array.isArray(sys.planets) ? sys.planets : [];
-            const payload = AWApi.mapPlanetsToSyncPayload(sys.id, planets);
-            if (!isInVision) {
-                // Out-of-vision: the game's cache may be stale, so route every planet
-                // through the SAME "unknown" guard a live scraper uses for fog of war.
-                payload.planets = payload.planets.map(p => ({ ...p, is_unknown: true }));
-            }
-            if (!payload.planets.length) continue;
-            // Bulk seeding hundreds of systems at once would otherwise flood Discord with
-            // owner-change/pop-drop announcements; scan_mode: 'silent' still does every DB
-            // write and history log, it just skips the announcement.
-            payload.scan_mode = 'silent';
-
-            const syncRes = await fetch('/hub-api/sync/system', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            });
-            if (syncRes.ok) {
-                systemsProcessed++;
-                planetsProcessed += payload.planets.length;
-            }
-            say(`Seeding planets… ${systemsProcessed}/${allSystems.length} systems (${planetsProcessed} planets)`);
-        }
-
-        if (visionFlags.length) {
-            await fetch('/hub-api/sync/system-in-vision', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ systems: visionFlags }),
-            });
-        }
-
         if (typeof window.showToast === 'function') {
-            window.showToast(`Indexed ${indexPayload.length} systems and seeded ${planetsProcessed} planets across ${systemsProcessed} of them`);
+            window.showToast(`Indexed ${result.systemsIndexed} systems and seeded ${result.planetsProcessed} planets across ${result.systemsProcessed} of them`);
         }
         await loadData();
     } catch (err) {

@@ -621,6 +621,21 @@ function markPlayersApiScanned(ids) {
     db.prepare(`UPDATE players SET last_api_scan_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`).run(...ids);
 }
 
+// Feeds the "Deep scan" button's status line — total roster size, how many are still
+// stale by the SAME 6-hour floor getStalePlayerIdsForApiScan uses (so the count on screen
+// never disagrees with what a claim would actually hand out), and when the most recent
+// claim of any size last touched a row.
+const getPlayerApiScanStatsStmt = db.prepare(`
+    SELECT
+        (SELECT COUNT(*) FROM players) as total,
+        (SELECT COUNT(*) FROM players
+            WHERE last_api_scan_at IS NULL OR last_api_scan_at < datetime('now', '-6 hours')) as stale,
+        (SELECT MAX(last_api_scan_at) FROM players) as last_scan_at
+`);
+function getPlayerApiScanStats() {
+    return getPlayerApiScanStatsStmt.get();
+}
+
 // --- players: read (discord-commands.js) ---
 
 const suggestPlayersByQueryStmt = db.prepare(`
@@ -657,5 +672,5 @@ module.exports = {
     suggestPlayersByQuery, suggestPlayersTopByPoints,
     getPlayerName, recordNameChange, recordNameChangeIfDifferent, getPlayerRaceValues,
     upsertPlayerFromApiList, upsertPlayerFromApiDetail,
-    getStalePlayerIdsForApiScan, markPlayersApiScanned,
+    getStalePlayerIdsForApiScan, markPlayersApiScanned, getPlayerApiScanStats,
 };

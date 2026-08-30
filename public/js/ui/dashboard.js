@@ -13,7 +13,7 @@ import {
     openRoutePlannerPanel,
     openBuildOrderPanel
 } from './archives.js';
-import { runMassScan, runPlayerScan } from '../scrapers/mass-scanner.js';
+import { runPlayerScan } from '../scrapers/mass-scanner.js';
 import '../utils/vision-model.js';   // side-effect import: the !vision rule, defined once
 
 let toolUser = null;
@@ -60,8 +60,10 @@ window.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('btn-mass-scan')?.addEventListener('click', runMassGalaxyScan);
     document.getElementById('btn-mass-scan-players')?.addEventListener('click', runMassPlayerScan);
+    document.getElementById('btn-deep-scan-players')?.addEventListener('click', runDeepScanPlayers);
     document.getElementById('btn-sync-battles')?.addEventListener('click', runManualBattleSync);
     refreshBattleReportsWatermark();
+    refreshDeepScanStatus();
 
     // --- EVENT DELEGATION FOR DYNAMIC ELEMENTS ---
     document.getElementById('search-player-results')?.addEventListener('click', (e) => {
@@ -294,24 +296,89 @@ function updateScanProgress(statusMsg, current, total) {
     if (bar) bar.style.width = `${Math.min(percent, 100)}%`;
 }
 
+function setScanButtonsDisabled(disabled) {
+    document.getElementById('btn-mass-scan').disabled = disabled;
+    document.getElementById('btn-mass-scan-players').disabled = disabled;
+    const deepBtn = document.getElementById('btn-deep-scan-players');
+    if (deepBtn) deepBtn.disabled = disabled;
+}
+
 async function runMassGalaxyScan() {
-    document.getElementById('btn-mass-scan').disabled = true;
-    document.getElementById('btn-mass-scan-players').disabled = true;
+    setScanButtonsDisabled(true);
     container?.classList.replace('hidden', 'flex');
-    await runMassScan(updateScanProgress);
-    document.getElementById('btn-mass-scan').disabled = false;
-    document.getElementById('btn-mass-scan-players').disabled = false;
+    // Loaded on demand, same discipline as battle-sync.js/player-api-sync.js below — the
+    // dashboard shell never blocks on it.
+    const { seedGalaxyFromApi } = await import('../scrapers/api-galaxy-seed.js');
+    const result = await seedGalaxyFromApi(updateScanProgress);
+    if (result.ok) {
+        const msg = `Indexed ${result.systemsIndexed} systems, seeded ${result.planetsProcessed} planets across ${result.systemsProcessed} of them`;
+        updateScanProgress(msg, result.systemsProcessed, result.systemsIndexed);
+        showToast(msg);
+    } else {
+        updateScanProgress(result.error, 0, 0);
+        showToast(result.error);
+    }
+    setScanButtonsDisabled(false);
     setTimeout(() => refreshDbStats(), 500);
 }
 
 async function runMassPlayerScan() {
-    document.getElementById('btn-mass-scan').disabled = true;
-    document.getElementById('btn-mass-scan-players').disabled = true;
+    setScanButtonsDisabled(true);
     container?.classList.replace('hidden', 'flex');
     await runPlayerScan(updateScanProgress);
-    document.getElementById('btn-mass-scan').disabled = false;
-    document.getElementById('btn-mass-scan-players').disabled = false;
+    setScanButtonsDisabled(false);
     setTimeout(() => refreshDbStats(), 500);
+}
+
+// "Deep scan": the manual, immediate, much-bigger cousin of the quiet background sweep
+// (player-api-sync.js's runSweepTick, 15 players/minute). Forces the roster list fresh
+// first, then claims and scans up to DEEP_SCAN_LIMIT stale players in one shot. Claiming
+// bumps last_api_scan_at right away, so if 150 isn't the whole roster, running it again —
+// from this browser after the cooldown, or from a teammate's browser right now — simply
+// picks up the NEXT stale batch instead of re-claiming these ones.
+const DEEP_SCAN_LIMIT = 150;
+
+async function runDeepScanPlayers() {
+    setScanButtonsDisabled(true);
+    container?.classList.replace('hidden', 'flex');
+    const { deepScanPlayers } = await import('./player-api-sync.js');
+    const result = await deepScanPlayers(DEEP_SCAN_LIMIT, updateScanProgress);
+    if (result.ok) {
+        const msg = `Deep scan: updated ${result.scanned}/${result.claimed} player(s)`
+            + (result.failed ? `, ${result.failed} failed` : '')
+            + (result.listUpdated != null ? ` · roster refreshed (${result.listUpdated} active players)` : '');
+        updateScanProgress(msg, result.scanned, result.claimed || 1);
+        showToast(msg);
+    } else if (result.error === 'cooldown') {
+        showToast('Deep scan already ran recently on this browser — try again in a few minutes, or have another member run it.');
+    } else if (result.error === 'session') {
+        showToast('Deep scan needs your game session — log into the game first, then try again.');
+    } else {
+        updateScanProgress(`Deep scan failed: ${result.error}`, 0, 0);
+        showToast(`Deep scan failed: ${result.error}`);
+    }
+    setScanButtonsDisabled(false);
+    setTimeout(() => refreshDbStats(), 500);
+    refreshDeepScanStatus();
+}
+
+// Status line under the Deep scan button: how many players are on record and "fresh" (by
+// the exact same 6-hour floor the claim itself uses), and when the most recent claim of
+// any size last touched a row — so members can see at a glance whether it's worth clicking
+// again or better left for the cooldown/a teammate.
+async function refreshDeepScanStatus() {
+    const el = document.getElementById('deep-scan-status');
+    if (!el) return;
+    try {
+        const res = await fetch('/hub-api/sync/player-scan-status');
+        const data = await res.json();
+        if (!data.success) { el.textContent = ''; return; }
+        const fresh = data.total - data.stale;
+        const lastScan = data.last_scan_at ? new Date(data.last_scan_at).toLocaleString() : 'never';
+        el.textContent = `${fresh}/${data.total} players fresh · last scan: ${lastScan}`;
+    } catch (err) {
+        el.textContent = '';
+    }
 }
 
 // Manual "sync now" for battle reports — the background battle-sync.js module already

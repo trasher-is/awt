@@ -325,6 +325,15 @@ router.post('/sync/player-scan-claim', requireAuth, (req, res) => {
     res.json({ success: true, ids });
 });
 
+// --- PLAYER API-SCAN STATUS ---
+// Read-only counterpart to the claim above, for the "Deep scan" button's status line: how
+// many players are on record at all, how many are still stale by the exact same 6-hour
+// floor a claim would use (so this number never disagrees with what clicking the button
+// actually does), and when the most recent claim of any size last touched a row.
+router.get('/sync/player-scan-status', requireAuth, (req, res) => {
+    res.json({ success: true, ...playersRepo.getPlayerApiScanStats() });
+});
+
 // --- PLAYER LIST RECEIVER (ListPlayer bulk sync) ---
 router.post('/sync/player-list', requireAuth, (req, res) => {
     const { players } = req.body;

@@ -280,12 +280,64 @@
         return { players };
     }
 
+    // API Player/{id} detail objects (getPlayer shape, including intelligenceReport when
+    // present) -> the existing POST /hub-api/sync/player-detail body. The ONE shared
+    // mapper: player-api-sync.js's background sweep tick and its manual "deep scan"
+    // counterpart both use it, so the two can never drift apart the way the race_growth
+    // bug (2026-08-30) drifted between client and server. Every intel field is nullish-
+    // coalesced rather than read bare: not every player race carries all nine race_*
+    // bonus categories, and a bare `undefined` is silently dropped by JSON.stringify on
+    // the way to the server, which crashed the upsert (better-sqlite3 requires every named
+    // parameter present, even when null).
+    function mapPlayerDetailToSyncPayload(d) {
+        const intel = d && d.intelligenceReport;
+        return {
+            id: d.id, name: typeof d.name === 'string' ? d.name : null,
+            alliance_id: Number.isInteger(d.allianceId) ? d.allianceId : null,
+            level: Number.isInteger(d.playerLevel) ? d.playerLevel : null,
+            points: Number.isInteger(d.pointsScored) ? d.pointsScored : null,
+            ranking: Number.isInteger(d.rank) ? d.rank : null,
+            country: typeof d.playsFromCountryCode === 'string' ? d.playsFromCountryCode : null,
+            is_active_player: d.isActivePlayer ? 1 : 0,
+            joined: typeof d.joinedAt === 'string' ? d.joinedAt : null,
+            logins: Number.isInteger(d.numberOfLogins) ? d.numberOfLogins : null,
+            last_activity_at: typeof d.lastActivityAt === 'string' ? d.lastActivityAt : null,
+            last_login_at: typeof d.lastLoginAt === 'string' ? d.lastLoginAt : null,
+            resigned_at: typeof d.resignedAt === 'string' ? d.resignedAt : null,
+            number_of_battles: Number.isInteger(d.numberOfBattles) ? d.numberOfBattles : null,
+            battle_luckiness: typeof d.battleLuckiness === 'number' ? d.battleLuckiness : null,
+            multi_status: typeof d.multiStatus === 'string' ? d.multiStatus : null,
+            is_top_permanent_ranker: d.isTopPermanentRanker ? 1 : 0,
+            has_supporter_badge: d.hasSupporterBadge ? 1 : 0,
+            supporter_type: typeof d.supporterType === 'string' ? d.supporterType : null,
+            has_intel: intel ? 1 : 0,
+            biology: intel ? (intel.biologyLevel ?? null) : null,
+            economy: intel ? (intel.economyLevel ?? null) : null,
+            energy: intel ? (intel.energyLevel ?? null) : null,
+            mathematics: intel ? (intel.mathematicsLevel ?? null) : null,
+            physics: intel ? (intel.physicsLevel ?? null) : null,
+            social: intel ? (intel.socialLevel ?? null) : null,
+            trade_revenue: intel ? (intel.tradeBonus ?? null) : null,
+            artefact: intel && intel.activeArtefact ? JSON.stringify(intel.activeArtefact) : null,
+            race_growth: intel && intel.race ? (intel.race.growth ?? null) : null,
+            race_science: intel && intel.race ? (intel.race.science ?? null) : null,
+            race_culture: intel && intel.race ? (intel.race.culture ?? null) : null,
+            race_production: intel && intel.race ? (intel.race.production ?? null) : null,
+            race_speed: intel && intel.race ? (intel.race.speed ?? null) : null,
+            race_attack: intel && intel.race ? (intel.race.attack ?? null) : null,
+            race_defense: intel && intel.race ? (intel.race.defense ?? null) : null,
+            race_trader: intel && intel.race ? (intel.race.trader ?? null) : null,
+            race_sul: intel && intel.race ? (intel.race.sul ?? null) : null,
+        };
+    }
+
     return {
         getSolarSystems, getSolarSystem, getSystemPlanets, getMapSectors,
         getTravelTime, searchBattleReports, putOrderGeometry,
         searchAlliances, searchSolarSystems,
         getPlayers, getPlayer, searchPlayers,
         mapPlanetsToSyncPayload, mapSolarSystemsToSyncPayload, mapPlayersToSyncPayload,
+        mapPlayerDetailToSyncPayload,
         _setFetch,
     };
 });
