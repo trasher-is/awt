@@ -70,13 +70,19 @@ Starbase level *n*: `cv = round(4·1.5ⁿ) − 4`, `attack = defense = floor(cv/
 lossFraction_own = Σ enemyCV / Σ(att + 2·def)_own      uniform across ship types
 ```
 
-Race defense divides your own losses by `(1 + 0.11·RD)` and does not touch the enemy.
+Race defense divides your own losses by `(1 + 0.12·RD)` and does not touch the enemy
+(`0.11` before patch 6.0.0-beta, 2026-08-28 — see docs/game-rules.md's Race picks table).
 Mathematics adds a small symmetric toughness term (`0.0015`/level) plus a `+12.5%` combat
 bracket at a 6+ lead. Race attack, physics and player level do **not** change survivors.
 The winning side always keeps at least one ship.
 
 **Win %** is a separate logistic over the force ratio, the attack ratio and stat
 differences. Force and attack enter as power laws, not linearly.
+
+**Stale as of 6.0.0-beta**: the race attack bonus per point was also raised (7% → 8%), but
+the win-% logistic's race-attack coefficients below were fit against the old 7% value —
+they now under-weight race attack's effect on win chance. Not hand-tuned here; needs
+recalibration against fresh post-patch in-game samples, same method as the original fit.
 
 ## Ground truth
 

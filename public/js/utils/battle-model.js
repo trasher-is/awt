@@ -22,13 +22,22 @@
 //
 // SURVIVORS (reverse-engineered from in-game samples, commit fb2013f):
 //   lossFraction_own = Σ enemyCV / Σ(att + 2·def)_own      — uniform across ship types
-//   Race defense divides your own losses by (1 + 0.11·RD); it does not touch the enemy.
+//   Race defense divides your own losses by (1 + 0.12·RD); it does not touch the enemy.
 //   Mathematics adds a small symmetric toughness term (0.0015/level).
 //   Race attack, physics and player level do NOT change survivors — win % only.
 //
 // WIN % is a separate logistic on force ratio, attack ratio and stat differences
 // (commits 243bdfe / 7289025 / 2cc1467, fit across 24 in-game samples: mean
 // absolute error 0.97%, max 4.0%).
+//
+// STALE as of patch 6.0.0-beta (2026-08-28): the race attack/defence bonus per point was
+// raised 7%/11% -> 8%/12% (see docs/game-rules.md's Race picks table). RACE_DEF below is a
+// direct formula constant, updated to match. The WIN_RA*/WIN_RA_BASE6/WIN_RA_SLOPE
+// coefficients are NOT a direct formula — they are empirically fit against the OLD 7%
+// attack bonus (see the 24-sample calibration above) and are now under-weighting race
+// attack's effect on win%. Left unchanged rather than guessed: recalibrate against fresh
+// post-patch in-game samples the same way the original fit was done, do not hand-tune
+// these numbers without real data.
 (function (root, factory) {
     const api = factory();
     // Node (CommonJS)
@@ -52,7 +61,7 @@
     function sbCV(n) { return n > 0 ? Math.round(4 * Math.pow(1.5, n)) - 4 : 0; }
     function sbHalf(n) { return Math.floor(sbCV(n) / 2); }
 
-    const RACE_DEF = 0.11;      // race defense: own losses ÷ (1 + 0.11·RD)
+    const RACE_DEF = 0.12;      // race defense: own losses ÷ (1 + 0.12·RD) — 6.0.0-beta (was 0.11)
     const MATH_TOUGH = 0.0015;  // small symmetric toughness gain per math level
     const MATH_BRACKET = 0.125; // a 6+ mathematics lead grants +12.5% combat to that side
 

@@ -59,8 +59,11 @@ screen enforces this directly, so a bonus anywhere is a malus somewhere else.
 | Culture | 4% | Culture growth |
 | Production | 4% | Production points/hour |
 | Speed | 11% | Fleet travel time |
-| Attack | 7% | Battles — win chance |
-| Defence | 11% | Battles — survivors |
+| Attack | 8% | Battles — win chance |
+| Defence | 12% | Battles — survivors |
+
+Attack and Defence were raised from 7%/11% to 8%/12% by patch **6.0.0-beta** (2026-08-28
+changelog: "Combat Balance Changes"). Growth/Science/Culture/Production/Speed were untouched.
 
 Two additional picks are one-time toggles rather than a scalable stat — each has a fixed
 point **cost** that must be offset by the seven traits above summing correspondingly
