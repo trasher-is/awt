@@ -17,7 +17,6 @@ router.use(require('./intel'));
 router.use(require('./trade'));
 router.use(require('./search'));
 router.use(require('./incoming'));
-router.use(require('./notes'));
 router.use(require('./routes'));
 
 module.exports = router;

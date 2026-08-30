@@ -15,7 +15,6 @@ import {
     openBuildOrderPanel
 } from './archives.js';
 import { runMassScan, runPlayerScan } from '../scrapers/mass-scanner.js';
-import { initNotes, toggleNotesPanel } from './notes.js';
 import '../utils/vision-model.js';   // side-effect import: the !vision rule, defined once
 
 const { visionRadius } = globalThis.AWVision;
@@ -62,8 +61,6 @@ window.addEventListener('DOMContentLoaded', () => {
         await openGalaxyMapPanel(toolUser && toolUser.id);
     });
     document.getElementById('link-discord-btn')?.addEventListener('click', requestDiscordLinkCode);
-    document.getElementById('notes-trigger')?.addEventListener('click', toggleNotesPanel);
-    initNotes();
 
     document.getElementById('btn-mass-scan')?.addEventListener('click', runMassGalaxyScan);
     document.getElementById('btn-mass-scan-players')?.addEventListener('click', runMassPlayerScan);

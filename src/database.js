@@ -415,32 +415,6 @@ function initDatabase() {
     // everyone can see who has defence on the way.
     addColumn('incoming_msgs', 'covering', 'TEXT');
 
-    // Personal task/reminder notes (per-user, private). due_at is optional — a note with
-    // no due date is a plain checklist item; one with a due date participates in the
-    // overdue/red styling, the sidebar countdown badge, and (if remind_15 is set) the
-    // 15-minutes-before Discord mention reminder.
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS user_notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            owner_id INTEGER NOT NULL,
-            text TEXT NOT NULL,
-            due_at TEXT,
-            remind_15 INTEGER DEFAULT 0,
-            reminded_at TEXT,
-            done INTEGER DEFAULT 0,
-            done_at TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(owner_id) REFERENCES app_users(id) ON DELETE CASCADE
-        )
-    `);
-
-    // Who assigned the note — set to the creator's own id for a normal personal note, or
-    // to a teammate's id when a note was created "for" someone else. A note shared with N
-    // recipients is stored as N independent rows (one per owner_id), all sharing the same
-    // author_id, so each recipient's copy/reminder/done-state is fully independent while
-    // still showing "from <author>" on the ones that weren't self-authored.
-    addColumn('user_notes', 'author_id', 'INTEGER');
-
     // Shared, login-gated planning notes for the redzone (rz.*) proxy — one note per
     // planet, visible to everyone who entered the shared password. Keyed by the game's
     // own global planet id (data-planet-id). Not per-user: it's a communal scratchpad, so
