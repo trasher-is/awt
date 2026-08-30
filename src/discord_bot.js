@@ -297,8 +297,8 @@ async function handleMessage(message) {
                 { name: '`!ghosts <sys_id> <planet_num> <alliance_tag>`', value: 'Calculates the shortest/longest hidden fleet arrival window from hostile members with radar vision over a system.\n*Example: `!ghosts 1 10 AO`*' },
                 { name: '`!bio`', value: 'Generates intelligence alerts highlighting players who possess a +6 biology or science advantage over your personal bio level.' },
                 { name: '`!battle <D> <C> <B> vs <D> <C> <B>`', value: 'Simulates a battle. Flags: `--sb N` starbase (0-50), `--dp/--ap N` physics, `--dm/--am N` math, `--dra/--ara N` race atk, `--drd/--ard N` race def, `--dl/--al N` player level. Or `--def Name --atk Name` to auto-fill all stats from DB.\n*Example: `!battle 50 10 0 vs 40 8 2 --dp 5 --ap 3 --dl 12 --al 8`*' },
-                { name: '`!mortal` / `!mortalday` / `!mortalweek`', value: 'Shows the CV/population-killed battle leaderboards — all-time, last 24 hours, or last 7 days.\n*Example: `!mortalweek`*' },
-                { name: '`!lastseen <player_name>`', value: 'Shows the most recent system/planet a player was involved in a battle report or News-page bombardment at, on either side.\n*Example: `!lastseen Hkiller89`*' }
+                { name: '`!mortal` / `!mortalday` / `!mortalweek` `[all|alliance]`', value: 'Shows the CV/population-killed battle leaderboards — all-time, last 24 hours, or last 7 days. Defaults to Hub tool users only; `all` lifts that; `alliance` shows your own alliance (needs `!link`).\n*Example: `!mortalweek alliance`*' },
+                { name: '`!lastseen <player_name>`', value: 'Shows up to 5 recent system/planet locations a player was involved in a battle report or News-page bombardment at, on either side, newest first.\n*Example: `!lastseen Hkiller89`*' }
             )
             .setFooter({ text: 'AWT Intelligence Hub' });
 
@@ -335,13 +335,37 @@ async function handleMessage(message) {
             : null;
         const label = command === 'mortalday' ? 'Last 24 Hours' : command === 'mortalweek' ? 'Last 7 Days' : 'All Time';
 
-        const { cv, pop } = battlePointsRepo.getLeaderboards(sinceIso, 10);
+        // Default (no arg): only players linked to a Hub account — actual tool users, not
+        // every enemy who ever showed up in a fight. `all` lifts that filter entirely;
+        // `alliance` narrows/widens it the other way — every player in the CALLER's own
+        // alliance, tool user or not, resolved via their Discord link (same bridge !bio
+        // uses: app_users -> players by game_name).
+        const scopeArg = (args[0] || '').toLowerCase();
+        let scope = 'members';
+        let allianceId = null;
+        if (scopeArg === 'all') {
+            scope = 'all';
+        } else if (scopeArg === 'alliance') {
+            const discordName = message.author.username.toLowerCase();
+            const user = usersRepo.getUserByDiscordName(discordName, `@${discordName}`);
+            const bridge = user ? usersRepo.getUserAllianceIdBridge(user.id) : null;
+            if (!bridge || bridge.alliance_id == null) {
+                return message.reply('❌ `!mortal alliance` needs your Discord linked to a Hub account with a known alliance. Link with `!link` first, or use `!mortal`/`!mortal all`.');
+            }
+            scope = 'alliance';
+            allianceId = bridge.alliance_id;
+        } else if (scopeArg) {
+            return message.reply(`❌ Unknown scope \`${scopeArg}\`. Usage: \`!${command} [all|alliance]\`.`);
+        }
+
+        const { cv, pop } = battlePointsRepo.getLeaderboards(sinceIso, 10, scope, allianceId);
         const formatLines = (rows, unit) => rows.length
             ? rows.map((r, i) => `**${i + 1}.** ${r.player_name || 'Unknown'} — ${r.points} pts (${r.raw.toLocaleString()} ${unit})`).join('\n')
             : '_No battles recorded yet._';
 
+        const scopeLabel = scope === 'all' ? ' (All Players)' : scope === 'alliance' ? ' (Your Alliance)' : '';
         const embed = new EmbedBuilder()
-            .setTitle(`⚔️ Battle Challenge — ${label}`)
+            .setTitle(`⚔️ Battle Challenge — ${label}${scopeLabel}`)
             .addFields(
                 { name: '💥 CV Killed', value: formatLines(cv, 'CV') },
                 { name: '☠️ Population Killed', value: formatLines(pop, 'pop') },
@@ -352,7 +376,7 @@ async function handleMessage(message) {
     }
 
     // ----------------------------------------------------
-    // !lastseen <name> - MOST RECENT BATTLE/BOMBARDMENT LOCATION FOR A PLAYER
+    // !lastseen <name> - RECENT BATTLE/BOMBARDMENT LOCATIONS FOR A PLAYER
     // ----------------------------------------------------
     if (command === 'lastseen') {
         const playerName = args.join(' ');
@@ -361,27 +385,61 @@ async function handleMessage(message) {
         const player = playersRepo.getPlayerFullByName(playerName);
         if (!player) return message.reply(`❌ Player **${playerName}** not found in the database.`);
 
-        const seen = battleReportsRepo.getLastSeenPlanet(player.id);
-        if (!seen) return message.reply(`👀 No battle-report or News-page location on record for **${player.name}** yet.`);
+        const occurrences = battleReportsRepo.getRecentPlanets(player.id, 5);
+        if (!occurrences.length) {
+            // hasAnyBattleHistory distinguishes "never in a recorded battle" from "in a
+            // battle, but the ship-detail scrape (which is what actually captures the
+            // planet) hasn't reached that report yet" — very different situations for the
+            // reader, and the second one is fixable with the sidebar Battle Reports sync
+            // button rather than meaning the data is simply missing.
+            if (battleReportsRepo.hasAnyBattleHistory(player.id)) {
+                return message.reply(`👀 **${player.name}** has battle history, but no location has been scraped yet — try the sidebar's "Battle Reports" sync, ship-detail scraping runs shortly after.`);
+            }
+            return message.reply(`👀 No battle-report or News-page location on record for **${player.name}** yet.`);
+        }
 
-        const sys = systemsRepo.getSystemCoords(seen.system_id);
-        const sysLabel = sys ? `${sys.name || 'System ' + sys.id} (${sys.x}/${sys.y})` : `System ${seen.system_id}`;
-        const planetName = seen.planet_index != null
-            ? systemsRepo.getPlanetNameByLocation(seen.system_id, seen.planet_index)
-            : systemsRepo.getPlanetNameByGameId(seen.game_planet_id);
-        const planetLabel = planetName
-            ? planetName
-            : (seen.planet_index != null ? `planet #${seen.planet_index}` : `planet id ${seen.game_planet_id}`);
-        const sourceLabel = seen.source === 'battle_report'
-            ? `[battle report #${seen.source_id}](https://astrowars.games/About/BattleReport/${seen.source_id})`
-            : 'a News-page bombardment';
+        // "[272] Pherkad Minor #5" — system id in brackets (always known), then the
+        // planets table's own name plus its index (both best-effort: a planet that was
+        // never scanned into that table falls back to just the numbers).
+        function planetLabel(occ) {
+            const sysId = occ.system_id;
+            let index = occ.planet_index;
+            let name = index != null ? systemsRepo.getPlanetNameByLocation(sysId, index) : null;
+            if (index == null && occ.game_planet_id != null) {
+                const loc = systemsRepo.getPlanetLocationByGameId(occ.game_planet_id);
+                if (loc) { index = loc.planet_index; name = loc.name; }
+            }
+            const nameAndIndex = name && index != null ? `${name} #${index}`
+                : index != null ? `Planet #${index}`
+                : '(unscanned planet)';
+            return `[${sysId}] ${nameAndIndex}`;
+        }
+
+        const lines = occurrences.map((occ) => {
+            const when = `<t:${Math.floor(Date.parse(occ.occurred_at) / 1000)}:R>`;
+            const where = planetLabel(occ);
+            if (occ.source === 'battle_report') {
+                return `**${where}** — [Battle report #${occ.source_id}](https://astrowars.games/About/BattleReport/${occ.source_id}) — ${when}`;
+            }
+            // News-page events other than a bombardment (battle-conquer/battle-conquered)
+            // never carry credited_player_id/population_delta — no opponent link exists on
+            // those rows at all (see news-battle-events.js), and they only ever surface
+            // here for the scraping member's OWN record, so no name is needed either.
+            if (occ.message_type === 'battle-conquer') {
+                return `**${where}** — conquered this planet — ${when}`;
+            }
+            if (occ.message_type === 'battle-conquered') {
+                return `**${where}** — lost this planet — ${when}`;
+            }
+            const credited = occ.credited_player_id != null ? playersRepo.getPlayerName(occ.credited_player_id) : null;
+            const creditedName = credited ? credited.name : 'Unknown';
+            const pop = occ.population_delta != null ? occ.population_delta.toLocaleString() : '?';
+            return `**${where}** — **${creditedName}** popkilled **${pop}** population — ${when}`;
+        });
 
         const embed = new EmbedBuilder()
             .setTitle(`👀 Last Seen — ${player.name}`)
-            .setDescription(
-                `**${sysLabel}** — ${planetLabel}\n` +
-                `At <t:${Math.floor(Date.parse(seen.occurred_at) / 1000)}:R>, via ${sourceLabel}.`
-            )
+            .setDescription(lines.join('\n'))
             .setColor('#e11d48');
 
         return message.reply({ embeds: [embed] });

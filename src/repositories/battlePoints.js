@@ -44,13 +44,35 @@ function toPoints(raw, ratio) {
     return Math.round((raw / ratio) * 10) / 10;
 }
 
+// Who counts on the leaderboard. Applied on the OUTER query (after the union, against the
+// already-unified `player_id` column) rather than duplicated into every UNION branch's own
+// WHERE — the three scopes:
+//   'members'  (default) — only players linked to a Hub account (app_users.game_name),
+//               i.e. actual tool users, not every enemy/ally who ever showed up in a fight.
+//   'alliance' — every player in one specific alliance (tool user or not) — allianceId is
+//               required for this scope; falls back to 'members' semantics if omitted.
+//   'all'      — no filter at all (the original, unrestricted behavior).
+function scopeClauseFor(scope, allianceId) {
+    if (scope === 'alliance' && allianceId != null) {
+        return { clause: 'player_id IN (SELECT id FROM players WHERE alliance_id = ?)', params: [allianceId] };
+    }
+    if (scope === 'all') {
+        return { clause: '1=1', params: [] };
+    }
+    return {
+        clause: "player_id IN (SELECT p.id FROM players p JOIN app_users au ON au.game_name = p.name COLLATE NOCASE)",
+        params: [],
+    };
+}
+
 // Arity/text vary per call (since-window presence, excluded-tag count) — prepared fresh
 // each call, same reasoning as battleReports.js's markShipDetailScraped dynamic IN clause.
-function getCvLeaderboard(sinceIso, limit) {
+function getCvLeaderboard(sinceIso, limit, scope = 'members', allianceId = null) {
     const { clause, params } = exclusionClauseFor('att_alliance_tag', 'def_alliance_tag', getExcludedAllianceTags());
     const sinceSql = sinceIso ? `AND started_at >= ?` : '';
     const wherePart = `${sinceSql} AND ${clause}`;
     const wherePartParams = sinceIso ? [sinceIso, ...params] : [...params];
+    const { clause: scopeSql, params: scopeParams } = scopeClauseFor(scope, allianceId);
 
     const sql = `
         SELECT player_id, player_name, SUM(cv_credit) AS raw_cv
@@ -63,12 +85,13 @@ function getCvLeaderboard(sinceIso, limit) {
             FROM battle_reports
             WHERE def_player_id IS NOT NULL ${wherePart}
         )
+        WHERE ${scopeSql}
         GROUP BY player_id
         ORDER BY raw_cv DESC
         LIMIT ?
     `;
     const ratio = getCvRatio();
-    return db.prepare(sql).all(...wherePartParams, ...wherePartParams, limit).map(r => ({
+    return db.prepare(sql).all(...wherePartParams, ...wherePartParams, ...scopeParams, limit).map(r => ({
         player_id: r.player_id,
         player_name: r.player_name,
         raw: r.raw_cv || 0,
@@ -83,7 +106,7 @@ function getCvLeaderboard(sinceIso, limit) {
 // itself, so it is excluded here to avoid double-counting). News-page rows carry no
 // alliance-tag columns of their own, so exclusions are applied via a join to players'
 // CURRENT alliance — a known simplification (not the alliance at the time of the event).
-function getPopLeaderboard(sinceIso, limit) {
+function getPopLeaderboard(sinceIso, limit, scope = 'members', allianceId = null) {
     const excludedTags = getExcludedAllianceTags();
 
     const br = exclusionClauseFor('att_alliance_tag', 'def_alliance_tag', excludedTags);
@@ -95,6 +118,8 @@ function getPopLeaderboard(sinceIso, limit) {
     const neSinceSql = sinceIso ? `AND ne.occurred_at >= ?` : '';
     const neWherePart = `${neSinceSql} AND ${ne.clause}`;
     const neParams = sinceIso ? [sinceIso, ...ne.params] : [...ne.params];
+
+    const { clause: scopeSql, params: scopeParams } = scopeClauseFor(scope, allianceId);
 
     const sql = `
         SELECT player_id, player_name, SUM(pop_credit) AS raw_pop
@@ -130,12 +155,13 @@ function getPopLeaderboard(sinceIso, limit) {
               AND ne.credited_player_id IS NOT NULL
               ${neWherePart}
         )
+        WHERE ${scopeSql}
         GROUP BY player_id
         ORDER BY raw_pop DESC
         LIMIT ?
     `;
     const ratio = getPopRatio();
-    return db.prepare(sql).all(...brParams, ...neParams, limit).map(r => ({
+    return db.prepare(sql).all(...brParams, ...neParams, ...scopeParams, limit).map(r => ({
         player_id: r.player_id,
         player_name: r.player_name,
         raw: r.raw_pop || 0,
@@ -143,8 +169,11 @@ function getPopLeaderboard(sinceIso, limit) {
     }));
 }
 
-function getLeaderboards(sinceIso, limit = 10) {
-    return { cv: getCvLeaderboard(sinceIso, limit), pop: getPopLeaderboard(sinceIso, limit) };
+function getLeaderboards(sinceIso, limit = 10, scope = 'members', allianceId = null) {
+    return {
+        cv: getCvLeaderboard(sinceIso, limit, scope, allianceId),
+        pop: getPopLeaderboard(sinceIso, limit, scope, allianceId),
+    };
 }
 
 module.exports = {

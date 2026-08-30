@@ -63,35 +63,47 @@ function updateShipDetail(id, detail) {
     updateShipDetailStmt.run({ id, ...detail });
 }
 
-// "Last seen" for a player: the most recent event of ANY kind that names them, on
-// either side (attacker/defender in battle_reports; either party in news_events — see
-// news-battle-matching.js's other_player_id/player_id convention). Two different sources
-// with two different location shapes: battle_reports gives (system_id, planet_index) —
-// the planets table's own primary key, from the report page header (no game_planet_id
-// available there at all); news_events gives (system_id, game_planet_id) from the
-// News-page row's own links. Both are returned as-is; the caller resolves display text
-// (see discord_bot.js's !lastseen), since resolving a human-readable planet name needs
-// the systems/planets tables this repository doesn't own.
-const lastSeenBattleReportStmt = db.prepare(`
-    SELECT started_at AS occurred_at, system_id, planet_index, NULL AS game_planet_id, id AS source_id, 'battle_report' AS source
+// "Last seen" for a player: the most recent events of ANY kind that name them, on either
+// side (attacker/defender in battle_reports; either party in news_events — see
+// news-battle-matching.js's other_player_id/player_id convention), newest first. Two
+// different sources with two different location shapes: battle_reports gives (system_id,
+// planet_index) — the planets table's own primary key, from the report page header (no
+// game_planet_id available there at all); news_events gives (system_id, game_planet_id)
+// from the News-page row's own links, plus credited_player_id/population_delta for
+// bombardment rows. Both are returned as-is; the caller resolves display text (see
+// discord_bot.js's !lastseen), since resolving a human-readable planet name needs the
+// systems/planets tables this repository doesn't own.
+const recentPlanetsBattleReportsStmt = db.prepare(`
+    SELECT started_at AS occurred_at, system_id, planet_index, NULL AS game_planet_id,
+           id AS source_id, 'battle_report' AS source, NULL AS credited_player_id, NULL AS population_delta,
+           NULL AS message_type
     FROM battle_reports
     WHERE (att_player_id = ? OR def_player_id = ?) AND system_id IS NOT NULL
-    ORDER BY started_at DESC LIMIT 1
+    ORDER BY started_at DESC LIMIT ?
 `);
-const lastSeenNewsEventStmt = db.prepare(`
-    SELECT occurred_at, system_id, NULL AS planet_index, game_planet_id, id AS source_id, 'news_event' AS source
+const recentPlanetsNewsEventsStmt = db.prepare(`
+    SELECT occurred_at, system_id, NULL AS planet_index, game_planet_id,
+           id AS source_id, 'news_event' AS source, credited_player_id, population_delta, message_type
     FROM news_events
     WHERE (player_id = ? OR other_player_id = ?) AND system_id IS NOT NULL
-    ORDER BY occurred_at DESC LIMIT 1
+    ORDER BY occurred_at DESC LIMIT ?
 `);
-function getLastSeenPlanet(playerId) {
+function getRecentPlanets(playerId, limit = 5) {
     const candidates = [
-        lastSeenBattleReportStmt.get(playerId, playerId),
-        lastSeenNewsEventStmt.get(playerId, playerId),
-    ].filter(Boolean);
-    if (!candidates.length) return null;
+        ...recentPlanetsBattleReportsStmt.all(playerId, playerId, limit),
+        ...recentPlanetsNewsEventsStmt.all(playerId, playerId, limit),
+    ];
     candidates.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : a.occurred_at > b.occurred_at ? -1 : 0));
-    return candidates[0];
+    return candidates.slice(0, limit);
+}
+
+// Distinguishes "never in a recorded battle at all" from "has battles, but none with a
+// resolved location yet" (e.g. the ship-detail scrape sweep hasn't reached that report) —
+// getRecentPlanets alone can't tell those apart since it only ever returns located rows.
+const hasHistoryBattleReportsStmt = db.prepare(`SELECT 1 FROM battle_reports WHERE att_player_id = ? OR def_player_id = ? LIMIT 1`);
+const hasHistoryNewsEventsStmt = db.prepare(`SELECT 1 FROM news_events WHERE player_id = ? OR other_player_id = ? LIMIT 1`);
+function hasAnyBattleHistory(playerId) {
+    return !!(hasHistoryBattleReportsStmt.get(playerId, playerId) || hasHistoryNewsEventsStmt.get(playerId, playerId));
 }
 
 const findByPlayerPairNearStmt = db.prepare(`
@@ -121,5 +133,6 @@ module.exports = {
     markShipDetailScraped,
     updateShipDetail,
     findByPlayerPairNear,
-    getLastSeenPlanet,
+    getRecentPlanets,
+    hasAnyBattleHistory,
 };

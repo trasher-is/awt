@@ -266,6 +266,15 @@ function getPlanetNameByGameId(gamePlanetId) {
     return row ? row.name : null;
 }
 
+// A news_events row only has game_planet_id, not planet_index — this resolves the rest
+// of the planet's identity (system_id, planet_index, name) via the planets table's own
+// game_planet_id UNIQUE key, for display purposes (e.g. !lastseen's "[272] Pherkad Minor
+// #5" formatting). Returns null when the planet has never been scanned into this table.
+const getPlanetLocationByGameIdStmt = db.prepare(`SELECT system_id, planet_index, name FROM planets WHERE game_planet_id = ?`);
+function getPlanetLocationByGameId(gamePlanetId) {
+    return getPlanetLocationByGameIdStmt.get(gamePlanetId) || null;
+}
+
 const upsertPlanetStmt = db.prepare(`
     INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet, is_sieged, name)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -373,7 +382,7 @@ module.exports = {
     upsertSystemFull, setSystemInVision, deleteAllSystems, countBestGuardedAt, clearBestGuarded, insertBestGuarded,
     getSystemPlanetsWithIntel, getSystemPlanetsForBot, getPlanetsFullDb,
     getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getOldPlanet, upsertPlanet,
-    getPlanetsForAllianceTag, getPlanetOwnerName, getPlanetNameByLocation, getPlanetNameByGameId,
+    getPlanetsForAllianceTag, getPlanetOwnerName, getPlanetNameByLocation, getPlanetNameByGameId, getPlanetLocationByGameId,
     clearMovedPlanet, deleteAllPlanets, logPlanetEvent, getPlanetHistory, deleteAllPlanetEvents,
     getTakeoverBoard, upsertTakeover,
 };
