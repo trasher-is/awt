@@ -249,6 +249,28 @@
         return { systems };
     }
 
+    // Map/sectors' own alliances[] (getMapSectors shape: [{id, rectangle, alliances,
+    // players, solarSystems}]) -> the existing POST /hub-api/sync/alliances-from-map body.
+    // There is no dedicated "list every alliance" endpoint — this is the only bulk source,
+    // and each alliance can appear in more than one sector (it holds territory across
+    // several), so this dedupes by id before it ever reaches the wire. Confirmed against a
+    // real response (2026-08-30): a sector alliance object is {id, name, tag, color} — no
+    // full_name/member_count, unlike Alliance/search.
+    function mapSectorAlliancesToSyncPayload(apiSectors) {
+        const byId = new Map();
+        for (const sec of (Array.isArray(apiSectors) ? apiSectors : [])) {
+            for (const a of (Array.isArray(sec && sec.alliances) ? sec.alliances : [])) {
+                if (!a || !Number.isInteger(a.id) || byId.has(a.id)) continue;
+                byId.set(a.id, {
+                    id: a.id,
+                    name: typeof a.name === 'string' ? a.name : null,
+                    tag: typeof a.tag === 'string' ? a.tag : null,
+                });
+            }
+        }
+        return { alliances: [...byId.values()] };
+    }
+
     // API ListPlayer objects (getPlayers/searchPlayers shape) -> the existing POST
     // /hub-api/sync/player-list body. The ONE shared mapper: the background sweep's list
     // pull (player-api-sync.js) and the manual live-search fallback (search.js) both use
@@ -334,6 +356,7 @@
         searchAlliances, searchSolarSystems,
         getPlayers, getPlayer, searchPlayers,
         mapPlanetsToSyncPayload, mapSolarSystemsToSyncPayload, mapPlayersToSyncPayload,
+        mapSectorAlliancesToSyncPayload,
         mapPlayerDetailToSyncPayload,
         _setFetch,
     };

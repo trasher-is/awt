@@ -314,7 +314,7 @@ async function runMassGalaxyScan() {
     const { seedGalaxyFromApi } = await import('../scrapers/api-galaxy-seed.js');
     const result = await seedGalaxyFromApi(updateScanProgress);
     if (result.ok) {
-        const msg = `Indexed ${result.systemsIndexed} systems, seeded ${result.planetsProcessed} planets across ${result.systemsProcessed} of them`;
+        const msg = `Indexed ${result.systemsIndexed} systems, ${result.alliancesIndexed} alliances, seeded ${result.planetsProcessed} planets across ${result.systemsProcessed} of them`;
         updateScanProgress(msg, result.systemsProcessed, result.systemsIndexed);
         showToast(msg);
     } else {

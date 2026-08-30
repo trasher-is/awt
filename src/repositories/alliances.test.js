@@ -107,6 +107,21 @@ const byFullNameOnly = alliances.searchAlliancesByTagOrName('%Yet Another%', '99
 ok('a search term matching only full_name (not name or tag) finds the alliance',
     byFullNameOnly.some(a => a.id === 501));
 
+// upsertAllianceFromMapSector: the ONE bulk source for "every alliance" (Map/sectors has
+// no full_name/member_count) — must never clobber those columns even though it doesn't
+// know them, unlike upsertAllianceFromApiSearch above which legitimately owns them.
+alliances.upsertAllianceFromMapSector(501, 'Star Raiders Renamed', 'SR2');
+const afterMapSector = alliances.searchAlliancesByTagOrName('%Renamed%', '501')[0];
+ok('name and tag update from Map/sectors data', afterMapSector.name === 'Star Raiders Renamed' && afterMapSector.tag === 'SR2');
+ok('full_name is untouched — Map/sectors has no such field to clobber it with',
+    afterMapSector.full_name === 'Yet Another Full Name', afterMapSector);
+ok('member_count is untouched', afterMapSector.member_count === 40, afterMapSector);
+
+alliances.upsertAllianceFromMapSector(9001, 'Brand New Alliance', 'BNA');
+const brandNew = alliances.searchAlliancesByTagOrName('%Brand New%', '9001')[0];
+ok('a genuinely new alliance (never seen by Alliance/search) can be created this way too',
+    brandNew && brandNew.name === 'Brand New Alliance' && brandNew.tag === 'BNA', brandNew);
+
 alliances.deleteAllAlliances();
 ok('deleteAllAlliances empties the table', alliances.countAlliances() === 0);
 
