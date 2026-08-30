@@ -160,6 +160,23 @@ const ivan = boardsWithLostDirection.pop.find(r => r.player_name === 'Ivan');
 ok('Ivan (attacker, credited via a direction:lost-style row) is INCLUDED — tags legitimately differ and are not excluded',
     ivan && ivan.raw === 750, boardsWithLostDirection.pop);
 
+// --- Regression test: self-bombing with no known opponent at all (other_player_id NULL
+// from the start, not just unresolvable). A real News-page "You killed N population" row
+// carries no player-profile link (see the 2026-08-30 sync.js/news-battle-matching fix), so
+// credited_player_id gets set to the scraping player while other_player_id stays NULL. The
+// pop leaderboard's "op" join (used only to check the opponent's alliance tag for
+// exclusion) must tolerate that NULL rather than wrongly excluding or crashing.
+db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (30, 'Kate', 100)`).run();
+db.prepare(`
+    INSERT INTO news_events (player_id, message_type, occurred_at, other_player_id, credited_player_id, population_delta, matched_battle_report_id)
+    VALUES (30, 'battle-bombarded', '2026-08-08T00:00:00Z', NULL, 30, 5, NULL)
+`).run();
+
+const boardsWithUnknownOpponent = battlePoints.getLeaderboards(null, 10);
+const kate = boardsWithUnknownOpponent.pop.find(r => r.player_name === 'Kate');
+ok('Kate is credited for a self-bombing row with no known opponent (other_player_id NULL)',
+    kate && kate.raw === 5, boardsWithUnknownOpponent.pop);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {
