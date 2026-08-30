@@ -380,20 +380,28 @@ async function runMassPlayerScan() {
 }
 
 // Manual "sync now" for battle reports — the background battle-sync.js module already
-// pulls every 30 min; this just runs that same pull immediately on click, for a member
-// who doesn't want to wait (e.g. checking !mortal/!lastseen right after a fight).
+// pulls every 30 min, and battle-report-detail-sync.js's ship-detail sweep runs on its
+// own separate 90 s timer; this runs BOTH immediately, back-to-back, for a member who
+// wants !mortal/!lastseen to reflect a fight right now instead of waiting on either clock.
 async function runManualBattleSync() {
     const btn = document.getElementById('btn-sync-battles');
     if (btn) btn.disabled = true;
     try {
         const { triggerManualSync } = await import('./battle-sync.js');
-        const result = await triggerManualSync();
-        if (result.ok) {
-            showToast(result.inserted > 0
-                ? `Synced ${result.inserted} new battle report(s).`
-                : 'Battle reports up to date — nothing new.');
+        const syncResult = await triggerManualSync();
+        if (!syncResult.ok) {
+            showToast(`Battle-report sync failed: ${syncResult.error || 'unknown error'}`);
+            return;
+        }
+
+        const { triggerManualSweep } = await import('./battle-report-detail-sync.js');
+        const sweepResult = await triggerManualSweep();
+
+        const syncMsg = syncResult.inserted > 0 ? `Synced ${syncResult.inserted} new report(s)` : 'Reports up to date';
+        if (!sweepResult.ok) {
+            showToast(`${syncMsg}. Ship-detail sweep failed: ${sweepResult.error || 'unknown error'}`);
         } else {
-            showToast(`Battle-report sync failed: ${result.error || 'unknown error'}`);
+            showToast(`${syncMsg}. Scraped location/CV for ${sweepResult.scraped} report(s).`);
         }
     } finally {
         if (btn) btn.disabled = false;
