@@ -140,130 +140,6 @@ export function initSpy() {
 
         if (!knownSysIdsCache) return;
 
-        // --- GEOMETRIC RADAR CIRCLE INJECTION ENGINE ---
-        if (window.activeSearchedPlayerVision) {
-            const { range, originSystemId } = window.activeSearchedPlayerVision;
-            if (originSystemId && range > 0) {
-                const existingCircle = document.querySelector('.custom-vision-circle');
-                let shouldDraw = true;
-
-                if (existingCircle) {
-                    if (existingCircle.getAttribute('data-origin-id') === String(originSystemId) && 
-                        existingCircle.getAttribute('data-range') === String(range)) {
-                        shouldDraw = false; 
-                    } else {
-                        existingCircle.remove();
-                    }
-                }
-
-                if (shouldDraw) {
-                    let originNode = null;
-                    const allNodes = document.querySelectorAll('.map-planet');
-                    for (let node of allNodes) {
-                        const span = node.querySelector('span');
-                        const m = span?.innerText.match(/\[(\d+)\]/);
-                        if (m && String(m[1]) === String(originSystemId)) {
-                            originNode = node;
-                            break;
-                        }
-                    }
-
-                    if (originNode) {
-                        const scale = calculateMapScaleFromOffset();
-                        if (scale) {
-                            const radiusPx = range * scale;
-                            const diameterPx = radiusPx * 2;
-                            const circle = document.createElement('div');
-                            
-                            circle.className = 'custom-vision-circle';
-                            circle.setAttribute('data-origin-id', String(originSystemId));
-                            circle.setAttribute('data-range', String(range));
-                            
-                            circle.style.position = 'absolute';
-                            circle.style.width = `${diameterPx}px`;
-                            circle.style.height = `${diameterPx}px`;
-                            circle.style.backgroundColor = 'rgba(255, 255, 255, 0.10)';
-                            circle.style.border = '1px dashed rgba(255, 255, 255, 0.3)';
-                            circle.style.borderRadius = '50%';
-                            circle.style.pointerEvents = 'none';
-                            circle.style.zIndex = '1';
-                            
-                            // FIXED: Shifted horizontal midpoint center to 8px inside the leftmost square box boundary
-                            const h = originNode.offsetHeight || 0;
-                            const centerX = originNode.offsetLeft + 14;
-                            const centerY = originNode.offsetTop + (h / 2);
-                            
-                            circle.style.left = `${centerX - radiusPx}px`;
-                            circle.style.top = `${centerY - radiusPx}px`;
-                            
-                            originNode.parentElement.appendChild(circle);
-                        }
-                    }
-                }
-            }
-        } else {
-            document.querySelector('.custom-vision-circle')?.remove();
-        }
-
-        // --- ALLIANCE COLLECTIVE VISION CIRCLES ENGINE ---
-        if (window.activeAllianceVision && window.activeAllianceVision.length > 0) {
-            const scale = calculateMapScaleFromOffset();
-            
-            const unTaggedNodes = document.querySelectorAll('.map-planet:not([data-hub-tagged="true"])');
-            if (unTaggedNodes.length > 0) {
-                document.querySelectorAll('.custom-alliance-vision-circle').forEach(el => el.remove());
-            }
-
-            if (scale) {
-                window.activeAllianceVision.forEach(vis => {
-                    const existingCircle = document.querySelector(`.custom-alliance-vision-circle[data-player-id="${vis.playerId}"]`);
-                    if (existingCircle) return;
-
-                    let originNode = null;
-                    const allNodes = document.querySelectorAll('.map-planet');
-                    for (let node of allNodes) {
-                        const span = node.querySelector('span');
-                        const m = span?.innerText.match(/\[(\d+)\]/);
-                        if (m && String(m[1]) === String(vis.originSystemId)) {
-                            originNode = node;
-                            break;
-                        }
-                    }
-
-                    if (originNode) {
-                        // FIX: Add 1 extra square scale to the radius calculation
-                        const radiusPx = vis.range * scale;
-                        const diameterPx = radiusPx * 2;
-                        const circle = document.createElement('div');
-                        
-                        circle.className = 'custom-alliance-vision-circle';
-                        circle.setAttribute('data-player-id', String(vis.playerId));
-                        
-                        circle.style.position = 'absolute';
-                        circle.style.width = `${diameterPx}px`;
-                        circle.style.height = `${diameterPx}px`;
-                        circle.style.backgroundColor = 'transparent'; 
-                        circle.style.border = '1px dashed rgb(255, 255, 255)'; 
-                        circle.style.borderRadius = '50%';
-                        circle.style.pointerEvents = 'none';
-                        circle.style.zIndex = '1';
-                        
-                        const h = originNode.offsetHeight || 0;
-                        // FIX: Changed from +8 to +13 to nudge the center 5px to the right
-                        const centerX = originNode.offsetLeft + 14;
-                        const centerY = originNode.offsetTop + (h / 2);
-                        
-                        circle.style.left = `${centerX - radiusPx}px`;
-                        circle.style.top = `${centerY - radiusPx}px`;
-                        
-                        originNode.parentElement.appendChild(circle);
-                    }
-                });
-            }
-        } else {
-            document.querySelectorAll('.custom-alliance-vision-circle').forEach(el => el.remove());
-        }
-
         // --- MAP NODE ASSET INDICATOR INJECTION BLOCK ---
         const systemNodes = document.querySelectorAll('.map-planet:not([data-hub-tagged="true"])');
 
@@ -303,35 +179,18 @@ export function initSpy() {
             }, { capture: true }); 
 
             if (knownSysIdsCache.has(sysId)) {
-                const icon = node.querySelector('img') || node; 
-                let isBaseSystemForTarget = false;
+                const icon = node.querySelector('img') || node;
 
-                if (window.activeSearchedPlayerVision && window.activeSearchedPlayerVision.targetSystems) {
-                    isBaseSystemForTarget = window.activeSearchedPlayerVision.targetSystems.some(ts => String(ts.id) === String(sysId));
-                }
-
-                if (isBaseSystemForTarget) {
-                    // FIXED: Removed box-glow modifications entirely
-                    icon.style.boxShadow = '';
-                    icon.style.borderRadius = '';
-                    icon.style.border = '';
-                    icon.style.backgroundColor = '';
-                    
-                    // FIXED: System name text label configuration transformed to white and scaled up +2px
-                    span.style.color = '#ffffff';
-                    span.style.fontSize = '14px'; 
-                    span.style.fontWeight = 'bold';
-                    span.style.textShadow = '0 0 6px rgba(0, 0, 0, 1), 0 0 2px rgba(0, 0, 0, 1)';
-                } else {
-                    // FIXED: Green alliance highlights removed entirely. Default tracking profiles applied here.
-                    icon.style.boxShadow = '0 0 4px 1px rgba(34, 197, 94, 0.3)';
-                    icon.style.borderRadius = '50%';
-                    icon.style.border = '1px solid rgba(34, 197, 94, 0.5)';
-                    span.style.color = 'rgba(74, 222, 128, 0.7)'; 
-                    span.style.fontWeight = 'normal';
-                    span.style.fontSize = ''; 
-                    span.style.textShadow = '';
-                }
+                // Default tracking profile — the "target system" white-highlight variant
+                // this used to branch to only applied while the searched-player-vision
+                // feature was active (removed; the game now shows this natively).
+                icon.style.boxShadow = '0 0 4px 1px rgba(34, 197, 94, 0.3)';
+                icon.style.borderRadius = '50%';
+                icon.style.border = '1px solid rgba(34, 197, 94, 0.5)';
+                span.style.color = 'rgba(74, 222, 128, 0.7)';
+                span.style.fontWeight = 'normal';
+                span.style.fontSize = '';
+                span.style.textShadow = '';
             }
         });
     }
@@ -689,30 +548,6 @@ export function initSpy() {
     window.addEventListener('message', (event) => {
         if (event.origin !== window.location.origin) return;
         const data = event.data;
-
-        if (data.type === 'SHOW_ALLIANCE_VISION') {
-            window.activeAllianceVision = data.payload.visions;
-            document.querySelectorAll('.custom-alliance-vision-circle').forEach(el => el.remove());
-            injectMapIndicators();
-        } 
-        else if (data.type === 'CLEAR_ALLIANCE_VISION') {
-            window.activeAllianceVision = null;
-            document.querySelectorAll('.custom-alliance-vision-circle').forEach(el => el.remove());
-            injectMapIndicators();
-        }
-
-        if (data.type === 'HIGHLIGHT_PLAYER_VISION') {
-            const { range, systems, originSystemId } = data.payload;
-            window.activeSearchedPlayerVision = { range, targetSystems: systems, originSystemId };
-            document.querySelectorAll('.map-planet').forEach(el => el.removeAttribute('data-hub-tagged'));
-            injectMapIndicators();
-        } 
-        else if (data.type === 'CLEAR_PLAYER_VISION') {
-            window.activeSearchedPlayerVision = null;
-            document.querySelectorAll('.map-planet').forEach(el => el.removeAttribute('data-hub-tagged'));
-            document.querySelector('.custom-vision-circle')?.remove();
-            injectMapIndicators();
-        }
 
         if (data.type === 'INJECT_TACTICAL_OVERLAYS') {
             const { plans, planets: apiPlanets } = data.payload; 

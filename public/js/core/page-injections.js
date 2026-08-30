@@ -715,6 +715,8 @@ function buildActivityLogCard(heatmap, lastActivityAt) {
     const bars = counts.map((_, i) => {
         // Same local-time rotation as the sidebar heatmap used to (removed), so a viewer
         // who remembers that panel sees the same bar line up with "now".
+        // Rotate UTC hours into the viewer's local time, same as intel.js's raw
+        // per-hour counts assume UTC storage.
         const localHour = (i + offsetHours + 24) % 24;
         const count = counts[localHour];
         const pct = Math.round((count / max) * 100);

@@ -1,4 +1,3 @@
-import { loadPlayerIntel } from './player-intel.js';
 import { esc } from '../utils/escape.js';
 import '../utils/game-rate-limit.js'; // side-effect import: the shared 5/s gate AWApi rides
 import '../utils/aw-api.js';         // side-effect import: the game API client, gate included
@@ -28,12 +27,9 @@ async function executeSearch(type) {
     if (!input || !resultsContainer) return;
 
     const q = input.value.trim();
-    if (!q) { 
-        resultsContainer.innerHTML = ''; 
-        if (type === 'player') {
-            document.getElementById('game-frame')?.contentWindow?.postMessage({ type: 'CLEAR_PLAYER_VISION' }, window.location.origin);
-        }
-        return; 
+    if (!q) {
+        resultsContainer.innerHTML = '';
+        return;
     }
 
     resultsContainer.innerHTML = '<div class="text-s text-muted-foreground text-center py-2"><i class="fa-solid fa-circle-notch fa-spin"></i> Searching...</div>';
@@ -74,11 +70,7 @@ async function executeSearch(type) {
                     const id = e.currentTarget.getAttribute('data-player-id');
                     input.value = '';
                     resultsContainer.innerHTML = '';
-                    loadPlayerIntel(id);
-                    
-                    // Force-open the sidebar player section during manual search
-                    document.getElementById('player-context-tools')?.classList.remove('hidden');
-                    document.getElementById('context-tools')?.classList.add('hidden');
+                    navToIframe(`/Game/Players/Profile/${id}`);
                 });
             });
         } else if (type === 'system') {
