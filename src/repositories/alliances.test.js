@@ -110,6 +110,20 @@ ok('a search term matching only full_name (not name or tag) finds the alliance',
 alliances.deleteAllAlliances();
 ok('deleteAllAlliances empties the table', alliances.countAlliances() === 0);
 
+// Regression for a real production bug (2026-08-30): alliance_member_stats was never
+// cleared by the round-reset ("nuke intel") route, unlike every other table — its rows
+// are keyed by player_id, which is stable across rounds, so last round's rows survived
+// and rejoined against the fresh (empty) players table as an "Unknown" member still
+// showing last round's stats.
+alliances.upsertAllianceMemberStats(701, '19 of 25', '2h', 100, 50, 200, 1000, 5000, 'None', '20-24', '1000', 30, 20, 15, 40, 300);
+alliances.upsertAllianceMemberStats(702, '10 of 12', '5h', 50, 25, 100, 500, 2500, 'None', '10-14', '500', 15, 10, 10, 20, 150);
+const idsBeforeWipe = alliances.getAllianceMemberStatIds().map(r => r.player_id);
+ok('both new alliance_member_stats rows are on record before the wipe',
+    idsBeforeWipe.includes(701) && idsBeforeWipe.includes(702), idsBeforeWipe);
+alliances.deleteAllAllianceMemberStats();
+ok('deleteAllAllianceMemberStats empties the table',
+    alliances.getAllianceMemberStatIds().length === 0, alliances.getAllianceMemberStatIds());
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

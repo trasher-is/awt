@@ -320,6 +320,10 @@ router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
             systemsRepo.deleteAllPlanets();
             playersRepo.deleteAllPlayers();
             alliancesRepo.deleteAllAlliances();
+            // Keyed by player_id, which is stable across rounds — without this, last
+            // round's rows survive the nuke and rejoin against the fresh (now-empty)
+            // players table as an "Unknown" member still showing last round's stats.
+            alliancesRepo.deleteAllAllianceMemberStats();
             systemsRepo.deleteAllSystems();
         });
 
