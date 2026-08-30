@@ -736,7 +736,7 @@ function buildBuildingsCard(p) {
         : '';
     return `
         <table class="table">
-            <thead><tr${scrapedTitle}><th colspan="2"><i class="bi bi-building"></i> Buildings <span style="font-weight:normal;font-size:10px;color:#c96;">(Statistics page, up to ~4d behind live)</span></th></tr></thead>
+            <thead><tr${scrapedTitle}><th colspan="2"><i class="bi bi-building"></i> Buildings <span style="font-weight:normal;font-size:10px;color:#c96;">(4 day old data)</span></th></tr></thead>
             <tbody>
                 ${row('Farms', p.total_farms)}
                 ${row('Factories', p.total_factories)}
