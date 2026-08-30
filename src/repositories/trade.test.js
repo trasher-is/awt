@@ -51,6 +51,13 @@ ok('markAgreementDoneByScan creates a done row with initiator=scan', scanRow.sta
 trade.proposeAgreement('adminpair|x', 'adminpair', 'x', 'someoneelse');
 ok('proposeAgreement does not touch a non-cancelled existing pair (ON CONFLICT WHERE guard)', trade.getActiveAgreements().find(r => r.pair_key === 'adminpair|x').status === 'confirmed');
 
+// Regression for a real production bug (2026-08-30): trade_agreements was never cleared
+// by the round-reset ("nuke intel") route — pair_key identifies two player NAMES, only
+// meaningful within the round they played in.
+ok('trade_agreements has rows from the earlier tests before the wipe', trade.getActiveAgreements().length > 0);
+trade.deleteAllTradeAgreements();
+ok('deleteAllTradeAgreements empties the table', trade.getActiveAgreements().length === 0);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

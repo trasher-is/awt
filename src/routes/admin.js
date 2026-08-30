@@ -13,6 +13,8 @@ const battleReportsRepo = require('../repositories/battleReports');
 const newsEventsRepo = require('../repositories/newsEvents');
 const usersRepo = require('../repositories/users');
 const settingsRepo = require('../repositories/settings');
+const incomingRepo = require('../repositories/incoming');
+const tradeRepo = require('../repositories/trade');
 const { archiveRound, listRounds, roundDetail } = require('../utils/round-archive');
 const router = express.Router();
 
@@ -324,6 +326,13 @@ router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
             // round's rows survive the nuke and rejoin against the fresh (now-empty)
             // players table as an "Unknown" member still showing last round's stats.
             alliancesRepo.deleteAllAllianceMemberStats();
+            // Planet CV leaderboard — meaningless once the planets it ranks are gone.
+            systemsRepo.clearBestGuarded();
+            // Both keyed by identities (system:planet:attacker / player names) that only
+            // mean anything within the round that's being wiped.
+            incomingRepo.deleteAllIncomingMsgs();
+            incomingRepo.deleteAllIncomingAlerts();
+            tradeRepo.deleteAllTradeAgreements();
             systemsRepo.deleteAllSystems();
         });
 

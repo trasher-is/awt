@@ -39,7 +39,25 @@ function updateLastOntime(alertKey, lastOntime) {
     updateLastOntimeStmt.run(lastOntime, alertKey);
 }
 
+// alert_key is system:planet:attacker — an identity that only means anything against the
+// current round's map, so a round reset must clear it or the next round's first genuinely
+// new incoming at the same coordinates would be treated as an edit of a stale message.
+const deleteAllIncomingMsgsStmt = db.prepare(`DELETE FROM incoming_msgs`);
+function deleteAllIncomingMsgs() {
+    deleteAllIncomingMsgsStmt.run();
+}
+
+// incoming_alerts (fleet_id-keyed) was superseded by incoming_msgs (alert_key-keyed) — no
+// other code in this repo still reads or writes it. Kept clearable here anyway: whatever
+// wrote its existing rows made them round-scoped too, and leftover rows should not survive
+// a reset just because the table itself is otherwise dead.
+const deleteAllIncomingAlertsStmt = db.prepare(`DELETE FROM incoming_alerts`);
+function deleteAllIncomingAlerts() {
+    deleteAllIncomingAlertsStmt.run();
+}
+
 module.exports = {
     getCoveringRow, upsertCovering, upsertMessageRef, getMessageRef,
-    getLastOntimeRow, updateLastOntime
+    getLastOntimeRow, updateLastOntime,
+    deleteAllIncomingMsgs, deleteAllIncomingAlerts,
 };
