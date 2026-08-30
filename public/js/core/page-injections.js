@@ -679,8 +679,8 @@ export async function initProfileHubIntel() {
     wrap.id = 'awt-hub-intel-block';
     wrap.innerHTML = `
         <div class="row">
-            <div class="col-md-3">${buildActivityLogCard(data.heatmap)}</div>
-            <div class="col-md-3">${buildBuildingsCard(p)}</div>
+            <div class="col-lg-6">${buildActivityLogCard(data.heatmap)}</div>
+            <div class="col-lg-6">${buildBuildingsCard(p)}</div>
         </div>`
         + (!hasLiveIntel ? buildIntelCard(p) : '');
     anchor.parentNode.insertBefore(wrap, anchor);
