@@ -99,7 +99,14 @@ function updateShipDetail(id, detail) {
 const recentPlanetsBattleReportsStmt = db.prepare(`
     SELECT started_at AS occurred_at, system_id, planet_index, NULL AS game_planet_id,
            id AS source_id, 'battle_report' AS source, NULL AS credited_player_id, NULL AS population_delta,
-           NULL AS message_type
+           NULL AS message_type,
+           att_player_id, def_player_id, att_survived_cv, def_survived_cv,
+           att_destroyers, att_destroyers_lost, def_destroyers, def_destroyers_lost,
+           att_cruisers, att_cruisers_lost, def_cruisers, def_cruisers_lost,
+           att_battleships, att_battleships_lost, def_battleships, def_battleships_lost,
+           att_transports, att_transports_lost, def_transports, def_transports_lost,
+           att_colony_ships, att_colony_ships_lost, def_colony_ships, def_colony_ships_lost,
+           att_starbases, att_starbases_lost, def_starbases, def_starbases_lost
     FROM battle_reports
     WHERE (att_player_id = ? OR def_player_id = ?) AND system_id IS NOT NULL
     ORDER BY started_at DESC LIMIT ?
@@ -111,10 +118,45 @@ const recentPlanetsNewsEventsStmt = db.prepare(`
     WHERE (player_id = ? OR other_player_id = ?) AND system_id IS NOT NULL
     ORDER BY occurred_at DESC LIMIT ?
 `);
+
+const REMAINING_SHIP_TYPES = [
+    { label: 'Destroyers', col: 'destroyers' },
+    { label: 'Cruisers', col: 'cruisers' },
+    { label: 'Battleships', col: 'battleships' },
+    { label: 'Transports', col: 'transports' },
+    { label: 'Colony Ships', col: 'colony_ships' },
+    { label: 'Starbases', col: 'starbases' },
+];
+
+// Ship counts/CV in battle_reports are only ever populated together, by the ship-detail
+// scraper (see battle-report-parser.js) — att_destroyers being null means that report's
+// detail was never scraped, not that the fleet had zero destroyers. Computed here rather
+// than in SQL (a 12-branch CASE-per-column wall is much harder to read/verify than this).
+function computeRemainingFleet(row, playerId) {
+    const prefix = row.att_player_id === playerId ? 'att_' : row.def_player_id === playerId ? 'def_' : null;
+    if (!prefix) return null;
+    const cv = row[`${prefix}survived_cv`];
+    if (cv == null) return null; // ship detail never scraped for this report
+
+    const byType = [];
+    for (const t of REMAINING_SHIP_TYPES) {
+        const count = row[`${prefix}${t.col}`];
+        const lost = row[`${prefix}${t.col}_lost`];
+        if (count == null || count <= 0) continue; // never had this ship type in the fight
+        byType.push({ label: t.label, remaining: lost == null ? null : count - lost });
+    }
+    return { cv, byType };
+}
+
 function getRecentPlanets(playerId, limit = 5) {
     const candidates = [
-        ...recentPlanetsBattleReportsStmt.all(playerId, playerId, limit),
-        ...recentPlanetsNewsEventsStmt.all(playerId, playerId, limit),
+        ...recentPlanetsBattleReportsStmt.all(playerId, playerId, limit).map(row => ({
+            occurred_at: row.occurred_at, system_id: row.system_id, planet_index: row.planet_index,
+            game_planet_id: row.game_planet_id, source_id: row.source_id, source: row.source,
+            credited_player_id: row.credited_player_id, population_delta: row.population_delta,
+            message_type: row.message_type, remaining_fleet: computeRemainingFleet(row, playerId),
+        })),
+        ...recentPlanetsNewsEventsStmt.all(playerId, playerId, limit).map(row => ({ ...row, remaining_fleet: null })),
     ];
     candidates.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : a.occurred_at > b.occurred_at ? -1 : 0));
     return candidates.slice(0, limit);

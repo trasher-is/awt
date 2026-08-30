@@ -216,6 +216,38 @@ const limited = battleReports.getRecentPlanets(500, 2);
 ok('limit=2 returns exactly the 2 most recent occurrences', limited.length === 2 &&
     limited[0].source_id === 9301 && limited[1].source_id === 9202, limited);
 
+// --- remaining_fleet ---
+ok('a battle_report row with no ship-detail scraped has remaining_fleet: null',
+    afterBr[0].remaining_fleet === null, afterBr[0]);
+
+// Player 505 was the ATTACKER (destroyers 10/lost 4, cruisers 5/lost 5 — wiped out,
+// battleships 0 — never had any, so excluded from byType) in a fully-scraped report.
+db.prepare(`INSERT INTO players (id, name) VALUES (505, 'Remnant'), (506, 'Opponent')`).run();
+db.prepare(`
+    INSERT INTO battle_reports (
+        id, started_at, att_player_id, def_player_id, system_id, planet_index,
+        att_survived_cv, att_destroyers, att_destroyers_lost, att_cruisers, att_cruisers_lost,
+        att_battleships, att_battleships_lost,
+        def_survived_cv, def_destroyers, def_destroyers_lost
+    ) VALUES (
+        9401, '2026-08-30T10:00:00Z', 505, 506, 50, 2,
+        3000, 10, 4, 5, 5,
+        0, 0,
+        0, 20, 20
+    )
+`).run();
+const remainAtt = battleReports.getRecentPlanets(505)[0].remaining_fleet;
+ok('attacker-side remaining_fleet: correct CV and per-type math (count - lost)',
+    remainAtt && remainAtt.cv === 3000
+    && remainAtt.byType.find(t => t.label === 'Destroyers').remaining === 6
+    && remainAtt.byType.find(t => t.label === 'Cruisers').remaining === 0, remainAtt);
+ok('a ship type the fleet never had (battleships: count 0) is excluded from byType entirely',
+    !remainAtt.byType.some(t => t.label === 'Battleships'), remainAtt);
+
+const remainDef = battleReports.getRecentPlanets(506)[0].remaining_fleet;
+ok('defender-side remaining_fleet resolves the OTHER side\'s columns (def_*, not att_*)',
+    remainDef && remainDef.cv === 0 && remainDef.byType.find(t => t.label === 'Destroyers').remaining === 0, remainDef);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

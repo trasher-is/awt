@@ -416,7 +416,13 @@ async function handleMessage(message) {
             const when = `<t:${Math.floor(Date.parse(occ.occurred_at) / 1000)}:R>`;
             const where = planetLabel(occ);
             if (occ.source === 'battle_report') {
-                return `**${where}** — [Battle report #${occ.source_id}](https://astrowars.games/About/BattleReport/${occ.source_id}) — ${when}`;
+                const line = `**${where}** — [Battle report #${occ.source_id}](https://astrowars.games/About/BattleReport/${occ.source_id}) — ${when}`;
+                if (!occ.remaining_fleet) return line; // ship detail never scraped for this report yet
+                const { cv, byType } = occ.remaining_fleet;
+                const perType = byType.length
+                    ? byType.map(t => `${t.remaining != null ? t.remaining.toLocaleString() : '?'} ${t.label}`).join(', ')
+                    : 'nothing';
+                return `${line}\n> Remaining: **${cv.toLocaleString()} CV** — ${perType}`;
             }
             // News-page events other than a bombardment (battle-conquer/battle-conquered)
             // never carry credited_player_id/population_delta — no opponent link exists on
