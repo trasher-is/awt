@@ -107,6 +107,35 @@ ok('with a recent "since", Alice only gets battle 1\'s cv (2000)', aliceWindowed
 const limited = battlePoints.getCvLeaderboard(null, 1);
 ok('limit=1 returns exactly one row (the top scorer)', limited.length === 1 && limited[0].player_name === 'Alice', limited);
 
+// --- News-page bombardment credit (unmatched only — see the "no battle_reports link"
+// case vs. the "already covered by a real battle report" case) ---
+db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (10, 'Gina', NULL), (11, 'Hank', NULL)`).run();
+
+db.prepare(`
+    INSERT INTO news_events (player_id, message_type, occurred_at, credited_player_id, population_delta, matched_battle_report_id)
+    VALUES (10, 'battle-bombarded', '2026-08-05T00:00:00Z', 10, 400, NULL)
+`).run();
+// This one IS matched to a real battle report — must be excluded from the sum (that
+// battle report's own killed_population already counts it, via the existing battle_reports path).
+db.prepare(`
+    INSERT INTO news_events (player_id, message_type, occurred_at, credited_player_id, population_delta, matched_battle_report_id)
+    VALUES (11, 'battle-bombarded', '2026-08-05T00:00:00Z', 11, 999, 1)
+`).run();
+// A conquest event never contributes points regardless of credited_player_id.
+db.prepare(`
+    INSERT INTO news_events (player_id, message_type, occurred_at, credited_player_id, population_delta, matched_battle_report_id)
+    VALUES (10, 'battle-conquer', '2026-08-06T00:00:00Z', 10, NULL, NULL)
+`).run();
+
+const boardsWithNews = battlePoints.getLeaderboards(null, 10);
+const gina = boardsWithNews.pop.find(r => r.player_name === 'Gina');
+ok('Gina gets population points from her unmatched bombardment (400)', gina && gina.raw === 400, gina);
+ok('Hank never appears — his bombardment is already covered by a real battle report',
+    !boardsWithNews.pop.some(r => r.player_name === 'Hank'), boardsWithNews.pop);
+
+ok('cv leaderboard is unaffected by news_events (still only Alice/Bob/Frank from battle_reports)',
+    boardsWithNews.cv.length === 3, boardsWithNews.cv);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

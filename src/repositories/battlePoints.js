@@ -22,17 +22,19 @@ function getExcludedAllianceTags() {
 }
 
 // Friendly fire (both sides share an alliance tag) is always excluded. An admin-configured
-// excluded-alliance-tag list is layered on top when non-empty. Returns the SQL fragment and
-// the positional params it needs, in the exact order its `?` placeholders appear — callers
-// must not reorder the params relative to where this clause lands in their WHERE text.
-function exclusionClause(excludedTags) {
-    let clause = `NOT (att_alliance_tag IS NOT NULL AND def_alliance_tag IS NOT NULL AND UPPER(att_alliance_tag) = UPPER(def_alliance_tag))`;
+// excluded-alliance-tag list is layered on top when non-empty. `attTagExpr`/`defTagExpr`
+// are raw SQL column/expression text (never user input) so this same logic works whether
+// the caller is querying battle_reports directly or a news_events join. Returns the SQL
+// fragment and the positional params it needs, in the exact order its `?` placeholders
+// appear — callers must not reorder params relative to where this clause lands.
+function exclusionClauseFor(attTagExpr, defTagExpr, excludedTags) {
+    let clause = `NOT (${attTagExpr} IS NOT NULL AND ${defTagExpr} IS NOT NULL AND UPPER(${attTagExpr}) = UPPER(${defTagExpr}))`;
     const params = [];
     if (excludedTags.length > 0) {
         const attPh = excludedTags.map(() => '?').join(',');
         const defPh = excludedTags.map(() => '?').join(',');
-        clause += ` AND (att_alliance_tag IS NULL OR UPPER(att_alliance_tag) NOT IN (${attPh}))`;
-        clause += ` AND (def_alliance_tag IS NULL OR UPPER(def_alliance_tag) NOT IN (${defPh}))`;
+        clause += ` AND (${attTagExpr} IS NULL OR UPPER(${attTagExpr}) NOT IN (${attPh}))`;
+        clause += ` AND (${defTagExpr} IS NULL OR UPPER(${defTagExpr}) NOT IN (${defPh}))`;
         params.push(...excludedTags, ...excludedTags);
     }
     return { clause, params };
@@ -45,7 +47,7 @@ function toPoints(raw, ratio) {
 // Arity/text vary per call (since-window presence, excluded-tag count) — prepared fresh
 // each call, same reasoning as battleReports.js's markShipDetailScraped dynamic IN clause.
 function getCvLeaderboard(sinceIso, limit) {
-    const { clause, params } = exclusionClause(getExcludedAllianceTags());
+    const { clause, params } = exclusionClauseFor('att_alliance_tag', 'def_alliance_tag', getExcludedAllianceTags());
     const sinceSql = sinceIso ? `AND started_at >= ?` : '';
     const wherePart = `${sinceSql} AND ${clause}`;
     const wherePartParams = sinceIso ? [sinceIso, ...params] : [...params];
@@ -76,22 +78,50 @@ function getCvLeaderboard(sinceIso, limit) {
 
 // Population is only ever credited to the attacker (the side whose fleet bombed the
 // target planet) — see the design spec §1/§3 for why the defender never earns pop points.
+// Two sources are unioned: real battle_reports rows, and News-page bombardments that have
+// NO matching battle_reports row (a matched one is already covered by the battle report
+// itself, so it is excluded here to avoid double-counting). News-page rows carry no
+// alliance-tag columns of their own, so exclusions are applied via a join to players'
+// CURRENT alliance — a known simplification (not the alliance at the time of the event).
 function getPopLeaderboard(sinceIso, limit) {
-    const { clause, params } = exclusionClause(getExcludedAllianceTags());
-    const sinceSql = sinceIso ? `AND started_at >= ?` : '';
-    const wherePart = `${sinceSql} AND ${clause}`;
-    const wherePartParams = sinceIso ? [sinceIso, ...params] : [...params];
+    const excludedTags = getExcludedAllianceTags();
+
+    const br = exclusionClauseFor('att_alliance_tag', 'def_alliance_tag', excludedTags);
+    const brSinceSql = sinceIso ? `AND started_at >= ?` : '';
+    const brWherePart = `${brSinceSql} AND ${br.clause}`;
+    const brParams = sinceIso ? [sinceIso, ...br.params] : [...br.params];
+
+    const ne = exclusionClauseFor('ca.tag', 'oa.tag', excludedTags);
+    const neSinceSql = sinceIso ? `AND ne.occurred_at >= ?` : '';
+    const neWherePart = `${neSinceSql} AND ${ne.clause}`;
+    const neParams = sinceIso ? [sinceIso, ...ne.params] : [...ne.params];
 
     const sql = `
-        SELECT att_player_id AS player_id, att_player_name AS player_name, SUM(killed_population) AS raw_pop
-        FROM battle_reports
-        WHERE att_player_id IS NOT NULL ${wherePart}
-        GROUP BY att_player_id
+        SELECT player_id, player_name, SUM(pop_credit) AS raw_pop
+        FROM (
+            SELECT att_player_id AS player_id, att_player_name AS player_name, killed_population AS pop_credit
+            FROM battle_reports
+            WHERE att_player_id IS NOT NULL ${brWherePart}
+
+            UNION ALL
+
+            SELECT ne.credited_player_id AS player_id, cp.name AS player_name, ne.population_delta AS pop_credit
+            FROM news_events ne
+            JOIN players cp ON cp.id = ne.credited_player_id
+            LEFT JOIN players op ON op.id = ne.other_player_id
+            LEFT JOIN alliances ca ON ca.id = cp.alliance_id
+            LEFT JOIN alliances oa ON oa.id = op.alliance_id
+            WHERE ne.message_type = 'battle-bombarded'
+              AND ne.matched_battle_report_id IS NULL
+              AND ne.credited_player_id IS NOT NULL
+              ${neWherePart}
+        )
+        GROUP BY player_id
         ORDER BY raw_pop DESC
         LIMIT ?
     `;
     const ratio = getPopRatio();
-    return db.prepare(sql).all(...wherePartParams, limit).map(r => ({
+    return db.prepare(sql).all(...brParams, ...neParams, limit).map(r => ({
         player_id: r.player_id,
         player_name: r.player_name,
         raw: r.raw_pop || 0,
