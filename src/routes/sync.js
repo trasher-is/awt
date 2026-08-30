@@ -9,7 +9,8 @@ const alliancesRepo = require('../repositories/alliances');
 const settingsRepo = require('../repositories/settings');
 const { mapApiReport, upsertReports, formatBattleEmbed } = require('../utils/battle-reports');
 const battleReportsRepo = require('../repositories/battleReports');
-const { postEmbed, defuseMentions, settingValue } = require('../utils/discord-post');
+const battlePointsRepo = require('../repositories/battlePoints');
+const { postEmbed, postBattleEmbed, defuseMentions, settingValue } = require('../utils/discord-post');
 const router = express.Router();
 
 // --- MAP SCRAPER DATA RECEIVER ---
@@ -753,6 +754,35 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
                 // on the next sync (matches how reminders/timers mark themselves sent).
                 const flip = db.transaction((ids) => { for (const id of ids) battleReportsRepo.markAnnounced(id); });
                 flip(pending.map(r => r.id));
+            }
+        }
+
+        // --- BATTLE POINTS: automated twice-daily leaderboard post ---
+        // This app has no server-side scheduler anywhere (every periodic-feeling behavior
+        // here is actually driven by client sync traffic) — so this piggybacks on real
+        // battle-report sync activity instead of adding a new timer. Any sync that
+        // actually inserts new rows is treated as "fresh data just arrived"; if at least
+        // 12 hours have passed since the last automated post, it fires again. In practice
+        // this lands once after the first sync following local midnight (when yesterday's
+        // reports become visible) and again roughly 12 hours later.
+        if (inserted.length > 0 && settingValue('discord_battlepoints_channel')) {
+            const lastPostRaw = settingValue('battle_points_last_auto_post_at');
+            const lastPostMs = lastPostRaw ? Date.parse(lastPostRaw) : NaN;
+            const hoursSince = Number.isFinite(lastPostMs) ? (Date.now() - lastPostMs) / (60 * 60 * 1000) : Infinity;
+            if (hoursSince >= 12) {
+                const { cv, pop } = battlePointsRepo.getLeaderboards(null, 10);
+                const formatLines = (rows, unit) => rows.length
+                    ? rows.map((r, i) => `**${i + 1}.** ${r.player_name || 'Unknown'} — ${r.points} pts (${r.raw.toLocaleString()} ${unit})`).join('\n')
+                    : '_No battles recorded yet._';
+                postBattleEmbed('discord_battlepoints_channel', {
+                    title: '⚔️ Battle Challenge Update',
+                    fields: [
+                        { name: '💥 CV Killed', value: formatLines(cv, 'CV') },
+                        { name: '☠️ Population Killed', value: formatLines(pop, 'pop') },
+                    ],
+                    color: 0xe11d48,
+                }).catch(err => console.error('[Discord] battle-points auto-post error:', err.message));
+                settingsRepo.setSetting('battle_points_last_auto_post_at', new Date().toISOString());
             }
         }
 
