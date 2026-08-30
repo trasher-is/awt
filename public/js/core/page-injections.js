@@ -634,6 +634,123 @@ export async function initProfilePLGrowth() {
     }
 }
 
+// Hub-tracked additions to a player's profile page: an always-shown login-time heatmap
+// ("Activity Log" — Hub-tracked, independent of intel), and, only when the game itself is
+// NOT currently showing live intel (no .race-summary/.ir-summary table on the page — either
+// never scanned or the scan has expired), a "last known" fallback built from whatever the
+// Hub last captured. When the game IS showing live intel, that block is skipped entirely —
+// duplicating what the player can already see would just be clutter.
+//
+// Also hides the "Astro Wars Supporter" promo rows unconditionally (unrelated to intel).
+export async function initProfileHubIntel() {
+    if (!window.location.pathname.toLowerCase().includes('/game/players/profile/')) return;
+
+    hideSupporterPromo();
+
+    if (document.getElementById('awt-hub-intel-block')) return; // idempotent
+
+    const idMatch = window.location.pathname.match(/\/Profile\/(\d+)/i);
+    const playerId = idMatch ? idMatch[1] : null;
+    if (!playerId) return;
+
+    // Anchor: the Planets table's own column wrapper exists in every layout variant seen
+    // so far (with or without live intel) — insert our block immediately before it, so it
+    // lands right after the player-info/intel area and before the planet list.
+    const planetsTable = document.querySelector('table.sortable');
+    const anchor = planetsTable ? planetsTable.closest('.col-12, .col-lg-6') : null;
+    if (!anchor || !anchor.parentNode) return;
+
+    let data;
+    try {
+        const res = await fetch(`/hub-api/intel/player/${playerId}`);
+        data = await res.json();
+    } catch (err) {
+        return;
+    }
+    if (!data || !data.success || !data.player) return;
+    const p = data.player;
+
+    const hasLiveIntel = !!document.querySelector('.race-summary, .ir-summary');
+
+    const wrap = document.createElement('div');
+    wrap.className = 'col-12';
+    wrap.id = 'awt-hub-intel-block';
+    wrap.innerHTML = buildActivityLogCard(data.heatmap)
+        + (!hasLiveIntel && p.has_intel ? buildStaleIntelCard(p) : '');
+    anchor.parentNode.insertBefore(wrap, anchor);
+}
+
+function hideSupporterPromo() {
+    document.querySelectorAll('table th[colspan="2"]').forEach(th => {
+        if (th.textContent.trim() !== 'Astro Wars Supporter') return;
+        const headerRow = th.closest('tr');
+        if (!headerRow || headerRow.dataset.awtHidden) return;
+        const badgeRow = headerRow.nextElementSibling;
+        headerRow.style.display = 'none';
+        headerRow.dataset.awtHidden = '1';
+        if (badgeRow) badgeRow.style.display = 'none';
+    });
+}
+
+function buildActivityLogCard(heatmap) {
+    const counts = Array.isArray(heatmap) && heatmap.length === 24 ? heatmap : Array(24).fill(0);
+    const max = Math.max(1, ...counts);
+    const offsetHours = Math.round(-new Date().getTimezoneOffset() / 60);
+    const bars = counts.map((_, i) => {
+        // Same local-time rotation as the sidebar heatmap (player-intel.js), so the two
+        // never disagree on which bar represents "now".
+        const localHour = (i + offsetHours + 24) % 24;
+        const count = counts[localHour];
+        const pct = Math.round((count / max) * 100);
+        return `<div title="${localHour}:00 — ${count} login(s)" style="flex:1;height:${Math.max(pct, 2)}%;background:#22c55e;border-radius:1px 1px 0 0;"></div>`;
+    }).join('');
+
+    return `
+        <table class="table">
+            <thead><tr><th colspan="2"><i class="bi bi-activity"></i> Activity Log <span style="font-weight:normal;font-size:11px;color:#888;">(Hub-tracked login hours, local time)</span></th></tr></thead>
+            <tbody>
+                <tr><td colspan="2">
+                    <div style="display:flex;align-items:flex-end;gap:2px;height:60px;">${bars}</div>
+                    <div style="display:flex;justify-content:space-between;font-size:10px;color:#888;margin-top:2px;">
+                        <span>00h</span><span>06h</span><span>12h</span><span>18h</span><span>23h</span>
+                    </div>
+                </td></tr>
+            </tbody>
+        </table>`;
+}
+
+function buildStaleIntelCard(p) {
+    const row = (label, val) => `<tr><td>${esc(label)}</td><td class="lowlight">${esc(val)}</td></tr>`;
+    const trait = (label, val) => {
+        const n = val || 0;
+        return row(label, `${n > 0 ? '+' : ''}${n}`);
+    };
+    const updatedAt = p.intel_updated_at ? new Date(p.intel_updated_at).toLocaleString() : 'unknown date';
+
+    return `
+        <table class="table">
+            <thead><tr><th colspan="2"><i class="bi bi-clock-history"></i> Hub Intel <span style="font-weight:normal;font-size:11px;color:#c96;">(last known — as of ${esc(updatedAt)}, not currently visible in-game)</span></th></tr></thead>
+            <tbody>
+                ${row('Biology', p.biology || 0)}
+                ${row('Economy', p.economy || 0)}
+                ${row('Energy', p.energy || 0)}
+                ${row('Mathematics', p.mathematics || 0)}
+                ${row('Physics', p.physics || 0)}
+                ${row('Social', p.social || 0)}
+                ${row('Trade Revenue', `+${p.trade_revenue || 0}%`)}
+                ${row('Eco Bonus', `+${p.eco_bonus || 0}%`)}
+                ${row('Artefact', p.artefact || 'None')}
+                ${trait('Growth', p.race_growth)}
+                ${trait('Science', p.race_science)}
+                ${trait('Culture', p.race_culture)}
+                ${trait('Production', p.race_production)}
+                ${trait('Speed', p.race_speed)}
+                ${trait('Attack', p.race_attack)}
+                ${trait('Defence', p.race_defense)}
+            </tbody>
+        </table>`;
+}
+
 let currentObservedTable = null;
 let systemTableObserver = null;
 
