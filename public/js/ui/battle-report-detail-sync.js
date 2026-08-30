@@ -28,6 +28,43 @@ function claimLock(key, ttlMs) {
     }
 }
 
+// Shared claim/scrape/sync loop for both endpoints below — the two claim routes
+// (battle-report-ship-detail-claim, battle-report-location-backfill-claim) return the
+// same {success, ids} shape and both hand their ids to the same scrape+sync pair, so
+// there is nothing endpoint-specific happening inside the loop itself.
+async function runClaimLoop(claimUrl, maxBatches) {
+    let scraped = 0;
+    let claimed = 0;
+    for (let i = 0; i < maxBatches; i++) {
+        const claimRes = await fetch(claimUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ limit: SWEEP_BATCH_SIZE }),
+        });
+        if (!claimRes.ok) return { ok: false, error: `claim failed (${claimRes.status})`, scraped, claimed };
+        const claimedBody = await claimRes.json().catch(() => ({}));
+        if (!claimedBody.success) return { ok: false, error: 'claim response not successful', scraped, claimed };
+        const ids = Array.isArray(claimedBody.ids) ? claimedBody.ids : [];
+        if (!ids.length) break; // caught up
+        claimed += ids.length;
+
+        for (const id of ids) {
+            const detail = await scrapeBattleReportShipDetail(id);
+            if (!detail) continue; // scrape/parse failed — stays claimed, acceptable data gap, not retried
+            const syncRes = await fetch('/hub-api/sync/battle-report-ship-detail', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id, ...detail }),
+            });
+            if (!syncRes.ok) continue;
+            const syncBody = await syncRes.json().catch(() => ({}));
+            if (syncBody.success) scraped++;
+        }
+        if (ids.length < SWEEP_BATCH_SIZE) break; // a partial page means nothing is left to claim
+    }
+    return { ok: true, scraped, claimed };
+}
+
 let sweeping = false;
 
 async function runSweepTick() {
@@ -35,28 +72,12 @@ async function runSweepTick() {
     if (!claimLock(SWEEP_LOCK_KEY, SWEEP_LOCK_TTL_MS)) return; // cross-tab guard
     sweeping = true;
     try {
-        const claimRes = await fetch('/hub-api/sync/battle-report-ship-detail-claim', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ limit: SWEEP_BATCH_SIZE }),
-        });
-        if (!claimRes.ok) { console.warn('[BattleReportDetailSync] claim failed:', claimRes.status); return; }
-        const claimed = await claimRes.json().catch(() => ({}));
-        if (!claimed.success) { console.warn('[BattleReportDetailSync] claim response not successful:', claimed); return; }
-        const ids = Array.isArray(claimed.ids) ? claimed.ids : [];
-
-        for (const id of ids) {
-            const detail = await scrapeBattleReportShipDetail(id);
-            if (!detail) continue; // scrape/parse failed — report stays claimed (already scraped=now), acceptable data gap, not retried
-            const syncRes = await fetch('/hub-api/sync/battle-report-ship-detail', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id, ...detail }),
-            });
-            if (!syncRes.ok) { console.warn('[BattleReportDetailSync] sync failed for report', id, syncRes.status); continue; }
-            const syncBody = await syncRes.json().catch(() => ({}));
-            if (!syncBody.success) console.warn('[BattleReportDetailSync] sync response not successful for report', id, syncBody);
-        }
+        await runClaimLoop('/hub-api/sync/battle-report-ship-detail-claim', 1);
+        // One backfill batch per tick too — this is a one-time legacy gap (reports
+        // scraped before planet capture existed, or by a stale tab running old JS; see
+        // getReportsNeedingLocationBackfill), so it self-terminates as it catches up
+        // rather than needing its own separate timer.
+        await runClaimLoop('/hub-api/sync/battle-report-location-backfill-claim', 1);
     } catch (err) {
         console.warn('[BattleReportDetailSync] sweep tick failed:', err.message);
     } finally {
@@ -82,40 +103,26 @@ let manualSweeping = false;
 export async function triggerManualSweep(maxBatches = 10) {
     if (manualSweeping) return { ok: false, error: 'a sweep is already running' };
     manualSweeping = true;
-    let scraped = 0;
-    let claimed = 0;
     try {
-        for (let i = 0; i < maxBatches; i++) {
-            const claimRes = await fetch('/hub-api/sync/battle-report-ship-detail-claim', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ limit: SWEEP_BATCH_SIZE }),
-            });
-            if (!claimRes.ok) return { ok: false, error: `claim failed (${claimRes.status})`, scraped, claimed };
-            const claimedBody = await claimRes.json().catch(() => ({}));
-            if (!claimedBody.success) return { ok: false, error: 'claim response not successful', scraped, claimed };
-            const ids = Array.isArray(claimedBody.ids) ? claimedBody.ids : [];
-            if (!ids.length) break; // caught up
-            claimed += ids.length;
-
-            for (const id of ids) {
-                const detail = await scrapeBattleReportShipDetail(id);
-                if (!detail) continue; // scrape/parse failed — stays claimed, same acceptable gap as the periodic sweep
-                const syncRes = await fetch('/hub-api/sync/battle-report-ship-detail', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id, ...detail }),
-                });
-                if (!syncRes.ok) continue;
-                const syncBody = await syncRes.json().catch(() => ({}));
-                if (syncBody.success) scraped++;
-            }
-            if (ids.length < SWEEP_BATCH_SIZE) break; // a partial page means nothing is left to claim
-        }
-        return { ok: true, scraped, claimed };
+        return await runClaimLoop('/hub-api/sync/battle-report-ship-detail-claim', maxBatches);
     } catch (err) {
-        return { ok: false, error: err.message, scraped, claimed };
+        return { ok: false, error: err.message, scraped: 0, claimed: 0 };
     } finally {
         manualSweeping = false;
+    }
+}
+
+// Manual "backfill legacy locations now" — same idea as triggerManualSweep but for
+// reports already scraped with no system_id (see getReportsNeedingLocationBackfill).
+let manualBackfilling = false;
+export async function triggerManualLocationBackfill(maxBatches = 10) {
+    if (manualBackfilling) return { ok: false, error: 'a backfill is already running' };
+    manualBackfilling = true;
+    try {
+        return await runClaimLoop('/hub-api/sync/battle-report-location-backfill-claim', maxBatches);
+    } catch (err) {
+        return { ok: false, error: err.message, scraped: 0, claimed: 0 };
+    } finally {
+        manualBackfilling = false;
     }
 }
