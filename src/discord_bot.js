@@ -297,7 +297,7 @@ async function handleMessage(message) {
                 { name: '`!ghosts <sys_id> <planet_num> <alliance_tag>`', value: 'Calculates the shortest/longest hidden fleet arrival window from hostile members with radar vision over a system.\n*Example: `!ghosts 1 10 AO`*' },
                 { name: '`!bio`', value: 'Generates intelligence alerts highlighting players who possess a +6 biology or science advantage over your personal bio level.' },
                 { name: '`!battle <D> <C> <B> vs <D> <C> <B>`', value: 'Simulates a battle. Flags: `--sb N` starbase (0-50), `--dp/--ap N` physics, `--dm/--am N` math, `--dra/--ara N` race atk, `--drd/--ard N` race def, `--dl/--al N` player level. Or `--def Name --atk Name` to auto-fill all stats from DB.\n*Example: `!battle 50 10 0 vs 40 8 2 --dp 5 --ap 3 --dl 12 --al 8`*' },
-                { name: '`!mortal` / `!mortalday` / `!mortalweek` `[all|alliance]`', value: 'Shows the CV/population-killed battle leaderboards — all-time, last 24 hours, or last 7 days. Defaults to Hub tool users only; `all` lifts that; `alliance` shows your own alliance (needs `!link`).\n*Example: `!mortalweek alliance`*' },
+                { name: '`!mortal` / `!mortalday` / `!mortalweek` `[all|<alliance_tag>]`', value: 'Shows the CV/population-killed battle leaderboards — all-time, last 24 hours, or last 7 days. Defaults to Hub tool users only; `all` lifts that; any alliance tag filters to that alliance (any alliance, not just your own).\n*Example: `!mortalweek nsa`*' },
                 { name: '`!lastseen <player_name>`', value: 'Shows up to 5 recent system/planet locations a player was involved in a battle report or News-page bombardment at, on either side, newest first.\n*Example: `!lastseen Hkiller89`*' }
             )
             .setFooter({ text: 'AWT Intelligence Hub' });
@@ -336,34 +336,31 @@ async function handleMessage(message) {
         const label = command === 'mortalday' ? 'Last 24 Hours' : command === 'mortalweek' ? 'Last 7 Days' : 'All Time';
 
         // Default (no arg): only players linked to a Hub account — actual tool users, not
-        // every enemy who ever showed up in a fight. `all` lifts that filter entirely;
-        // `alliance` narrows/widens it the other way — every player in the CALLER's own
-        // alliance, tool user or not, resolved via their Discord link (same bridge !bio
-        // uses: app_users -> players by game_name).
-        const scopeArg = (args[0] || '').toLowerCase();
+        // every enemy who ever showed up in a fight. `all` lifts that filter entirely.
+        // Anything else is treated as an alliance TAG (not a reserved word) — filters to
+        // every player in that alliance, tool user or not. Works for any alliance, not
+        // just the caller's own.
+        const scopeArg = (args[0] || '').trim();
         let scope = 'members';
         let allianceId = null;
-        if (scopeArg === 'all') {
+        let scopeLabel = '';
+        if (scopeArg.toLowerCase() === 'all') {
             scope = 'all';
-        } else if (scopeArg === 'alliance') {
-            const discordName = message.author.username.toLowerCase();
-            const user = usersRepo.getUserByDiscordName(discordName, `@${discordName}`);
-            const bridge = user ? usersRepo.getUserAllianceIdBridge(user.id) : null;
-            if (!bridge || bridge.alliance_id == null) {
-                return message.reply('❌ `!mortal alliance` needs your Discord linked to a Hub account with a known alliance. Link with `!link` first, or use `!mortal`/`!mortal all`.');
+            scopeLabel = ' (All Players)';
+        } else if (scopeArg) {
+            const alliance = alliancesRepo.getAllianceIdByTag(scopeArg);
+            if (!alliance) {
+                return message.reply(`❌ Unknown alliance tag \`${scopeArg}\`. Usage: \`!${command} [all|<alliance_tag>]\`.`);
             }
             scope = 'alliance';
-            allianceId = bridge.alliance_id;
-        } else if (scopeArg) {
-            return message.reply(`❌ Unknown scope \`${scopeArg}\`. Usage: \`!${command} [all|alliance]\`.`);
+            allianceId = alliance.id;
+            scopeLabel = ` (${scopeArg.toUpperCase()})`;
         }
 
         const { cv, pop } = battlePointsRepo.getLeaderboards(sinceIso, 10, scope, allianceId);
         const formatLines = (rows, unit) => rows.length
             ? rows.map((r, i) => `**${i + 1}.** ${r.player_name || 'Unknown'} — ${r.points} pts (${r.raw.toLocaleString()} ${unit})`).join('\n')
             : '_No battles recorded yet._';
-
-        const scopeLabel = scope === 'all' ? ' (All Players)' : scope === 'alliance' ? ' (Your Alliance)' : '';
         const embed = new EmbedBuilder()
             .setTitle(`⚔️ Battle Challenge — ${label}${scopeLabel}`)
             .addFields(

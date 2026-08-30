@@ -13,6 +13,13 @@ function getWarRoomAllianceIntelTags() {
     return getWarRoomAllianceIntelTagsStmt.all();
 }
 
+// Exact tag lookup (tag is COLLATE NOCASE, so this is already case-insensitive) — used by
+// discord_bot.js's `!mortal <tag>` to resolve an arbitrary alliance tag to its id.
+const getAllianceIdByTagStmt = db.prepare(`SELECT id FROM alliances WHERE tag = ?`);
+function getAllianceIdByTag(tag) {
+    return getAllianceIdByTagStmt.get(tag);
+}
+
 const countAlliancesStmt = db.prepare(`SELECT COUNT(*) as count FROM alliances`);
 function countAlliances() {
     return countAlliancesStmt.get().count;
@@ -243,7 +250,7 @@ function deleteStaleAllianceMembers(ids) {
 }
 
 module.exports = {
-    getWarRoomAllianceIntelTags, countAlliances, getWarRoomAlliances,
+    getWarRoomAllianceIntelTags, getAllianceIdByTag, countAlliances, getWarRoomAlliances,
     searchAlliancesByTagOrName, upsertAllianceFromApiSearch,
     upsertAllianceBasic, upsertAllianceTagOnly, upsertAllianceFull, deleteAllAlliances,
     insertBroadcast, getBroadcasts, updateBroadcast, deleteBroadcast,
