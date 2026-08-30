@@ -250,6 +250,22 @@ function getPlanetOwnerName(systemId, planetIndex) {
     return getPlanetOwnerNameStmt.get(systemId, planetIndex);
 }
 
+// Display-name lookups for battleReports.getLastSeenPlanet's two different location
+// shapes: (system_id, planet_index) from a scraped battle report page, or a bare
+// game_planet_id from a News-page bombardment row. Either can miss (the planet may never
+// have been scanned into this table) — callers fall back to raw ids in that case.
+const getPlanetNameByLocationStmt = db.prepare(`SELECT name FROM planets WHERE system_id = ? AND planet_index = ?`);
+function getPlanetNameByLocation(systemId, planetIndex) {
+    const row = getPlanetNameByLocationStmt.get(systemId, planetIndex);
+    return row ? row.name : null;
+}
+
+const getPlanetNameByGameIdStmt = db.prepare(`SELECT name FROM planets WHERE game_planet_id = ?`);
+function getPlanetNameByGameId(gamePlanetId) {
+    const row = getPlanetNameByGameIdStmt.get(gamePlanetId);
+    return row ? row.name : null;
+}
+
 const upsertPlanetStmt = db.prepare(`
     INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet, is_sieged, name)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -357,7 +373,7 @@ module.exports = {
     upsertSystemFull, setSystemInVision, deleteAllSystems, countBestGuardedAt, clearBestGuarded, insertBestGuarded,
     getSystemPlanetsWithIntel, getSystemPlanetsForBot, getPlanetsFullDb,
     getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getOldPlanet, upsertPlanet,
-    getPlanetsForAllianceTag, getPlanetOwnerName,
+    getPlanetsForAllianceTag, getPlanetOwnerName, getPlanetNameByLocation, getPlanetNameByGameId,
     clearMovedPlanet, deleteAllPlanets, logPlanetEvent, getPlanetHistory, deleteAllPlanetEvents,
     getTakeoverBoard, upsertTakeover,
 };

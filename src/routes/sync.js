@@ -839,6 +839,8 @@ router.post('/sync/battle-report-ship-detail', requireAuth, (req, res) => {
     normalized.win_chance = typeof detail.win_chance === 'number' && Number.isFinite(detail.win_chance)
         ? detail.win_chance
         : null;
+    normalized.system_id = Number.isInteger(detail.system_id) ? detail.system_id : null;
+    normalized.planet_index = Number.isInteger(detail.planet_index) ? detail.planet_index : null;
     try {
         battleReportsRepo.updateShipDetail(id, normalized);
         res.json({ success: true });

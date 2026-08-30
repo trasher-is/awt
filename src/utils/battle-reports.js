@@ -1,15 +1,20 @@
 // Battle-report ingest: map the game REST API's report objects into flat rows, upsert
 // them idempotently, and format the Discord embed for freshly discovered ones.
 //
-// Every field name read from the API object below is SPEC-DERIVED (OpenAPI 3.0.1 at
-// /swagger/v1/swagger.json) — no /api/v1 response has ever been observed against
-// production. That is why mapApiReport is deliberately forgiving: a report whose fields
-// do not match simply maps them to NULL, and a report without a usable id is skipped —
-// one bad row must never abort a sync batch.
+// Field names below are confirmed against a real production response (2026-08-30, GET
+// https://astrowars.games/api/v1/BattleReport/search) — an earlier version of this file
+// guessed field names from the OpenAPI spec alone (never observed against production),
+// which silently mapped every attacker/defender field to NULL in every stored row: the
+// spec-derived names were `firstParty`/`secondParty` with `experienceGained`/
+// `levelGained`; the real API uses `attacker`/`defender` with `experiencePointsGained`/
+// `playerLevelGained`. mapApiReport is still deliberately forgiving — a report whose
+// fields do not match simply maps them to NULL, and a report without a usable id is
+// skipped — one bad row must never abort a sync batch.
 //
-// firstParty is mapped to att_ (the side that initiated the battle) and secondParty to
-// def_, matching the search parameters the API exposes (FirstParty.AllianceId /
-// SecondParty.AllianceId).
+// `attacker` is mapped to att_ (the side that initiated the battle) and `defender` to
+// def_. `conqueredPlanet` is a plain boolean in the real response (there is no planet-id
+// field on this endpoint at all, despite the column's original "game planet id" framing
+// in formatBattleEmbed below) — mapped with bool01, not int.
 
 // Coercion helpers: the API is typed by its spec, but the payload has travelled through
 // a member's browser. Anything that is not the expected shape becomes NULL, not a throw.
@@ -45,8 +50,8 @@ function mapApiReport(api) {
     const id = int(api.id);
     if (id == null || id <= 0) return null;
 
-    const att = (api.firstParty && typeof api.firstParty === 'object') ? api.firstParty : {};
-    const def = (api.secondParty && typeof api.secondParty === 'object') ? api.secondParty : {};
+    const att = (api.attacker && typeof api.attacker === 'object') ? api.attacker : {};
+    const def = (api.defender && typeof api.defender === 'object') ? api.defender : {};
 
     const side = (s, prefix) => ({
         [`${prefix}alliance_id`]: int(s.allianceId),
@@ -59,8 +64,8 @@ function mapApiReport(api) {
         [`${prefix}survived_cv`]: int(s.survivedCombatValue ?? s.survivedCv),
         [`${prefix}lost_cv`]: int(s.lostCombatValue ?? s.lostCv),
         [`${prefix}pct_cv_lost`]: real(s.percentageCombatValueLost ?? s.pctCvLost),
-        [`${prefix}xp_gained`]: int(s.experienceGained ?? s.xpGained),
-        [`${prefix}level_gained`]: int(s.levelGained ?? s.levelsGained),
+        [`${prefix}xp_gained`]: int(s.experiencePointsGained ?? s.experienceGained ?? s.xpGained),
+        [`${prefix}level_gained`]: int(s.playerLevelGained ?? s.levelGained ?? s.levelsGained),
     });
 
     return {
@@ -69,7 +74,7 @@ function mapApiReport(api) {
         started_at: text(api.startedAt ?? api.dateTime),
         is_public: bool01(api.isPublic),
         winner: text(api.winner),
-        conquered_planet: int(api.conqueredPlanet),
+        conquered_planet: bool01(api.conqueredPlanet),
         killed_population: int(api.killedPopulation),
         random_number: real(api.randomNumber),
         ...side(att, 'att_'),
@@ -159,7 +164,7 @@ function formatBattleEmbed(row) {
         outcome,
         `CV ${num(row.att_combat_value)} vs ${num(row.def_combat_value)} — losses ${num(row.att_lost_cv)} / ${num(row.def_lost_cv)}`,
     ];
-    if (row.conquered_planet != null) lines.push(`Planet conquered (game planet id ${row.conquered_planet}).`);
+    if (row.conquered_planet === 1) lines.push('Planet conquered.');
     if (row.killed_population != null && row.killed_population > 0) lines.push(`Population killed: ${num(row.killed_population)}.`);
 
     return {

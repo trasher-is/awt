@@ -11,6 +11,7 @@ const incomingRepo = require('./repositories/incoming');
 const notesRepo = require('./repositories/notes');
 const settingsRepo = require('./repositories/settings');
 const battlePointsRepo = require('./repositories/battlePoints');
+const battleReportsRepo = require('./repositories/battleReports');
 const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
 const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require('./utils/covering');
 // The battle model — the same physical file the dashboard calculator imports, so
@@ -296,7 +297,8 @@ async function handleMessage(message) {
                 { name: '`!ghosts <sys_id> <planet_num> <alliance_tag>`', value: 'Calculates the shortest/longest hidden fleet arrival window from hostile members with radar vision over a system.\n*Example: `!ghosts 1 10 AO`*' },
                 { name: '`!bio`', value: 'Generates intelligence alerts highlighting players who possess a +6 biology or science advantage over your personal bio level.' },
                 { name: '`!battle <D> <C> <B> vs <D> <C> <B>`', value: 'Simulates a battle. Flags: `--sb N` starbase (0-50), `--dp/--ap N` physics, `--dm/--am N` math, `--dra/--ara N` race atk, `--drd/--ard N` race def, `--dl/--al N` player level. Or `--def Name --atk Name` to auto-fill all stats from DB.\n*Example: `!battle 50 10 0 vs 40 8 2 --dp 5 --ap 3 --dl 12 --al 8`*' },
-                { name: '`!mortal` / `!mortalday` / `!mortalweek`', value: 'Shows the CV/population-killed battle leaderboards — all-time, last 24 hours, or last 7 days.\n*Example: `!mortalweek`*' }
+                { name: '`!mortal` / `!mortalday` / `!mortalweek`', value: 'Shows the CV/population-killed battle leaderboards — all-time, last 24 hours, or last 7 days.\n*Example: `!mortalweek`*' },
+                { name: '`!lastseen <player_name>`', value: 'Shows the most recent system/planet a player was involved in a battle report or News-page bombardment at, on either side.\n*Example: `!lastseen Hkiller89`*' }
             )
             .setFooter({ text: 'AWT Intelligence Hub' });
 
@@ -343,6 +345,42 @@ async function handleMessage(message) {
             .addFields(
                 { name: '💥 CV Killed', value: formatLines(cv, 'CV') },
                 { name: '☠️ Population Killed', value: formatLines(pop, 'pop') },
+            )
+            .setColor('#e11d48');
+
+        return message.reply({ embeds: [embed] });
+    }
+
+    // ----------------------------------------------------
+    // !lastseen <name> - MOST RECENT BATTLE/BOMBARDMENT LOCATION FOR A PLAYER
+    // ----------------------------------------------------
+    if (command === 'lastseen') {
+        const playerName = args.join(' ');
+        if (!playerName) return message.reply('❌ Usage: `!lastseen <player_name>`');
+
+        const player = playersRepo.getPlayerFullByName(playerName);
+        if (!player) return message.reply(`❌ Player **${playerName}** not found in the database.`);
+
+        const seen = battleReportsRepo.getLastSeenPlanet(player.id);
+        if (!seen) return message.reply(`👀 No battle-report or News-page location on record for **${player.name}** yet.`);
+
+        const sys = systemsRepo.getSystemCoords(seen.system_id);
+        const sysLabel = sys ? `${sys.name || 'System ' + sys.id} (${sys.x}/${sys.y})` : `System ${seen.system_id}`;
+        const planetName = seen.planet_index != null
+            ? systemsRepo.getPlanetNameByLocation(seen.system_id, seen.planet_index)
+            : systemsRepo.getPlanetNameByGameId(seen.game_planet_id);
+        const planetLabel = planetName
+            ? planetName
+            : (seen.planet_index != null ? `planet #${seen.planet_index}` : `planet id ${seen.game_planet_id}`);
+        const sourceLabel = seen.source === 'battle_report'
+            ? `[battle report #${seen.source_id}](https://astrowars.games/About/BattleReport/${seen.source_id})`
+            : 'a News-page bombardment';
+
+        const embed = new EmbedBuilder()
+            .setTitle(`👀 Last Seen — ${player.name}`)
+            .setDescription(
+                `**${sysLabel}** — ${planetLabel}\n` +
+                `At <t:${Math.floor(Date.parse(seen.occurred_at) / 1000)}:R>, via ${sourceLabel}.`
             )
             .setColor('#e11d48');
 

@@ -48,25 +48,27 @@ function freshDb() {
     return { db, dir };
 }
 
-// A synthetic report in the spec-derived API shape (camelCase, firstParty/secondParty).
+// A synthetic report in the real production API shape (confirmed 2026-08-30 against
+// GET https://astrowars.games/api/v1/BattleReport/search — attacker/defender, boolean
+// conqueredPlanet, experiencePointsGained/playerLevelGained).
 function apiReport(overrides = {}) {
     return {
         id: 101,
         startedAt: '2026-08-15T18:30:00.000Z',
         isPublic: true,
-        winner: 'FirstParty',
-        conqueredPlanet: 4242,
+        winner: 'Attacker',
+        conqueredPlanet: true,
         killedPopulation: 7,
         randomNumber: 0.4321,
-        firstParty: {
+        attacker: {
             allianceId: 11, allianceTag: 'ATK', playerId: 5001, playerName: 'Synth Attacker',
             hasWon: true, luckiness: 1.05, combatValue: 12000, survivedCombatValue: 9000,
-            lostCombatValue: 3000, percentageCombatValueLost: 25, experienceGained: 340, levelGained: 1,
+            lostCombatValue: 3000, percentageCombatValueLost: 25, experiencePointsGained: 340, playerLevelGained: 1,
         },
-        secondParty: {
+        defender: {
             allianceId: 22, allianceTag: 'DEF', playerId: 5002, playerName: 'Synth Defender',
             hasWon: false, luckiness: 0.97, combatValue: 8000, survivedCombatValue: 0,
-            lostCombatValue: 8000, percentageCombatValueLost: 100, experienceGained: 120, levelGained: 0,
+            lostCombatValue: 8000, percentageCombatValueLost: 100, experiencePointsGained: 120, playerLevelGained: 0,
         },
         ...overrides,
     };
@@ -82,17 +84,50 @@ const cleanup = [];
         ok('started_at is kept as a string', row.started_at === '2026-08-15T18:30:00.000Z', row.started_at);
         ok('booleans become 0/1 integers', row.is_public === 1 && row.att_has_won === 1 && row.def_has_won === 0, row);
         ok('top-level battle facts survive',
-            row.winner === 'FirstParty' && row.conquered_planet === 4242
+            row.winner === 'Attacker' && row.conquered_planet === 1
             && row.killed_population === 7 && row.random_number === 0.4321, row);
-        ok('firstParty lands under att_',
+        ok('attacker lands under att_',
             row.att_alliance_id === 11 && row.att_alliance_tag === 'ATK'
             && row.att_player_id === 5001 && row.att_player_name === 'Synth Attacker', row);
-        ok('secondParty lands under def_',
+        ok('defender lands under def_',
             row.def_alliance_id === 22 && row.def_player_name === 'Synth Defender', row);
         ok('the CV arithmetic columns come through',
             row.att_combat_value === 12000 && row.att_survived_cv === 9000 && row.att_lost_cv === 3000
             && row.att_pct_cv_lost === 25 && row.att_xp_gained === 340 && row.att_level_gained === 1, row);
         ok('luckiness stays a real', row.att_luckiness === 1.05 && row.def_luckiness === 0.97, row);
+    }
+
+    console.log('\n── Regression: attacker/defender keys, not the guessed firstParty/secondParty ' + '─'.repeat(3));
+    // Before 2026-08-30, mapApiReport read api.firstParty/api.secondParty (an OpenAPI-spec
+    // guess never checked against production) — every real report has attacker/defender
+    // instead, so every att_/def_ field silently mapped to NULL in every stored row for
+    // as long as this bug existed. Assert the OLD shape now maps to all-null sides, so a
+    // future regression back to the guessed names fails loudly instead of silently.
+    {
+        const oldShapeRow = mapApiReport({
+            id: 999, startedAt: '2026-08-15T18:30:00.000Z', winner: 'Attacker',
+            firstParty: { playerId: 1, playerName: 'Should Not Map' },
+            secondParty: { playerId: 2, playerName: 'Should Not Map Either' },
+        });
+        ok('the old spec-guessed firstParty/secondParty shape no longer maps to anything (regression guard)',
+            oldShapeRow.att_player_id === null && oldShapeRow.att_player_name === null
+            && oldShapeRow.def_player_id === null && oldShapeRow.def_player_name === null, oldShapeRow);
+    }
+
+    console.log('\n── conqueredPlanet is a real boolean, not a planet id ' + '─'.repeat(22));
+    // Regression test for the 2026-08-30 production-shape fix: the search endpoint has
+    // no planet-id field at all, only this boolean. false/absent must map to a clean 0/
+    // null, never to something formatBattleEmbed would mistake for "conquered".
+    {
+        ok('conqueredPlanet: true maps to 1', mapApiReport(apiReport({ conqueredPlanet: true })).conquered_planet === 1);
+        ok('conqueredPlanet: false maps to 0, not null/truthy',
+            mapApiReport(apiReport({ conqueredPlanet: false })).conquered_planet === 0);
+        const noPlanetLine = formatBattleEmbed(mapApiReport(apiReport({ conqueredPlanet: false })));
+        ok('a false conqueredPlanet never adds a "Planet conquered" line',
+            !noPlanetLine.description.includes('Planet conquered'), noPlanetLine.description);
+        const planetLine = formatBattleEmbed(mapApiReport(apiReport({ conqueredPlanet: true })));
+        ok('a true conqueredPlanet adds a plain "Planet conquered." line (no fabricated planet id)',
+            planetLine.description.includes('Planet conquered.'), planetLine.description);
     }
 
     console.log('\n── ...and shrugs at what it cannot use ' + '─'.repeat(37));
@@ -172,8 +207,8 @@ const cleanup = [];
         ok('an attacker win is the red embed', embed.color === 0xed4245, embed.color);
 
         const held = formatBattleEmbed(mapApiReport(apiReport({
-            firstParty: { ...apiReport().firstParty, hasWon: false },
-            secondParty: { ...apiReport().secondParty, hasWon: true },
+            attacker: { ...apiReport().attacker, hasWon: false },
+            defender: { ...apiReport().defender, hasWon: true },
         })));
         ok('a held defence is the green one', held.color === 0x57f287, held.color);
 
