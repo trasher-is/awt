@@ -896,7 +896,8 @@ router.post('/sync/trade-prices', requireAuth, (req, res) => {
 
 // --- NEWS-PAGE WATERMARK (for the client's pagination-walk stop condition) ---
 router.get('/sync/news-watermark', requireAuth, (req, res) => {
-    const playerId = playersRepo.getPlayerIdByName(req.session.gameName || '');
+    const row = playersRepo.getPlayerIdByName(req.session.gameName || '');
+    const playerId = row ? row.id : null;
     if (!playerId) return res.json({ watermark: null });
     res.json({ watermark: newsEventsRepo.getWatermark(playerId) });
 });
@@ -911,7 +912,8 @@ router.post('/sync/news', requireAuth, (req, res) => {
     const entries = Array.isArray(req.body.entries) ? req.body.entries : null;
     if (!entries) return res.status(400).json({ error: 'Invalid payload' });
 
-    const playerId = playersRepo.getPlayerIdByName(req.session.gameName || '');
+    const row = playersRepo.getPlayerIdByName(req.session.gameName || '');
+    const playerId = row ? row.id : null;
     if (!playerId) return res.status(400).json({ error: 'Session player not recognized' });
 
     let inserted = 0;
