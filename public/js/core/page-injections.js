@@ -682,7 +682,7 @@ export async function initProfileHubIntel() {
             <div class="col-md-3">${buildActivityLogCard(data.heatmap)}</div>
             <div class="col-md-3">${buildBuildingsCard(p)}</div>
         </div>`
-        + (!hasLiveIntel && p.has_intel ? buildStaleIntelCard(p) : '');
+        + (!hasLiveIntel ? buildIntelCard(p) : '');
     anchor.parentNode.insertBefore(wrap, anchor);
 }
 
@@ -744,6 +744,34 @@ function buildBuildingsCard(p) {
                 ${row('Factories', p.total_factories)}
                 ${row('Labs', p.total_labs)}
                 ${row('Cybernetics', p.total_cybernetics)}
+            </tbody>
+        </table>`;
+}
+
+// Dispatches between the two shapes a player's row of intel columns can be in when this
+// page has no live intel of its own to show: has_intel=1 means every column below was
+// actually captured at some point (buildStaleIntelCard shows the real last-known values);
+// has_intel=0 means the hub has never had vision on this player at all — the table still
+// renders, with an "X" in every cell, so its absence never reads as "definitely zero" and
+// its presence always tells a member at a glance whether the hub has ANY read on this
+// player, without needing to check a separate signal.
+function buildIntelCard(p) {
+    return p.has_intel ? buildStaleIntelCard(p) : buildNoIntelCard();
+}
+
+const INTEL_ROW_LABELS = [
+    'Biology', 'Economy', 'Energy', 'Mathematics', 'Physics', 'Social',
+    'Trade Revenue', 'Eco Bonus', 'Artefact',
+    'Growth', 'Science', 'Culture', 'Production', 'Speed', 'Attack', 'Defence',
+];
+
+function buildNoIntelCard() {
+    const row = (label) => `<tr><td>${esc(label)}</td><td class="lowlight">X</td></tr>`;
+    return `
+        <table class="table">
+            <thead><tr><th colspan="2"><i class="bi bi-clock-history"></i> Hub Intel <span style="font-weight:normal;font-size:11px;color:#888;">(no intel on record)</span></th></tr></thead>
+            <tbody>
+                ${INTEL_ROW_LABELS.map(row).join('')}
             </tbody>
         </table>`;
 }
