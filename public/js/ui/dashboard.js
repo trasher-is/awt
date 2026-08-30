@@ -385,8 +385,10 @@ async function runMassPlayerScan() {
 // wants !mortal/!lastseen to reflect a fight right now instead of waiting on either clock.
 async function runManualBattleSync() {
     const btn = document.getElementById('btn-sync-battles');
+    const originalHtml = btn ? btn.innerHTML : null;
     if (btn) btn.disabled = true;
     try {
+        if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Syncing reports...';
         const { triggerManualSync } = await import('./battle-sync.js');
         const syncResult = await triggerManualSync();
         if (!syncResult.ok) {
@@ -394,6 +396,7 @@ async function runManualBattleSync() {
             return;
         }
 
+        if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Scraping details...';
         const { triggerManualSweep } = await import('./battle-report-detail-sync.js');
         const sweepResult = await triggerManualSweep();
 
@@ -404,6 +407,6 @@ async function runManualBattleSync() {
             showToast(`${syncMsg}. Scraped location/CV for ${sweepResult.scraped} report(s).`);
         }
     } finally {
-        if (btn) btn.disabled = false;
+        if (btn) { btn.disabled = false; btn.innerHTML = originalHtml; }
     }
 }
