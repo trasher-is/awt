@@ -681,9 +681,28 @@ export async function initProfileHubIntel() {
         <div class="row">
             <div class="col-lg-6">${buildActivityLogCard(data.heatmap)}</div>
             <div class="col-lg-6">${buildBuildingsCard(p)}</div>
-        </div>`
-        + (!hasLiveIntel ? buildIntelCard(p) : '');
+        </div>`;
     anchor.parentNode.insertBefore(wrap, anchor);
+
+    // Without live intel, the game renders the player-info card as a single col-12 instead
+    // of its usual col-lg-6 paired with an Intelligence Report column — there is no "top
+    // right" slot already waiting for us. Reclaim it: shrink player-info to col-lg-6 (the
+    // same width it would already be if the game itself had intel to show) and place the
+    // Hub Intel card beside it as the second column, so a profile with no intel on record
+    // ends up laid out exactly like one that does, just with X's instead of numbers.
+    if (!hasLiveIntel) {
+        const playerInfoTable = [...document.querySelectorAll('table.table')]
+            .find(t => t.querySelector('tbody tr td')?.textContent?.trim() === 'Local Time');
+        const playerInfoCol = playerInfoTable ? playerInfoTable.closest('[class*="col-"]') : null;
+        if (playerInfoCol) {
+            playerInfoCol.className = 'col-lg-6';
+            const intelCol = document.createElement('div');
+            intelCol.className = 'col-lg-6';
+            intelCol.id = 'awt-hub-intel-col';
+            intelCol.innerHTML = buildIntelCard(p);
+            playerInfoCol.insertAdjacentElement('afterend', intelCol);
+        }
+    }
 }
 
 function hideSupporterPromo() {
