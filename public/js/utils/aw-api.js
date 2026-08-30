@@ -179,16 +179,6 @@
         return requestJson('/api/v1/BattleReport/search' + query(params));
     }
 
-    // Write a starbase order's geometry. The API exposes no read of the current
-    // geometry, so this is write-only by design; callers confirm with the member first.
-    function putOrderGeometry(orderId, { range, angleDegree1, angleDegree2 } = {}) {
-        return requestJson('/api/v1/Starbase/orders/' + encodeURIComponent(orderId) + '/geometry', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ range, angleDegree1, angleDegree2 }),
-        });
-    }
-
     // ─── MAPPING ──────────────────────────────────────────────────────────────
 
     // API planet objects -> the existing POST /hub-api/sync/system body. The ONE shared
@@ -333,7 +323,7 @@
 
     return {
         getSolarSystems, getSolarSystem, getSystemPlanets, getMapSectors,
-        getTravelTime, searchBattleReports, putOrderGeometry,
+        getTravelTime, searchBattleReports,
         searchAlliances, searchSolarSystems,
         getPlayers, getPlayer, searchPlayers,
         mapPlanetsToSyncPayload, mapSolarSystemsToSyncPayload, mapPlayersToSyncPayload,

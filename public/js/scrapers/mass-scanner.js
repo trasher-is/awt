@@ -9,48 +9,28 @@ const { gameFetch } = globalThis.AWGameRate;
 const { ScrapeReport } = globalThis.AWScrape;
 
 export async function runPlayerScan(updateProgressCb) {
-    console.log("[Mass Scan] Initiating player sequence from Rankings...");
+    console.log("[Mass Scan] Initiating player sequence...");
     try {
-        updateProgressCb("Compiling Player Index from Rankings...", 0, 0);
-        
-        const playerIds = [];
-        let currentPage = 1;
-
-        while (true) {
-            updateProgressCb(`Fetching Ranking Page ${currentPage}...`, currentPage, currentPage + 2); 
-            
-            const rankRes = await gameFetch(`/Ranking/EcoBonus?pageNumber=${currentPage}`);
-            if (!rankRes.ok) break;
-            
-            const rankHtml = await rankRes.text();
-            const rankDoc = new DOMParser().parseFromString(rankHtml, 'text/html');
-            
-            const playerLinks = rankDoc.querySelectorAll('td a[href^="/Game/Players/Profile/"]');
-            if (playerLinks.length === 0) break; 
-
-            let newIdsAdded = 0;
-            playerLinks.forEach(link => {
-                const id = parseInt(link.getAttribute('href').split('/').pop(), 10);
-                if (id && !playerIds.includes(id)) {
-                    playerIds.push(id);
-                    newIdsAdded++;
-                }
-            });
-
-            if (newIdsAdded === 0) break;
-
-            currentPage++;
-            // Pacing is handled centrally by the 5-per-second game gate. 
-        }
+        // Used to scrape the Ranking/EcoBonus pages for the id list — that page can be
+        // empty for stretches of a round (e.g. nothing ranked yet right after a reset) and
+        // duplicated work the API-sourced roster (player-api-sync.js's ListPlayer pull,
+        // forced immediately by the Deep Scan button) already gives the hub for free. The
+        // hub's own /hub-api/players — every player id already on record — is the ONE
+        // source for "which ids to deep-scan" now; this scan is purely about the
+        // page-scrape-only fields (Infrastructure History) the API cannot provide.
+        updateProgressCb("Loading known players from the hub archive...", 0, 0);
+        const listRes = await fetch('/hub-api/players');
+        const listData = await listRes.json().catch(() => ({}));
+        const playerIds = (listRes.ok && Array.isArray(listData.players)) ? listData.players : [];
 
         const total = playerIds.length;
-        if (!total) { 
-            updateProgressCb("Error: No players found in Ranking", 0, 0); 
-            return; 
+        if (!total) {
+            updateProgressCb("Error: no players on record yet — run Deep Scan (API) first", 0, 0);
+            return;
         }
 
-        console.log(`[Mass Scan] Index compiled. Deep scanning ${total} players...`);
-        const rankScan = new ScrapeReport('ranking player scan');
+        console.log(`[Mass Scan] Deep scanning ${total} known players...`);
+        const rankScan = new ScrapeReport('known player scan');
 
         for (let i = 0; i < total; i++) {
             const playerId = playerIds[i];
