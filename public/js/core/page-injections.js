@@ -1,8 +1,12 @@
 import { esc } from '../utils/escape.js';
 import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
 import '../utils/game-rate-limit.js';
+import '../utils/game-tables.js';    // side-effect import: empire-model.js's own dependency
+import '../utils/travel-model.js';   // side-effect import: empire-model.js's own dependency
+import '../utils/empire-model.js';   // side-effect import: TRAIT_PCT, the ONE source for race-bonus %/point
 const { gameFetch } = globalThis.AWGameRate;
 const { formatSqliteUtc } = globalThis.AWSqliteTime;
+const { TRAIT_PCT } = globalThis.AWEmpire.constants;
 
 export function initPlanetPopTimers() {
     if (!window.location.pathname.toLowerCase().includes('/game/planets')) return;
@@ -778,53 +782,82 @@ function buildIntelCard(p) {
     return p.has_intel ? buildStaleIntelCard(p) : buildNoIntelCard();
 }
 
-const INTEL_ROW_LABELS = [
-    'Biology', 'Economy', 'Energy', 'Mathematics', 'Physics', 'Social',
-    'Trade Revenue', 'Eco Bonus', 'Artefact',
-    'Growth', 'Science', 'Culture', 'Production', 'Speed', 'Attack', 'Defence',
+// Mirrors the game's own Intelligence Report field order exactly, so a member who knows
+// that table can read this one the same way. No Eco Bonus row: the real table doesn't
+// have one either — that field lives elsewhere in the hub, not here.
+const IR_ROW_LABELS = ['Biology', 'Economy', 'Energy', 'Mathematics', 'Physics', 'Social', 'Trade Revenue', 'Artefact'];
+
+// Mirrors the game's own Race Summary grid: two traits per row, Defence alone in the last
+// row (the game leaves that cell's partner empty too — there is no 8th trait to pair it
+// with). `pct` is the TRAIT_PCT key, NOT the same spelling as the race_* column for
+// growth/culture/production/speed — only defense/defence differ, but keeping every trait
+// explicit here avoids relying on a naming coincidence for the rest.
+const RACE_TRAITS = [
+    { label: 'Growth', field: 'race_growth', pct: 'growth' },
+    { label: 'Science', field: 'race_science', pct: 'science' },
+    { label: 'Culture', field: 'race_culture', pct: 'culture' },
+    { label: 'Production', field: 'race_production', pct: 'production' },
+    { label: 'Speed', field: 'race_speed', pct: 'speed' },
+    { label: 'Attack', field: 'race_attack', pct: 'attack' },
+    { label: 'Defence', field: 'race_defense', pct: 'defence' },
 ];
+const RACE_ROWS = [[0, 1], [2, 3], [4, 5], [6, null]].map(([a, b]) => [RACE_TRAITS[a], b == null ? null : RACE_TRAITS[b]]);
+
+// "-32% Growth -4" — the game's own format: percent first (its own sign), trait name,
+// then the raw per-level value (also signed, including +0).
+function raceCellKnown(trait, value) {
+    const v = value || 0;
+    const pct = Math.round(v * TRAIT_PCT[trait.pct] * 100);
+    return `${pct >= 0 ? '+' : ''}${pct}% ${trait.label} ${v >= 0 ? '+' : ''}${v}`;
+}
+
+function raceCellUnknown(trait) {
+    return `${trait.label}: X`;
+}
+
+function buildIrTable(caption, rows) {
+    return `
+        <table class="table">
+            <thead><tr><th colspan="2"><i class="bi bi-clock-history"></i> Hub Intel <span style="font-weight:normal;font-size:11px;${caption.color ? `color:${caption.color};` : ''}">${caption.text}</span></th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>`;
+}
+
+function buildRaceTable(cellFn, values) {
+    const rows = RACE_ROWS.map(([a, b]) => `
+        <tr>
+            <td>${esc(cellFn(a, values && values[a.field]))}</td>
+            <td>${b ? esc(cellFn(b, values && values[b.field])) : ''}</td>
+        </tr>`).join('');
+    return `
+        <table class="table mb-2">
+            <thead><tr><th colspan="2">Race Summary</th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>`;
+}
 
 function buildNoIntelCard() {
     const row = (label) => `<tr><td>${esc(label)}</td><td class="lowlight">X</td></tr>`;
-    return `
-        <table class="table">
-            <thead><tr><th colspan="2"><i class="bi bi-clock-history"></i> Hub Intel <span style="font-weight:normal;font-size:11px;color:#888;">(no intel on record)</span></th></tr></thead>
-            <tbody>
-                ${INTEL_ROW_LABELS.map(row).join('')}
-            </tbody>
-        </table>`;
+    return buildIrTable({ text: '(no intel on record)', color: '#888' }, IR_ROW_LABELS.map(row).join(''))
+        + buildRaceTable(raceCellUnknown, null);
 }
 
 function buildStaleIntelCard(p) {
     const row = (label, val) => `<tr><td>${esc(label)}</td><td class="lowlight">${esc(val)}</td></tr>`;
-    const trait = (label, val) => {
-        const n = val || 0;
-        return row(label, `${n > 0 ? '+' : ''}${n}`);
-    };
     const updatedAt = formatSqliteUtc(p.intel_updated_at, undefined, 'unknown date');
+    const irRows = [
+        row('Biology', p.biology || 0),
+        row('Economy', p.economy || 0),
+        row('Energy', p.energy || 0),
+        row('Mathematics', p.mathematics || 0),
+        row('Physics', p.physics || 0),
+        row('Social', p.social || 0),
+        row('Trade Revenue', `+${p.trade_revenue || 0}%`),
+        row('Artefact', p.artefact || 'N/A'),
+    ].join('');
 
-    return `
-        <table class="table">
-            <thead><tr><th colspan="2"><i class="bi bi-clock-history"></i> Hub Intel <span style="font-weight:normal;font-size:11px;color:#c96;">(last known — as of ${esc(updatedAt)}, not currently visible in-game)</span></th></tr></thead>
-            <tbody>
-                ${row('Biology', p.biology || 0)}
-                ${row('Economy', p.economy || 0)}
-                ${row('Energy', p.energy || 0)}
-                ${row('Mathematics', p.mathematics || 0)}
-                ${row('Physics', p.physics || 0)}
-                ${row('Social', p.social || 0)}
-                ${row('Trade Revenue', `+${p.trade_revenue || 0}%`)}
-                ${row('Eco Bonus', `+${p.eco_bonus || 0}%`)}
-                ${row('Artefact', p.artefact || 'None')}
-                ${trait('Growth', p.race_growth)}
-                ${trait('Science', p.race_science)}
-                ${trait('Culture', p.race_culture)}
-                ${trait('Production', p.race_production)}
-                ${trait('Speed', p.race_speed)}
-                ${trait('Attack', p.race_attack)}
-                ${trait('Defence', p.race_defense)}
-            </tbody>
-        </table>`;
+    return buildIrTable({ text: `(last known — as of ${esc(updatedAt)}, not currently visible in-game)`, color: '#c96' }, irRows)
+        + buildRaceTable(raceCellKnown, p);
 }
 
 let currentObservedTable = null;
