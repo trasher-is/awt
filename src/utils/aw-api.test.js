@@ -332,6 +332,64 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
     ok('a non-array players answer maps to an empty, well-formed body',
         Array.isArray(degeneratePlayers.players) && degeneratePlayers.players.length === 0, degeneratePlayers);
 
+    console.log('\n── mapPlayerDetailToSyncPayload: the ONE API→/sync/player-detail mapper ' + '─'.repeat(5));
+    // Real-shaped Player/{id} detail with a FULL intelligenceReport.race object.
+    const fullDetail = AWApi.mapPlayerDetailToSyncPayload({
+        id: 413, name: 'Someplayer', allianceId: 9, playerLevel: 5, pointsScored: 100,
+        rank: 12, playsFromCountryCode: 'DE', isActivePlayer: true, joinedAt: '2026-08-01T00:00:00Z',
+        numberOfLogins: 40, lastActivityAt: '2026-08-30T10:00:00Z', lastLoginAt: '2026-08-30T09:00:00Z',
+        resignedAt: null, numberOfBattles: 3, battleLuckiness: 1.2, multiStatus: 'clean',
+        isTopPermanentRanker: false, hasSupporterBadge: true, supporterType: 'gold',
+        intelligenceReport: {
+            biologyLevel: 10, economyLevel: 11, energyLevel: 12, mathematicsLevel: 13,
+            physicsLevel: 14, socialLevel: 15, tradeBonus: 16, activeArtefact: { name: 'Relic' },
+            race: { growth: 1, science: 2, culture: 3, production: 4, speed: 5, attack: 6, defense: 7, trader: 8, sul: 9 },
+        },
+    });
+    ok('id/name/alliance_id/level/points/ranking/country/joined carry through',
+        fullDetail.id === 413 && fullDetail.name === 'Someplayer' && fullDetail.alliance_id === 9
+        && fullDetail.level === 5 && fullDetail.points === 100 && fullDetail.ranking === 12
+        && fullDetail.country === 'DE' && fullDetail.joined === '2026-08-01T00:00:00Z', fullDetail);
+    ok('has_intel is 1 when intelligenceReport is present', fullDetail.has_intel === 1, fullDetail);
+    ok('every race_* field carries through when the race sub-object is complete',
+        fullDetail.race_growth === 1 && fullDetail.race_sul === 9, fullDetail);
+    ok('artefact is JSON-stringified from activeArtefact',
+        fullDetail.artefact === JSON.stringify({ name: 'Relic' }), fullDetail.artefact);
+
+    // Regression for the real production crash (2026-08-30): intel.race present but
+    // missing ONE bonus field (growth) must map to null, never to undefined — a bare
+    // undefined is dropped entirely by JSON.stringify on the way to the server, which
+    // crashed better-sqlite3's named-parameter binding.
+    const partialRaceDetail = AWApi.mapPlayerDetailToSyncPayload({
+        id: 414, name: 'Otherplayer', allianceId: null, playerLevel: 5, pointsScored: 100,
+        rank: null, playsFromCountryCode: null, isActivePlayer: true, joinedAt: null,
+        numberOfLogins: null, lastActivityAt: null, lastLoginAt: null, resignedAt: null,
+        numberOfBattles: null, battleLuckiness: null, multiStatus: null,
+        isTopPermanentRanker: false, hasSupporterBadge: false, supporterType: null,
+        intelligenceReport: {
+            biologyLevel: 1, economyLevel: 1, energyLevel: 1, mathematicsLevel: 1,
+            physicsLevel: 1, socialLevel: 1, tradeBonus: 1, activeArtefact: null,
+            race: { science: 2, culture: 3, production: 4, speed: 5, attack: 6, defense: 7, trader: 8, sul: 9 }, // growth omitted
+        },
+    });
+    ok('a race sub-object missing one field maps that field to null, not undefined',
+        partialRaceDetail.race_growth === null, partialRaceDetail.race_growth);
+    ok('the field is an own, enumerable key (JSON.stringify will not drop it)',
+        Object.prototype.hasOwnProperty.call(partialRaceDetail, 'race_growth')
+        && JSON.parse(JSON.stringify(partialRaceDetail)).race_growth === null, partialRaceDetail);
+
+    const noIntelDetail = AWApi.mapPlayerDetailToSyncPayload({
+        id: 415, name: 'NoIntel', allianceId: null, playerLevel: 1, pointsScored: 0,
+        rank: null, playsFromCountryCode: null, isActivePlayer: true, joinedAt: null,
+        numberOfLogins: null, lastActivityAt: null, lastLoginAt: null, resignedAt: null,
+        numberOfBattles: null, battleLuckiness: null, multiStatus: null,
+        isTopPermanentRanker: false, hasSupporterBadge: false, supporterType: null,
+        intelligenceReport: null,
+    });
+    ok('has_intel is 0 and every intel/race field is null when there is no intelligenceReport',
+        noIntelDetail.has_intel === 0 && noIntelDetail.biology === null && noIntelDetail.race_growth === null,
+        noIntelDetail);
+
     console.log('\n── Source scan: the rules this file lives under ' + '─'.repeat(28));
     // Comments stripped first so a comment describing an old rule can never trip these.
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'utils', 'aw-api.js'), 'utf8')

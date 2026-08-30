@@ -61,22 +61,30 @@ async function pickListCadence() {
     return LIST_INTERVAL_FREQUENT_MS;
 }
 
+// Unconditional — no lock check, no cadence decision. This is the actual work; both the
+// scheduled background puller (runListPull, below) and a member's manual "force it now"
+// request (dashboard.js's deep-scan flow) call this directly.
+export async function pullPlayerList() {
+    const res = await AWApi.getPlayers();
+    if (!res.ok) return { ok: false, error: res.reason === 'session' ? 'session' : (res.reason || 'request failed') };
+    if (!Array.isArray(res.data) || !res.data.length) return { ok: false, error: 'no active players returned' };
+    // The ONE shared API->sync mapper (aw-api.js) — never a local copy of it.
+    const { players } = AWApi.mapPlayersToSyncPayload(res.data);
+    const syncRes = await fetch('/hub-api/sync/player-list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ players }),
+    });
+    const syncBody = await syncRes.json().catch(() => ({}));
+    if (!syncRes.ok || !syncBody.success) return { ok: false, error: syncBody.error || `HTTP ${syncRes.status}` };
+    return { ok: true, count: players.length };
+}
+
 async function runListPull() {
     if (!claimLock(LIST_LOCK_KEY, LIST_LOCK_TTL_MS)) return;
     try {
-        const res = await AWApi.getPlayers();
-        if (!res.ok || !Array.isArray(res.data) || !res.data.length) return;
-        // The ONE shared API->sync mapper (aw-api.js) — never a local copy of it.
-        const { players } = AWApi.mapPlayersToSyncPayload(res.data);
-        const syncRes = await fetch('/hub-api/sync/player-list', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ players }),
-        });
-        const syncBody = await syncRes.json().catch(() => ({}));
-        if (!syncRes.ok || !syncBody.success) {
-            console.warn('[PlayerApiSync] list sync rejected:', syncRes.status, syncBody.error || '');
-        }
+        const result = await pullPlayerList();
+        if (!result.ok) console.warn('[PlayerApiSync] list pull failed:', result.error);
     } catch (err) {
         console.warn('[PlayerApiSync] list pull failed:', err.message);
     }
@@ -91,6 +99,48 @@ async function scheduleNextListPull() {
     }, cadence);
 }
 
+// Claims `limit` stale ids and scans each one — the one loop shared by the quiet
+// background tick (SWEEP_BATCH_SIZE, no progress reporting) and a member's manual "deep
+// scan" (a much larger one-shot limit, reported through onProgress). Claiming is what
+// /hub-api/sync/player-scan-claim calls an optimistic claim: it bumps last_api_scan_at
+// immediately, so a second caller — another member's browser, or this same one again in
+// SWEEP_INTERVAL_MS/the deep-scan cooldown — naturally gets handed the NEXT stale batch
+// instead of racing this one for the same ids.
+async function scanClaimedBatch(limit, onProgress = () => {}) {
+    const claimRes = await fetch(`/hub-api/sync/player-scan-claim?limit=${limit}`, { method: 'POST' });
+    const claimed = await claimRes.json().catch(() => ({}));
+    if (!claimRes.ok || !claimed.success) {
+        return { ok: false, error: claimed.error || `HTTP ${claimRes.status}` };
+    }
+    const ids = Array.isArray(claimed.ids) ? claimed.ids : [];
+    let scanned = 0;
+    let failed = 0;
+    for (const id of ids) {
+        onProgress(`Scanning player ${id}…`, scanned + failed, ids.length);
+        const res = await AWApi.getPlayer(id);
+        if (!res.ok || !res.data) { failed++; continue; }
+        // The ONE shared API->sync mapper (aw-api.js) — never a local copy of it. This is
+        // the mapper that drifted from the server's expectations in the race_growth bug
+        // (2026-08-30); keeping exactly one copy is what makes that class of bug impossible
+        // now, not just fixed once.
+        const player = AWApi.mapPlayerDetailToSyncPayload(res.data);
+        const detailRes = await fetch('/hub-api/sync/player-detail', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ player }),
+        });
+        const detailBody = await detailRes.json().catch(() => ({}));
+        if (!detailRes.ok || !detailBody.success) {
+            console.warn('[PlayerApiSync] player-detail sync failed for', id, detailRes.status, detailBody.error || '');
+            failed++;
+        } else {
+            scanned++;
+        }
+        onProgress(`Scanned ${scanned + failed}/${ids.length} players…`, scanned + failed, ids.length);
+    }
+    return { ok: true, claimed: ids.length, scanned, failed };
+}
+
 let sweeping = false;
 async function runSweepTick() {
     // Re-entrancy guard: a tick can easily run long (up to SWEEP_BATCH_SIZE sequential
@@ -102,71 +152,42 @@ async function runSweepTick() {
     if (!claimLock(SWEEP_LOCK_KEY, SWEEP_LOCK_TTL_MS)) return;
     sweeping = true;
     try {
-        const claimRes = await fetch(`/hub-api/sync/player-scan-claim?limit=${SWEEP_BATCH_SIZE}`, { method: 'POST' });
-        const claimed = await claimRes.json().catch(() => ({}));
-        if (!claimRes.ok || !claimed.success) {
-            console.warn('[PlayerApiSync] scan-claim failed:', claimRes.status, claimed.error || '');
-            return;
-        }
-        const ids = Array.isArray(claimed.ids) ? claimed.ids : [];
-        for (const id of ids) {
-            const res = await AWApi.getPlayer(id);
-            if (!res.ok || !res.data) continue;
-            const d = res.data;
-            const intel = d.intelligenceReport;
-            const player = {
-                id: d.id, name: typeof d.name === 'string' ? d.name : null,
-                alliance_id: Number.isInteger(d.allianceId) ? d.allianceId : null,
-                level: Number.isInteger(d.playerLevel) ? d.playerLevel : null,
-                points: Number.isInteger(d.pointsScored) ? d.pointsScored : null,
-                ranking: Number.isInteger(d.rank) ? d.rank : null,
-                country: typeof d.playsFromCountryCode === 'string' ? d.playsFromCountryCode : null,
-                is_active_player: d.isActivePlayer ? 1 : 0,
-                joined: typeof d.joinedAt === 'string' ? d.joinedAt : null,
-                logins: Number.isInteger(d.numberOfLogins) ? d.numberOfLogins : null,
-                last_activity_at: typeof d.lastActivityAt === 'string' ? d.lastActivityAt : null,
-                last_login_at: typeof d.lastLoginAt === 'string' ? d.lastLoginAt : null,
-                resigned_at: typeof d.resignedAt === 'string' ? d.resignedAt : null,
-                number_of_battles: Number.isInteger(d.numberOfBattles) ? d.numberOfBattles : null,
-                battle_luckiness: typeof d.battleLuckiness === 'number' ? d.battleLuckiness : null,
-                multi_status: typeof d.multiStatus === 'string' ? d.multiStatus : null,
-                is_top_permanent_ranker: d.isTopPermanentRanker ? 1 : 0,
-                has_supporter_badge: d.hasSupporterBadge ? 1 : 0,
-                supporter_type: typeof d.supporterType === 'string' ? d.supporterType : null,
-                has_intel: intel ? 1 : 0,
-                biology: intel ? (intel.biologyLevel ?? null) : null,
-                economy: intel ? (intel.economyLevel ?? null) : null,
-                energy: intel ? (intel.energyLevel ?? null) : null,
-                mathematics: intel ? (intel.mathematicsLevel ?? null) : null,
-                physics: intel ? (intel.physicsLevel ?? null) : null,
-                social: intel ? (intel.socialLevel ?? null) : null,
-                trade_revenue: intel ? (intel.tradeBonus ?? null) : null,
-                artefact: intel && intel.activeArtefact ? JSON.stringify(intel.activeArtefact) : null,
-                race_growth: intel && intel.race ? (intel.race.growth ?? null) : null,
-                race_science: intel && intel.race ? (intel.race.science ?? null) : null,
-                race_culture: intel && intel.race ? (intel.race.culture ?? null) : null,
-                race_production: intel && intel.race ? (intel.race.production ?? null) : null,
-                race_speed: intel && intel.race ? (intel.race.speed ?? null) : null,
-                race_attack: intel && intel.race ? (intel.race.attack ?? null) : null,
-                race_defense: intel && intel.race ? (intel.race.defense ?? null) : null,
-                race_trader: intel && intel.race ? (intel.race.trader ?? null) : null,
-                race_sul: intel && intel.race ? (intel.race.sul ?? null) : null,
-            };
-            const detailRes = await fetch('/hub-api/sync/player-detail', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ player }),
-            });
-            const detailBody = await detailRes.json().catch(() => ({}));
-            if (!detailRes.ok || !detailBody.success) {
-                console.warn('[PlayerApiSync] player-detail sync failed for', id, detailRes.status, detailBody.error || '');
-            }
-        }
+        const result = await scanClaimedBatch(SWEEP_BATCH_SIZE);
+        if (!result.ok) console.warn('[PlayerApiSync] scan-claim failed:', result.error);
     } catch (err) {
         console.warn('[PlayerApiSync] sweep tick failed:', err.message);
     } finally {
         sweeping = false;
     }
+}
+
+const DEEP_SCAN_LOCK_KEY = 'awt.playerDeepScan.lock.v1';
+const DEEP_SCAN_LOCK_TTL_MS = 5 * 60 * 1000; // "the same player in 5 mins" — a fresh
+// browser/tab (another member) is a different localStorage origin-instance in practice
+// only when it's a different machine; same-machine tabs share it, which is the point —
+// one person mashing the button doesn't restart the claim ahead of the batch actually
+// finishing scanning.
+
+// Manual, immediate, much bigger cousin of the background sweep: forces the roster list
+// fresh right now instead of waiting on scheduleNextListPull's own clock, then claims and
+// scans up to `limit` stale players in one shot instead of trickling SWEEP_BATCH_SIZE per
+// minute. Self-cooldown only guards
+// against the SAME browser re-claiming before a prior run's batch could even finish; the
+// claim endpoint itself is what makes it safe for a DIFFERENT member to run this at the
+// same time — they simply get handed whatever the first claim didn't take.
+export async function deepScanPlayers(limit, onProgress = () => {}) {
+    if (!claimLock(DEEP_SCAN_LOCK_KEY, DEEP_SCAN_LOCK_TTL_MS)) {
+        return { ok: false, error: 'cooldown' };
+    }
+    onProgress('Refreshing the player roster…', 0, 0);
+    const listResult = await pullPlayerList();
+    if (!listResult.ok && listResult.error === 'session') {
+        return { ok: false, error: 'session' };
+    }
+    onProgress('Claiming stale players…', 0, 0);
+    const scanResult = await scanClaimedBatch(limit, onProgress);
+    if (!scanResult.ok) return scanResult;
+    return { ok: true, listUpdated: listResult.ok ? listResult.count : null, ...scanResult };
 }
 
 let started = false;

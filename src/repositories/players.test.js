@@ -207,6 +207,21 @@ ok('a player scanned more than 6 hours ago re-enters the stale queue',
 ok('a player scanned less than 6 hours ago still stays excluded',
     !staleAfterBackdate.includes(703), staleAfterBackdate);
 
+// --- getPlayerApiScanStats: the Deep scan button's status line ---
+// At this point: 701 has has_intel written but was never marked scanned (last_api_scan_at
+// still NULL from upsertPlayerFromApiDetail, which never touches it — only
+// markPlayersApiScanned does) -> stale. 702 was backdated to 7h ago -> stale again. 703 is
+// still within the 6h fresh window -> not stale. Every OTHER player row created earlier in
+// this suite also counts toward total, so this only asserts the stale count and the shape,
+// not an exact total.
+const scanStats = players.getPlayerApiScanStats();
+ok('getPlayerApiScanStats returns a total at least as large as the rows just created',
+    scanStats.total >= 3, scanStats);
+ok('getPlayerApiScanStats stale count agrees with getStalePlayerIdsForApiScan for a large limit',
+    scanStats.stale === players.getStalePlayerIdsForApiScan(100000).length, scanStats);
+ok('getPlayerApiScanStats last_scan_at reflects the most recent markPlayersApiScanned call',
+    scanStats.last_scan_at != null, scanStats);
+
 // --- Finding 1: guarding upsertPlayerFromApiDetail against partial/malformed intel and
 // enforcing race write-once. The route layer (sync.js) is what decides has_intel and
 // normalizes race_* before calling the repo — these tests exercise the repo-level pieces
