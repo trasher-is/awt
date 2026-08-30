@@ -10,6 +10,7 @@ const discordTimersRepo = require('./repositories/discordTimers');
 const incomingRepo = require('./repositories/incoming');
 const notesRepo = require('./repositories/notes');
 const settingsRepo = require('./repositories/settings');
+const battlePointsRepo = require('./repositories/battlePoints');
 const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
 const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require('./utils/covering');
 // The battle model — the same physical file the dashboard calculator imports, so
@@ -294,7 +295,8 @@ async function handleMessage(message) {
                 { name: '`!tt <sysA> <plnA> <sysB> <plnB> <speed> <nrg>`', value: 'Calculates fleet travel time between two coordinates.\n*Example: `!tt 100 1 200 4 10 5`*\n*(You can also swap speed/energy for a player name: `!tt 100 1 200 4 PlayerOne`)*' },
                 { name: '`!ghosts <sys_id> <planet_num> <alliance_tag>`', value: 'Calculates the shortest/longest hidden fleet arrival window from hostile members with radar vision over a system.\n*Example: `!ghosts 1 10 AO`*' },
                 { name: '`!bio`', value: 'Generates intelligence alerts highlighting players who possess a +6 biology or science advantage over your personal bio level.' },
-                { name: '`!battle <D> <C> <B> vs <D> <C> <B>`', value: 'Simulates a battle. Flags: `--sb N` starbase (0-50), `--dp/--ap N` physics, `--dm/--am N` math, `--dra/--ara N` race atk, `--drd/--ard N` race def, `--dl/--al N` player level. Or `--def Name --atk Name` to auto-fill all stats from DB.\n*Example: `!battle 50 10 0 vs 40 8 2 --dp 5 --ap 3 --dl 12 --al 8`*' }
+                { name: '`!battle <D> <C> <B> vs <D> <C> <B>`', value: 'Simulates a battle. Flags: `--sb N` starbase (0-50), `--dp/--ap N` physics, `--dm/--am N` math, `--dra/--ara N` race atk, `--drd/--ard N` race def, `--dl/--al N` player level. Or `--def Name --atk Name` to auto-fill all stats from DB.\n*Example: `!battle 50 10 0 vs 40 8 2 --dp 5 --ap 3 --dl 12 --al 8`*' },
+                { name: '`!mortal` / `!mortalday` / `!mortalweek`', value: 'Shows the CV/population-killed battle leaderboards — all-time, last 24 hours, or last 7 days.\n*Example: `!mortalweek`*' }
             )
             .setFooter({ text: 'AWT Intelligence Hub' });
 
@@ -319,6 +321,32 @@ async function handleMessage(message) {
     // ----------------------------------------------------
     if (command === 'getid') {
         return message.reply(`The ID of this channel is: **${message.channel.id}**`);
+    }
+
+    // ----------------------------------------------------
+    // !mortal / !mortalday / !mortalweek - BATTLE CHALLENGE LEADERBOARDS
+    // ----------------------------------------------------
+    if (command === 'mortal' || command === 'mortalday' || command === 'mortalweek') {
+        const now = Date.now();
+        const sinceIso = command === 'mortalday' ? new Date(now - 24 * 60 * 60 * 1000).toISOString()
+            : command === 'mortalweek' ? new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString()
+            : null;
+        const label = command === 'mortalday' ? 'Last 24 Hours' : command === 'mortalweek' ? 'Last 7 Days' : 'All Time';
+
+        const { cv, pop } = battlePointsRepo.getLeaderboards(sinceIso, 10);
+        const formatLines = (rows, unit) => rows.length
+            ? rows.map((r, i) => `**${i + 1}.** ${r.player_name || 'Unknown'} — ${r.points} pts (${r.raw.toLocaleString()} ${unit})`).join('\n')
+            : '_No battles recorded yet._';
+
+        const embed = new EmbedBuilder()
+            .setTitle(`⚔️ Battle Challenge — ${label}`)
+            .addFields(
+                { name: '💥 CV Killed', value: formatLines(cv, 'CV') },
+                { name: '☠️ Population Killed', value: formatLines(pop, 'pop') },
+            )
+            .setColor('#e11d48');
+
+        return message.reply({ embeds: [embed] });
     }
 
     // ----------------------------------------------------
