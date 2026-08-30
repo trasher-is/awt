@@ -97,14 +97,30 @@ member's next News-page visit.
 
 ### 3.3 Message types handled
 
-- `battle-conquer` / `battle-conquered` — no CV/population numbers. Checked
-  against `battle_reports` (matching planet, timestamp within ±10 minutes): if
-  no match exists, it's a walkover, stored for the announcement feed only.
+**Matching rule (correction from an earlier draft):** `battle_reports` carries
+no planet or system column at all — only `att_player_id`/`def_player_id` and
+`started_at`. So a News entry is matched against `battle_reports` by **player
+pair + time proximity**, not by planet: does a row exist where
+`(att_player_id, def_player_id)` equals `(scraping player, other player)` in
+either order, with `started_at` within ±15 minutes of the News entry's
+`occurred_at`? The other player's id comes directly from the profile link in
+the News row's HTML (`/Game/Players/Profile/{id}`).
+
+- `battle-conquer` / `battle-conquered` — no CV/population numbers, and no
+  other-player link either (conquering an undefended planet has no opponent to
+  name). These can never match a `battle_reports` row by the rule above — a
+  conquest with a real fight behind it always shows up as `battle-lost` (with
+  a battle-report link) on one side or an ordinary win on the other, never as
+  `battle-conquer`/`battle-conquered` itself. So these two types are *always*
+  treated as walkovers and stored for the announcement feed only; they never
+  need a cross-reference lookup.
 - `battle-bombarded` — two mirrored wordings depending on which side the
   scraping player was on: *"You lost N population..."* (defender) or *"You
-  killed N population..."* (attacker). Checked against `battle_reports` the
-  same way. If no match exists, the population number **is** counted toward
-  the population leaderboard, credited to the attacker. If a match exists, the
+  killed N population..."* (attacker). The other player's id (attacker or
+  defender counterpart) comes from the profile link in the row, so this type
+  IS checked against `battle_reports` by the player-pair + time-proximity rule
+  above. If no match exists, the population number **is** counted toward the
+  population leaderboard, credited to the attacker. If a match exists, the
   battle report's own `killed_population` already covers it — the News entry
   is stored (for audit/completeness) but excluded from the point sum.
 - All other message types (`player-incoming`, etc.) are ignored by this
