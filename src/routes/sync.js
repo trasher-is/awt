@@ -953,12 +953,18 @@ router.post('/sync/news', requireAuth, (req, res) => {
             let matched_battle_report_id = null;
 
             if (raw.message_type === 'battle-bombarded') {
-                const credit = otherPlayerId ? resolveBombardmentCredit({ ...raw, other_player_id: otherPlayerId }, playerId) : null;
+                // Don't gate this call on otherPlayerId: direction "killed" credits the
+                // scraping player regardless of whether the opponent is known (see
+                // resolveBombardmentCredit). Only the cross-reference lookup below needs
+                // a known otherPlayerId.
+                const credit = resolveBombardmentCredit({ ...raw, other_player_id: otherPlayerId }, playerId);
                 if (credit) {
                     credited_player_id = credit.credited_player_id;
-                    matched_battle_report_id = battleReportsRepo.findByPlayerPairNear(
-                        credit.credited_player_id, credit.otherPlayerId, raw.occurred_at, 15
-                    );
+                    if (credit.otherPlayerId) {
+                        matched_battle_report_id = battleReportsRepo.findByPlayerPairNear(
+                            credit.credited_player_id, credit.otherPlayerId, raw.occurred_at, 15
+                        );
+                    }
                 }
             }
 
