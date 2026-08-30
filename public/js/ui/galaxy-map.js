@@ -616,7 +616,7 @@ async function loadData() {
                 // rather than in the component, so it is wired by delegation (see init).
                 status.innerHTML = 'The archive has no system coordinates yet.'
                     + '<button class="gm-seed-inline pointer-events-auto ml-2 h-7 px-2 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors">'
-                    + '<i class="fa-solid fa-cloud-arrow-down mr-1"></i>Seed from API</button>';
+                    + '<i class="fa-solid fa-globe mr-1"></i>Seed galaxy</button>';
             }
             return;
         }
@@ -639,61 +639,16 @@ async function loadData() {
     }
 }
 
-// ─── SEED FROM THE GAME API ──────────────────────────────────────────────────
-// One GET of the game's system index — through the member's own session and the shared
-// 5/s gate, like every game-bound request — replaces the old requirement to open the
-// in-game travel calculator once. The answer is filtered to systems that actually have
-// coordinates and handed to the existing /hub-api/sync/galaxy receiver; the map then
-// reloads from its own archive, the only surface it ever draws from.
-let seeding = false;
-async function seedFromApi() {
-    if (seeding) return;   // a re-click mid-run would double-spend the request budget
-    seeding = true;
-    const button = document.getElementById('gm-seed-api');
-    if (button) button.disabled = true;
-    const status = document.getElementById('gm-status');
-    const say = (msg) => { if (status) { status.classList.remove('hidden'); status.textContent = msg; } };
-    try {
-        say('Asking the game for the system index…');
-        const res = await AWApi.getSolarSystems();
-        if (!res.ok) {
-            say(res.reason === 'session'
-                ? 'Seeding needs your game session — log into the game first, then try again.'
-                : `The game API did not answer (${res.reason}${res.status ? `, HTTP ${res.status}` : ''}).`);
-            return;
-        }
-        // The ONE shared API->sync mapper (aw-api.js) — never a local copy of it.
-        const { systems } = AWApi.mapSolarSystemsToSyncPayload(res.data);
-        if (!systems.length) {
-            say('The game returned no systems with coordinates — nothing to index.');
-            return;
-        }
-        const sync = await fetch('/hub-api/sync/galaxy', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ systems }),
-        });
-        const result = await sync.json().catch(() => ({}));
-        if (!sync.ok || !result.success) {
-            say(`The archive rejected the index: ${result.error || `HTTP ${sync.status}`}`);
-            return;
-        }
-        if (typeof window.showToast === 'function') window.showToast(`Indexed ${systems.length} systems from the game API`);
-        await loadData();
-    } catch (err) {
-        console.error('[GalaxyMap] Seed failed:', err);
-        say(`Seeding failed: ${err.message}`);
-    } finally {
-        seeding = false;
-        if (button) button.disabled = false;
-    }
-}
-
-// Seeds planets in bulk from Map/sectors, one system at a time, through the EXISTING
-// /hub-api/sync/system endpoint — same fog-of-war/owner-change/pop-drop logic a live scrape
-// already goes through, just driven from a bulk API response instead of one page. A system
-// the API marks isInVision:false gets every one of its planets marked is_unknown so the
-// merge preserves whatever was last actually seen there, exactly like a DOM scraper would.
+// Seeds the ENTIRE galaxy — system index (coordinates/names) AND every system's planets —
+// from a SINGLE Map/sectors call. Each solarSystems[] entry the sector endpoint returns
+// already carries the full base SolarSystem shape (id/name/fullName/info/populationLevel/
+// x/y) on top of planets[]/isInVision, i.e. exactly what getSolarSystems() returns plus
+// more — so there is no need for a separate system-index API call (that's what the old
+// old two-button split cost: one game request for coordinates, a second for planets).
+// mapSolarSystemsToSyncPayload works unmodified against these objects since
+// the field names line up. Systems still go through /hub-api/sync/system one at a time
+// (same fog-of-war/owner-change/pop-drop logic a live scrape already goes through) — only
+// the game-facing API call itself is collapsed to one.
 let seedingSectors = false;
 const SECTOR_BOUNDS = { x1: -40, y1: -40, x2: 40, y2: 40 }; // known map bounds ~-32..32, padded
 
@@ -718,6 +673,20 @@ async function seedPlanetsFromSectors() {
         if (!allSystems.length) {
             say('The game returned no systems in that area — nothing to seed.');
             return;
+        }
+
+        say(`Indexing ${allSystems.length} systems…`);
+        const { systems: indexPayload } = AWApi.mapSolarSystemsToSyncPayload(allSystems);
+        if (indexPayload.length) {
+            const indexRes = await fetch('/hub-api/sync/galaxy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ systems: indexPayload }),
+            });
+            if (!indexRes.ok) {
+                say(`The archive rejected the system index (HTTP ${indexRes.status}) — aborting before touching planets.`);
+                return;
+            }
         }
 
         let systemsProcessed = 0;
@@ -762,7 +731,7 @@ async function seedPlanetsFromSectors() {
         }
 
         if (typeof window.showToast === 'function') {
-            window.showToast(`Seeded ${planetsProcessed} planets across ${systemsProcessed} systems`);
+            window.showToast(`Indexed ${indexPayload.length} systems and seeded ${planetsProcessed} planets across ${systemsProcessed} of them`);
         }
         await loadData();
     } catch (err) {
@@ -832,12 +801,11 @@ export async function initGalaxyMap(userId) {
     wireIsoOriginPicker();
     wireIsoInputs();
 
-    document.getElementById('gm-seed-api')?.addEventListener('click', seedFromApi);
     document.getElementById('gm-seed-sectors')?.addEventListener('click', seedPlanetsFromSectors);
     // The empty-state message offers the same seed. Its button only exists after
     // loadData() renders it, so the click is caught here by delegation instead of an id.
     document.getElementById('gm-status')?.addEventListener('click', (e) => {
-        if (e.target && e.target.closest && e.target.closest('.gm-seed-inline')) seedFromApi();
+        if (e.target && e.target.closest && e.target.closest('.gm-seed-inline')) seedPlanetsFromSectors();
     });
 
     document.getElementById('gm-zoom-in')?.addEventListener('click', () => zoomAt(1.3, canvas.clientWidth / 2, canvas.clientHeight / 2));
