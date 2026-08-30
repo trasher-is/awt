@@ -62,6 +62,13 @@ function updateShipDetail(id, detail) {
     updateShipDetailStmt.run({ id, ...detail });
 }
 
+const findByPlayerPairNearStmt = db.prepare(`
+    SELECT id FROM battle_reports
+    WHERE ((att_player_id = @a AND def_player_id = @b) OR (att_player_id = @b AND def_player_id = @a))
+      AND started_at BETWEEN @from AND @to
+    LIMIT 1
+`);
+
 // News-page events carry no planet reference (battle_reports has no planet/system column
 // at all) — matching is by player pair + time proximity instead. Direction doesn't matter:
 // either player could be attacker or defender in the stored report.
@@ -69,12 +76,7 @@ function findByPlayerPairNear(playerA, playerB, occurredAtIso, windowMinutes) {
     const center = new Date(occurredAtIso).getTime();
     const from = new Date(center - windowMinutes * 60000).toISOString();
     const to = new Date(center + windowMinutes * 60000).toISOString();
-    const row = db.prepare(`
-        SELECT id FROM battle_reports
-        WHERE ((att_player_id = @a AND def_player_id = @b) OR (att_player_id = @b AND def_player_id = @a))
-          AND started_at BETWEEN @from AND @to
-        LIMIT 1
-    `).get({ a: playerA, b: playerB, from, to });
+    const row = findByPlayerPairNearStmt.get({ a: playerA, b: playerB, from, to });
     return row ? row.id : null;
 }
 
