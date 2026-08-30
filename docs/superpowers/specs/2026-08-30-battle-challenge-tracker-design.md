@@ -114,15 +114,22 @@ the News row's HTML (`/Game/Players/Profile/{id}`).
   `battle-conquer`/`battle-conquered` itself. So these two types are *always*
   treated as walkovers and stored for the announcement feed only; they never
   need a cross-reference lookup.
-- `battle-bombarded` — two mirrored wordings depending on which side the
-  scraping player was on: *"You lost N population..."* (defender) or *"You
-  killed N population..."* (attacker). The other player's id (attacker or
-  defender counterpart) comes from the profile link in the row, so this type
-  IS checked against `battle_reports` by the player-pair + time-proximity rule
-  above. If no match exists, the population number **is** counted toward the
-  population leaderboard, credited to the attacker. If a match exists, the
-  battle report's own `killed_population` already covers it — the News entry
-  is stored (for audit/completeness) but excluded from the point sum.
+- `battle-bombarded` (CSS class actually emitted by the game: `battle-bombard`,
+  no "-ed" — confirmed against a real News-page row) — two mirrored wordings
+  depending on which side the scraping player was on: *"You lost N
+  population..."* (defender) or *"You killed N population..."* (attacker).
+  **Correction from an earlier draft, confirmed against a real example:** the
+  *"killed"* (attacker) wording carries NO player-profile link at all — only
+  system/planet links — so `other_player_id` is legitimately null for it. Only
+  the *"lost"* (defender) wording names the other player. Population credit
+  does not depend on knowing the opponent (attacker-direction rows always
+  credit the scraping player); only the `battle_reports` cross-reference
+  lookup is skipped when the opponent is unknown. If no match exists (or none
+  was attempted, for lack of an opponent id), the population number **is**
+  counted toward the population leaderboard, credited to the attacker. If a
+  match exists, the battle report's own `killed_population` already covers
+  it — the News entry is stored (for audit/completeness) but excluded from
+  the point sum.
 - All other message types (`player-incoming`, etc.) are ignored by this
   feature — already handled elsewhere (`news-incoming.js`, `webhook.js`).
 
