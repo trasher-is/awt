@@ -66,6 +66,22 @@ const lastOntimeAfter = incoming.getLastOntimeRow('alert-3');
 ok('updateLastOntime and getLastOntimeRow round-trip the value',
     lastOntimeAfter && lastOntimeAfter.last_ontime === 'Defender Y, Z');
 
+// Regression for a real production bug (2026-08-30): incoming_msgs/incoming_alerts were
+// never cleared by the round-reset ("nuke intel") route — alert_key is system:planet:
+// attacker, an identity meaningless outside the round it was recorded in.
+ok('incoming_msgs has rows from the seeding above before the wipe',
+    db.prepare('SELECT COUNT(*) as n FROM incoming_msgs').get().n > 0);
+incoming.deleteAllIncomingMsgs();
+ok('deleteAllIncomingMsgs empties the table',
+    db.prepare('SELECT COUNT(*) as n FROM incoming_msgs').get().n === 0);
+
+db.prepare(`INSERT INTO incoming_alerts (fleet_id, channel_id, message_id) VALUES (?, ?, ?)`).run(999, 'chan-legacy', 'msg-legacy');
+ok('incoming_alerts has a row before the wipe',
+    db.prepare('SELECT COUNT(*) as n FROM incoming_alerts').get().n === 1);
+incoming.deleteAllIncomingAlerts();
+ok('deleteAllIncomingAlerts empties the table',
+    db.prepare('SELECT COUNT(*) as n FROM incoming_alerts').get().n === 0);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

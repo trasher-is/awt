@@ -75,8 +75,16 @@ function markAgreementDoneByScan(pairKey, playerA, playerB) {
     markAgreementDoneByScanStmt.run(pairKey, playerA, playerB);
 }
 
+// pair_key identifies two PLAYER NAMES, and names are only meaningful within the round
+// they played in — a round reset must clear every agreement or a name reused (or
+// coincidentally reassigned) next round would inherit a stale confirmed/done status.
+const deleteAllTradeAgreementsStmt = db.prepare(`DELETE FROM trade_agreements`);
+function deleteAllTradeAgreements() {
+    deleteAllTradeAgreementsStmt.run();
+}
+
 module.exports = {
     getActivePairKeys, getActiveAgreements, getAgreementStatusByPairKey, getAgreementById,
     proposeAgreement, confirmAgreement, cancelAgreement, forceSetAgreement,
-    markAgreementDoneByInitiator, markAgreementDoneByScan,
+    markAgreementDoneByInitiator, markAgreementDoneByScan, deleteAllTradeAgreements,
 };
