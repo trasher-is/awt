@@ -338,7 +338,7 @@ app.use('/', requireAuth, proxyCeiling, gameGate, (req, res, next) => {
 }, proxyMiddleware);
 
 const server = app.listen(PORT, () => {
-    console.log(`[Core] Alliance Intelligence Hub v2 online on port ${PORT}`);
+    console.log(`[Core] Alliance Intelligence Hub v3 online on port ${PORT}`);
 });
 
 initDiscordBot(process.env.DISCORD_TOKEN);

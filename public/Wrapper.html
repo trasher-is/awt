@@ -45,58 +45,9 @@
     <nav id="sidebar" class="absolute top-0 left-0 h-full w-14 transition-all duration-300 bg-background/95 backdrop-blur-md border-r border-border z-50 overflow-x-hidden shadow-2xl flex flex-col">
         <button id="sidebar-toggle-btn" class="h-14 w-full flex items-center justify-start px-4 border-b border-border hover:bg-accent text-foreground shrink-0 transition-colors group">
             <i class="fa-solid fa-shuttle-space text-lg w-6 text-center group-hover:scale-110 transition-transform"></i>
-            <span class="ml-4 font-semibold tracking-wide sidebar-text">Hub v2</span>
+            <span class="ml-4 font-semibold tracking-wide sidebar-text">Hub v3</span>
             <i class="fa-solid fa-xmark ml-auto md:hidden text-muted-foreground sidebar-text text-lg"></i>
         </button>
-
-        <button id="notes-trigger" class="h-10 w-full flex items-center justify-start px-4 border-b border-border hover:bg-accent text-muted-foreground hover:text-foreground shrink-0 transition-colors" title="My Notes">
-            <i class="fa-solid fa-bell w-6 text-center text-sm"></i>
-            <span class="ml-4 sidebar-text text-sm">My Notes</span>
-            <span id="notes-badge-text" class="ml-auto sidebar-text text-xs font-mono hidden"></span>
-        </button>
-
-        <!-- Inline accordion — stays inside the sidebar itself (not a separate slide-out
-             panel) so it's reachable on mobile without closing the sidebar to see it. -->
-        <div id="notes-inline" class="hidden flex-col border-b border-border hide-collapsed shrink-0">
-            <div class="p-4 flex flex-col gap-2">
-                <textarea id="note-text-input" rows="2" placeholder="e.g. Switch to Mathematics after 12lvl Physics..." class="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none resize-none"></textarea>
-
-                <!-- Quick-pick time chips — tap instead of typing a date/time. "At update"
-                     is the next daily server reset, 00:00 Europe/Berlin (CET/CEST). -->
-                <div id="note-quick-picks" class="flex flex-wrap gap-1.5">
-                    <button type="button" data-quick="15" class="h-7 px-2 rounded-md border border-border bg-secondary/50 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">+15m</button>
-                    <button type="button" data-quick="60" class="h-7 px-2 rounded-md border border-border bg-secondary/50 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">+1h</button>
-                    <button type="button" data-quick="360" class="h-7 px-2 rounded-md border border-border bg-secondary/50 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">+6h</button>
-                    <button type="button" data-quick="720" class="h-7 px-2 rounded-md border border-border bg-secondary/50 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">+12h</button>
-                    <button type="button" data-quick="update" class="h-7 px-2 rounded-md border border-border bg-secondary/50 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Next 00:00 CET/CEST (Europe/Berlin)">At update</button>
-                    <button type="button" data-quick="clear" class="h-7 px-2 rounded-md border border-border text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">Clear</button>
-                </div>
-
-                <div class="flex flex-wrap items-center gap-2">
-                    <input type="datetime-local" id="note-due-input" class="h-9 flex-1 min-w-0 rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus:outline-none text-muted-foreground [color-scheme:dark]">
-                    <label class="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none whitespace-nowrap">
-                        <input type="checkbox" id="note-remind-input" class="w-4 h-4 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
-                        Remind 15m
-                    </label>
-                </div>
-
-                <!-- Assign to teammates — defaults to just you; check any others to also
-                     create their own independent copy of this note (any amount: 1, a few, or all). -->
-                <div>
-                    <div class="flex items-center justify-between mb-1">
-                        <span class="text-xs text-muted-foreground">Assign to</span>
-                        <label class="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer select-none">
-                            <input type="checkbox" id="note-recipients-all" class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
-                            All
-                        </label>
-                    </div>
-                    <div id="note-recipients-list" class="grid grid-cols-2 gap-x-2 gap-y-1 max-h-28 overflow-y-auto border border-border rounded-md p-2"></div>
-                </div>
-
-                <button id="note-add-btn" class="h-9 px-4 rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90 text-sm shadow-sm self-end">Add task</button>
-            </div>
-            <div id="notes-list" class="flex flex-col gap-2 px-4 pb-4 max-h-[45vh] overflow-y-auto"></div>
-        </div>
 
         <div class="flex-1 flex flex-col pt-2 overflow-y-auto">
             

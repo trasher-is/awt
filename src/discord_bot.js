@@ -8,7 +8,6 @@ const alliancesRepo = require('./repositories/alliances');
 const usersRepo = require('./repositories/users');
 const discordTimersRepo = require('./repositories/discordTimers');
 const incomingRepo = require('./repositories/incoming');
-const notesRepo = require('./repositories/notes');
 const settingsRepo = require('./repositories/settings');
 const battlePointsRepo = require('./repositories/battlePoints');
 const battleReportsRepo = require('./repositories/battleReports');
@@ -32,7 +31,6 @@ client.on('clientReady', () => {
     // Run both checks immediately on connect: anything that came due while the process
     // was down fires now rather than waiting for the first tick.
     const tick = () => {
-        checkNoteReminders().catch(err => console.error('[Discord] Reminder check failed:', err.message));
         checkDueTimers().catch(err => console.error('[Discord] Timer check failed:', err.message));
     };
     tick();
@@ -1608,55 +1606,6 @@ function getPopdropChannelId() {
     return getSettingValue('discord_popdrop_channel');
 }
 
-function getReminderChannelId() {
-    return getSettingValue('discord_reminder_channel');
-}
-
-// ----------------------------------------------------
-// PERSONAL NOTE REMINDERS — "remind 15 min before" mention
-// ----------------------------------------------------
-// Polled every minute. Picks up notes that are due within 15 minutes (or already
-// overdue, e.g. after downtime) and haven't been reminded yet, and pings the owner in
-// the configured channel. Best-effort: a note is marked reminded regardless of whether
-// the mention could actually be sent (no channel configured / no linked Discord id /
-// send failed), so a bad config never causes it to resend forever once fixed.
-async function checkNoteReminders() {
-    let pending;
-    try {
-        pending = notesRepo.getDueReminders();
-    } catch (err) {
-        console.error('[Discord] Reminder lookup failed:', err.message);
-        return;
-    }
-    // due_at is stored as a full ISO string (toISOString()), which SQLite can't compare
-    // against datetime('now') (space-separated, no ms) as text — so the 15-minute window
-    // is filtered here in JS instead, on parsed Date values.
-    const due = pending.filter(n => new Date(n.due_at).getTime() - Date.now() <= 15 * 60 * 1000);
-    if (!due.length) return;
-
-    const channelId = getReminderChannelId();
-    let channel = null;
-    if (client.isReady() && channelId) {
-        try { channel = await client.channels.fetch(channelId); } catch (err) {
-            console.error('[Discord] Could not fetch reminder channel:', err.message);
-        }
-    }
-
-    for (const note of due) {
-        try {
-            if (channel && typeof channel.send === 'function') {
-                const unix = Math.floor(new Date(note.due_at).getTime() / 1000);
-                const who = note.discord_id ? `<@${note.discord_id}>` : `**${note.game_name}**`;
-                const from = note.author_name ? ` _(assigned by ${note.author_name})_` : '';
-                await channel.send({ content: `⏰ **Reminder** ${who} — ${note.text}${from}\n🕐 Due <t:${unix}:R>` });
-            }
-        } catch (err) {
-            console.error('[Discord] Failed to send note reminder:', err.message);
-        } finally {
-            notesRepo.markReminderSent(note.id);
-        }
-    }
-}
 
 // Send one system-change embed to a channel. Best-effort, safe no-op if the channel
 // isn't configured / usable. `color` distinguishes owner-change vs pop-drop embeds.

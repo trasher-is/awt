@@ -40,7 +40,7 @@ console.log('── Guests keep full read access ' + '─'.repeat(44));
 for (const method of ['GET', 'HEAD', 'OPTIONS']) {
     ok(`${method} passes through`, asGuest({ method }).nexted === true);
 }
-for (const p of ['/intel/players', '/routes', '/plans/10', '/notes', '/me', '/search/player']) {
+for (const p of ['/intel/players', '/routes', '/plans/10', '/me', '/search/player']) {
     ok(`GET ${p} passes through`, asGuest({ method: 'GET', reqPath: p }).nexted === true);
 }
 
@@ -50,7 +50,7 @@ const writePaths = [
     '/sync/player', '/sync/system', '/sync/galaxy', '/sync/alliance', '/sync/alliance-stats',
     '/sync/alliance-search',
     '/sync/best-guarded', '/sync/trade-agreements', '/sync/trade-inventory',
-    '/plans', '/notes', '/intel/takeover', '/trade-agreements/propose',
+    '/plans', '/intel/takeover', '/trade-agreements/propose',
     '/routes', '/incoming/announce', '/incoming/cover', '/nuke',
     '/sync/player-list', '/sync/player-detail',
     '/sync/player-scan-claim',
