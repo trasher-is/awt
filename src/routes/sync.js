@@ -9,6 +9,8 @@ const alliancesRepo = require('../repositories/alliances');
 const settingsRepo = require('../repositories/settings');
 const { mapApiReport, upsertReports, formatBattleEmbed } = require('../utils/battle-reports');
 const battleReportsRepo = require('../repositories/battleReports');
+const newsEventsRepo = require('../repositories/newsEvents');
+const { resolveBombardmentCredit } = require('../utils/news-battle-matching');
 const battlePointsRepo = require('../repositories/battlePoints');
 const { postEmbed, postBattleEmbed, defuseMentions, settingValue } = require('../utils/discord-post');
 const router = express.Router();
@@ -890,6 +892,65 @@ router.post('/sync/trade-prices', requireAuth, (req, res) => {
         console.error('[DB Error] Failed to store trade prices:', err);
         res.status(500).json({ error: 'Failed to store trade prices' });
     }
+});
+
+// --- NEWS-PAGE WATERMARK (for the client's pagination-walk stop condition) ---
+router.get('/sync/news-watermark', requireAuth, (req, res) => {
+    const playerId = playersRepo.getPlayerIdByName(req.session.gameName || '');
+    if (!playerId) return res.json({ watermark: null });
+    res.json({ watermark: newsEventsRepo.getWatermark(playerId) });
+});
+
+// --- NEWS-PAGE EVENT RECEIVER ---
+// Body: { entries: [{ message_type, occurred_at, game_planet_id, system_id,
+// other_player_id, population_delta, direction }] }. Parsing lives entirely on the
+// client (public/js/ui/news-battle-events.js reading the member's own /Game/News page);
+// this route only resolves crediting/matching and stores the result. `direction`
+// ('killed'|'lost') only matters for battle-bombarded rows.
+router.post('/sync/news', requireAuth, (req, res) => {
+    const entries = Array.isArray(req.body.entries) ? req.body.entries : null;
+    if (!entries) return res.status(400).json({ error: 'Invalid payload' });
+
+    const playerId = playersRepo.getPlayerIdByName(req.session.gameName || '');
+    if (!playerId) return res.status(400).json({ error: 'Session player not recognized' });
+
+    let inserted = 0;
+    let maxOccurredAt = null;
+
+    for (const raw of entries) {
+        if (!raw || !raw.message_type || !raw.occurred_at) continue;
+        if (maxOccurredAt === null || raw.occurred_at > maxOccurredAt) maxOccurredAt = raw.occurred_at;
+
+        let credited_player_id = null;
+        let matched_battle_report_id = null;
+
+        if (raw.message_type === 'battle-bombarded') {
+            const credit = resolveBombardmentCredit(raw, playerId);
+            if (credit) {
+                credited_player_id = credit.credited_player_id;
+                matched_battle_report_id = battleReportsRepo.findByPlayerPairNear(
+                    credit.credited_player_id, credit.otherPlayerId, raw.occurred_at, 15
+                );
+            }
+        }
+
+        const wasInserted = newsEventsRepo.insertNewsEvent({
+            player_id: playerId,
+            message_type: raw.message_type,
+            occurred_at: raw.occurred_at,
+            game_planet_id: raw.game_planet_id || null,
+            system_id: raw.system_id || null,
+            other_player_id: raw.other_player_id || null,
+            population_delta: raw.population_delta || null,
+            credited_player_id,
+            matched_battle_report_id,
+        });
+        if (wasInserted) inserted++;
+    }
+
+    if (maxOccurredAt) newsEventsRepo.advanceWatermark(playerId, maxOccurredAt);
+
+    res.json({ success: true, inserted });
 });
 
 module.exports = router;
