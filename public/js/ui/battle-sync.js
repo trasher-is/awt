@@ -24,7 +24,13 @@ const FIRST_PULL_DELAY_MS = 10 * 1000;
 const PULL_INTERVAL_MS = 30 * 60 * 1000;
 const LOCK_KEY = 'awt.battleSync.lock.v1';
 const LOCK_TTL_MS = 25 * 60 * 1000;
-const TAKE = 50;
+// 500 confirmed to work against production (2026-08-30, ?Take=500) — no confirmed offset/
+// paging parameter exists to walk past a full page, so this is a bigger safety margin, not
+// a hard guarantee. See the full-page warning below: results are Descending by DateTime, so
+// if a single window (the initial no-BattleDateFrom pull, or activity since the last
+// watermark) has MORE than TAKE reports, the oldest ones in that window are silently
+// dropped by the API's own Take cap, not by this code.
+const TAKE = 500;
 
 // BattleDateFrom for the next pull: the newest started_at the hub holds, learned from
 // each sync response (newest_started_at). Null until the first sync answers — the first
@@ -120,7 +126,16 @@ async function pullOnce() {
             continue;
         }
         anySearchOk = true;
-        for (const r of extractReports(result.data)) {
+        const pageReports = extractReports(result.data);
+        // A page exactly at the Take cap means the API may hold MORE matches for this
+        // window than we asked for — Descending order means those extra ones are older
+        // than everything here, and with no confirmed way to page past this, they are
+        // silently gone from this pull. Fail loudly instead of pretending the window was
+        // fully covered (same philosophy as extractReports' "unrecognized shape" warning).
+        if (pageReports.length >= TAKE) {
+            console.warn(`[BattleSync] search page hit the Take cap (${TAKE}) — older reports in this window may have been missed.`);
+        }
+        for (const r of pageReports) {
             const id = r && r.id;
             if (id != null) {
                 if (seen.has(id)) continue;
