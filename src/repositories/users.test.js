@@ -87,6 +87,30 @@ ok('deleteUnusedLinkCodesForUser removes the unused row but not the already-used
 users.deleteLinkCodesByUserId(caveman.id);
 ok('deleteLinkCodesByUserId removes remaining codes regardless of used_at', !users.getLinkCodeWithUser('ABCD1234'));
 
+// getUserAllianceIdBridge: app_users.game_name <-> players.name (case-insensitive), the
+// ONLY signal /hub-api/me has for "which alliance does this hub account belong to". Two
+// genuinely different null-ish outcomes must stay distinguishable to callers (see the real
+// production confusion this caused, 2026-08-31 — a misleading "name bridge unresolved"
+// error for an account that was actually just allianceless): no matching player row at all
+// (undefined) vs. a matching player who simply has no alliance right now (a real row, with
+// alliance_id null).
+ok('no matching player row -> undefined (bridge itself unresolved)',
+    users.getUserAllianceIdBridge(caveman.id) === undefined);
+
+db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (701, 'Caveman2', NULL)`).run();
+const bridgeNoAlliance = users.getUserAllianceIdBridge(caveman.id);
+ok('a matching player with no alliance -> a real row, alliance_id null (bridge resolved, just no alliance)',
+    bridgeNoAlliance && bridgeNoAlliance.alliance_id === null, bridgeNoAlliance);
+
+db.prepare(`INSERT INTO alliances (id, name, tag) VALUES (9001, 'Test Alliance', 'TA')`).run();
+db.prepare(`UPDATE players SET alliance_id = 9001 WHERE id = 701`).run();
+const bridgeWithAlliance = users.getUserAllianceIdBridge(caveman.id);
+ok('a matching player with an alliance -> the real alliance_id',
+    bridgeWithAlliance && bridgeWithAlliance.alliance_id === 9001, bridgeWithAlliance);
+
+db.prepare(`DELETE FROM players WHERE id = 701`).run();
+db.prepare(`DELETE FROM alliances WHERE id = 9001`).run();
+
 users.deleteUser(caveman.id);
 ok('deleteUser removes the row', users.getUserByGameName('Caveman2') === undefined);
 

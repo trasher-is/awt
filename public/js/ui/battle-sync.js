@@ -102,8 +102,12 @@ function extractReports(data) {
 }
 
 async function pullOnce() {
-    // Whose reports? allianceId is resolved server-side via the name bridge and is null
-    // when the bridge cannot match — the contract says treat null as "skip", not error.
+    // Whose reports? allianceId is resolved server-side via the name bridge. It's null in
+    // two different situations that must not share one message: bridgeResolved=false means
+    // the hub username doesn't match any in-game player at all (a real config problem);
+    // bridgeResolved=true with allianceId still null means the match worked fine and that
+    // player simply has no alliance right now (e.g. a fresh round, before joining one) —
+    // an expected, temporary state, not an error to fix.
     const meRes = await fetch('/hub-api/me');
     if (!meRes.ok) {
         console.warn('[BattleSync] /hub-api/me failed:', meRes.status);
@@ -111,8 +115,14 @@ async function pullOnce() {
     }
     const me = await meRes.json();
     if (me.allianceId == null) {
-        console.warn('[BattleSync] no allianceId for this account (name bridge unresolved) — skipping sync.');
-        return { ok: false, error: 'no allianceId for this account' };
+        if (!me.bridgeResolved) {
+            console.warn('[BattleSync] hub username does not match any in-game player — skipping sync.');
+            return { ok: false, reason: 'bridge', error: 'your hub username does not match an in-game player name — check it in Settings' };
+        }
+        // Not a failure — reason: 'no-alliance' lets callers (e.g. the manual sync button)
+        // show this as a plain status instead of an error.
+        console.warn('[BattleSync] account is not currently in an alliance — skipping sync.');
+        return { ok: false, reason: 'no-alliance', error: 'not currently in an alliance — nothing to sync yet' };
     }
 
     const { searchBattleReports } = globalThis.AWApi;

@@ -397,7 +397,12 @@ async function runManualBattleSync() {
         const { triggerManualSync } = await import('./battle-sync.js');
         const syncResult = await triggerManualSync();
         if (!syncResult.ok) {
-            showToast(`Battle-report sync failed: ${syncResult.error || 'unknown error'}`);
+            // 'no-alliance' isn't a failure to fix — it's the account's actual current
+            // state (e.g. a fresh round, before joining an alliance) — say so plainly
+            // instead of alarming a member with "sync failed" for something expected.
+            showToast(syncResult.reason === 'no-alliance'
+                ? `Battle reports: ${syncResult.error}`
+                : `Battle-report sync failed: ${syncResult.error || 'unknown error'}`);
             return;
         }
 
