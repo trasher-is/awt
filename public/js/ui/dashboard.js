@@ -397,6 +397,9 @@ async function runManualBattleSync() {
         const { triggerManualSync } = await import('./battle-sync.js');
         const syncResult = await triggerManualSync();
         if (!syncResult.ok) {
+            // No alliance yet is no longer a failure case here — battle-sync.js falls
+            // back to a per-player search instead, so anything reaching this branch is a
+            // genuine problem (bridge unresolved, or the search itself failed).
             showToast(`Battle-report sync failed: ${syncResult.error || 'unknown error'}`);
             return;
         }

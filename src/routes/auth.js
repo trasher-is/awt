@@ -35,15 +35,26 @@ router.post('/logout', (req, res) => {
 // --- TOOL USER CONTEXT ---
 // The Wrapper calls this to figure out who is supposed to be playing.
 //
-// allianceId rides along for the battle-report scheduler, resolved through the only
-// app_users -> players bridge there is: case-insensitive name equality. It is null when
-// the member's hub username does not match an in-game player (the bridge breaks silently
-// when the two names drift apart — callers must treat null as "skip", never as an error).
+// allianceId (and playerId alongside it) rides along for the battle-report scheduler,
+// resolved through the only app_users -> players bridge there is: case-insensitive name
+// equality. allianceId is null in TWO genuinely different cases a caller must not conflate:
+// the bridge itself failing to match (hub username drifted from the in-game name) vs. the
+// bridge matching fine but that player simply has no alliance right now (a brand-new
+// round, before anyone's joined one — commonly the first 7-10+ days). bridgeResolved tells
+// them apart — it's true as soon as a players row was found, independent of whether that
+// row's alliance_id happens to be set. playerId lets a caller fall back to a per-player
+// battle search during that gap, instead of having nothing to search by at all.
 router.get('/me', requireAuth, (req, res) => {
     let allianceId = null;
+    let playerId = null;
+    let bridgeResolved = false;
     try {
         const row = usersRepo.getUserAllianceIdBridge(req.session.userId);
-        if (row && row.alliance_id != null) allianceId = row.alliance_id;
+        if (row) {
+            bridgeResolved = true;
+            playerId = row.player_id;
+            if (row.alliance_id != null) allianceId = row.alliance_id;
+        }
     } catch (err) {
         // Purely additive field: a broken bridge must never break /me itself.
         console.error('[Auth] allianceId resolution failed:', err.message);
@@ -51,8 +62,10 @@ router.get('/me', requireAuth, (req, res) => {
     res.json({
         id: req.session.userId,
         gameName: req.session.gameName,
+        bridgeResolved,
         role: req.session.role,
-        allianceId
+        allianceId,
+        playerId
     });
 });
 
