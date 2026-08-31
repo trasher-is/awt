@@ -101,6 +101,8 @@ db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (701, 'Caveman2',
 const bridgeNoAlliance = users.getUserAllianceIdBridge(caveman.id);
 ok('a matching player with no alliance -> a real row, alliance_id null (bridge resolved, just no alliance)',
     bridgeNoAlliance && bridgeNoAlliance.alliance_id === null, bridgeNoAlliance);
+ok('player_id is still returned — the fallback battle-sync needs it to search by player',
+    bridgeNoAlliance && bridgeNoAlliance.player_id === 701, bridgeNoAlliance);
 
 db.prepare(`INSERT INTO alliances (id, name, tag) VALUES (9001, 'Test Alliance', 'TA')`).run();
 db.prepare(`UPDATE players SET alliance_id = 9001 WHERE id = 701`).run();

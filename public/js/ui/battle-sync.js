@@ -1,9 +1,11 @@
 // Battle-report background sync — wrapper realm only.
 //
-// While a dashboard is open it periodically pulls the alliance's newest battle reports
-// from the game API and hands them to the hub (POST /hub-api/sync/battle-reports), which
-// stores them idempotently and announces the genuinely new ones on Discord. First pull
-// 10 s after load, then every 30 minutes.
+// While a dashboard is open it periodically pulls the newest battle reports from the game
+// API and hands them to the hub (POST /hub-api/sync/battle-reports), which stores them
+// idempotently and announces the genuinely new ones on Discord. First pull 10 s after
+// load, then every 30 minutes. Scoped to the account's alliance once it has one; before
+// that (commonly the first 7-10+ days of a round) scoped to just that account's own
+// battles instead of skipping tracking entirely — see pullOnce's filterKey/filterValue.
 //
 // A setInterval here does NOT violate the no-polling rule: that rule bans polling the
 // game's DOM inside the injected frame (the 200ms interval spy.js was rewritten to
@@ -114,20 +116,22 @@ async function pullOnce() {
         return { ok: false, error: `/hub-api/me failed (${meRes.status})` };
     }
     const me = await meRes.json();
-    if (me.allianceId == null) {
-        if (!me.bridgeResolved) {
-            console.warn('[BattleSync] hub username does not match any in-game player — skipping sync.');
-            return { ok: false, reason: 'bridge', error: 'your hub username does not match an in-game player name — check it in Settings' };
-        }
-        // Not a failure — reason: 'no-alliance' lets callers (e.g. the manual sync button)
-        // show this as a plain status instead of an error.
-        console.warn('[BattleSync] account is not currently in an alliance — skipping sync.');
-        return { ok: false, reason: 'no-alliance', error: 'not currently in an alliance — nothing to sync yet' };
+    if (!me.bridgeResolved) {
+        console.warn('[BattleSync] hub username does not match any in-game player — skipping sync.');
+        return { ok: false, reason: 'bridge', error: 'your hub username does not match an in-game player name — check it in Settings' };
     }
+    // No alliance yet (commonly the first 7-10+ days of a round, before anyone's joined
+    // one) doesn't mean nothing to track — the API also filters by PlayerId, so fall back
+    // to this member's own battles instead of skipping the whole round's opening stretch.
+    // Coverage is necessarily partial (only players who are both hub members AND have their
+    // browser open get synced this way), but that beats zero battle tracking until an
+    // alliance forms.
+    const filterKey = me.allianceId != null ? 'AllianceId' : 'PlayerId';
+    const filterValue = me.allianceId != null ? me.allianceId : me.playerId;
 
     const { searchBattleReports } = globalThis.AWApi;
 
-    // Both sides of the alliance's battles: initiated (FirstParty) and received
+    // Both sides of the tracked scope's battles: initiated (FirstParty) and received
     // (SecondParty). gameFetch serializes these through the shared 5/s window anyway.
     const base = {
         OrderBy: 'DateTime',
@@ -136,12 +140,13 @@ async function pullOnce() {
         BattleDateFrom: newestStartedAt, // omitted from the query while null
     };
     const [asAttacker, asDefender] = await Promise.all([
-        searchBattleReports({ ...base, 'FirstParty.AllianceId': me.allianceId }),
-        searchBattleReports({ ...base, 'SecondParty.AllianceId': me.allianceId }),
+        searchBattleReports({ ...base, [`FirstParty.${filterKey}`]: filterValue }),
+        searchBattleReports({ ...base, [`SecondParty.${filterKey}`]: filterValue }),
     ]);
 
-    // An intra-alliance battle matches both searches — dedupe by report id. Reports
-    // without an id pass through untouched; the server-side mapper is the validator.
+    // A battle that matches both searches (e.g. two tracked members fighting each other)
+    // dedupes by report id. Reports without an id pass through untouched; the server-side
+    // mapper is the validator.
     const seen = new Set();
     const reports = [];
     let anySearchOk = false;

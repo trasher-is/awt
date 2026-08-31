@@ -63,12 +63,17 @@ function getJson(server, urlPath) {
         const noMatch = await getJson(server, '/hub-api/me');
         ok('bridgeResolved is false', noMatch.body.bridgeResolved === false, noMatch.body);
         ok('allianceId is null', noMatch.body.allianceId === null, noMatch.body);
+        ok('playerId is null — nothing to fall back to either', noMatch.body.playerId === null, noMatch.body);
 
         console.log('\n── a matching player exists but has no alliance right now ' + '─'.repeat(10));
+        // The exact scenario a real production report traced back to (2026-08-31): a fresh
+        // round, before the account has joined an alliance. playerId is what lets
+        // battle-sync.js fall back to a per-player search instead of skipping entirely.
         db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (701, 'Caveman2', NULL)`).run();
         const noAlliance = await getJson(server, '/hub-api/me');
         ok('bridgeResolved is true — the bridge itself worked', noAlliance.body.bridgeResolved === true, noAlliance.body);
         ok('allianceId is still null — this player genuinely has no alliance', noAlliance.body.allianceId === null, noAlliance.body);
+        ok('playerId is the real player id, usable as a fallback search scope', noAlliance.body.playerId === 701, noAlliance.body);
 
         console.log('\n── a matching player with an alliance ' + '─'.repeat(30));
         db.prepare(`INSERT INTO alliances (id, name, tag) VALUES (9001, 'Test Alliance', 'TA')`).run();
@@ -76,6 +81,7 @@ function getJson(server, urlPath) {
         const withAlliance = await getJson(server, '/hub-api/me');
         ok('bridgeResolved is true', withAlliance.body.bridgeResolved === true, withAlliance.body);
         ok('allianceId is the real alliance id', withAlliance.body.allianceId === 9001, withAlliance.body);
+        ok('playerId is still returned even once an alliance exists', withAlliance.body.playerId === 701, withAlliance.body);
 
         console.log('\n── case-insensitive match, per the bridge\'s own contract ' + '─'.repeat(11));
         db.prepare(`UPDATE players SET name = 'CAVEMAN2' WHERE id = 701`).run();

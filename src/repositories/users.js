@@ -57,7 +57,7 @@ function getUserByGameName(gameName) {
 }
 
 const getUserAllianceIdBridgeStmt = db.prepare(`
-    SELECT p.alliance_id AS alliance_id
+    SELECT p.id AS player_id, p.alliance_id AS alliance_id
     FROM app_users u
     JOIN players p ON LOWER(u.game_name) = LOWER(p.name)
     WHERE u.id = ?
