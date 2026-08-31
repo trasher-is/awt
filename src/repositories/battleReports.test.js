@@ -248,6 +248,62 @@ const remainDef = battleReports.getRecentPlanets(506)[0].remaining_fleet;
 ok('defender-side remaining_fleet resolves the OTHER side\'s columns (def_*, not att_*)',
     remainDef && remainDef.cv === 0 && remainDef.byType.find(t => t.label === 'Destroyers').remaining === 0, remainDef);
 
+// --- getBattleReportsFeed ---
+console.log('\n── getBattleReportsFeed: the unified Battle Reports page feed ' + '─'.repeat(11));
+
+db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (700, 'Feed System', 1, 1)`).run();
+db.prepare(`INSERT INTO players (id, name) VALUES (700, 'Attacker700'), (701, 'Defender700'), (702, 'Loner702')`).run();
+
+// A real battle report — always linked, since the row IS the report.
+db.prepare(`
+    INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_name, att_alliance_tag, def_player_name, killed_population, winner)
+    VALUES (9500, '2026-08-31T10:00:00Z', 700, 1, 'Attacker700', 'AT', 'Defender700', 40, 'Attacker700')
+`).run();
+
+// A POP_DROP with NO matching report nearby (different planet, no report at all) — must
+// appear unlinked.
+db.prepare(`INSERT INTO planets (system_id, planet_index, owner_id) VALUES (700, 2, 702)`).run();
+db.prepare(`INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp) VALUES (700, 2, 2, 5, 3, '2026-08-31T09:00:00Z')`).run();
+
+// A POP_DROP that DOES fall within the match window of the report above (same system/
+// planet as the report, timestamp inside +/-3h) — must be excluded entirely, not shown as
+// a second, unlinked entry for the same battle.
+db.prepare(`INSERT INTO planets (system_id, planet_index, owner_id) VALUES (700, 1, 701)`).run();
+db.prepare(`INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp) VALUES (700, 1, 2, 10, 6, '2026-08-31T10:05:00Z')`).run();
+
+// An OWNER_CHANGE event (event_type_id 1, not 2) — must never appear in this feed at all,
+// matched or not; this feed is specifically battles + population drops.
+db.prepare(`INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp) VALUES (700, 2, 1, 701, 702, '2026-08-31T08:00:00Z')`).run();
+
+// Scoped to system 700 — this file shares one DB across all its tests, and earlier
+// getRecentPlanets fixtures above also inserted located battle_reports rows.
+const feed = battleReports.getBattleReportsFeed(200).filter(r => r.system_id === 700);
+ok('exactly 2 rows for system 700: the battle report and the one genuinely unmatched pop-drop (not 4)',
+    feed.length === 2, JSON.stringify(feed));
+
+const battleRow = feed.find(r => r.battle_report_id === 9500);
+ok('the battle report row is present and linked to its own id', !!battleRow);
+ok('the battle row carries attacker/defender/killed_population from battle_reports',
+    battleRow.attacker_name === 'Attacker700' && battleRow.attacker_alliance_tag === 'AT'
+    && battleRow.defender_name === 'Defender700' && battleRow.killed_population === 40, battleRow);
+ok('the battle row resolves the system name via the join', battleRow.system_name === 'Feed System', battleRow);
+
+const dropRow = feed.find(r => r.battle_report_id === null);
+ok('the unmatched pop-drop row is present and unlinked (battle_report_id null)', !!dropRow);
+ok('the unmatched row resolves the CURRENT planet owner as "defender" (best-effort, not a historical snapshot)',
+    dropRow.defender_name === 'Loner702', dropRow);
+ok('the unmatched row carries old/new population and a derived killed_population',
+    dropRow.old_population === 5 && dropRow.new_population === 3 && dropRow.killed_population === 2, dropRow);
+
+ok('the matched-away pop-drop (system 700/planet 1) does not appear as its own row',
+    !feed.some(r => r.battle_report_id === null && r.planet_index === 1), feed);
+
+ok('sorted newest first (the battle at 10:00 before the drop at 09:00)',
+    feed[0].occurred_at > feed[1].occurred_at, feed.map(r => r.occurred_at));
+
+const limitedFeed = battleReports.getBattleReportsFeed(1);
+ok('limit caps the merged result, not just each half independently', limitedFeed.length === 1, limitedFeed);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

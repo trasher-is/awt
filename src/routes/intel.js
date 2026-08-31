@@ -5,6 +5,7 @@ const fleetsRepo = require('../repositories/fleets');
 const plansRepo = require('../repositories/plans');
 const playersRepo = require('../repositories/players');
 const alliancesRepo = require('../repositories/alliances');
+const battleReportsRepo = require('../repositories/battleReports');
 const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
 const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
@@ -411,6 +412,21 @@ router.get('/intel/alliance-stats', requireAuth, (req, res) => {
         res.json({ success: true, stats });
     } catch (err) {
         res.status(500).json({ error: 'Failed to retrieve alliance metrics' });
+    }
+});
+
+// --- BATTLE REPORTS PAGE FEED ---
+// One chronological list: real battle_reports rows (always linked to their own game
+// report) merged with population-drop events that have no matching report (shown
+// unlinked) — see getBattleReportsFeed's own comment for the matching rules.
+router.get('/intel/battle-reports-feed', requireAuth, (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+        const feed = battleReportsRepo.getBattleReportsFeed(limit);
+        res.json({ success: true, feed });
+    } catch (err) {
+        console.error('[DB Error] Failed to fetch battle reports feed:', err);
+        res.status(500).json({ error: 'Failed to retrieve battle reports feed' });
     }
 });
 

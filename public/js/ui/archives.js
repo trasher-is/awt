@@ -1,12 +1,15 @@
 // public/js/ui/archives.js
 import { esc } from '../utils/escape.js';
+import { navToIframe } from './search.js';
 import '../utils/battle-model.js';   // side-effect import: cvOf, so CV is defined once
 import '../utils/parse-number.js';   // side-effect import: locale-aware sorting
+import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
 import '../utils/game-rate-limit.js';
 const { gameFetch } = globalThis.AWGameRate;
 
 const { cvOf } = globalThis.AWBattleModel;
 const { compareNumeric } = globalThis.AWNumber;
+const { formatSqliteUtc } = globalThis.AWSqliteTime;
 
 let rawDbPlayers = [], dbSortCol = 'points', dbSortAsc = false;
 let rawDbSystems = [], sysDbSortCol = 'id', sysDbSortAsc = true;
@@ -15,7 +18,7 @@ let rawDbFleets = [], fltDbSortCol = 'cv', fltDbSortAsc = false;
 let rawDbAllyStats = [], allyStatsSortCol = 'player_id', allyStatsSortAsc = true;
 
 function closeOtherPanels(exceptId) {
-    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'battle-calc-panel', 'travel-calc-panel', 'route-planner-panel', 'galaxy-map-panel', 'build-order-panel'].forEach(id => {
+    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'battle-calc-panel', 'travel-calc-panel', 'route-planner-panel', 'galaxy-map-panel', 'build-order-panel', 'battle-reports-panel'].forEach(id => {
         if (id !== exceptId) document.getElementById(id)?.classList.replace('translate-x-0', 'translate-x-full');
     });
 }
@@ -484,6 +487,79 @@ export async function refreshAllianceStatsData() {
         const data = await res.json();
         if (data.success) { rawDbAllyStats = data.stats; renderAllyStatsTable(); }
     } catch (err) {}
+}
+
+export async function openBattleReportsPanel() {
+    let panel = document.getElementById('battle-reports-panel');
+    if (!panel) {
+        const res = await fetch('/hub-assets/components/battle-reports.html');
+        document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
+        panel = document.getElementById('battle-reports-panel');
+        document.getElementById('battle-reports-close-btn')?.addEventListener('click', () => {
+            panel.classList.replace('translate-x-0', 'translate-x-full');
+        });
+    }
+    if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
+    closeOtherPanels('battle-reports-panel');
+    panel.classList.replace('translate-x-full', 'translate-x-0');
+    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
+
+    document.getElementById('battle-reports-table-body').innerHTML = '<tr><td colspan="6" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading battle reports...</td></tr>';
+    try {
+        const res = await fetch('/hub-api/intel/battle-reports-feed');
+        const data = await res.json();
+        if (data.success) renderBattleReportsTable(data.feed);
+        else throw new Error(data.error || 'unknown error');
+    } catch (err) {
+        document.getElementById('battle-reports-table-body').innerHTML = '<tr><td colspan="6" class="text-center py-8 text-red-500">Failed to load data.</td></tr>';
+    }
+}
+
+function renderBattleReportsTable(feed) {
+    const body = document.getElementById('battle-reports-table-body');
+    const countEl = document.getElementById('battle-reports-result-count');
+    if (countEl) countEl.textContent = feed.length;
+    if (!body) return;
+
+    if (!feed.length) {
+        body.innerHTML = '<tr><td colspan="6" class="text-center py-8 text-muted-foreground">No battles or population drops recorded yet.</td></tr>';
+        return;
+    }
+
+    body.innerHTML = feed.map(row => {
+        const when = formatSqliteUtc(row.occurred_at, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const systemLabel = row.system_name ? `${esc(row.system_name)} [${row.system_id}] #${row.planet_index}` : `#${row.system_id}/${row.planet_index}`;
+        const attacker = row.attacker_name
+            ? `${row.attacker_alliance_tag ? `[${esc(row.attacker_alliance_tag)}] ` : ''}${esc(row.attacker_name)}`
+            : '<span class="text-muted-foreground">—</span>';
+        const defender = row.defender_name
+            ? `${row.defender_alliance_tag ? `[${esc(row.defender_alliance_tag)}] ` : ''}${esc(row.defender_name)}`
+            : '<span class="text-muted-foreground">—</span>';
+        const population = (row.old_population != null && row.new_population != null)
+            ? `${row.old_population} → ${row.new_population}`
+            : (row.killed_population != null ? `-${row.killed_population}` : '—');
+        // Battles link to the game's own report; a population drop with no matching
+        // report has nothing to link to, so it's plain text instead.
+        const report = row.battle_report_id
+            ? `<button class="btn-open-battle-report text-primary hover:underline" data-report-id="${row.battle_report_id}">#${row.battle_report_id}</button>`
+            : '<span class="text-muted-foreground italic">no report</span>';
+
+        return `<tr class="hover:bg-accent/50">
+            <td class="p-3 text-muted-foreground">${esc(when)}</td>
+            <td class="p-3">${systemLabel}</td>
+            <td class="p-3">${attacker}</td>
+            <td class="p-3">${defender}</td>
+            <td class="p-3 text-red-400">${esc(population)}</td>
+            <td class="p-3">${report}</td>
+        </tr>`;
+    }).join('');
+
+    body.querySelectorAll('.btn-open-battle-report').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const id = e.currentTarget.getAttribute('data-report-id');
+            navToIframe(`/About/BattleReport/${id}`);
+        });
+    });
 }
 
 // Extract trade-partner names from a member's /Game/Alliance/Member page.

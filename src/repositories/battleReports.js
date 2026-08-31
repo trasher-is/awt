@@ -189,6 +189,87 @@ function findByPlayerPairNear(playerA, playerB, occurredAtIso, windowMinutes) {
     return row ? row.id : null;
 }
 
+// --- Battle Reports page: a unified, alliance-wide "what happened" feed ---
+// Two very different signal sources merged into one chronological list:
+//   1. battle_reports rows — a real combat encounter the game reported. Always "linked":
+//      the row IS the report, so battle_report_id is just its own id.
+//   2. planet_events POP_DROP rows (id 2) with NO matching battle_reports row nearby —
+//      population fell but no combat report exists for it (a bombardment outside a full
+//      encounter, or one the hub hasn't synced/matched yet). Shown unlinked.
+// A POP_DROP row that DOES have a matching battle_reports row is dropped from the feed
+// entirely rather than shown a second time — the battle_reports row for that same
+// system/planet/time already covers it, with richer detail.
+//
+// The match window is wide (3h) on purpose: planet_events.timestamp is when the hub's own
+// scan happened to observe the drop, not the true in-game event time (unlike a battle
+// report's own started_at, which IS the real time) — see systems.js's logPlanetEvent.
+const POP_DROP_MATCH_WINDOW_MINUTES = 180;
+
+const battleReportsFeedStmt = db.prepare(`
+    SELECT br.id AS battle_report_id, br.started_at AS occurred_at,
+           br.system_id, br.planet_index, s.name AS system_name,
+           br.att_player_name, br.att_alliance_tag,
+           br.def_player_name, br.def_alliance_tag,
+           br.killed_population, br.winner
+    FROM battle_reports br
+    LEFT JOIN systems s ON s.id = br.system_id
+    WHERE br.system_id IS NOT NULL
+    ORDER BY br.started_at DESC
+    LIMIT ?
+`);
+
+const unmatchedPopDropsStmt = db.prepare(`
+    SELECT pe.timestamp AS occurred_at, pe.system_id, pe.planet_index, s.name AS system_name,
+           pe.old_value AS old_population, pe.new_value AS new_population,
+           p.name AS owner_name
+    FROM planet_events pe
+    LEFT JOIN systems s ON s.id = pe.system_id
+    LEFT JOIN planets pl ON pl.system_id = pe.system_id AND pl.planet_index = pe.planet_index
+    LEFT JOIN players p ON p.id = pl.owner_id
+    WHERE pe.event_type_id = 2
+      AND NOT EXISTS (
+          SELECT 1 FROM battle_reports br
+          WHERE br.system_id = pe.system_id AND br.planet_index = pe.planet_index
+            -- started_at is stored verbatim from the game API (ISO8601, "...T...Z") while
+            -- datetime()'s own output is always space-separated ("YYYY-MM-DD HH:MM:SS") —
+            -- comparing the raw column against a bare datetime() result is a string
+            -- comparison across two different formats and silently never matches (T > ' '
+            -- lexicographically, so started_at always sorted "after" the upper bound
+            -- regardless of the real time). Wrapping started_at in datetime() too
+            -- normalizes both sides to the same canonical form before comparing.
+            AND datetime(br.started_at) BETWEEN datetime(pe.timestamp, '-' || @window || ' minutes')
+                                             AND datetime(pe.timestamp, '+' || @window || ' minutes')
+      )
+    ORDER BY pe.timestamp DESC
+    LIMIT @limit
+`);
+
+function getBattleReportsFeed(limit = 50) {
+    const battles = battleReportsFeedStmt.all(limit).map(row => ({
+        occurred_at: row.occurred_at,
+        battle_report_id: row.battle_report_id,
+        system_id: row.system_id, planet_index: row.planet_index, system_name: row.system_name,
+        attacker_name: row.att_player_name, attacker_alliance_tag: row.att_alliance_tag,
+        defender_name: row.def_player_name, defender_alliance_tag: row.def_alliance_tag,
+        killed_population: row.killed_population, winner: row.winner,
+        old_population: null, new_population: null,
+    }));
+    const drops = unmatchedPopDropsStmt.all({ window: POP_DROP_MATCH_WINDOW_MINUTES, limit }).map(row => ({
+        occurred_at: row.occurred_at,
+        battle_report_id: null,
+        system_id: row.system_id, planet_index: row.planet_index, system_name: row.system_name,
+        attacker_name: null, attacker_alliance_tag: null,
+        defender_name: row.owner_name, defender_alliance_tag: null,
+        killed_population: (row.old_population != null && row.new_population != null)
+            ? row.old_population - row.new_population : null,
+        winner: null,
+        old_population: row.old_population, new_population: row.new_population,
+    }));
+    const merged = [...battles, ...drops];
+    merged.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : a.occurred_at > b.occurred_at ? -1 : 0));
+    return merged.slice(0, limit);
+}
+
 module.exports = {
     deleteAllBattleReports,
     getPendingAnnouncements,
@@ -202,4 +283,5 @@ module.exports = {
     findByPlayerPairNear,
     getRecentPlanets,
     hasAnyBattleHistory,
+    getBattleReportsFeed,
 };
