@@ -30,9 +30,6 @@ function generateSyntheticPage(systemId) {
     <div b-b4pfdex4p1="" class="container-fluid">
         <div class="row">
             <div class="col-md-12">
-                <div class="alert alert-secondary text-center mb-3 shadow-sm">
-                    Out of vision range — showing the hub's last recorded data for this system.
-                </div>
                 <table class="table navigation">
                     <tbody>
                     <tr>
@@ -78,6 +75,13 @@ function generateSyntheticPage(systemId) {
                 </div>
             </div>
         </div>
+        <div class="row">
+            <div class="col-md-12">
+                <div class="alert alert-secondary text-center mb-3 shadow-sm">
+                    Out of vision range — showing the hub's last recorded data for this system.
+                </div>
+            </div>
+        </div>
     </div>
 </main>
 
@@ -98,11 +102,14 @@ function generateSyntheticPage(systemId) {
                 return;
             }
 
-            if (data.system) {
+            if (data.system && data.system.name) {
+                // Bare name only — full_name already carries "Name [id] (x/y)" baked in
+                // (confirmed against real data: full_name for system 4 was literally
+                // "Ras al Asad al Shamaliyy [4] (4/-1)"), so preferring it here duplicated
+                // the bracket/coords suffix this code also appends of its own accord.
                 const heading = document.getElementById('synthetic-system-heading');
-                const name = data.system.full_name || data.system.name || ('System #' + ${JSON.stringify(systemId)});
                 heading.innerHTML = '<a class="me-2" href="/Game/Map"><i class="bi bi-geo-alt"></i></a>'
-                    + name + ' [' + ${JSON.stringify(systemId)} + '] (' + data.system.x + '/' + data.system.y + ')';
+                    + data.system.name + ' [' + ${JSON.stringify(systemId)} + '] (' + data.system.x + '/' + data.system.y + ')';
             }
 
             const maxIndex = Math.max(
@@ -132,7 +139,7 @@ function generateSyntheticPage(systemId) {
                     tr.innerHTML += '<td>' + planet.population.toLocaleString() + '</td>';
                     tr.innerHTML += '<td>' + planet.starbase + '</td>';
                     const tagStr = planet.alliance_tag ? ' [' + planet.alliance_tag + ']' : '';
-                    tr.innerHTML += '<td><span>' + (planet.owner_name || 'Unoccupied') + tagStr + '</span></td>';
+                    tr.innerHTML += '<td><span>' + (planet.owner_name || 'Free Planet') + tagStr + '</span></td>';
                 } else {
                     tr.innerHTML += '<td>-</td><td>-</td><td><span class="text-muted">Unknown</span></td>';
                 }
