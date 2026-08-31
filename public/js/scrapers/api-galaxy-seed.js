@@ -10,8 +10,10 @@
 // discussion for why that trade was made deliberately, not by accident.
 import '../utils/game-rate-limit.js';
 import '../utils/aw-api.js';
+import '../utils/capture-freshness.js'; // side-effect import: puts the model on globalThis
 
 const AWApi = globalThis.AWApi;
+const { isStaleCapture } = globalThis.AWCaptureFreshness;
 
 const SECTOR_BOUNDS = { x1: -40, y1: -40, x2: 40, y2: 40 }; // known map bounds ~-32..32, padded
 
@@ -65,14 +67,19 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
     const visionFlags = [];
     for (const sys of allSystems) {
         if (!sys || !Number.isInteger(sys.id)) continue;
-        const isInVision = !!sys.isInVision;
+        // isInVision alone isn't enough — see capture-freshness.js: the API can say
+        // isInVision:true for a stale, hours-old snapshot (confirmed live: a real capture
+        // exactly at the daily reset boundary, 20+ hours old, for a system only an ally
+        // had personal vision on).
+        const isInVision = !!sys.isInVision && !isStaleCapture(sys.capturedAt);
         visionFlags.push({ id: sys.id, is_in_vision: isInVision });
 
         const planets = Array.isArray(sys.planets) ? sys.planets : [];
         const payload = AWApi.mapPlanetsToSyncPayload(sys.id, planets);
         if (!isInVision) {
-            // Out-of-vision: the game's cache may be stale, so route every planet through
-            // the SAME "unknown" guard a live scraper uses for fog of war.
+            // Out-of-vision (or in-vision but stale, see isStaleCapture above): the data
+            // may not reflect reality right now, so route every planet through the SAME
+            // "unknown" guard a live scraper uses for fog of war.
             payload.planets = payload.planets.map(p => ({ ...p, is_unknown: true }));
         }
         if (!payload.planets.length) continue;
