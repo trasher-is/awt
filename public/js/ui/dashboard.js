@@ -11,7 +11,8 @@ import {
     openBattleCalcPanel,
     openTravelCalcPanel,
     openRoutePlannerPanel,
-    openBuildOrderPanel
+    openBuildOrderPanel,
+    openBattleReportsPanel
 } from './archives.js';
 import { runPlayerScan } from '../scrapers/mass-scanner.js';
 import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
@@ -51,6 +52,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('open-planets-db-btn')?.addEventListener('click', openPlanetDatabasePanel);
     document.getElementById('open-fleets-db-btn')?.addEventListener('click', openFleetDatabasePanel);
     document.getElementById('open-battle-calc-btn')?.addEventListener('click', openBattleCalcPanel);
+    document.getElementById('open-battle-reports-btn')?.addEventListener('click', openBattleReportsPanel);
     document.getElementById('open-travel-calc-btn')?.addEventListener('click', openTravelCalcPanel);
     document.getElementById('open-route-planner-btn')?.addEventListener('click', openRoutePlannerPanel);
     document.getElementById('open-build-order-btn')?.addEventListener('click', openBuildOrderPanel);
