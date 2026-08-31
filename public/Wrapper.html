@@ -52,15 +52,15 @@
         <div class="flex-1 flex flex-col pt-2 overflow-y-auto">
             
             <div id="context-tools" class="flex flex-col pb-4 border-b border-border hidden">
-                <div class="px-4 py-2 text-s text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed flex justify-between items-center">
-                    <span>System Intel</span><span id="ui-sys-id" class="text-foreground font-mono">--</span>
+                <div class="px-4 py-2 text-s text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed">
+                    <span id="ui-sys-id">System Data</span>
                 </div>
-            
+
                 <div id="system-intel-container" class="px-4 py-2 hide-collapsed flex flex-col gap-4 text-sm">
                     <div id="system-plans-container" class="flex flex-col gap-3">
-                        <div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Tactical Plans</div>
+                        <div class="text-muted-foreground font-semibold border-b border-border pb-1 mb-2">Plans</div>
                         <div class="bg-card border border-border rounded-lg p-3 shadow-sm">
-                            <div class="flex gap-2 mb-3">
+                            <div class="flex gap-2 mb-2">
                                 <select id="plan-planet-idx" class="h-8 w-24 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm text-muted-foreground focus:outline-none">
                                     <option value="" disabled selected>Planet #</option>
                                     <option value="1">1</option><option value="2">2</option><option value="3">3</option>
@@ -68,9 +68,9 @@
                                     <option value="7">7</option><option value="8">8</option><option value="9">9</option>
                                     <option value="10">10</option><option value="11">11</option><option value="12">12</option>
                                 </select>
-                                <input type="text" id="plan-note" placeholder="Instructions..." class="h-8 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus:outline-none">
                                 <button id="save-plan-btn" class="inline-flex items-center justify-center h-8 px-3 rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90 text-sm shadow-sm">Save</button>
                             </div>
+                            <input type="text" id="plan-note" placeholder="Instructions..." class="h-8 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus:outline-none">
                         </div>
                         <div id="plans-list" class="flex flex-col gap-2 empty:hidden"></div>
                     </div>

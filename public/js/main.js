@@ -1,5 +1,4 @@
 import { initSpy } from './core/spy.js';
-import { initPersistentPlanPills } from './core/page-injections.js';
 
 console.log("[Alliance Tools] Extension Core Engine Loaded.");
 
@@ -38,9 +37,11 @@ function scrapeAllianceOnce() {
 }
 
 function processActiveView() {
-    if (document.getElementById("solarSystem")) {
-        initPersistentPlanPills();
-    }
+    // Plan badges on the system table are spy.js's job now (INJECT_TACTICAL_OVERLAYS,
+    // sent whenever the sidebar loads a system's plans) — a separate, older pill renderer
+    // used to live here too and ran independently of that system, so a planet with a plan
+    // ended up with BOTH a "Plan" badge (spy.js) and a "PLAN" badge (this one) stacked on
+    // the same row.
 
     if (window.location.href.toLowerCase().includes('/game/alliance')) {
         scrapeAllianceOnce();

@@ -98,6 +98,11 @@ router.get('/intel/system/:id', requireAuth, (req, res) => {
     try {
         const sysId = req.params.id;
 
+        // 0. Get the system's own name/coords — used by the sidebar header ("System Data
+        // - #4 Meboula") and the out-of-vision synthetic page's heading. null when the
+        // system has never been indexed at all, which callers must handle gracefully.
+        const system = systemsRepo.getFullSystem(sysId) || null;
+
         // 1. Get Planets & Owners (Updated to grab joined Guarded Ranking values)
         const planets = systemsRepo.getSystemPlanetsWithIntel(sysId);
 
@@ -110,7 +115,7 @@ router.get('/intel/system/:id', requireAuth, (req, res) => {
         // 4. Get Plans
         const plans = plansRepo.getPlansForSystem(sysId);
 
-        res.json({ success: true, planets, fleets, history, plans });
+        res.json({ success: true, system, planets, fleets, history, plans });
     } catch (err) {
         console.error("[DB Error] Failed to fetch system intel:", err);
         res.status(500).json({ error: 'Failed to fetch intel' });
