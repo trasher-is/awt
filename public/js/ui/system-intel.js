@@ -22,6 +22,14 @@ export async function loadPlans(sysId) {
         const data = await res.json();
         if (!data.success) return;
 
+        // Refines the sidebar header dashboard.js already set to "System Data - #{id}"
+        // (from GAME_CONTEXT, before this fetch had a chance to resolve) into the full
+        // "System Data - #{id} {name}" once the system's own name is known.
+        const sysLabel = document.getElementById('ui-sys-id');
+        if (sysLabel && data.system && data.system.name) {
+            sysLabel.innerText = `System Data - #${sysId} ${data.system.name}`;
+        }
+
         const list = document.getElementById('plans-list');
         if (list) {
             if (data.plans.length > 0) {

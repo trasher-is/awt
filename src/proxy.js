@@ -23,11 +23,6 @@ function generateSyntheticPage(systemId) {
             padding-left: 20px;
             padding-right: 20px;
         }
-        .out-of-range-alert {
-            background-color: rgba(127, 29, 29, 0.9) !important;
-            color: #fca5a5 !important;
-            border: 1px solid #f87171 !important;
-        }
     </style>
 </head>
 <body class="d-flex flex-column h-100">
@@ -35,8 +30,8 @@ function generateSyntheticPage(systemId) {
     <div b-b4pfdex4p1="" class="container-fluid">
         <div class="row">
             <div class="col-md-12">
-                <div class="alert out-of-range-alert text-center fw-bold mb-3 shadow-sm">
-                    ⚠️ OUT OF VISION RANGE — SYSTEM INSIGHTS RENDERED FROM ALLIANCE CACHE RECORDINGS
+                <div class="alert alert-secondary text-center mb-3 shadow-sm">
+                    Out of vision range — showing the hub's last recorded data for this system.
                 </div>
                 <table class="table navigation">
                     <tbody>
@@ -57,10 +52,9 @@ function generateSyntheticPage(systemId) {
         </div>
         <div class="row">
             <div class="col-md-12 text-center">
-                <h5>
+                <h5 id="synthetic-system-heading">
                     <a class="me-2" href="/Game/Map"><i class="bi bi-geo-alt"></i></a>
-                    Planets at Cached Coordinate Matrix: [ System Index Reference #${systemId} ]
-                    <span class="badge bg-danger ms-2" style="font-size: 0.6em; vertical-align: middle;"><i class="bi bi-cloud-slash"></i> Offline Mode</span>
+                    System #${systemId}
                 </h5>
             </div>
         </div>
@@ -78,7 +72,7 @@ function generateSyntheticPage(systemId) {
                             </tr>
                         </thead>
                         <tbody id="synthetic-intel-body">
-                            <tr><td colspan="5" class="text-center py-4 text-muted">Pulling archived registry maps from alliance array storage...</td></tr>
+                            <tr><td colspan="5" class="text-center py-4 text-muted">Loading...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -100,8 +94,15 @@ function generateSyntheticPage(systemId) {
             tbody.innerHTML = '';
 
             if (!data.success) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">No shared data matches this system index coordinate.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">No data available for this system.</td></tr>';
                 return;
+            }
+
+            if (data.system) {
+                const heading = document.getElementById('synthetic-system-heading');
+                const name = data.system.full_name || data.system.name || ('System #' + ${JSON.stringify(systemId)});
+                heading.innerHTML = '<a class="me-2" href="/Game/Map"><i class="bi bi-geo-alt"></i></a>'
+                    + name + ' [' + ${JSON.stringify(systemId)} + '] (' + data.system.x + '/' + data.system.y + ')';
             }
 
             const maxIndex = Math.max(
@@ -112,7 +113,7 @@ function generateSyntheticPage(systemId) {
             );
 
             if (maxIndex === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No mapped planet entries or operations tracked in history logs for this layout.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No planets recorded for this system.</td></tr>';
                 return;
             }
 
@@ -124,8 +125,7 @@ function generateSyntheticPage(systemId) {
                 if (planet && planet.id) {
                     tr.setAttribute('data-planet-id', planet.id);
                 }
-                
-                // Serves only the row identifier coordinate block. No embedded badges here anymore.
+
                 tr.innerHTML = '<td>' + i + '</td>';
 
                 if (planet) {
@@ -134,12 +134,12 @@ function generateSyntheticPage(systemId) {
                     const tagStr = planet.alliance_tag ? ' [' + planet.alliance_tag + ']' : '';
                     tr.innerHTML += '<td><span>' + (planet.owner_name || 'Unoccupied') + tagStr + '</span></td>';
                 } else {
-                    tr.innerHTML += '<td>-</td><td>-</td><td><span class="text-muted">No Scan History</span></td>';
+                    tr.innerHTML += '<td>-</td><td>-</td><td><span class="text-muted">Unknown</span></td>';
                 }
 
                 let actionTd = '<td class="copy-none">';
                 if (fleets.length > 0) {
-                    actionTd += '<i class="bi bi-rocket-fill me-2 text-warning"></i> ' + fleets.length + ' Recorded Fleets';
+                    actionTd += '<i class="bi bi-rocket-fill me-2 text-warning"></i> ' + fleets.length + ' fleet(s)';
                     fleets.forEach(f => {
                         actionTd += '<div class="small text-muted" style="font-size: 11px; padding-left: 15px;">• ' + (f.owner_name || 'Unknown') + ' (TR:' + f.transports + ' BS:' + f.battleships + ')</div>';
                     });
@@ -152,7 +152,7 @@ function generateSyntheticPage(systemId) {
                 tbody.appendChild(tr);
             }
         } catch (err) {
-            document.getElementById('synthetic-intel-body').innerHTML = '<tr><td colspan="5" class="text-center text-danger">Intel pipeline connection timeout.</td></tr>';
+            document.getElementById('synthetic-intel-body').innerHTML = '<tr><td colspan="5" class="text-center text-danger">Failed to load system data.</td></tr>';
         }
     }
     window.addEventListener('DOMContentLoaded', loadCachedIntel);

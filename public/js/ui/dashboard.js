@@ -1,4 +1,4 @@
-import { handleSearchInput, navToIframe } from './search.js';
+import { handleSearchInput } from './search.js';
 import { loadPlans, savePlan, deletePlan, setIntelSystemId } from './system-intel.js';
 import {
     openDatabasePanel,
@@ -69,25 +69,11 @@ window.addEventListener('DOMContentLoaded', () => {
     refreshDeepScanStatus();
 
     // --- EVENT DELEGATION FOR DYNAMIC ELEMENTS ---
-    document.getElementById('search-player-results')?.addEventListener('click', (e) => {
-        const btn = e.target.closest('.btn-search-player');
-        if (btn) {
-            const id = btn.getAttribute('data-player-id');
-            document.getElementById('search-player-input').value = '';
-            document.getElementById('search-player-results').innerHTML = '';
-            navToIframe(`/Game/Players/Profile/${id}`);
-        }
-    });
-
-    document.getElementById('search-system-results')?.addEventListener('click', (e) => {
-        const btn = e.target.closest('.btn-search-system');
-        if (btn) {
-            const path = btn.getAttribute('data-path');
-            document.getElementById('search-system-input').value = '';
-            document.getElementById('search-system-results').innerHTML = '';
-            navToIframe(path);
-        }
-    });
+    // Player/system/alliance search results are NOT wired here — search.js binds a
+    // listener directly to each result button as it renders them (executeSearch). A
+    // leftover duplicate delegation used to live here too: every result click fired
+    // navToIframe twice, which on mobile closed the sidebar and then immediately reopened
+    // it (toggleSidebar flipped 'expanded' off then straight back on in the same click).
 
     document.getElementById('plans-list')?.addEventListener('click', (e) => {
         const btn = e.target.closest('.btn-delete-plan');
@@ -262,7 +248,10 @@ window.addEventListener('message', async (event) => {
                     ctxContainer.classList.remove('hidden');
                     if (sysLabel) {
                         sysLabel.classList.remove('hidden');
-                        sysLabel.innerText = `System #${p.systemId}`;
+                        // Set immediately from what GAME_CONTEXT already knows (the id);
+                        // loadPlans below refines this to "System Data - #{id} {name}"
+                        // once the system's name comes back from the hub archive.
+                        sysLabel.innerText = `System Data - #${p.systemId}`;
                     }
                     loadPlans(p.systemId);
                 }
