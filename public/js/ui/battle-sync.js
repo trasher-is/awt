@@ -1,16 +1,16 @@
 // Battle-report background sync — wrapper realm only.
 //
 // While a dashboard is open it periodically pulls the newest battle reports from the game
-// API and hands them to the hub (POST /hub-api/sync/battle-reports), which stores them
-// idempotently and announces the genuinely new ones on Discord. First pull 10 s after
-// load, then every 30 minutes. Scoped to the account's alliance once it has one; before
-// that (commonly the first 7-10+ days of a round) scoped to just that account's own
-// battles instead of skipping tracking entirely — see pullOnce's filterKey/filterValue.
+// API — GLOBALLY, every report on the server, not scoped to any one alliance (see pullOnce)
+// — and hands them to the hub (POST /hub-api/sync/battle-reports), which stores them
+// idempotently and announces the genuinely new, alliance-relevant ones on Discord (the
+// alliance filter lives server-side now, at announce time — see routes/sync.js). First
+// pull 10 s after load, then every 30 minutes.
 //
 // A setInterval here does NOT violate the no-polling rule: that rule bans polling the
 // game's DOM inside the injected frame (the 200ms interval spy.js was rewritten to
-// remove). This is the wrapper document making rate-gated API calls on a slow clock —
-// two requests per pull, through the same shared 5/s budget as everything else.
+// remove). This is the wrapper document making rate-gated API calls on a slow clock — one
+// request per pull, through the same shared 5/s budget as everything else.
 //
 // Two open dashboards must not double-pull, so a pull first claims a localStorage
 // timestamp lock (25-min TTL — shorter than the 30-min interval, so a pull that died
@@ -104,77 +104,40 @@ function extractReports(data) {
 }
 
 async function pullOnce() {
-    // Whose reports? allianceId is resolved server-side via the name bridge. It's null in
-    // two different situations that must not share one message: bridgeResolved=false means
-    // the hub username doesn't match any in-game player at all (a real config problem);
-    // bridgeResolved=true with allianceId still null means the match worked fine and that
-    // player simply has no alliance right now (e.g. a fresh round, before joining one) —
-    // an expected, temporary state, not an error to fix.
-    const meRes = await fetch('/hub-api/me');
-    if (!meRes.ok) {
-        console.warn('[BattleSync] /hub-api/me failed:', meRes.status);
-        return { ok: false, error: `/hub-api/me failed (${meRes.status})` };
-    }
-    const me = await meRes.json();
-    if (!me.bridgeResolved) {
-        console.warn('[BattleSync] hub username does not match any in-game player — skipping sync.');
-        return { ok: false, reason: 'bridge', error: 'your hub username does not match an in-game player name — check it in Settings' };
-    }
-    // No alliance yet (commonly the first 7-10+ days of a round, before anyone's joined
-    // one) doesn't mean nothing to track — the API also filters by PlayerId, so fall back
-    // to this member's own battles instead of skipping the whole round's opening stretch.
-    // Coverage is necessarily partial (only players who are both hub members AND have their
-    // browser open get synced this way), but that beats zero battle tracking until an
-    // alliance forms.
-    const filterKey = me.allianceId != null ? 'AllianceId' : 'PlayerId';
-    const filterValue = me.allianceId != null ? me.allianceId : me.playerId;
-
+    // GLOBAL, unfiltered pull — every battle report on the server, not just the tracked
+    // account's own alliance/battles. Confirmed against production (2026-09-02): omitting
+    // FirstParty/SecondParty entirely returns results for arbitrary, unrelated players (same
+    // "no filter" shape as getPlayers()), so there is no need to resolve "my alliance" here
+    // at all any more — the old alliance-or-own-battles scoping just meant this hub only
+    // ever learned about combat involving whichever account's dashboard happened to be open,
+    // and (in a fresh round, before alliances have real rosters) essentially nothing. Storing
+    // everything now means there is no gap to backfill later if a wider view is ever wanted;
+    // Discord's announcer is what stays alliance-scoped (see routes/sync.js), by filtering
+    // AFTER sync rather than restricting what gets pulled in the first place.
     const { searchBattleReports } = globalThis.AWApi;
 
-    // Both sides of the tracked scope's battles: initiated (FirstParty) and received
-    // (SecondParty). gameFetch serializes these through the shared 5/s window anyway.
-    const base = {
+    const result = await searchBattleReports({
         OrderBy: 'DateTime',
         OrderDirection: 'Descending',
         Take: TAKE,
         BattleDateFrom: newestStartedAt, // omitted from the query while null
-    };
-    const [asAttacker, asDefender] = await Promise.all([
-        searchBattleReports({ ...base, [`FirstParty.${filterKey}`]: filterValue }),
-        searchBattleReports({ ...base, [`SecondParty.${filterKey}`]: filterValue }),
-    ]);
-
-    // A battle that matches both searches (e.g. two tracked members fighting each other)
-    // dedupes by report id. Reports without an id pass through untouched; the server-side
-    // mapper is the validator.
-    const seen = new Set();
-    const reports = [];
-    let anySearchOk = false;
-    for (const result of [asAttacker, asDefender]) {
-        if (!result.ok) {
-            console.warn('[BattleSync] battle-report search failed:', result.status, result.reason);
-            continue;
-        }
-        anySearchOk = true;
-        const pageReports = extractReports(result.data);
-        // A page exactly at the Take cap means the API may hold MORE matches for this
-        // window than we asked for — Descending order means those extra ones are older
-        // than everything here, and with no confirmed way to page past this, they are
-        // silently gone from this pull. Fail loudly instead of pretending the window was
-        // fully covered (same philosophy as extractReports' "unrecognized shape" warning).
-        if (pageReports.length >= TAKE) {
-            console.warn(`[BattleSync] search page hit the Take cap (${TAKE}) — older reports in this window may have been missed.`);
-        }
-        for (const r of pageReports) {
-            const id = r && r.id;
-            if (id != null) {
-                if (seen.has(id)) continue;
-                seen.add(id);
-            }
-            reports.push(r);
-        }
+    });
+    if (!result.ok) {
+        console.warn('[BattleSync] battle-report search failed:', result.status, result.reason);
+        return { ok: false, error: `battle-report search failed (${result.status || result.reason})` };
     }
-    if (!anySearchOk) return { ok: false, error: 'both battle-report searches failed' };
+    const reports = extractReports(result.data);
+    // A page exactly at the Take cap means the API may hold MORE matches for this window
+    // than we asked for — Descending order means those extra ones are older than everything
+    // here, and with no confirmed way to page past this, they are silently gone from this
+    // pull. Fail loudly instead of pretending the window was fully covered (same philosophy
+    // as extractReports' "unrecognized shape" warning). A global feed fills this cap far
+    // faster than the old alliance-scoped one did, so this is far more likely to fire now —
+    // if it does often, PULL_INTERVAL_MS needs shortening, not TAKE raising past what's
+    // confirmed to work.
+    if (reports.length >= TAKE) {
+        console.warn(`[BattleSync] search page hit the Take cap (${TAKE}) — older reports in this window may have been missed.`);
+    }
 
     // POST even when empty: the response's newest_started_at is the only way to learn
     // the hub's watermark (including advances other members' dashboards pushed), and
