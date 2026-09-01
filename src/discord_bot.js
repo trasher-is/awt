@@ -296,7 +296,8 @@ async function handleMessage(message) {
                 { name: '`!bio`', value: 'Generates intelligence alerts highlighting players who possess a +6 biology or science advantage over your personal bio level.' },
                 { name: '`!battle <D> <C> <B> vs <D> <C> <B>`', value: 'Simulates a battle. Flags: `--sb N` starbase (0-50), `--dp/--ap N` physics, `--dm/--am N` math, `--dra/--ara N` race atk, `--drd/--ard N` race def, `--dl/--al N` player level. Or `--def Name --atk Name` to auto-fill all stats from DB.\n*Example: `!battle 50 10 0 vs 40 8 2 --dp 5 --ap 3 --dl 12 --al 8`*' },
                 { name: '`!mortal` / `!mortalday` / `!mortalweek` `[all|<alliance_tag>]`', value: 'Shows the CV/population-killed battle leaderboards — all-time, last 24 hours, or last 7 days. Defaults to Hub tool users only; `all` lifts that; any alliance tag filters to that alliance (any alliance, not just your own).\n*Example: `!mortalweek nsa`*' },
-                { name: '`!lastseen <player_name>`', value: 'Shows up to 5 recent system/planet locations a player was involved in a battle report or News-page bombardment at, on either side, newest first.\n*Example: `!lastseen Hkiller89`*' }
+                { name: '`!lastseen <player_name>`', value: 'Shows up to 5 recent system/planet locations a player was involved in a battle report or News-page bombardment at, on either side, newest first.\n*Example: `!lastseen Hkiller89`*' },
+                { name: '`!8ball <question>`', value: 'Ask the magic 8-ball a question.\n*Example: `!8ball will we win this round?`*' }
             )
             .setFooter({ text: 'AWT Intelligence Hub' });
 
@@ -321,6 +322,19 @@ async function handleMessage(message) {
     // ----------------------------------------------------
     if (command === 'getid') {
         return message.reply(`The ID of this channel is: **${message.channel.id}**`);
+    }
+
+    // ----------------------------------------------------
+    // !8ball <question> - MAGIC 8-BALL
+    // ----------------------------------------------------
+    if (command === '8ball') {
+        const answers = [
+            'Yes', 'No', 'Maybe',
+            'Absolutely', 'Definitely not', 'Ask again later',
+            'Signs point to yes', 'Very doubtful', 'Without a doubt',
+        ];
+        const answer = answers[Math.floor(Math.random() * answers.length)];
+        return message.reply(`🎱 ${answer}`);
     }
 
     // ----------------------------------------------------
