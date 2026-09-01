@@ -544,6 +544,27 @@ function upsertPlayerFromApiList(id, name, allianceId, level, points, ranking, c
     upsertPlayerFromApiListStmt.run(id, name, allianceId, level, points, ranking, country, isActivePlayer, joined);
 }
 
+// New-player announcement queue, mirroring battle_reports.announced (see
+// routes/sync.js's /sync/battle-reports handler): driven from the column, not from this
+// sync batch, so a player who joined before the Discord channel was configured still gets
+// announced once it is. joined IS NOT NULL guards against announcing rows the API listed
+// without ever supplying a join date (nothing to put in the embed).
+const getPendingNewPlayerAnnouncementsStmt = db.prepare(`
+    SELECT p.id, p.name, p.alliance_id, a.tag as alliance_tag, p.joined
+    FROM players p
+    LEFT JOIN alliances a ON a.id = p.alliance_id
+    WHERE p.announced_new_player = 0 AND p.joined IS NOT NULL
+    ORDER BY p.joined ASC
+`);
+function getPendingNewPlayerAnnouncements() {
+    return getPendingNewPlayerAnnouncementsStmt.all();
+}
+
+const markNewPlayerAnnouncedStmt = db.prepare(`UPDATE players SET announced_new_player = 1 WHERE id = ?`);
+function markNewPlayerAnnounced(id) {
+    markNewPlayerAnnouncedStmt.run(id);
+}
+
 // Player/{id}-sourced upsert: same has_intel-CASE-guard shape as upsertPlayerFull above,
 // a SEPARATE statement (not shared) that never touches home_planet_id/total_*/idle_time/
 // eco_bonus — those are scrape-only, the API detail response has no data for them.
@@ -673,4 +694,5 @@ module.exports = {
     getPlayerName, recordNameChange, recordNameChangeIfDifferent, getPlayerRaceValues,
     upsertPlayerFromApiList, upsertPlayerFromApiDetail,
     getStalePlayerIdsForApiScan, markPlayersApiScanned, getPlayerApiScanStats,
+    getPendingNewPlayerAnnouncements, markNewPlayerAnnounced,
 };
