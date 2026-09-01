@@ -369,34 +369,32 @@ router.post('/sync/player-list', requireAuth, (req, res) => {
 
     // New-player announcements: same "queue driven by the column, not this batch" idiom as
     // the battle-report announcer above (a player who joined before the channel was
-    // configured still gets announced once it is). Capped at 5 embeds per sync with the
-    // overflow summarized in one line, same as battle reports. Posted via postBattleEmbed
-    // (kombat bot / BATTLE_DISCORD_TOKEN) at the user's request — same identity that
-    // already posts the battle-points leaderboard, not the main raider bot.
+    // configured still gets announced once it is). Unlike battle reports (one embed per
+    // report — each is a distinct event worth its own post), a backlog of new players is
+    // one story ("N players joined"), so it's aggregated into a SINGLE embed, one name per
+    // line, rather than a message-per-player + a trailing "...and N more" ever having been
+    // sent as its own message (that produced 5 separate pings plus an unhelpful "56 more,
+    // no names" message the first time this ran against the existing backlog). Capped at 40
+    // named lines — comfortably inside Discord's 4096-char embed description limit even for
+    // long names — with any further overflow folded into the same embed's last line instead
+    // of a second message. Posted via postBattleEmbed (kombat bot / BATTLE_DISCORD_TOKEN) at
+    // the user's request — same identity that already posts the battle-points leaderboard,
+    // not the main raider bot.
     if (settingValue('discord_new_player_channel')) {
         const pending = playersRepo.getPendingNewPlayerAnnouncements();
         if (pending.length > 0) {
-            const toEmbed = pending.slice(0, 5);
-            for (const row of toEmbed) {
-                // row.joined comes straight from the game API (e.g.
-                // "2026-08-31T10:00:08.0083294+02:00") — Discord's embed timestamp field
-                // wants a standard ISO8601 string, so route it through Date first rather
-                // than passing the API's raw (non-standard fractional-second) format through.
-                const joinedMs = Date.parse(row.joined);
-                postBattleEmbed('discord_new_player_channel', {
-                    title: 'New player joined',
-                    description: `**${defuseMentions(row.name)}**${row.alliance_tag ? ` [${defuseMentions(row.alliance_tag)}]` : ''}`,
-                    color: 0x3ba55d,
-                    ...(Number.isFinite(joinedMs) ? { timestamp: new Date(joinedMs).toISOString() } : {}),
-                }).catch(err => console.error('[Discord] new-player announce error:', err.message));
+            const NAMED_LINE_CAP = 40;
+            const named = pending.slice(0, NAMED_LINE_CAP);
+            const lines = named.map(row =>
+                `**${defuseMentions(row.name)}**${row.alliance_tag ? ` [${defuseMentions(row.alliance_tag)}]` : ''}`);
+            if (pending.length > named.length) {
+                lines.push(`…and ${pending.length - named.length} more.`);
             }
-            if (pending.length > toEmbed.length) {
-                postBattleEmbed('discord_new_player_channel', {
-                    title: 'More new players',
-                    description: `…and ${pending.length - toEmbed.length} more new players joined.`,
-                    color: 0x99aab5,
-                }).catch(err => console.error('[Discord] new-player announce error:', err.message));
-            }
+            postBattleEmbed('discord_new_player_channel', {
+                title: pending.length === 1 ? 'New player joined' : `${pending.length} new players joined`,
+                description: lines.join('\n'),
+                color: 0x3ba55d,
+            }).catch(err => console.error('[Discord] new-player announce error:', err.message));
             const flip = db.transaction((ids) => { for (const id of ids) playersRepo.markNewPlayerAnnounced(id); });
             flip(pending.map(r => r.id));
         }
