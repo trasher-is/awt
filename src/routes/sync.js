@@ -370,7 +370,9 @@ router.post('/sync/player-list', requireAuth, (req, res) => {
     // New-player announcements: same "queue driven by the column, not this batch" idiom as
     // the battle-report announcer above (a player who joined before the channel was
     // configured still gets announced once it is). Capped at 5 embeds per sync with the
-    // overflow summarized in one line, same as battle reports.
+    // overflow summarized in one line, same as battle reports. Posted via postBattleEmbed
+    // (kombat bot / BATTLE_DISCORD_TOKEN) at the user's request — same identity that
+    // already posts the battle-points leaderboard, not the main raider bot.
     if (settingValue('discord_new_player_channel')) {
         const pending = playersRepo.getPendingNewPlayerAnnouncements();
         if (pending.length > 0) {
@@ -381,7 +383,7 @@ router.post('/sync/player-list', requireAuth, (req, res) => {
                 // wants a standard ISO8601 string, so route it through Date first rather
                 // than passing the API's raw (non-standard fractional-second) format through.
                 const joinedMs = Date.parse(row.joined);
-                postEmbed('discord_new_player_channel', {
+                postBattleEmbed('discord_new_player_channel', {
                     title: 'New player joined',
                     description: `**${defuseMentions(row.name)}**${row.alliance_tag ? ` [${defuseMentions(row.alliance_tag)}]` : ''}`,
                     color: 0x3ba55d,
@@ -389,7 +391,7 @@ router.post('/sync/player-list', requireAuth, (req, res) => {
                 }).catch(err => console.error('[Discord] new-player announce error:', err.message));
             }
             if (pending.length > toEmbed.length) {
-                postEmbed('discord_new_player_channel', {
+                postBattleEmbed('discord_new_player_channel', {
                     title: 'More new players',
                     description: `…and ${pending.length - toEmbed.length} more new players joined.`,
                     color: 0x99aab5,
