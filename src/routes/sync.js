@@ -802,15 +802,31 @@ router.get('/sync/battle-reports-watermark', requireAuth, (req, res) => {
     res.json({ newest_started_at: battleReportsRepo.getNewestStartedAt() });
 });
 
+// Which alliance tags' battles are worth a Discord post. battle-sync.js pulls EVERY report
+// on the server now (2026-09-02 — see that file's header), not just the tracked account's
+// own alliance, so without this every random battle anywhere in the game would spam the
+// channel. Comma-separated, same parsing convention as battlePoints.js's
+// getExcludedAllianceTags — except this is an INCLUDE list, not an exclude one. Empty means
+// "not configured yet": announce nothing rather than silently falling back to the old
+// firehose behavior, so an admin who hasn't set this notices a quiet channel instead of a
+// noisy one.
+function getBattleReportAllianceTags() {
+    const row = settingsRepo.getSetting('discord_battlereport_alliance_tags');
+    if (!row || !row.value) return [];
+    return row.value.split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
+}
+
 // --- BATTLE REPORT RECEIVER (game REST API) ---
 // Body: { reports: [<raw /api/v1 battle-report objects>] }. Mapping/validation lives in
 // src/utils/battle-reports.js: a malformed report is skipped, never aborts the batch,
 // and INSERT OR IGNORE makes re-syncs idempotent (the game report id is the PK).
 //
 // Discord announcements are fired AFTER the commit, fire-and-forget, only for reports
-// the hub had never seen (freshly inserted, announced=0), capped at 5 embeds per sync
-// with the overflow summarized in one line. Names are player-controlled strings on
-// their way to Discord, so they pass through defuseMentions first.
+// the hub had never seen (freshly inserted, announced=0) AND involving a tracked alliance
+// tag (see getBattleReportAllianceTags — sync itself is global, so this is the only
+// relevance filter left), capped at 5 embeds per sync with the overflow summarized in one
+// line. Names are player-controlled strings on their way to Discord, so they pass through
+// defuseMentions first.
 router.post('/sync/battle-reports', requireAuth, (req, res) => {
     const list = Array.isArray(req.body.reports) ? req.body.reports : null;
     if (!list) return res.status(400).json({ error: 'Invalid payload' });
@@ -833,7 +849,17 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
         if (settingValue('discord_battlereport_channel')) {
             const pending = battleReportsRepo.getPendingAnnouncements();
             if (pending.length > 0) {
-                const toEmbed = pending.slice(0, 5);
+                // Relevance filter: sync is global (every battle on the server), so only
+                // announce the ones touching a tag this alliance actually cares about.
+                // Irrelevant rows are NOT re-queued forever — they're still marked announced
+                // below, same as relevant ones, since "not relevant" is a final answer, not
+                // a transient failure worth retrying.
+                const trackedTags = getBattleReportAllianceTags();
+                const relevant = trackedTags.length === 0 ? [] : pending.filter(row =>
+                    (row.att_alliance_tag && trackedTags.includes(row.att_alliance_tag.toUpperCase()))
+                    || (row.def_alliance_tag && trackedTags.includes(row.def_alliance_tag.toUpperCase())));
+
+                const toEmbed = relevant.slice(0, 5);
                 for (const row of toEmbed) {
                     const embed = formatBattleEmbed({
                         ...row,
@@ -846,16 +872,17 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
                     postEmbed('discord_battlereport_channel', embed).catch(err =>
                         console.error('[Discord] battle-report announce error:', err.message));
                 }
-                if (pending.length > toEmbed.length) {
+                if (relevant.length > toEmbed.length) {
                     postEmbed('discord_battlereport_channel', {
                         title: 'More battle reports',
-                        description: `…and ${pending.length - toEmbed.length} more new battle reports synced.`,
+                        description: `…and ${relevant.length - toEmbed.length} more new battle reports synced.`,
                         color: 0x99aab5,
                     }).catch(err => console.error('[Discord] battle-report announce error:', err.message));
                 }
-                // Fire-and-forget above: the flag is flipped for every pending row now, so a
-                // Discord hiccup drops that one embed rather than replaying the whole backlog
-                // on the next sync (matches how reminders/timers mark themselves sent).
+                // Fire-and-forget above: the flag is flipped for every PENDING row (relevant
+                // or not) now, so a Discord hiccup drops that one embed rather than replaying
+                // the whole backlog on the next sync (matches how reminders/timers mark
+                // themselves sent) — and an irrelevant row never gets a second look.
                 const flip = db.transaction((ids) => { for (const id of ids) battleReportsRepo.markAnnounced(id); });
                 flip(pending.map(r => r.id));
             }

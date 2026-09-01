@@ -179,7 +179,7 @@
 
             <div class="bg-card border border-border rounded-lg p-4 shadow-sm">
                 <h3 class="font-bold text-foreground mb-1"><i class="fa-solid fa-explosion text-orange-400 mr-1"></i> Battle Report Announcer</h3>
-                <p class="text-xs text-muted-foreground mb-3">New <strong>battle reports</strong> involving the alliance (synced from the game API) are posted to this channel. Leave empty to disable — reports still sync and will announce once a channel is set. Use <code>!getid</code> in a channel to get its ID.</p>
+                <p class="text-xs text-muted-foreground mb-3">Battle reports now sync from the game API <strong>globally</strong> (every battle on the server, not just your own alliance's) so nothing is missed while a wider view is decided on later. This channel only gets a post when a battle involves one of the alliance tags below — leave the tag list empty and nothing will announce, even with a channel set. Use <code>!getid</code> in a channel to get its ID.</p>
                 <div class="flex flex-col md:flex-row gap-2 md:items-end">
                     <div class="flex-1">
                         <label class="text-xs text-muted-foreground mb-1 block">Battle Report Channel ID</label>
@@ -188,6 +188,14 @@
                     <button onclick="saveBattlereportChannel()" class="h-9 px-4 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Save</button>
                 </div>
                 <span id="battlereportChannelStatus" class="text-xs text-muted-foreground mt-2 block"></span>
+                <div class="flex flex-col md:flex-row gap-2 md:items-end mt-3">
+                    <div class="flex-1">
+                        <label class="text-xs text-muted-foreground mb-1 block">Tracked Alliance Tags (announce only battles touching these)</label>
+                        <input type="text" id="battlereportAllianceTags" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm" placeholder="e.g. RAID, NAP1">
+                    </div>
+                    <button onclick="saveBattlereportAllianceTags()" class="h-9 px-4 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Save</button>
+                </div>
+                <span id="battlereportAllianceTagsStatus" class="text-xs text-muted-foreground mt-1 block"></span>
             </div>
 
             <div class="bg-card border border-border rounded-lg p-4 shadow-sm">
@@ -395,6 +403,7 @@
                     document.getElementById('discordChannelId').value = data.settings.discord_announce_channel || '';
                     document.getElementById('popdropChannelId').value = data.settings.discord_popdrop_channel || '';
                     document.getElementById('battlereportChannelId').value = data.settings.discord_battlereport_channel || '';
+                    document.getElementById('battlereportAllianceTags').value = data.settings.discord_battlereport_alliance_tags || '';
                     document.getElementById('newplayerChannelId').value = data.settings.discord_new_player_channel || '';
                     document.getElementById('battlepointsChannelId').value = data.settings.discord_battlepoints_channel || '';
                     document.getElementById('battlepointsExcludedTags').value = data.settings.battle_points_excluded_alliance_tags || '';
@@ -443,6 +452,10 @@
 
         function saveNewplayerChannel() {
             return saveSetting('discord_new_player_channel', 'newplayerChannelId', 'newplayerChannelStatus');
+        }
+
+        function saveBattlereportAllianceTags() {
+            return saveSetting('discord_battlereport_alliance_tags', 'battlereportAllianceTags', 'battlereportAllianceTagsStatus');
         }
 
         function saveBattlepointsChannel() {
