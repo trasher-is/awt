@@ -191,6 +191,19 @@
             </div>
 
             <div class="bg-card border border-border rounded-lg p-4 shadow-sm">
+                <h3 class="font-bold text-foreground mb-1"><i class="fa-solid fa-user-plus text-green-400 mr-1"></i> New Player Announcer</h3>
+                <p class="text-xs text-muted-foreground mb-3">New players (join date synced from the game API) are posted to this channel. Leave empty to disable — new players still sync and will announce once a channel is set. Use <code>!getid</code> in a channel to get its ID.</p>
+                <div class="flex flex-col md:flex-row gap-2 md:items-end">
+                    <div class="flex-1">
+                        <label class="text-xs text-muted-foreground mb-1 block">New Player Channel ID</label>
+                        <input type="text" id="newplayerChannelId" class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm font-mono" placeholder="e.g. 123456789012345678">
+                    </div>
+                    <button onclick="saveNewplayerChannel()" class="h-9 px-4 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Save</button>
+                </div>
+                <span id="newplayerChannelStatus" class="text-xs text-muted-foreground mt-2 block"></span>
+            </div>
+
+            <div class="bg-card border border-border rounded-lg p-4 shadow-sm">
                 <h3 class="font-bold text-foreground mb-1"><i class="fa-solid fa-ranking-star text-rose-400 mr-1"></i> Battle Challenge Tracker</h3>
                 <p class="text-xs text-muted-foreground mb-3">Twice-daily CV/population leaderboard posts to this channel. CV/pop ratios control how raw kills convert to points; excluded alliance tags (comma-separated) are left out of both leaderboards entirely, in addition to always-excluded friendly fire. Leave the channel empty to disable posting.</p>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -382,6 +395,7 @@
                     document.getElementById('discordChannelId').value = data.settings.discord_announce_channel || '';
                     document.getElementById('popdropChannelId').value = data.settings.discord_popdrop_channel || '';
                     document.getElementById('battlereportChannelId').value = data.settings.discord_battlereport_channel || '';
+                    document.getElementById('newplayerChannelId').value = data.settings.discord_new_player_channel || '';
                     document.getElementById('battlepointsChannelId').value = data.settings.discord_battlepoints_channel || '';
                     document.getElementById('battlepointsExcludedTags').value = data.settings.battle_points_excluded_alliance_tags || '';
                     document.getElementById('battlepointsCvRatio').value = data.settings.battle_points_cv_ratio || '';
@@ -425,6 +439,10 @@
 
         function saveBattlereportChannel() {
             return saveSetting('discord_battlereport_channel', 'battlereportChannelId', 'battlereportChannelStatus');
+        }
+
+        function saveNewplayerChannel() {
+            return saveSetting('discord_new_player_channel', 'newplayerChannelId', 'newplayerChannelStatus');
         }
 
         function saveBattlepointsChannel() {

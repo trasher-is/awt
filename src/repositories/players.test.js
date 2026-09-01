@@ -302,6 +302,31 @@ const afterFreshRace = players.getPlayerFullById(712);
 ok('a player with no race on record gets the new race values written normally',
     afterFreshRace.race_growth === 1 && afterFreshRace.race_sul === 9 && afterFreshRace.biology === 20, afterFreshRace);
 
+// ── getPendingNewPlayerAnnouncements / markNewPlayerAnnounced: new-player Discord queue ──
+// announced_new_player defaults to 0 on INSERT and is never touched by upsertPlayerFromApiList's
+// ON CONFLICT UPDATE, so a genuinely new row queues up while a re-synced existing row does not.
+db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (3, 'NEW', 'Newcomers')`).run();
+
+players.upsertPlayerFromApiList(801, 'Freshface', 3, 1, 0, null, 'US', 1, '2026-08-31T10:00:08.0083294+02:00');
+players.upsertPlayerFromApiList(802, 'NoJoinDate', null, 1, 0, null, 'US', 1, null);
+
+const pendingAfterFirstSync = players.getPendingNewPlayerAnnouncements();
+ok('a freshly-inserted player with a joined date is queued for announcement',
+    pendingAfterFirstSync.some(r => r.id === 801), pendingAfterFirstSync);
+ok('a freshly-inserted player with no joined date is NOT queued (nothing to announce)',
+    !pendingAfterFirstSync.some(r => r.id === 802), pendingAfterFirstSync);
+ok('the queued row carries its alliance tag via the join', pendingAfterFirstSync.find(r => r.id === 801).alliance_tag === 'NEW');
+
+players.markNewPlayerAnnounced(801);
+ok('markNewPlayerAnnounced removes the player from the pending queue',
+    !players.getPendingNewPlayerAnnouncements().some(r => r.id === 801), players.getPendingNewPlayerAnnouncements());
+
+// A re-sync of the SAME player (e.g. next ListPlayer pull) must not re-queue them —
+// announced_new_player is intentionally absent from the ON CONFLICT UPDATE SET clause.
+players.upsertPlayerFromApiList(801, 'Freshface', 3, 2, 100, 5, 'US', 1, '2026-08-31T10:00:08.0083294+02:00');
+ok('re-syncing an already-announced player does not re-queue them',
+    !players.getPendingNewPlayerAnnouncements().some(r => r.id === 801), players.getPendingNewPlayerAnnouncements());
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

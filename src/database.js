@@ -162,6 +162,11 @@ function initDatabase() {
     addColumn('players', 'supporter_type', 'TEXT');
     addColumn('players', 'last_api_scan_at', 'DATETIME');
     addColumn('players', 'last_news_scraped_at', 'DATETIME');
+    // Left at its default (0) by upsertPlayerFromApiList's INSERT and never touched by its
+    // ON CONFLICT UPDATE clause, so it stays 0 only for a row that is genuinely new to this
+    // table — same "queue driven by the column, not by this batch" idiom as
+    // battle_reports.announced (see routes/sync.js's /sync/battle-reports handler).
+    addColumn('players', 'announced_new_player', 'INTEGER DEFAULT 0');
 
     // NOTE: the migrations for player_logins.total_logins and fleets.arrival_at used to
     // sit here, above the CREATE TABLE statements for those two tables. On a fresh
