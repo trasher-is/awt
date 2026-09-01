@@ -548,12 +548,18 @@ function upsertPlayerFromApiList(id, name, allianceId, level, points, ranking, c
 // routes/sync.js's /sync/battle-reports handler): driven from the column, not from this
 // sync batch, so a player who joined before the Discord channel was configured still gets
 // announced once it is. joined IS NOT NULL guards against announcing rows the API listed
-// without ever supplying a join date (nothing to put in the embed).
+// without ever supplying a join date (nothing to put in the embed). joined != 'N/A' guards
+// against a second, distinct case: the API returns the literal string "N/A" (not null) for
+// a player who has RESIGNED and not yet rejoined this round — a real player, but not a new
+// one, so it must not satisfy the "has a join date" check the way a real ISO timestamp does.
+// If they do rejoin, the API starts sending a real joinedAt again, which overwrites 'N/A' via
+// upsertPlayerFromApiList's COALESCE (COALESCE only keeps the old value when the NEW one is
+// null, and a real join date is non-null) — so this row becomes eligible again on its own.
 const getPendingNewPlayerAnnouncementsStmt = db.prepare(`
     SELECT p.id, p.name, p.alliance_id, a.tag as alliance_tag, p.joined
     FROM players p
     LEFT JOIN alliances a ON a.id = p.alliance_id
-    WHERE p.announced_new_player = 0 AND p.joined IS NOT NULL
+    WHERE p.announced_new_player = 0 AND p.joined IS NOT NULL AND p.joined != 'N/A'
     ORDER BY p.joined ASC
 `);
 function getPendingNewPlayerAnnouncements() {
