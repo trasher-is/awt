@@ -304,6 +304,29 @@ ok('sorted newest first (the battle at 10:00 before the drop at 09:00)',
 const limitedFeed = battleReports.getBattleReportsFeed(1);
 ok('limit caps the merged result, not just each half independently', limitedFeed.length === 1, limitedFeed);
 
+// Real production shape (unlike the fixtures above, which use 'Z'-suffixed ISO for both
+// sources): battle_reports.started_at arrives from the game API as raw ISO8601 WITH AN
+// OFFSET ("...+02:00", no 'Z'), while planet_events.timestamp is written by SQLite's own
+// CURRENT_TIMESTAMP default (space-separated, no 'T'/offset at all) — see systems.js's
+// logPlanetEvent. Mixing the two unnormalized would break both the frontend's date parser
+// (sqlite-time.js assumes the space-separated shape) and the merged array's newest-first
+// sort (a plain string comparison across two different shapes).
+db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (701, 'Format System', 2, 2)`).run();
+db.prepare(`
+    INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_name)
+    VALUES (9600, '2026-08-31T18:00:00+02:00', 701, 1, 'OffsetAttacker')
+`).run();
+db.prepare(`INSERT INTO planets (system_id, planet_index, owner_id) VALUES (701, 2, 702)`).run();
+// SQLite's own space-separated shape (what CURRENT_TIMESTAMP actually produces), earlier
+// than the battle report above (16:00 UTC once its +02:00 offset is normalized away).
+db.prepare(`INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp) VALUES (701, 2, 2, 9, 7, '2026-08-31 09:00:00')`).run();
+
+const formatFeed = battleReports.getBattleReportsFeed(200).filter(r => r.system_id === 701);
+ok('a battle report\'s occurred_at is normalized to SQLite\'s space-separated shape, not the raw offset string',
+    formatFeed.some(r => r.battle_report_id === 9600 && r.occurred_at === '2026-08-31 16:00:00'), formatFeed);
+ok('the normalized battle row still sorts newest-first against a real CURRENT_TIMESTAMP pop-drop row',
+    formatFeed[0].battle_report_id === 9600, formatFeed);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

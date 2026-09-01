@@ -205,8 +205,16 @@ function findByPlayerPairNear(playerA, playerB, occurredAtIso, windowMinutes) {
 // report's own started_at, which IS the real time) — see systems.js's logPlanetEvent.
 const POP_DROP_MATCH_WINDOW_MINUTES = 180;
 
+// datetime(br.started_at): started_at is stored verbatim from the game API (raw ISO8601,
+// "...T...+02:00") while planet_events.timestamp (the other half of this merged feed, see
+// unmatchedPopDropsStmt below) is SQLite's own space-separated CURRENT_TIMESTAMP format.
+// Left un-normalized, occurred_at would carry two different string shapes depending on
+// which row produced it — breaking both the frontend's date parser (sqlite-time.js assumes
+// the space-separated shape) and the merged array's chronological sort in JS below, which
+// compares occurred_at as a plain string (same failure class as the BETWEEN bug just below,
+// caught by getBattleReportsFeed's own regression test the first time — see its comment).
 const battleReportsFeedStmt = db.prepare(`
-    SELECT br.id AS battle_report_id, br.started_at AS occurred_at,
+    SELECT br.id AS battle_report_id, datetime(br.started_at) AS occurred_at,
            br.system_id, br.planet_index, s.name AS system_name,
            br.att_player_name, br.att_alliance_tag,
            br.def_player_name, br.def_alliance_tag,
