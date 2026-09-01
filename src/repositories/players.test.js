@@ -327,6 +327,18 @@ players.upsertPlayerFromApiList(801, 'Freshface', 3, 2, 100, 5, 'US', 1, '2026-0
 ok('re-syncing an already-announced player does not re-queue them',
     !players.getPendingNewPlayerAnnouncements().some(r => r.id === 801), players.getPendingNewPlayerAnnouncements());
 
+// The game API sends the literal string "N/A" (not null) for a resigned player who hasn't
+// rejoined this round yet -- a real player, but not a NEW one, so it must not queue.
+players.upsertPlayerFromApiList(803, 'ResignedGuy', null, 1, 0, null, 'US', 1, 'N/A');
+ok('a player with joined="N/A" (resigned, not yet rejoined) is NOT queued as a new player',
+    !players.getPendingNewPlayerAnnouncements().some(r => r.id === 803), players.getPendingNewPlayerAnnouncements());
+
+// If they DO rejoin, the API starts sending a real joinedAt again, which must overwrite the
+// stale "N/A" and make them eligible.
+players.upsertPlayerFromApiList(803, 'ResignedGuy', null, 1, 0, null, 'US', 1, '2026-09-01T09:00:00.0000000+02:00');
+ok('a real joinedAt on a later sync overwrites "N/A" and the player becomes queueable',
+    players.getPendingNewPlayerAnnouncements().some(r => r.id === 803), players.getPendingNewPlayerAnnouncements());
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {
