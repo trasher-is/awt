@@ -990,6 +990,44 @@ export function initScienceTimers() {
 }
 
 // ---------------------------------------------------------------
+// AUTO PRODUCE FINISH DATES — /Game/Planets/Planet/{id}
+// Same idea as initScienceTimers above: the "Auto Produce" table's own "Remain" timer
+// gives only the DURATION of each queued item (not already including the wait for
+// earlier items in the same queue — confirmed the same way science's queue works), so a
+// second/third queued item's real finish time is the cumulative sum of every timer above
+// it plus its own, not just its own value read in isolation.
+// ---------------------------------------------------------------
+export function initAutoProduceFinishDates() {
+    if (!window.location.pathname.toLowerCase().includes('/game/planets/planet/')) return;
+
+    const rows = document.querySelectorAll('tr[data-auto-produce]');
+    let cumulativeSeconds = 0;
+
+    rows.forEach(row => {
+        const timerEl = row.querySelector('.timer[data-value]');
+        if (!timerEl) return;
+
+        const seconds = parseInt(timerEl.getAttribute('data-value'), 10) || 0;
+        cumulativeSeconds += seconds;
+
+        const finishDate = new Date(Date.now() + cumulativeSeconds * 1000);
+        const dateStr = finishDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
+                        finishDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+
+        // Idempotency: reuse the badge already there instead of stacking duplicates.
+        let dateSpan = timerEl.nextElementSibling;
+        if (!dateSpan || !dateSpan.classList.contains('custom-autoproduce-date')) {
+            dateSpan = document.createElement('span');
+            dateSpan.className = 'custom-autoproduce-date ms-2';
+            dateSpan.style.cssText = 'color: #888; font-size: 11px; font-weight: normal;';
+            timerEl.parentNode.insertBefore(dateSpan, timerEl.nextSibling);
+        }
+
+        dateSpan.innerText = `(${dateStr})`;
+    });
+}
+
+// ---------------------------------------------------------------
 // FLEET ARRIVAL COUNTDOWN — /Game/Fleets
 // The "Estimated Arrival" cell shows an absolute local time like "04:28:17 - Jul 16".
 // Append the time REMAINING from now, e.g. " | 26m", " | 4h 28m", " | 2d 1h 30m".

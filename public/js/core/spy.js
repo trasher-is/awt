@@ -1,4 +1,4 @@
-import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers } from './page-injections.js';
+import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates } from './page-injections.js';
 import { initNewsIncomingTools } from '../ui/news-incoming.js';
 import { initNewsBattleEvents } from '../ui/news-battle-events.js';
 import '../utils/game-rate-limit.js';
@@ -480,6 +480,7 @@ export function initSpy() {
             }
             if (pathLower.includes('/game/planets/planet/')) {
                 initStarbaseTimer();
+                initAutoProduceFinishDates();
             }
 	    if (pathLower.includes('/game/fleets')) {
                 initFleetTimers();
