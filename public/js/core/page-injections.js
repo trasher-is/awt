@@ -4,9 +4,11 @@ import '../utils/game-rate-limit.js';
 import '../utils/game-tables.js';    // side-effect import: empire-model.js's own dependency
 import '../utils/travel-model.js';   // side-effect import: empire-model.js's own dependency
 import '../utils/empire-model.js';   // side-effect import: TRAIT_PCT, the ONE source for race-bonus %/point
+import '../utils/aw-api.js';         // side-effect import: getTravelTime, for initColonizeLaunchWindows
 const { gameFetch } = globalThis.AWGameRate;
 const { formatSqliteUtc } = globalThis.AWSqliteTime;
 const { TRAIT_PCT } = globalThis.AWEmpire.constants;
+const { getTravelTime } = globalThis.AWApi;
 
 export function initPlanetPopTimers() {
     if (!window.location.pathname.toLowerCase().includes('/game/planets')) return;
@@ -163,11 +165,140 @@ export async function initScienceCultureCalc() {
                     targetRow.cells[2].appendChild(container);
                 }
             }
-        } catch (e) { 
+        } catch (e) {
             console.error("Calc Error", e);
             targetRow.removeAttribute('data-calc-injected');
         }
     }
+}
+
+// ---------------------------------------------------------------
+// COLONY SHIP LAUNCH WINDOWS (Science page, next to the Culture row)
+// "When do I need to launch, so the ship lands only after the next culture slot is
+// actually open?" A ship that arrives too early just sits there wasted — colonizing
+// needs a free slot at the moment it lands, not merely by the time it's built — so this
+// computes the EARLIEST safe launch time per planned (Free/Unknown, i.e. actually
+// colonizable) target: arrival must be at or after the next culture level-up AND at or
+// after the standard server cycle tick that actually applies it (culture level-ups, like
+// every other stat, only take effect when that 5-min cycle runs — landing one second
+// before it does not yet have the slot). Requires: the culture row's own live timer
+// (seconds until the NEXT level — no CultureTable fetch needed, unlike
+// initScienceCultureCalc's level+2/+3 look-ahead), the "Standard server hosting cycle"
+// badge in the page footer (its own timer, to find the cycle's tick alignment), the
+// player's own Energy science level (ships' speed bonus, read straight off this same
+// page), and GET /hub-api/intel/colonize-launch-windows for the launch origin (v1: always
+// home, per the user) and the list of colonizable plans.
+// ---------------------------------------------------------------
+
+// The footer's "Standard server hosting cycle" badge (Production/Growth/Science/Culture)
+// — distinguished from the OTHER footer timers (fleet hosting, trade) by its tooltip text,
+// not by data-repeat, since a repeat interval is an implementation detail that could
+// coincidentally collide with another cycle's.
+function findServerCycleTimer() {
+    const nodes = document.querySelectorAll('[data-timer][data-at-datetime]');
+    for (const el of nodes) {
+        const badge = el.closest('[title], [data-bs-original-title]');
+        const title = (badge && (badge.getAttribute('data-bs-original-title') || badge.getAttribute('title'))) || '';
+        if (/standard server hosting cycle/i.test(title)) return el;
+    }
+    return null;
+}
+
+// The next tick of a repeating cycle at or after `targetMs`, given one known tick's
+// timing (secondsUntilNextTick, read live off the page right now).
+function nextCycleTickAtOrAfter(targetMs, secondsUntilNextTick, repeatSeconds) {
+    const firstTickMs = Date.now() + secondsUntilNextTick * 1000;
+    if (targetMs <= firstTickMs) return firstTickMs;
+    const repeatMs = repeatSeconds * 1000;
+    const ticksNeeded = Math.ceil((targetMs - firstTickMs) / repeatMs);
+    return firstTickMs + ticksNeeded * repeatMs;
+}
+
+export async function initColonizeLaunchWindows() {
+    if (!window.location.pathname.toLowerCase().includes('/game/science')) return;
+    if (document.getElementById('custom-colonize-windows')) return; // one pass per page load is enough — plans don't change mid-visit
+
+    // Find the Culture row exactly like initScienceCultureCalc does, and read its live
+    // timer directly — the seconds remaining until the CURRENTLY IN-PROGRESS level, i.e.
+    // the very next one, which is all a launch-window calc needs (unlike the level+2/+3
+    // look-ahead elsewhere on this page, no CultureTable fetch is required here).
+    let cultureRow = null;
+    document.querySelectorAll('table tbody tr').forEach(row => {
+        const text = row.innerText;
+        if ((text.includes('Culture') || text.includes('Cul')) && !text.includes('Science') && row.cells[1]) {
+            if (!isNaN(parseInt(row.cells[1].innerText.trim(), 10))) cultureRow = row;
+        }
+    });
+    if (!cultureRow) return;
+    const cultureTimer = cultureRow.querySelector('.timer-active');
+    if (!cultureTimer) return; // not currently researching culture — no ETA to plan around
+    const secondsToNextCulture = parseInt(cultureTimer.getAttribute('data-value'), 10) || 0;
+    if (secondsToNextCulture <= 0) return;
+
+    const cycleTimer = findServerCycleTimer();
+    if (!cycleTimer) return; // footer not present/rendered yet — try again next view pass
+    const cycleSeconds = parseInt(cycleTimer.getAttribute('data-value'), 10) || 0;
+    const cycleRepeat = parseInt(cycleTimer.getAttribute('data-repeat'), 10) || 0;
+    if (cycleRepeat <= 0) return;
+
+    const cultureLevelUpMs = Date.now() + secondsToNextCulture * 1000;
+    const arrivalCutoffMs = nextCycleTickAtOrAfter(cultureLevelUpMs, cycleSeconds, cycleRepeat);
+
+    let data;
+    try {
+        const res = await fetch('/hub-api/intel/colonize-launch-windows');
+        data = await res.json();
+    } catch (e) {
+        console.warn('[Spy] colonize launch-windows fetch failed:', e.message);
+        return;
+    }
+    if (!data || !data.success || !data.origin || !Array.isArray(data.plans) || !data.plans.length) return;
+
+    const energyState = readScienceState(SCIENCES.find(s => s.name === 'Energy'));
+    const energyLevel = energyState ? energyState.level : 0;
+
+    const results = [];
+    for (const plan of data.plans) {
+        try {
+            const res = await getTravelTime({
+                fromSystem: data.origin.system_id, fromPlanetIndex: data.origin.planet_index,
+                toSystem: plan.system_id, toPlanetIndex: plan.planet_index, energyLevel,
+            });
+            if (!res.ok || !res.data || typeof res.data.totalSeconds !== 'number') continue;
+            const launchMs = arrivalCutoffMs - res.data.totalSeconds * 1000;
+            const launchDate = new Date(launchMs);
+            const label = `${plan.system_name} [${plan.system_id}] #${plan.planet_index}`;
+            results.push({
+                label,
+                pastDue: launchMs <= Date.now(),
+                dateStr: launchDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
+                         launchDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false }),
+            });
+        } catch (e) {
+            // One bad plan must not block the rest.
+            console.warn('[Spy] colonize launch-window calc failed for a plan:', e.message);
+        }
+    }
+    if (!results.length) return;
+
+    const container = document.createElement('div');
+    container.id = 'custom-colonize-windows';
+    container.style.marginTop = '4px';
+    container.style.fontSize = '11px';
+    container.style.color = '#aaa';
+    const header = document.createElement('div');
+    header.innerHTML = '<span style="color:#888;">Colony ship launch windows (land after next culture slot):</span>';
+    container.appendChild(header);
+    results.forEach(r => {
+        const line = document.createElement('div');
+        const timeSpan = r.pastDue
+            ? `<span style="color:#e88;font-weight:bold;">launch now</span>`
+            : `<span style="color:#fff;font-weight:bold;">${r.dateStr}</span>`;
+        line.innerHTML = `<span style="color:#aaa;">${esc(r.label)}:</span> ${timeSpan}`;
+        container.appendChild(line);
+    });
+
+    if (cultureRow.cells[3]) cultureRow.cells[3].appendChild(container);
 }
 
 // ---------------------------------------------------------------

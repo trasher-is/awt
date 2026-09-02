@@ -430,6 +430,27 @@ router.get('/intel/battle-reports-feed', requireAuth, (req, res) => {
     }
 });
 
+// --- COLONIZE LAUNCH WINDOWS (Science page: "when to launch to land after the next
+// culture slot opens") ---
+// Everything the client needs in one call: the caller's own launch origin (v1 — always
+// home, see players.js's getPlayerLaunchOrigin) plus every plan currently sitting on a
+// confirmed-empty (Free or Unknown-owner) planet. The client still does its own
+// getTravelTime call per plan (that's the game's own API, not ours) and its own culture-ETA
+// math (already computed for the page's timer display) to turn this into actual launch
+// times — this route only resolves the two pieces that need the hub's DB.
+router.get('/intel/colonize-launch-windows', requireAuth, (req, res) => {
+    try {
+        const bridge = usersRepo.getUserAllianceIdBridge(req.session.userId);
+        if (!bridge) return res.json({ success: true, origin: null, plans: [] });
+        const origin = playersRepo.getPlayerLaunchOrigin(bridge.player_id) || null;
+        const plans = plansRepo.getColonizablePlans();
+        res.json({ success: true, origin, plans });
+    } catch (err) {
+        console.error('[DB Error] Failed to fetch colonize launch windows:', err);
+        res.status(500).json({ error: 'Failed to retrieve colonize launch windows' });
+    }
+});
+
 // --- GET ALL ACTIVE SCANNED ALLIANCES FOR SELECTION FILTER BUTTONS ---
 router.get('/intel/war-room/alliances', requireAuth, (req, res) => {
     try {

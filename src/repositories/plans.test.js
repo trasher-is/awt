@@ -51,6 +51,29 @@ plans.createPlan(11, 2, cavemanId, 'note');
 plans.deleteAllPlans();
 ok('deleteAllPlans empties the table', plans.getAllPlanIndex().length === 0);
 
+// ── getColonizablePlans: plans worth a launch-window calc ──
+db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (20, 'ColSys', 5, 5)`).run();
+db.prepare(`INSERT INTO players (id, name) VALUES (900, 'SomePlayer')`).run();
+
+// (a) a plan on a confirmed-empty planet (owner_id NULL, real planets row exists) — included.
+db.prepare(`INSERT INTO planets (system_id, planet_index, owner_id) VALUES (20, 1, NULL)`).run();
+plans.createPlan(20, 1, cavemanId, 'colonize this one');
+
+// (b) a plan on a planet that IS owned — excluded, it's not actually colonizable.
+db.prepare(`INSERT INTO planets (system_id, planet_index, owner_id) VALUES (20, 2, 900)`).run();
+plans.createPlan(20, 2, cavemanId, 'someone lives here');
+
+// (c) a plan on a planet the hub has never scanned (no planets row at all) — excluded,
+// "confirmed empty" only, not "presumed empty".
+plans.createPlan(20, 3, cavemanId, 'never scanned');
+
+const colonizable = plans.getColonizablePlans();
+ok('exactly one plan qualifies (confirmed-empty planet)', colonizable.length === 1, colonizable);
+ok('the qualifying plan is the one on the confirmed-empty planet',
+    colonizable[0].system_id === 20 && colonizable[0].planet_index === 1, colonizable);
+ok('it carries the system name and coordinates for a travel-time calc',
+    colonizable[0].system_name === 'ColSys' && colonizable[0].x === 5 && colonizable[0].y === 5, colonizable);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

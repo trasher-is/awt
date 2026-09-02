@@ -67,6 +67,22 @@ db.prepare(`UPDATE players SET origin_system = 10 WHERE id = 1`).run();
 const observers = players.getVisionObservers([1, 2]);
 ok('getVisionObservers only returns players with a mapped origin system', observers.length === 1 && observers[0].playerId === 1);
 
+// ── getPlayerLaunchOrigin: falls back to origin_system + planet index 1 until a full
+// profile scrape sets home_system_id/home_planet_index (see the repo function's comment).
+const originFallback = players.getPlayerLaunchOrigin(1);
+ok('before a home is known, falls back to origin_system + planet index 1',
+    originFallback && originFallback.system_id === 10 && originFallback.planet_index === 1, originFallback);
+ok('carries the origin system\'s coordinates for a travel-time calc',
+    originFallback && originFallback.x === 5 && originFallback.y === 5, originFallback);
+
+db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (11, 'ActualHome', 8, 9)`).run();
+db.prepare(`UPDATE players SET home_system_id = 11, home_planet_index = 5 WHERE id = 1`).run();
+const originHome = players.getPlayerLaunchOrigin(1);
+ok('once a real home is known, it wins over origin_system',
+    originHome && originHome.system_id === 11 && originHome.planet_index === 5 && originHome.x === 8 && originHome.y === 9, originHome);
+
+ok('an unknown player id returns undefined, not a crash', players.getPlayerLaunchOrigin(999999) === undefined);
+
 const combatDef = players.getPlayerCombatStats('caveman');
 const combatAtk = players.getPlayerCombatStats('caveman');
 ok('getPlayerCombatStats is reusable for both --def and --atk lookups', combatDef.name === combatAtk.name && combatDef.name === 'caveman');

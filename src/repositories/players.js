@@ -450,6 +450,24 @@ function getPlayerAllianceIdByName(name) {
     return getPlayerAllianceIdByNameStmt.get(name);
 }
 
+// Where a colony ship launches from, absent any other tracking of where a player's colony
+// ships actually sit (v1 — see routes/intel.js's colonize-launch-windows route). Same
+// COALESCE fallback as the intercept-homes queries below: home_system_id/home_planet_index
+// only populate from a full profile scrape (player-parser.js), so before that ever runs
+// this falls back to origin_system (known from the API's ListPlayer sync) + planet index 1
+// (a player's very first planet, per docs/game-rules.md's spawn rules).
+const getPlayerLaunchOriginStmt = db.prepare(`
+    SELECT COALESCE(p.home_system_id, p.origin_system) AS system_id,
+           COALESCE(p.home_planet_index, 1) AS planet_index,
+           s.x, s.y
+    FROM players p
+    JOIN systems s ON s.id = COALESCE(p.home_system_id, p.origin_system)
+    WHERE p.id = ? AND s.x IS NOT NULL AND s.y IS NOT NULL
+`);
+function getPlayerLaunchOrigin(playerId) {
+    return getPlayerLaunchOriginStmt.get(playerId);
+}
+
 // Two fixed variants of interceptors.js's dynamic WHERE clause for the `homes` query —
 // same pattern as fleets.js's getInterceptFleetsByAlliance/getInterceptFleetsByActiveUsers.
 const getInterceptHomesByAllianceStmt = db.prepare(`
@@ -701,4 +719,5 @@ module.exports = {
     upsertPlayerFromApiList, upsertPlayerFromApiDetail,
     getStalePlayerIdsForApiScan, markPlayersApiScanned, getPlayerApiScanStats,
     getPendingNewPlayerAnnouncements, markNewPlayerAnnounced,
+    getPlayerLaunchOrigin,
 };
