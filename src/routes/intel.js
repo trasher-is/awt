@@ -443,7 +443,7 @@ router.get('/intel/colonize-launch-windows', requireAuth, (req, res) => {
         const bridge = usersRepo.getUserAllianceIdBridge(req.session.userId);
         if (!bridge) return res.json({ success: true, origin: null, plans: [] });
         const origin = playersRepo.getPlayerLaunchOrigin(bridge.player_id) || null;
-        const plans = plansRepo.getColonizablePlans();
+        const plans = plansRepo.getColonizablePlans(req.session.userId);
         res.json({ success: true, origin, plans });
     } catch (err) {
         console.error('[DB Error] Failed to fetch colonize launch windows:', err);
