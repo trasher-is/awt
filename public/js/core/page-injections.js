@@ -216,7 +216,6 @@ function nextCycleTickAtOrAfter(targetMs, secondsUntilNextTick, repeatSeconds) {
 
 export async function initColonizeLaunchWindows() {
     if (!window.location.pathname.toLowerCase().includes('/game/science')) return;
-    if (document.getElementById('custom-colonize-windows')) return; // one pass per page load is enough — plans don't change mid-visit
 
     // Find the Culture row exactly like initScienceCultureCalc does, and read its live
     // timer directly — the seconds remaining until the CURRENTLY IN-PROGRESS level, i.e.
@@ -230,6 +229,19 @@ export async function initColonizeLaunchWindows() {
         }
     });
     if (!cultureRow) return;
+
+    // Claim this row SYNCHRONOUSLY, before any await below — same fix as
+    // initScienceCultureCalc's data-calc-injected. The native timers on this page tick
+    // every second via their own DOM updates, each of which re-triggers spy.js's
+    // MutationObserver-driven view hook; checking "does the final container exist yet"
+    // is not enough, because this function is async and multiple invocations can all pass
+    // that check before the FIRST one has gotten far enough to create it, each starting
+    // its own full (rate-limited, multi-second) run and appending a duplicate. A flag set
+    // before the first await closes that window (2026-09-02 fix — this exact bug produced
+    // seven stacked copies within moments of the page loading).
+    if (cultureRow.getAttribute('data-colonize-injected') === 'true') return;
+    cultureRow.setAttribute('data-colonize-injected', 'true');
+
     const cultureTimer = cultureRow.querySelector('.timer-active');
     if (!cultureTimer) return; // not currently researching culture — no ETA to plan around
     const secondsToNextCulture = parseInt(cultureTimer.getAttribute('data-value'), 10) || 0;
@@ -250,6 +262,7 @@ export async function initColonizeLaunchWindows() {
         data = await res.json();
     } catch (e) {
         console.warn('[Spy] colonize launch-windows fetch failed:', e.message);
+        cultureRow.removeAttribute('data-colonize-injected'); // transient network hiccup — allow a later retry
         return;
     }
     if (!data || !data.success || !data.origin || !Array.isArray(data.plans) || !data.plans.length) return;
@@ -298,7 +311,10 @@ export async function initColonizeLaunchWindows() {
         container.appendChild(line);
     });
 
-    if (cultureRow.cells[3]) cultureRow.cells[3].appendChild(container);
+    // cells[3] is the raw points-progress value (e.g. "55.785"), cells[4] is the actual
+    // "Remain" time column (e.g. "07:22:28") — confirmed against the live page's real cell
+    // layout (2026-09-02). Appended below the existing time text, in that same cell.
+    if (cultureRow.cells[4]) cultureRow.cells[4].appendChild(container);
 }
 
 // ---------------------------------------------------------------

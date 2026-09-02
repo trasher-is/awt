@@ -43,16 +43,19 @@ function getAllPlanIndex() {
 // Planet and the game's real "Unknown" owner state alike — see routes/sync.js's 2026-09-02
 // fix, both are equally colonizable) AND that row must actually exist (a plan on a planet
 // the hub has never scanned is excluded — "confirmed empty", not "presumed empty", since a
-// stale/never-synced row could just as easily be someone's active home).
+// stale/never-synced row could just as easily be someone's active home). Scoped to ONE
+// author (2026-09-02, per the user: "I don't want to launch to other people's Plans, only
+// to mine, everyone should see their own planned planet times") — every hub member sees
+// only their own plans' launch windows here, not the whole alliance's.
 const getColonizablePlansStmt = db.prepare(`
     SELECT pp.system_id, pp.planet_index, pp.note, s.name AS system_name, s.x, s.y
     FROM planet_plans pp
     JOIN planets p ON p.system_id = pp.system_id AND p.planet_index = pp.planet_index
     JOIN systems s ON s.id = pp.system_id
-    WHERE p.owner_id IS NULL AND s.x IS NOT NULL AND s.y IS NOT NULL
+    WHERE pp.author_id = ? AND p.owner_id IS NULL AND s.x IS NOT NULL AND s.y IS NOT NULL
 `);
-function getColonizablePlans() {
-    return getColonizablePlansStmt.all();
+function getColonizablePlans(authorId) {
+    return getColonizablePlansStmt.all(authorId);
 }
 
 // Used by both search.js's POST /plans and discord_bot.js's !plan command — a genuine

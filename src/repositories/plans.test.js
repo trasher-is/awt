@@ -67,12 +67,25 @@ plans.createPlan(20, 2, cavemanId, 'someone lives here');
 // "confirmed empty" only, not "presumed empty".
 plans.createPlan(20, 3, cavemanId, 'never scanned');
 
-const colonizable = plans.getColonizablePlans();
-ok('exactly one plan qualifies (confirmed-empty planet)', colonizable.length === 1, colonizable);
+// (d) a DIFFERENT author's plan on an equally confirmed-empty planet — excluded. Everyone
+// sees only their own planned-planet launch windows, not the whole alliance's.
+const otherUserResult = db.prepare(`INSERT INTO app_users (game_name, password_hash) VALUES ('otherplayer', 'x')`).run();
+const otherUserId = otherUserResult.lastInsertRowid;
+db.prepare(`INSERT INTO planets (system_id, planet_index, owner_id) VALUES (20, 4, NULL)`).run();
+plans.createPlan(20, 4, otherUserId, 'someone else\'s target');
+
+const colonizable = plans.getColonizablePlans(cavemanId);
+ok('exactly one plan qualifies (confirmed-empty AND authored by the requester)', colonizable.length === 1, colonizable);
 ok('the qualifying plan is the one on the confirmed-empty planet',
     colonizable[0].system_id === 20 && colonizable[0].planet_index === 1, colonizable);
 ok('it carries the system name and coordinates for a travel-time calc',
     colonizable[0].system_name === 'ColSys' && colonizable[0].x === 5 && colonizable[0].y === 5, colonizable);
+ok('the other author\'s plan does not leak into caveman\'s results',
+    !colonizable.some(p => p.planet_index === 4), colonizable);
+
+const otherResults = plans.getColonizablePlans(otherUserId);
+ok('the other author sees only their own colonizable plan',
+    otherResults.length === 1 && otherResults[0].planet_index === 4, otherResults);
 
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
