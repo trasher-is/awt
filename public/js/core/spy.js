@@ -1,4 +1,4 @@
-import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates } from './page-injections.js';
+import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates, initColonizeLaunchWindows } from './page-injections.js';
 import { initNewsIncomingTools } from '../ui/news-incoming.js';
 import { initNewsBattleEvents } from '../ui/news-battle-events.js';
 import '../utils/game-rate-limit.js';
@@ -477,6 +477,7 @@ export function initSpy() {
                 initScienceCultureCalc();
                 initScienceTimers();
                 initScienceLevelCalculator();
+                initColonizeLaunchWindows().catch(err => console.error('[Spy] colonize launch windows failed:', err.message));
             }
             if (pathLower.includes('/game/planets/planet/')) {
                 initStarbaseTimer();
