@@ -69,21 +69,31 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 ? (oldP ? oldP.is_sieged : 0)
                 : (p.is_sieged ? 1 : 0);
 
-            // CRITICAL FOG OF WAR GUARD: If scan reports "Unknown", protect historical stats
-            // from being nuked. When there's no prior row (oldP is null — a never-seen-before
+            // CRITICAL FOG OF WAR GUARD: protects historical stats from being nuked by a
+            // payload the hub cannot currently trust. Gated on vision_uncertain, NOT
+            // is_unknown (2026-09-02 fix — see api-galaxy-seed.js's comment): the two used to
+            // be conflated, which meant a REAL "Unknown" owner (a resigned player's leftover
+            // planet, or a game-spawned Unknown — see docs/game-rules.md's Colonizing
+            // section) got silently frozen at whatever stale data the hub had, forever,
+            // because visiting the system kept reporting is_unknown:true (correctly — it
+            // really is Unknown) and this guard kept refusing to believe it. is_unknown is
+            // only ever reported for a page/response the caller genuinely has in front of
+            // them (live DOM, or a live single-system API call), so it is always trustworthy
+            // on its own; vision_uncertain is the actual "this snapshot may not reflect
+            // reality" signal (only ever set by the out-of-vision/stale branch of the bulk
+            // galaxy seed). When there's no prior row (oldP is null — a never-seen-before
             // planet), there is nothing to fall back to, so fields fall back to their current
             // "no observation" defaults instead — crucially, ownership falls back to NULL
-            // rather than trusting p.owner.id: an out-of-vision seed can report is_unknown:true
-            // while still carrying owner from the API's cached snapshot, and that owner may be
-            // a player the hub has never seen (no players row was created for them, since the
-            // upsert below also skips creating one when is_unknown is true). Inserting a
-            // planets row with owner_id pointing at a nonexistent player trips the
-            // FOREIGN KEY(owner_id) REFERENCES players(id) constraint and rolls back the
-            // WHOLE system's transaction, not just this one planet.
+            // rather than trusting p.owner.id: an out-of-vision seed can carry an owner from
+            // the API's cached snapshot for a player the hub has never seen (no players row
+            // was created for them, since the upsert below also skips creating one when
+            // vision_uncertain is true). Inserting a planets row with owner_id pointing at a
+            // nonexistent player trips the FOREIGN KEY(owner_id) REFERENCES players(id)
+            // constraint and rolls back the WHOLE system's transaction, not just this planet.
             // NOTE: updated_at below still stamps CURRENT_TIMESTAMP even when the guard
             // preserves stale values — it reflects "last synced", not "last confirmed fresh".
             // is_in_vision (systems table) is the actual freshness signal, not updated_at.
-            if (p.is_unknown) {
+            if (p.vision_uncertain) {
                 finalOwnerId = oldP ? oldP.owner_id : null;
                 finalPopulation = oldP ? oldP.population : finalPopulation;
                 finalStarbase = oldP ? oldP.starbase : finalStarbase;
@@ -101,8 +111,10 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 finalOwnerId = oldP.owner_id;
             }
 
-            if (oldP && !p.is_unknown) {
-                // Skip all event creation on obscured shadow scans (guarded above).
+            if (oldP && !p.vision_uncertain) {
+                // Skip all event creation on genuinely uncertain (out-of-vision/stale) scans
+                // only — a real transition TO or FROM the game's own "Unknown" owner state
+                // (is_unknown) is real history and must be logged like any other change.
                 if (oldP.owner_id !== finalOwnerId) {
                     // OWNER CHANGE — takes precedence; a pop drop that comes with a new
                     // owner is really just the conquest, already captured here.
@@ -141,7 +153,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
             }
 
             // Standard Upsert (Skip structural updates for players/alliances if we can't see them clearly)
-            if (p.owner && !p.is_unknown) {
+            if (p.owner && !p.vision_uncertain) {
                 // A system scan only ever sees the tag, so it seeds `name` from the tag and
                 // leaves name alone on conflict (the alliance-profile sync owns the real
                 // name). `?? ''` because alliances.name is NOT NULL and a tag can be absent.
@@ -678,8 +690,8 @@ router.post('/sync/galaxy', requireAuth, (req, res) => {
 // Map/sectors reports isInVision per system: whether the returned planet data is live or
 // the game's last-known cache for territory outside anyone's current vision. This is
 // purely a staleness signal for later UI use — it does not affect the fog-of-war merge in
-// /sync/system (the client marks affected planets is_unknown before calling that route);
-// this route only records the flag itself for display.
+// /sync/system (the client marks affected planets vision_uncertain before calling that
+// route, see api-galaxy-seed.js); this route only records the flag itself for display.
 router.post('/sync/system-in-vision', requireAuth, (req, res) => {
     const { systems } = req.body;
     if (!Array.isArray(systems) || systems.length === 0) {

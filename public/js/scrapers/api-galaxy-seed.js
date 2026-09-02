@@ -77,10 +77,16 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
         const planets = Array.isArray(sys.planets) ? sys.planets : [];
         const payload = AWApi.mapPlanetsToSyncPayload(sys.id, planets);
         if (!isInVision) {
-            // Out-of-vision (or in-vision but stale, see isStaleCapture above): the data
-            // may not reflect reality right now, so route every planet through the SAME
-            // "unknown" guard a live scraper uses for fog of war.
-            payload.planets = payload.planets.map(p => ({ ...p, is_unknown: true }));
+            // Out-of-vision (or in-vision but stale, see isStaleCapture above): the data may
+            // not reflect reality right now. This is a SEPARATE concept from is_unknown
+            // (2026-09-02: is_unknown is the game's own real "Unknown" owner state — a
+            // resigned player's leftover planet, or a game-spawned Unknown — and must be
+            // trusted whenever it's reported for real, so it must not be overwritten here).
+            // vision_uncertain is the server's actual fog-of-war signal: it tells
+            // /sync/system to freeze this planet's owner/population/starbase at their last
+            // known values instead of trusting whatever this stale/out-of-vision snapshot
+            // says, regardless of what is_unknown happens to say.
+            payload.planets = payload.planets.map(p => ({ ...p, vision_uncertain: true }));
         }
         if (!payload.planets.length) continue;
         // Bulk seeding hundreds of systems at once would otherwise flood Discord with

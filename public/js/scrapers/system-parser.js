@@ -85,9 +85,20 @@ export function extractSystemData(doc = document, report = new ScrapeReport('sys
             }
 
             const hasFleet = !!row.querySelector('.bi-rocket-fill, .bi-rocket-takeoff-fill');
-            // "Unknown" is English; a missing owner link means the same thing in every
-            // language, so accept either.
-            const isUnknown = !ownerLink || containsLabel(tds[3].innerText, ['unknown']);
+            // "Unknown" is a REAL, permanent owner state the game itself assigns — a
+            // resigned player's leftover planet, or a game-spawned Unknown (see
+            // docs/game-rules.md's Colonizing section) — not fog of war. It is trustworthy
+            // live data whenever this page is actually rendering (you cannot be viewing a
+            // live system table without vision of it — an out-of-vision system gets the
+            // hub's own "last recorded data" fallback page instead, which this scraper never
+            // runs against). A bare missing owner link on its own just means Free Planet
+            // (never owned, or currently unclaimed) — a completely different, ordinary state
+            // that must NOT be flagged is_unknown, or the server's fog-of-war guard for the
+            // OTHER, genuinely uncertain source (the out-of-vision bulk galaxy seed — see
+            // vision_uncertain in api-galaxy-seed.js) would wrongly freeze real Free Planet
+            // transitions too. Confirmed against a real "Unknown" cell (2026-09-02): the game
+            // renders the literal word "Unknown" there, distinct from "Free Planet".
+            const isUnknown = containsLabel(tds[3].innerText, ['unknown']);
 
             planets.push({
                 game_planet_id: gamePlanetId,
