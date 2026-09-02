@@ -306,7 +306,7 @@ export async function initColonizeLaunchWindows() {
     container.style.fontSize = '11px';
     container.style.color = '#aaa';
     const header = document.createElement('div');
-    header.innerHTML = '<span style="color:#888;">Colony ship launch windows (land after next culture slot):</span>';
+    header.innerHTML = '<span style="color:#888;">Earliest time to launch colony ships from home planet to land after culture updates +5mins:</span>';
     container.appendChild(header);
     results.forEach(r => {
         const line = document.createElement('div');
