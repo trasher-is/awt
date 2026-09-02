@@ -254,7 +254,13 @@ export async function initColonizeLaunchWindows() {
     if (cycleRepeat <= 0) return;
 
     const cultureLevelUpMs = Date.now() + secondsToNextCulture * 1000;
-    const arrivalCutoffMs = nextCycleTickAtOrAfter(cultureLevelUpMs, cycleSeconds, cycleRepeat);
+    // One extra full cycle on top of the first tick at/after the level-up (2026-09-02, per
+    // the user: landing exactly ON that boundary tick is too tight a margin — nothing
+    // guarantees the server has actually finished applying THAT tick's culture update the
+    // instant it fires, e.g. a level-up landing at :04:59 with a cycle at :05:00 could still
+    // process after a ship arriving right at :05:00. Arriving a full cycle later than the
+    // earliest possible tick costs a few extra minutes of wait but removes that risk.
+    const arrivalCutoffMs = nextCycleTickAtOrAfter(cultureLevelUpMs, cycleSeconds, cycleRepeat) + cycleRepeat * 1000;
 
     let data;
     try {
@@ -300,7 +306,7 @@ export async function initColonizeLaunchWindows() {
     container.style.fontSize = '11px';
     container.style.color = '#aaa';
     const header = document.createElement('div');
-    header.innerHTML = '<span style="color:#888;">Colony ship launch windows (land after next culture slot):</span>';
+    header.innerHTML = '<span style="color:#888;">Earliest time to launch colony ships from home planet to land after culture updates +5mins:</span>';
     container.appendChild(header);
     results.forEach(r => {
         const line = document.createElement('div');
