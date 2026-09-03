@@ -191,5 +191,12 @@ async function searchLiveViaApi(type, q, resultsContainer) {
 export function navToIframe(path) {
     const gameFrame = document.getElementById('game-frame');
     if (gameFrame) gameFrame.src = path;
-    if (window.innerWidth < 768 && typeof window.toggleSidebar === 'function') window.toggleSidebar();
+    // Only close an ALREADY-OPEN sidebar — toggleSidebar() unconditionally flips state, so
+    // without this guard a navigation that happens while the sidebar is already closed
+    // (e.g. clicking a report link from inside a panel that closed it on open, same
+    // archives.js convention this mirrors) would instead force it back open on mobile.
+    const sidebar = document.getElementById('sidebar');
+    if (window.innerWidth < 768 && sidebar?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') {
+        window.toggleSidebar();
+    }
 }
