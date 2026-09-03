@@ -61,6 +61,17 @@ ok('getAllSettings includes all settings after multiple writes',
     allSettingsFinal.some(row => row.key === 'test_key')
 );
 
+// getTagListSetting: shared parser for the comma-separated-alliance-tags convention.
+ok('getTagListSetting returns [] for a key that was never set', settings.getTagListSetting('never_set').length === 0);
+
+settings.setSetting('tag_list_test', ' raid, nap1 ,RAID,, ao ');
+const tagList = settings.getTagListSetting('tag_list_test');
+ok('getTagListSetting trims, uppercases, dedupes, and drops empties',
+    tagList.length === 3 && tagList.includes('RAID') && tagList.includes('NAP1') && tagList.includes('AO'), tagList);
+
+settings.setSetting('tag_list_empty', '');
+ok('getTagListSetting returns [] for an explicitly empty value', settings.getTagListSetting('tag_list_empty').length === 0);
+
 // Clean up
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 

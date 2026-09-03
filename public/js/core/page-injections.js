@@ -1256,6 +1256,55 @@ export function initFleetTimers() {
     });
 }
 
+// ---------------------------------------------------------------
+// ALLIANCE RELATION ICONS (issue #114) — every AW page, unconditional
+// Wherever the game itself renders an alliance tag it does so as a link to
+// /Game/Alliance/Profile/{id} with the tag as the link text (confirmed live: system rows,
+// player profiles, the alliance page all use this exact same pattern) — so one generic pass
+// over that one selector covers every page that shows a [TAG], with no per-page-type logic
+// needed. Admin-configured allied/war tag lists (GET /hub-api/intel/alliance-relations);
+// any tag in neither list is neutral and gets no icon.
+// ---------------------------------------------------------------
+let _allianceRelationsCache = null; // fetched once per page load — settings rarely change mid-session
+async function getAllianceRelations() {
+    if (_allianceRelationsCache) return _allianceRelationsCache;
+    try {
+        const res = await fetch('/hub-api/intel/alliance-relations');
+        const data = await res.json();
+        if (data && data.success) {
+            _allianceRelationsCache = { allied: new Set(data.allied), war: new Set(data.war) };
+        }
+    } catch (e) {
+        // Leave cache null — next view-hook pass retries.
+        console.warn('[Spy] alliance-relations fetch failed:', e.message);
+    }
+    return _allianceRelationsCache;
+}
+
+export async function initAllianceRelationIcons() {
+    const relations = await getAllianceRelations();
+    if (!relations || (relations.allied.size === 0 && relations.war.size === 0)) return;
+
+    document.querySelectorAll('a[href^="/Game/Alliance/Profile/"]').forEach(link => {
+        // Idempotency: aw- prefix matches spy.js's MutationObserver "OURS" filter, so
+        // injecting this never triggers another view-hook pass on itself.
+        if (link.nextElementSibling && link.nextElementSibling.classList.contains('aw-relation-icon')) return;
+
+        const tag = (link.textContent || '').trim().toUpperCase();
+        let icon = null, label = null;
+        if (relations.allied.has(tag)) { icon = '🤝'; label = 'Allied'; }
+        else if (relations.war.has(tag)) { icon = '⚔️'; label = 'At war'; }
+        if (!icon) return;
+
+        const span = document.createElement('span');
+        span.className = 'aw-relation-icon';
+        span.style.marginLeft = '2px';
+        span.title = label;
+        span.textContent = icon;
+        link.parentNode.insertBefore(span, link.nextSibling);
+    });
+}
+
 (function autoScrapeRankings() {
     if (!window.location.pathname.toLowerCase().includes('/ranking/bestguarded')) return;
 

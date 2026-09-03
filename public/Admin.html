@@ -273,6 +273,25 @@
                 <span id="blockedChannelsStatus" class="text-xs text-muted-foreground mt-2 block"></span>
             </div>
 
+            <div class="bg-card border border-border rounded-lg p-4 shadow-sm">
+                <h3 class="font-bold text-foreground mb-1"><i class="fa-solid fa-handshake-angle text-muted-foreground mr-1"></i> Alliance Relations</h3>
+                <p class="text-xs text-muted-foreground mb-3">Any alliance tag listed here gets a relationship icon (🤝 Ally, ⚔️ War) injected next to every <code>[TAG]</code> the game itself shows — system rows, player profiles, the alliance page, anywhere the game links to an alliance. Any tag in neither list is treated as neutral (no icon). Same command output too: <code>!holes</code> breaks a system down by Ally/Enemy/Neutral instead of a flat "enemy". Comma-separated tags.</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div class="flex flex-col gap-2">
+                        <label class="text-xs text-muted-foreground mb-1 block">🤝 Allied Tags</label>
+                        <textarea id="alliesAllied" rows="2" class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm font-mono" placeholder="e.g. NAP1, FRIENDS"></textarea>
+                        <button onclick="saveAlliedTags()" class="h-9 px-4 self-start rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Save</button>
+                    </div>
+                    <div class="flex flex-col gap-2">
+                        <label class="text-xs text-muted-foreground mb-1 block">⚔️ War Tags</label>
+                        <textarea id="alliesWar" rows="2" class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm font-mono" placeholder="e.g. ENEMY1, HOSTILE"></textarea>
+                        <button onclick="saveWarTags()" class="h-9 px-4 self-start rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Save</button>
+                    </div>
+                </div>
+                <span id="alliesAlliedStatus" class="text-xs text-muted-foreground mt-2 block"></span>
+                <span id="alliesWarStatus" class="text-xs text-muted-foreground mt-1 block"></span>
+            </div>
+
         </section>
 
         <section class="flex flex-col gap-4">
@@ -411,6 +430,8 @@
                     document.getElementById('battlepointsPopRatio').value = data.settings.battle_points_pop_ratio || '';
                     document.getElementById('incomingChannelId').value = data.settings.discord_incoming_channel || '';
                     document.getElementById('blockedChannels').value = data.settings.discord_blocked_channels || '';
+                    document.getElementById('alliesAllied').value = data.settings.alliance_relations_allied || '';
+                    document.getElementById('alliesWar').value = data.settings.alliance_relations_war || '';
                 }
             } catch (e) {}
         }
@@ -480,6 +501,14 @@
 
         function saveBlockedChannels() {
             return saveSetting('discord_blocked_channels', 'blockedChannels', 'blockedChannelsStatus');
+        }
+
+        function saveAlliedTags() {
+            return saveSetting('alliance_relations_allied', 'alliesAllied', 'alliesAlliedStatus');
+        }
+
+        function saveWarTags() {
+            return saveSetting('alliance_relations_war', 'alliesWar', 'alliesWarStatus');
         }
 
         // --- 2. GLOBAL ALLIANCE BROADCAST UTILITIES ---

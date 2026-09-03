@@ -1,4 +1,4 @@
-import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates, initColonizeLaunchWindows } from './page-injections.js';
+import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates, initColonizeLaunchWindows, initAllianceRelationIcons } from './page-injections.js';
 import { initNewsIncomingTools } from '../ui/news-incoming.js';
 import { initNewsBattleEvents } from '../ui/news-battle-events.js';
 import '../utils/game-rate-limit.js';
@@ -490,6 +490,10 @@ export function initSpy() {
                 initProfilePLGrowth();
                 initProfileHubIntel().catch(err => console.error('[Spy] profile hub-intel injection failed:', err.message));
             }
+
+            // Ungated — every AW page that renders a [TAG] link uses the exact same DOM
+            // pattern, so this runs everywhere rather than being gated to one path.
+            initAllianceRelationIcons().catch(err => console.error('[Spy] alliance relation icons failed:', err.message));
 
             updateTabTitle();
         } catch (err) {

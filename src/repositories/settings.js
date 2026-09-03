@@ -23,4 +23,14 @@ function setSetting(key, value) {
     setSettingStmt.run(key, value);
 }
 
-module.exports = { getSetting, getPpPrice, getAllSettings, setSetting };
+// Shared parser for the comma-separated-alliance-tags setting convention already used by
+// battle_points_excluded_alliance_tags, discord_battlereport_alliance_tags, and (2026-09-04)
+// alliance_relations_allied/alliance_relations_war. One place for it since it's now read
+// from both a route (client-facing) and discord_bot.js (!holes).
+function getTagListSetting(key) {
+    const row = getSettingStmt.get(key);
+    if (!row || !row.value) return [];
+    return [...new Set(row.value.split(',').map(t => t.trim().toUpperCase()).filter(Boolean))];
+}
+
+module.exports = { getSetting, getPpPrice, getAllSettings, setSetting, getTagListSetting };

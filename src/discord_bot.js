@@ -312,7 +312,7 @@ async function handleMessage(message) {
                 { name: '`!dist <sys1_id> <sys2_id>`', value: 'Calculates the distance and required biology level between two systems.\n*Example: `!dist 100 200`*' },
                 { name: '`!plan <sys_id> <planet_num> <instructions...>`', value: 'Adds a tactical plan/note to a specific planet. (Requires your Discord ID to be linked in the Hub).\n*Example: `!plan 123 4 Send colony ship`*' },
                 { name: '`!vision <system_id> [alliance_tag]`', value: 'Performs a radar scan to see which alliance members have vision over a target system.\n*Example: `!vision 123 RAID`*' },
-                { name: '`!holes [alliance_tag]`', value: 'Scans your alliance\'s territory to find empty planets, hostile threats, and planned slots.\n*Example: `!holes RAID`*' },
+                { name: '`!holes [alliance_tag]`', value: 'Scans your alliance\'s territory for a per-system breakdown: your own holdings, free (planned/unplanned), and other alliances\' presence split into Ally 🤝/Neutral/Enemy ⚔️, per the Alliance Relations tags set in Admin.\n*Example: `!holes RAID`*' },
                 { name: '`!tt <sysA> <plnA> <sysB> <plnB> <speed> <nrg>`', value: 'Calculates fleet travel time between two coordinates.\n*Example: `!tt 100 1 200 4 10 5`*\n*(You can also swap speed/energy for a player name: `!tt 100 1 200 4 PlayerOne`)*' },
                 { name: '`!ghosts <sys_id> <planet_num> <alliance_tag>`', value: 'Calculates the shortest/longest hidden fleet arrival window from hostile members with radar vision over a system.\n*Example: `!ghosts 1 10 AO`*' },
                 { name: '`!bio`', value: 'Generates intelligence alerts highlighting players who possess a +6 biology or science advantage over your personal bio level.' },
@@ -1115,6 +1115,14 @@ async function handleMessage(message) {
             return message.reply(`❌ No scanned systems found with an active presence for alliance [${tag}].`);
         }
 
+        // Issue #114: break the old flat "not us = enemy" bucket into Ally/Neutral/Enemy,
+        // per the admin-configured alliance_relations_allied/alliance_relations_war tag
+        // lists (settingsRepo.getTagListSetting — same parser the client's relation-icon
+        // injection and the battle-report/battle-points alliance-tag settings all share).
+        // A tag in neither list is neutral.
+        const alliedTags = settingsRepo.getTagListSetting('alliance_relations_allied');
+        const warTags = settingsRepo.getTagListSetting('alliance_relations_war');
+
         const sysData = {};
         rows.forEach(r => {
             if (!sysData[r.system_id]) {
@@ -1141,40 +1149,48 @@ async function handleMessage(message) {
 
         for (const sysId of sortedSysIds) {
             const data = sysData[sysId];
-            const freeSlots = [];
-            const plannedSlots = [];
-            const enemySlots = [];
             const plannedForSys = planMap[sysId] || [];
+
+            let ownCount = 0;
+            const freePlanned = [];
+            const freeUnplanned = [];
+            const neutralSlots = [];
+            const allySlots = [];
+            const enemySlots = [];
 
             for (let i = 1; i <= 12; i++) {
                 const planetData = data.planets[i];
                 const owner = planetData ? planetData.owner_name : null;
-                const ownerTag = planetData ? planetData.owner_alliance_tag : null;
-                
+                const ownerTag = planetData ? (planetData.owner_alliance_tag || '').toUpperCase() : '';
+                const label = `P${i.toString().padStart(2, '0')}`;
                 const isPlanned = plannedForSys.includes(i);
                 const isFree = !owner || owner === "Free Planet" || owner === "Empty" || owner === "Unknown";
 
-                if (isPlanned) {
-                    plannedSlots.push(`P${i.toString().padStart(2, '0')}`);
-                } else if (isFree) {
-                    freeSlots.push(`P${i.toString().padStart(2, '0')}`);
+                if (isFree) {
+                    (isPlanned ? freePlanned : freeUnplanned).push(label);
+                } else if (ownerTag === tag) {
+                    ownCount++;
+                } else if (alliedTags.includes(ownerTag)) {
+                    allySlots.push(label);
+                } else if (warTags.includes(ownerTag)) {
+                    enemySlots.push(label);
                 } else {
-                    const isFriendly = ownerTag && ownerTag.toUpperCase() === tag;
-                    if (!isFriendly) {
-                        enemySlots.push(`P${i.toString().padStart(2, '0')}`);
-                    }
+                    neutralSlots.push(label);
                 }
             }
 
-            // Only appends the system line if there are open holes, targets planned, or enemy threats inside it
-            if (freeSlots.length > 0 || plannedSlots.length > 0 || enemySlots.length > 0) {
+            // Only appends the system line if there's something other than the alliance's
+            // own holdings to report (open holes, planned targets, or anyone else present).
+            if (freePlanned.length || freeUnplanned.length || neutralSlots.length || allySlots.length || enemySlots.length) {
                 systemsWithHoles++;
-                
-                let segments = [];
-                if (freeSlots.length > 0) segments.push(`Free - ${freeSlots.join(', ')}`);
-                if (plannedSlots.length > 0) segments.push(`Planned - *${plannedSlots.join(', ')}*`);
-                if (enemySlots.length > 0) segments.push(`Enemy - **${enemySlots.join(', ')}**`);
-                
+
+                let segments = [`${ownCount} ${tag}`];
+                if (freePlanned.length) segments.push(`Free planned - *${freePlanned.join(', ')}*`);
+                if (freeUnplanned.length) segments.push(`Free unplanned - ${freeUnplanned.join(', ')}`);
+                if (neutralSlots.length) segments.push(`Neutral - ${neutralSlots.join(', ')}`);
+                if (allySlots.length) segments.push(`Ally 🤝 - ${allySlots.join(', ')}`);
+                if (enemySlots.length) segments.push(`Enemy ⚔️ - **${enemySlots.join(', ')}**`);
+
                 report += `**[${sysId}]** ${data.name || "Unknown System"}: ${segments.join(' | ')}\n`;
             }
         }
@@ -1191,7 +1207,7 @@ async function handleMessage(message) {
             .setTitle(`🕳️ Sector Vulnerability Matrix: [${tag}]`)
             .setDescription(report)
             .setColor('#f97316')
-            .setFooter({ text: `Monitored systems: ${systemsWithHoles} | *Italics* = Spoken for (!plan) | **Bold** = Hostile Presence` });
+            .setFooter({ text: `Monitored systems: ${systemsWithHoles} | *Italics* = Spoken for (!plan) | **Bold** = War-list alliance` });
 
         return message.reply({ embeds: [embed] });
     }
