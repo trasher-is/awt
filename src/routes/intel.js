@@ -451,6 +451,26 @@ router.get('/intel/colonize-launch-windows', requireAuth, (req, res) => {
     }
 });
 
+// --- ALLIANCE RELATIONS (issue #114) ---
+// Admin-configured allied/war alliance tags, so the client can inject a relationship icon
+// next to every [TAG] the game itself renders (system rows, player profile, alliance page,
+// etc. all link to /Game/Alliance/Profile/{id} with the tag as the link text — one generic
+// DOM pass over that selector covers all of them). Any tag in neither list is neutral (no
+// icon). No auth-scoping beyond requireAuth: these are alliance-wide settings, same as
+// every other admin-configured Discord/battle-points setting.
+router.get('/intel/alliance-relations', requireAuth, (req, res) => {
+    try {
+        res.json({
+            success: true,
+            allied: settingsRepo.getTagListSetting('alliance_relations_allied'),
+            war: settingsRepo.getTagListSetting('alliance_relations_war'),
+        });
+    } catch (err) {
+        console.error('[DB Error] Failed to fetch alliance relations:', err);
+        res.status(500).json({ error: 'Failed to retrieve alliance relations' });
+    }
+});
+
 // --- GET ALL ACTIVE SCANNED ALLIANCES FOR SELECTION FILTER BUTTONS ---
 router.get('/intel/war-room/alliances', requireAuth, (req, res) => {
     try {
