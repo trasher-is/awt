@@ -155,6 +155,10 @@ function generateSyntheticPage(systemId) {
                 if (planet && planet.id) {
                     tr.setAttribute('data-planet-id', planet.id);
                 }
+                // A Free Planet (never owned, or currently unclaimed) gets its own subtle
+                // shade so it stands out from owned/Unknown rows at a glance.
+                const isFree = planet && !planet.owner_name;
+                if (isFree) tr.style.backgroundColor = 'rgba(255,255,255,0.03)';
 
                 tr.innerHTML = '<td>' + i + '</td>';
 
@@ -162,31 +166,43 @@ function generateSyntheticPage(systemId) {
                     tr.innerHTML += '<td>' + planet.population.toLocaleString() + '</td>';
                     tr.innerHTML += '<td>' + planet.starbase + '</td>';
                     const tagStr = planet.alliance_tag ? ' [' + escHtml(planet.alliance_tag) + ']' : '';
-                    tr.innerHTML += '<td><span>' + escHtml(planet.owner_name || 'Free Planet') + tagStr + '</span></td>';
+                    let ownerCell = '<td><span>' + escHtml(planet.owner_name || 'Free Planet') + tagStr + '</span>';
+                    if (planet.is_sieged) {
+                        ownerCell += ' <span class="badge bg-danger ms-1" title="Under siege">Siege</span>';
+                    }
+                    ownerCell += '</td>';
+                    tr.innerHTML += ownerCell;
                 } else {
                     tr.innerHTML += '<td>-</td><td>-</td><td><span class="text-muted">Unknown</span></td>';
                 }
 
-                // Same "Plan"/"P1"/"P2" pill style as the live in-vision overlay
-                // (spy.js's INJECT_TACTICAL_OVERLAYS) — note+author shown on hover.
+                // Plans + garrisoned fleets share ONE column (previously the Plan pill was
+                // appended as loose markup outside any <td>, which the browser then wrapped
+                // into its own extra, unlabeled column — reported as "mangled").
+                // NOTE: only fleets STATIONED here at last sync are shown — this hub has no
+                // tracking yet for fleets currently MOVING toward/through a planet (the
+                // fleets table's destination_system_id/destination_planet_index columns are
+                // defined but never populated by any sync path today; the live page's own
+                // "incoming" icons come from the game's real-time rendering, not from data
+                // this hub has out of vision). Same "Plan"/"P1"/"P2" pill style as the live
+                // in-vision overlay (spy.js's INJECT_TACTICAL_OVERLAYS).
+                let actionTd = '<td class="copy-none">';
                 if (plans.length === 1) {
-                    tr.innerHTML += '<span class="badge bg-light text-dark border ms-2" title="' +
+                    actionTd += '<span class="badge bg-light text-dark border me-2" title="' +
                         escAttr(plans[0].note + ' (' + (plans[0].author || 'Unknown') + ')') + '">Plan</span>';
                 } else if (plans.length > 1) {
-                    tr.innerHTML += plans.map((p, idx) =>
-                        '<span class="badge bg-light text-dark border ms-1" style="font-size: 8px; padding: 1px 3px; cursor: help;" title="' +
+                    actionTd += plans.map((p, idx) =>
+                        '<span class="badge bg-light text-dark border me-1" style="font-size: 8px; padding: 1px 3px; cursor: help;" title="' +
                         escAttr('[Plan ' + (idx + 1) + '] ' + p.note + ' (' + (p.author || 'Unknown') + ')') + '">P' + (idx + 1) + '</span>'
                     ).join('');
                 }
-
-                let actionTd = '<td class="copy-none">';
                 if (fleets.length > 0) {
                     actionTd += '<i class="bi bi-rocket-fill me-2 text-warning"></i> ' + fleets.length + ' fleet(s)';
                     fleets.forEach(f => {
                         const ships = shipStr(f) || 'no ships recorded';
                         actionTd += '<div class="small text-muted" style="font-size: 11px; padding-left: 15px;">• ' + escHtml(f.owner_name || 'Unknown') + ' (' + ships + ')</div>';
                     });
-                } else {
+                } else if (!plans.length) {
                     actionTd += '<span class="text-muted">-</span>';
                 }
                 actionTd += '</td>';
