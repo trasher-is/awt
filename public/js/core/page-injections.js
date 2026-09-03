@@ -190,19 +190,20 @@ export async function initScienceCultureCalc() {
 // home, per the user) and the list of colonizable plans.
 // ---------------------------------------------------------------
 
-// The footer's "Standard server hosting cycle" badge (Production/Growth/Science/Culture)
-// — distinguished from the OTHER footer timers (fleet hosting, trade) by its tooltip text,
-// not by data-repeat, since a repeat interval is an implementation detail that could
-// coincidentally collide with another cycle's.
-function findServerCycleTimer() {
+// One of the footer's cycle badges (Standard server / Fleet hosting / Trade), found by its
+// tooltip text rather than by data-repeat, since a repeat interval is an implementation
+// detail that could coincidentally collide with another cycle's.
+function findCycleTimer(titlePattern) {
     const nodes = document.querySelectorAll('[data-timer][data-at-datetime]');
     for (const el of nodes) {
         const badge = el.closest('[title], [data-bs-original-title]');
         const title = (badge && (badge.getAttribute('data-bs-original-title') || badge.getAttribute('title'))) || '';
-        if (/standard server hosting cycle/i.test(title)) return el;
+        if (titlePattern.test(title)) return el;
     }
     return null;
 }
+function findServerCycleTimer() { return findCycleTimer(/standard server hosting cycle/i); }
+function findFleetCycleTimer() { return findCycleTimer(/fleet hosting cycle/i); }
 
 // The next tick of a repeating cycle at or after `targetMs`, given one known tick's
 // timing (secondsUntilNextTick, read live off the page right now).
@@ -1183,7 +1184,10 @@ export function initAutoProduceFinishDates() {
 // ---------------------------------------------------------------
 // FLEET ARRIVAL COUNTDOWN — /Game/Fleets
 // The "Estimated Arrival" cell shows an absolute local time like "04:28:17 - Jul 16".
-// Append the time REMAINING from now, e.g. " | 26m", " | 4h 28m", " | 2d 1h 30m".
+// Append the time REMAINING from now, e.g. " | 26m", " | 4h 28m", " | 2d 1h 30m" — counted
+// down to the actual landing tick (2026-09-03 fix), not the raw nominal ETA: fleets only
+// land on the Fleet hosting cycle's own 2-minute tick, so a fleet nominally due at :36:39
+// really lands at the next :38:00-style boundary, not a few seconds early.
 // Pure client-side, viewer-local (the game already renders the arrival in local time).
 // ---------------------------------------------------------------
 const _FLEET_MONTHS = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
@@ -1216,7 +1220,20 @@ export function initFleetTimers() {
         if (ms == null) {
             const d = parseFleetArrival(td.textContent);
             if (!d) return;
-            ms = String(d.getTime());
+            // A fleet's nominal ETA (the game's own displayed arrival time) is not when it
+            // actually lands — fleets are only processed on the Fleet hosting cycle's own
+            // tick (every 2 minutes, e.g. :00, :02, :04...), so the real landing time is
+            // the first such tick AT OR AFTER the nominal ETA. Rounded once here, off the
+            // ORIGINAL nominal ETA (not re-rounded on every render pass) — the tick grid
+            // itself doesn't move, only "now" does, so caching is safe. If the footer's
+            // Fleet hosting cycle badge isn't rendered yet, skip caching for now (don't
+            // lock in an unrounded value) and retry on the next view-hook pass instead.
+            const cycleTimer = findFleetCycleTimer();
+            if (!cycleTimer) return;
+            const cycleSeconds = parseInt(cycleTimer.getAttribute('data-value'), 10) || 0;
+            const cycleRepeat = parseInt(cycleTimer.getAttribute('data-repeat'), 10) || 0;
+            const landMs = cycleRepeat > 0 ? nextCycleTickAtOrAfter(d.getTime(), cycleSeconds, cycleRepeat) : d.getTime();
+            ms = String(landMs);
             td.setAttribute('data-aw-eta-ms', ms);
         }
         let span = td.querySelector('.aw-fleet-eta');
