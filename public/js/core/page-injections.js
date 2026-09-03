@@ -250,7 +250,11 @@ export async function initColonizeLaunchWindows() {
 
     const cycleTimer = findServerCycleTimer();
     if (!cycleTimer) return; // footer not present/rendered yet — try again next view pass
-    const cycleSeconds = parseInt(cycleTimer.getAttribute('data-value'), 10) || 0;
+    // The footer's own cycle badges expose their countdown as data-seconds, NOT data-value
+    // (that's the per-row .timer[-active] convention used elsewhere on this page, e.g.
+    // cultureTimer above) — confirmed live (2026-09-03) after this originally shipped
+    // reading the wrong attribute and silently computing everything from 0 seconds instead.
+    const cycleSeconds = parseInt(cycleTimer.getAttribute('data-seconds'), 10) || 0;
     const cycleRepeat = parseInt(cycleTimer.getAttribute('data-repeat'), 10) || 0;
     if (cycleRepeat <= 0) return;
 
@@ -1192,10 +1196,13 @@ export function initAutoProduceFinishDates() {
 // ---------------------------------------------------------------
 const _FLEET_MONTHS = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
 // "04:28:17 - Jul 16" -> a local Date (this year, or next year if it'd otherwise be well past).
+// Month word matched as [A-Za-z]+ (not a hardcoded {3}) and looked up by its first 3
+// letters — confirmed live (2026-09-03) the game renders September as "Sept", 4 letters,
+// not the 3-letter "Sep" every other month uses, and a strict {3} silently matched nothing.
 function parseFleetArrival(text) {
-    const m = (text || '').match(/(\d{1,2}):(\d{2}):(\d{2})\s*-\s*([A-Za-z]{3})\s+(\d{1,2})/);
+    const m = (text || '').match(/(\d{1,2}):(\d{2}):(\d{2})\s*-\s*([A-Za-z]+)\s+(\d{1,2})/);
     if (!m) return null;
-    const mo = _FLEET_MONTHS[m[4].toLowerCase()];
+    const mo = _FLEET_MONTHS[m[4].toLowerCase().slice(0, 3)];
     if (mo == null) return null;
     const now = new Date();
     let d = new Date(now.getFullYear(), mo, +m[5], +m[1], +m[2], +m[3]);
@@ -1230,7 +1237,8 @@ export function initFleetTimers() {
             // lock in an unrounded value) and retry on the next view-hook pass instead.
             const cycleTimer = findFleetCycleTimer();
             if (!cycleTimer) return;
-            const cycleSeconds = parseInt(cycleTimer.getAttribute('data-value'), 10) || 0;
+            // data-seconds, not data-value — see findServerCycleTimer's call site for why.
+            const cycleSeconds = parseInt(cycleTimer.getAttribute('data-seconds'), 10) || 0;
             const cycleRepeat = parseInt(cycleTimer.getAttribute('data-repeat'), 10) || 0;
             const landMs = cycleRepeat > 0 ? nextCycleTickAtOrAfter(d.getTime(), cycleSeconds, cycleRepeat) : d.getTime();
             ms = String(landMs);
