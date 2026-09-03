@@ -90,6 +90,17 @@ function generateSyntheticPage(systemId) {
 <script src="/js/site.js"></script>
 
 <script>
+    // Every value interpolated below (owner names, alliance tags, plan notes/authors) is
+    // player-controlled text landing in innerHTML — escape it, same as public/js/utils/
+    // escape.js's esc() does for the rest of the hub (this standalone synthetic page has
+    // no module imports to share it with, so a small inline copy instead).
+    function escHtml(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+    function escAttr(s) { return escHtml(s); }
+
     async function loadCachedIntel() {
         try {
             const response = await fetch('/hub-api/intel/system/${systemId}');
@@ -124,9 +135,21 @@ function generateSyntheticPage(systemId) {
                 return;
             }
 
+            // Same abbreviations as discord_bot.js's !sys shipStr — only ship types
+            // actually present, never a padded "TR:0 BS:0" for types the fleet doesn't have.
+            const SHIP_TYPES = [
+                { key: 'transports', label: 'TR' }, { key: 'colony_ships', label: 'CS' },
+                { key: 'destroyers', label: 'DS' }, { key: 'cruisers', label: 'CR' },
+                { key: 'battleships', label: 'BS' },
+            ];
+            function shipStr(f) {
+                return SHIP_TYPES.filter(t => f[t.key]).map(t => f[t.key] + t.label).join(' ');
+            }
+
             for (let i = 1; i <= maxIndex; i++) {
                 const planet = data.planets.find(p => p.planet_index === i);
                 const fleets = data.fleets.filter(f => f.planet_index === i);
+                const plans = data.plans.filter(p => p.planet_index === i);
 
                 const tr = document.createElement('tr');
                 if (planet && planet.id) {
@@ -138,17 +161,30 @@ function generateSyntheticPage(systemId) {
                 if (planet) {
                     tr.innerHTML += '<td>' + planet.population.toLocaleString() + '</td>';
                     tr.innerHTML += '<td>' + planet.starbase + '</td>';
-                    const tagStr = planet.alliance_tag ? ' [' + planet.alliance_tag + ']' : '';
-                    tr.innerHTML += '<td><span>' + (planet.owner_name || 'Free Planet') + tagStr + '</span></td>';
+                    const tagStr = planet.alliance_tag ? ' [' + escHtml(planet.alliance_tag) + ']' : '';
+                    tr.innerHTML += '<td><span>' + escHtml(planet.owner_name || 'Free Planet') + tagStr + '</span></td>';
                 } else {
                     tr.innerHTML += '<td>-</td><td>-</td><td><span class="text-muted">Unknown</span></td>';
+                }
+
+                // Same "Plan"/"P1"/"P2" pill style as the live in-vision overlay
+                // (spy.js's INJECT_TACTICAL_OVERLAYS) — note+author shown on hover.
+                if (plans.length === 1) {
+                    tr.innerHTML += '<span class="badge bg-light text-dark border ms-2" title="' +
+                        escAttr(plans[0].note + ' (' + (plans[0].author || 'Unknown') + ')') + '">Plan</span>';
+                } else if (plans.length > 1) {
+                    tr.innerHTML += plans.map((p, idx) =>
+                        '<span class="badge bg-light text-dark border ms-1" style="font-size: 8px; padding: 1px 3px; cursor: help;" title="' +
+                        escAttr('[Plan ' + (idx + 1) + '] ' + p.note + ' (' + (p.author || 'Unknown') + ')') + '">P' + (idx + 1) + '</span>'
+                    ).join('');
                 }
 
                 let actionTd = '<td class="copy-none">';
                 if (fleets.length > 0) {
                     actionTd += '<i class="bi bi-rocket-fill me-2 text-warning"></i> ' + fleets.length + ' fleet(s)';
                     fleets.forEach(f => {
-                        actionTd += '<div class="small text-muted" style="font-size: 11px; padding-left: 15px;">• ' + (f.owner_name || 'Unknown') + ' (TR:' + f.transports + ' BS:' + f.battleships + ')</div>';
+                        const ships = shipStr(f) || 'no ships recorded';
+                        actionTd += '<div class="small text-muted" style="font-size: 11px; padding-left: 15px;">• ' + escHtml(f.owner_name || 'Unknown') + ' (' + ships + ')</div>';
                     });
                 } else {
                     actionTd += '<span class="text-muted">-</span>';
