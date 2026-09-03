@@ -283,7 +283,7 @@ async function handleMessage(message) {
             .setDescription('Here is a list of all available commands and how to use them:')
             .setColor('#10b981') // Green color
             .addFields(
-                { name: '`!link <hub name>`', value: 'Links your Discord account to your Hub account so you get @pinged on incoming alerts you can defend.\n*Example: `!link caveman`*' },
+                { name: '`!link <code>`', value: 'Links your Discord account to your Hub account so you get @pinged on incoming alerts you can defend. Get the one-time code from **Link Discord** in the Hub sidebar first (`!link` with no code explains how). Codes expire after 10 minutes.\n*Example: `!link A1B2C3`*' },
                 { name: '`!intels`', value: 'Opens an interactive text menu to browse tracked intelligence profiles.' },
                 { name: '`!sys <system_id>`', value: 'Displays intel for a specific solar system (Planets, Fleets, Plans).\n*Example: `!sys 123`*' },
                 { name: '`!intel <player_name>`', value: 'Displays detailed intelligence and stats for a specific player.\n*Example: `!intel PlayerOne`*' },
@@ -1008,7 +1008,20 @@ async function handleMessage(message) {
         if (!sysId || isNaN(sysId)) return message.reply("❌ Usage: `!vision <system_id> [alliance_tag]`");
 
         const targetSysId = parseInt(sysId, 10);
-        const tag = args[1] ? args[1].toUpperCase() : 'RAID';
+        // Auto-detect the caller's own alliance when omitted — same pattern as !holes.
+        // Used to hard-default to 'RAID' (this hub's original alliance), which silently
+        // broke the command for every other alliance running this same codebase (reported
+        // 2026-09-02: "No players found for alliance [RAID]" for a completely different
+        // Discord server's members, who never typed RAID at all).
+        let tag = args[1] ? args[1].toUpperCase() : null;
+        if (!tag) {
+            const discordName = message.author.username;
+            const userAlliance = usersRepo.getUserAllianceTagByDiscordName(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
+            if (!userAlliance || !userAlliance.tag) {
+                return message.reply('❌ Could not automatically detect your alliance. Provide it explicitly: `!vision <system_id> <alliance_tag>`');
+            }
+            tag = userAlliance.tag.toUpperCase();
+        }
 
         const targetSys = systemsRepo.getSystemCoords(targetSysId);
         if (!targetSys) return message.reply(`❌ System **[${targetSysId}]** not found in the database. Scan or fly near it first.`);
