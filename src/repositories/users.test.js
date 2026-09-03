@@ -62,6 +62,17 @@ ok('getValidActiveUserIds returns [] for an empty id list', users.getValidActive
 
 ok('getAllUsersWithIdle includes the bootstrap admin and caveman', users.getAllUsersWithIdle().length === 2);
 
+// last_activity_at (2026-09-04) — the client prefers it over idle_time (see
+// players.js's getWarRoomPlayers comment for why); this query must surface it too.
+// A dedicated user/player pair, not reusing 'Caveman2' — that name is exercised by the
+// name-bridge tests further down, which assert on whether a players row matching it
+// exists at specific points; inserting one here earlier broke those.
+users.createUser('idletester', 'hash2', 'user', null);
+db.prepare(`INSERT INTO players (id, name, last_activity_at) VALUES (500, 'idletester', '2026-09-03T17:13:55.1083087+02:00')`).run();
+const withIdle = users.getAllUsersWithIdle();
+ok('getAllUsersWithIdle joins in last_activity_at from the matching player row',
+    withIdle.some(u => u.game_name === 'idletester' && u.last_activity_at === '2026-09-03T17:13:55.1083087+02:00'), withIdle);
+
 ok('getActiveMemberNames lists active game names', users.getActiveMemberNames().some(u => u.game_name === 'Caveman2'));
 
 ok('getAdminPasswordHash finds the bootstrap admin', !!users.getAdminPasswordHash());

@@ -2,8 +2,17 @@ const db = require('../database');
 
 // --- players: read (intel.js) ---
 
+// last_activity_at (2026-09-04): a real timestamp from the API's Player/{id} detail sweep
+// (player-api-sync.js's background staleness sweep — runs for essentially every player,
+// automatically), vs. idle_time, a duration STRING frozen at whatever moment a full profile
+// scrape last happened (DOM-scrape only, ~half the roster ever gets one). Confirmed against
+// production: last_activity_at covers 138/139 players, idle_time only 72/139 — and unlike
+// idle_time, a timestamp can be turned into an ALWAYS-CURRENT "idle for Xh Ym" at render
+// time, rather than staying frozen at whatever it read when scraped. The client prefers
+// last_activity_at when present, falling back to idle_time only when it's null.
 const getWarRoomPlayersStmt = db.prepare(`
     SELECT p.id, p.name, p.economy, p.social, p.physics, p.mathematics, p.energy, p.biology, p.idle_time,
+           p.last_activity_at,
            p.race_attack, p.race_defense, p.race_speed, p.race_production, p.race_science,
            p.updated_at as player_scan_time, p.intel_updated_at,
            p.total_population, p.total_factories, p.total_farms, p.total_cybernetics, p.total_labs,

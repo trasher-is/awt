@@ -236,6 +236,28 @@ function parseTimerInput(input) {
 // Channels (IDs, separated by commas/spaces/newlines) where the bot refuses to run
 // commands — e.g. public/guest channels. Managed from the admin tool via the
 // app_settings key 'discord_blocked_channels'. getSettingValue is hoisted below.
+// Idle display, preferring a real timestamp (last_activity_at, from the API's background
+// detail sweep — near-total roster coverage) over the DOM-scrape-only idle_time string
+// (about half the roster, and frozen at whatever moment it was last scraped, so it only
+// gets MORE wrong the longer it's been since). Mirrors archives.js's computeIdleDisplay —
+// duplicated rather than shared, since this file is CJS/Node and that one's browser ESM.
+function formatIdleDisplay(player) {
+    if (player.last_activity_at) {
+        const d = new Date(player.last_activity_at);
+        if (!isNaN(d.getTime())) {
+            const secs = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+            if (secs < 60) return 'active';
+            const days = Math.floor(secs / 86400);
+            const hours = Math.floor((secs % 86400) / 3600);
+            const mins = Math.floor((secs % 3600) / 60);
+            if (days > 0) return `${days}d ${hours}h`;
+            if (hours > 0) return `${hours}h ${mins}m`;
+            return `${mins}m`;
+        }
+    }
+    return player.idle_time || '--';
+}
+
 function getBlockedChannels() {
     const raw = getSettingValue('discord_blocked_channels');
     return raw ? raw.split(/[^0-9]+/).filter(Boolean) : [];
@@ -732,7 +754,7 @@ async function handleMessage(message) {
                     .addFields(
                         { 
                             name: '📊 Core & Status', 
-                            value: `PL: **${player.level}**\nPoints: **${player.points}**\nRank: **${player.ranking}**\nOrigin: **#${player.origin_system || '--'}**\nLocal Time: **${player.local_time || '--'}**\nIdle Time: **${player.idle_time || '--'}**\nCountry: **${countryDisplay}**`, 
+                            value: `PL: **${player.level}**\nPoints: **${player.points}**\nRank: **${player.ranking}**\nOrigin: **#${player.origin_system || '--'}**\nLocal Time: **${player.local_time || '--'}**\nIdle Time: **${formatIdleDisplay(player)}**\nCountry: **${countryDisplay}**`, 
                             inline: true 
                         },
                         { 
@@ -910,7 +932,7 @@ async function handleMessage(message) {
             .addFields(
                 { 
                     name: '📊 Core & Status', 
-                    value: `PL: **${player.level}**\nPoints: **${player.points}**\nRank: **${player.ranking}**\nOrigin: **#${player.origin_system || '--'}**\nLocal Time: **${player.local_time || '--'}**\nIdle Time: **${player.idle_time || '--'}**\nCountry: **${countryDisplay}**`, 
+                    value: `PL: **${player.level}**\nPoints: **${player.points}**\nRank: **${player.ranking}**\nOrigin: **#${player.origin_system || '--'}**\nLocal Time: **${player.local_time || '--'}**\nIdle Time: **${formatIdleDisplay(player)}**\nCountry: **${countryDisplay}**`, 
                     inline: true 
                 },
                 {

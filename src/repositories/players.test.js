@@ -83,6 +83,14 @@ ok('once a real home is known, it wins over origin_system',
 
 ok('an unknown player id returns undefined, not a crash', players.getPlayerLaunchOrigin(999999) === undefined);
 
+// getWarRoomPlayers must surface last_activity_at (2026-09-04) — the client prefers it over
+// idle_time (a DOM-scrape-only snapshot, frozen at whatever moment it was last scraped)
+// since it's a real timestamp from the API's background sweep with far broader coverage.
+db.prepare(`UPDATE players SET last_activity_at = '2026-09-03T17:13:55.1083087+02:00' WHERE id = 1`).run();
+const warRoom = players.getWarRoomPlayers(2); // player 1 (caveman) is in alliance 2 (AO) by this point
+ok('getWarRoomPlayers includes last_activity_at',
+    warRoom.some(p => p.id === 1 && p.last_activity_at === '2026-09-03T17:13:55.1083087+02:00'), warRoom);
+
 const combatDef = players.getPlayerCombatStats('caveman');
 const combatAtk = players.getPlayerCombatStats('caveman');
 ok('getPlayerCombatStats is reusable for both --def and --atk lookups', combatDef.name === combatAtk.name && combatDef.name === 'caveman');
