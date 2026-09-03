@@ -71,8 +71,12 @@ function getUserById(id) {
     return getUserByIdStmt.get(id);
 }
 
+// last_activity_at added alongside idle_time (2026-09-04) — see players.js's
+// getWarRoomPlayers comment for why it's the preferred source: a real timestamp from the
+// API's background sweep (near-total roster coverage) vs. idle_time's DOM-scrape-only
+// snapshot (about half the roster, and frozen at whatever moment it was last scraped).
 const getAllUsersWithIdleStmt = db.prepare(`
-    SELECT u.id, u.game_name, u.role, u.is_active, u.discord_name, p.idle_time
+    SELECT u.id, u.game_name, u.role, u.is_active, u.discord_name, p.idle_time, p.last_activity_at
     FROM app_users u
     LEFT JOIN players p ON LOWER(u.game_name) = LOWER(p.name)
     ORDER BY u.id ASC

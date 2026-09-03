@@ -196,6 +196,33 @@ function parseIdleStringToSeconds(idleStr) {
     return secs;
 }
 
+// Idle display, preferring a real timestamp (last_activity_at, from the API's background
+// detail sweep — near-total roster coverage) over the DOM-scrape-only idle_time string
+// (about half the roster, and frozen at whatever moment it was last scraped, so it only
+// gets MORE wrong the longer it's been since). last_activity_at is raw ISO8601 with its own
+// offset (e.g. "...T...+02:00"), NOT SQLite's space-separated format — parseSqliteUtc above
+// assumes the latter and would silently fail on it, so this reads it directly instead.
+function computeIdleDisplay(p) {
+    if (p.last_activity_at) {
+        const d = new Date(p.last_activity_at);
+        if (!isNaN(d.getTime())) {
+            const secs = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+            return { secs, text: formatIdleSeconds(secs) };
+        }
+    }
+    if (p.idle_time) return { secs: parseIdleStringToSeconds(p.idle_time), text: p.idle_time };
+    return { secs: -1, text: 'Unknown' };
+}
+function formatIdleSeconds(secs) {
+    if (secs < 60) return 'active';
+    const days = Math.floor(secs / 86400);
+    const hours = Math.floor((secs % 86400) / 3600);
+    const mins = Math.floor((secs % 3600) / 60);
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${mins}m`;
+    return `${mins}m`;
+}
+
 function formatRaceModifier(val, isMasked) {
     if (isMasked) return '<span class="text-zinc-600">?</span>';
     if (val === null || val === undefined) return '<span class="text-zinc-500">-</span>';
@@ -289,7 +316,7 @@ async function loadWarRoomMatrixData() {
             const cvDay = Math.floor((dailyPP / costFor3CV) * 3);
             // MaxCombatValue = Σpopulation × (social + 3) × 11. The factor is 11, not 10.
             const maxCv = pop * (social + 3) * 11;
-            const idleSecs = parseIdleStringToSeconds(p.idle_time);
+            const idle = computeIdleDisplay(p);
 
             // ~Science/h = (labs + population) base, scaled by the race science trait
             // and trade revenue %, mirroring the production formula.
@@ -303,7 +330,7 @@ async function loadWarRoomMatrixData() {
             const sciMult = 1 + (p.race_science || 0) * 0.08;
             const estimatedScience = sciBase * sciMult * trMult;
 
-            return { ...p, calculated_prod: estimatedProd, calculated_science: estimatedScience, cv_day: cvDay, max_cv: maxCv, idle_seconds: idleSecs };
+            return { ...p, calculated_prod: estimatedProd, calculated_science: estimatedScience, cv_day: cvDay, max_cv: maxCv, idle_seconds: idle.secs, idle_display: idle.text };
         });
 
         if (warRoomSortCol) executeWarRoomSortingRoutine();
@@ -354,7 +381,7 @@ function renderWarRoomTable(data) {
         tr.className = "hover:bg-zinc-900/40 transition-colors border-b border-zinc-900/60";
         tr.innerHTML = `
             <td class="sticky left-0 z-10 bg-black px-2 py-1 font-bold text-foreground break-words leading-tight w-[110px] border-r border-zinc-800"><a href="/Game/Players/Profile/${p.id}" target="_blank" class="hover:underline hover:text-red-400">${esc(p.name)}</a></td>
-            <td class="px-2 py-1"><span class="px-1.5 py-0.5 rounded text-[11px] font-mono tracking-wide whitespace-nowrap" style="${idleStyle}">${esc(p.idle_time || 'Unknown')}</span></td>
+            <td class="px-2 py-1"><span class="px-1.5 py-0.5 rounded text-[11px] font-mono tracking-wide whitespace-nowrap" style="${idleStyle}">${esc(p.idle_display)}</span></td>
             <td class="px-2 py-1 text-right ${planetsCls}">${planetsCell}</td>
             <td class="px-2 py-1 text-right text-emerald-400 font-bold">${Math.round(p.calculated_prod).toLocaleString()}</td>
             <td class="px-2 py-1 text-right text-teal-300">${isUnknown ? q : (p.trade_revenue || 0) + '%'}</td>

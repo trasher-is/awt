@@ -578,6 +578,29 @@
             })[ch]);
         }
 
+        // Idle display, preferring a real timestamp (last_activity_at, from the API's
+        // background detail sweep — near-total roster coverage) over the DOM-scrape-only
+        // idle_time string (about half the roster, and frozen at whatever moment it was
+        // last scraped). Mirrors archives.js's computeIdleDisplay / discord_bot.js's
+        // formatIdleDisplay — duplicated rather than shared across these three separate
+        // runtimes (browser ESM, Node CJS, this standalone admin page).
+        function formatIdleDisplay(u) {
+            if (u.last_activity_at) {
+                const d = new Date(u.last_activity_at);
+                if (!isNaN(d.getTime())) {
+                    const secs = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+                    if (secs < 60) return 'active';
+                    const days = Math.floor(secs / 86400);
+                    const hours = Math.floor((secs % 86400) / 3600);
+                    const mins = Math.floor((secs % 3600) / 60);
+                    if (days > 0) return `${days}d ${hours}h`;
+                    if (hours > 0) return `${hours}h ${mins}m`;
+                    return `${mins}m`;
+                }
+            }
+            return u.idle_time || '-';
+        }
+
         // The row actions used to be inline onclick attributes carrying the user's name
         // as a JS string literal inside an HTML attribute - two nested contexts, so a
         // single apostrophe in a name broke out and ran as code. They are data attributes
@@ -635,7 +658,7 @@
                         </td>
                         <td class="py-3">${roleSelect}</td>
                         <td class="py-3">${statusBadge}</td>
-                        <td class="py-3 font-mono text-xs text-muted-foreground">${esc(u.idle_time || '-')}</td>
+                        <td class="py-3 font-mono text-xs text-muted-foreground">${esc(formatIdleDisplay(u))}</td>
                         <td class="py-3 text-right flex gap-3 justify-end items-center">
                             ${editBtn}
                             ${passBtn}
