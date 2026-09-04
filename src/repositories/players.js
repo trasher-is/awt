@@ -56,6 +56,16 @@ function getFullPlayersDb() {
     return getFullPlayersDbStmt.all();
 }
 
+// Lightweight id->joined map for the Ranking/EcoBonus page injection (issue: "add joined-date
+// to every player in the Eco Bonus ranking page"). Excludes 'N/A' the same way
+// getPendingNewPlayerAnnouncements does, since that sentinel means "resigned, no real date".
+const getJoinedDatesStmt = db.prepare(`
+    SELECT id, joined FROM players WHERE joined IS NOT NULL AND joined != 'N/A'
+`);
+function getJoinedDates() {
+    return getJoinedDatesStmt.all();
+}
+
 // Arity varies per call (memberIds length), so prepared fresh each call — same reasoning as
 // systems.js's getSystemsByIds.
 function getAllianceTagForMembers(memberIds) {
@@ -711,7 +721,7 @@ function suggestPlayersTopByPoints(limit) {
 }
 
 module.exports = {
-    getWarRoomPlayers, getAllianceIntelPlayerIds, countPlayers, listPlayerIds, getFullPlayersDb,
+    getWarRoomPlayers, getAllianceIntelPlayerIds, countPlayers, listPlayerIds, getFullPlayersDb, getJoinedDates,
     getAllianceTagForMembers, getVisionObservers, getPlayerWithPlanetCount,
     getPlayerLoginHistory, getPlayerLoginHeatmap,
     upsertPlayerBasic, getPlayerNameWithTag, getPlayerRestartCheck, playerExistsById, resetPlayerOnRestart,

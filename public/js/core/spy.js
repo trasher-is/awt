@@ -1,4 +1,4 @@
-import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates, initColonizeLaunchWindows, initAllianceRelationIcons } from './page-injections.js';
+import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates, initColonizeLaunchWindows, initAllianceRelationIcons, initEcoBonusJoinDates } from './page-injections.js';
 import { initNewsIncomingTools } from '../ui/news-incoming.js';
 import { initNewsBattleEvents } from '../ui/news-battle-events.js';
 import '../utils/game-rate-limit.js';
@@ -489,6 +489,9 @@ export function initSpy() {
             if (pathLower.includes('/game/players/profile/')) {
                 initProfilePLGrowth();
                 initProfileHubIntel().catch(err => console.error('[Spy] profile hub-intel injection failed:', err.message));
+            }
+            if (pathLower.includes('/ranking/ecobonus')) {
+                initEcoBonusJoinDates().catch(err => console.error('[Spy] eco bonus joined-dates injection failed:', err.message));
             }
 
             // Ungated — every AW page that renders a [TAG] link uses the exact same DOM

@@ -472,6 +472,16 @@ router.get('/intel/alliance-relations', requireAuth, (req, res) => {
 });
 
 // --- GET ALL ACTIVE SCANNED ALLIANCES FOR SELECTION FILTER BUTTONS ---
+// id->joined map for the Ranking/EcoBonus page injection (joined-date column request).
+router.get('/intel/joined-dates', requireAuth, (req, res) => {
+    try {
+        res.json({ success: true, players: playersRepo.getJoinedDates() });
+    } catch (err) {
+        console.error('[DB Error] Failed to fetch joined dates:', err);
+        res.status(500).json({ error: 'Failed to retrieve joined dates' });
+    }
+});
+
 router.get('/intel/war-room/alliances', requireAuth, (req, res) => {
     try {
         // Explicitly group by all selected non-aggregate elements to avoid engine resolution errors

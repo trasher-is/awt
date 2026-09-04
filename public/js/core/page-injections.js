@@ -1305,6 +1305,83 @@ export async function initAllianceRelationIcons() {
     });
 }
 
+// ---------------------------------------------------------------
+// ECO BONUS RANKING — JOINED-DATE COLUMN
+// /Ranking/EcoBonus lists players in fixed groups (the ranking bucket the game re-shuffles
+// players between); a member asked to see each player's join date so they can gauge how many
+// older players sit in their own and neighboring groups and predict when they'll get moved.
+// The table has a fixed "#/Rank +/-/Name/Eco Bonus" header, group-divider rows (a single
+// colspan=4 td, class "lowlight", text starting with "Group "), and 4-cell player rows whose
+// name cell holds a[href^="/Game/Players/Profile/{id}"] — confirmed live.
+// ---------------------------------------------------------------
+let _joinedDatesCache = null; // id -> raw ISO 'joined' string; fetched once per page load
+async function getJoinedDates() {
+    if (_joinedDatesCache) return _joinedDatesCache;
+    try {
+        const res = await fetch('/hub-api/intel/joined-dates');
+        const data = await res.json();
+        if (data && data.success) {
+            _joinedDatesCache = new Map(data.players.map(p => [p.id, p.joined]));
+        }
+    } catch (e) {
+        // Leave cache null — next view-hook pass retries.
+        console.warn('[Spy] joined-dates fetch failed:', e.message);
+    }
+    return _joinedDatesCache;
+}
+
+function formatJoinedAge(joinedIso) {
+    const d = new Date(joinedIso);
+    if (isNaN(d.getTime())) return null;
+    const secs = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+    const days = Math.floor(secs / 86400);
+    const hours = Math.floor((secs % 86400) / 3600);
+    const age = days > 0 ? `${days}d ${hours}h` : `${hours}h`;
+    const dateLabel = d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    return { age, dateLabel };
+}
+
+export async function initEcoBonusJoinDates() {
+    // The ranking page renders several <table>s (layout/nav included), so match on the
+    // one whose header is actually "#/Rank +//Name/Eco Bonus" rather than assuming order.
+    const table = [...document.querySelectorAll('table')].find(t => {
+        const head = t.querySelector('thead tr');
+        return head && /eco bonus/i.test(head.textContent);
+    });
+    if (!table) return;
+    const headRow = table.querySelector('thead tr');
+    if (headRow.querySelector('.aw-joined-header')) return; // already run
+
+    const joined = await getJoinedDates();
+    if (!joined) return;
+
+    const th = document.createElement('th');
+    th.className = 'aw-joined-header';
+    th.textContent = 'Joined';
+    headRow.appendChild(th);
+
+    table.querySelectorAll('tbody tr').forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length !== 4) return; // skip group-divider rows (colspan=4, 1 cell)
+        if (row.querySelector('.aw-joined-cell')) return; // already run
+
+        const link = cells[2].querySelector('a[href^="/Game/Players/Profile/"]');
+        const playerId = link ? parseInt(link.getAttribute('href').split('/').pop(), 10) : null;
+        const joinedIso = playerId !== null ? joined.get(playerId) : null;
+
+        const td = document.createElement('td');
+        td.className = 'aw-joined-cell';
+        const info = joinedIso ? formatJoinedAge(joinedIso) : null;
+        if (info) {
+            td.title = new Date(joinedIso).toLocaleString();
+            td.textContent = `${info.dateLabel} (${info.age})`;
+        } else {
+            td.textContent = '—';
+        }
+        row.appendChild(td);
+    });
+}
+
 (function autoScrapeRankings() {
     if (!window.location.pathname.toLowerCase().includes('/ranking/bestguarded')) return;
 
