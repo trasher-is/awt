@@ -363,6 +363,16 @@ players.upsertPlayerFromApiList(803, 'ResignedGuy', null, 1, 0, null, 'US', 1, '
 ok('a real joinedAt on a later sync overwrites "N/A" and the player becomes queueable',
     players.getPendingNewPlayerAnnouncements().some(r => r.id === 803), players.getPendingNewPlayerAnnouncements());
 
+// ── getJoinedDates: id->joined map for the Ranking/EcoBonus joined-date column injection ──
+const joinedDates = players.getJoinedDates();
+const joinedById = new Map(joinedDates.map(r => [r.id, r.joined]));
+ok('getJoinedDates includes a player with a real joined date',
+    joinedById.get(801) === '2026-08-31T10:00:08.0083294+02:00', joinedById.get(801));
+ok('getJoinedDates excludes a player with a null joined date',
+    !joinedById.has(802), joinedById.get(802));
+ok('getJoinedDates includes a player whose "N/A" was overwritten by a real joined date',
+    joinedById.get(803) === '2026-09-01T09:00:00.0000000+02:00', joinedById.get(803));
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {
