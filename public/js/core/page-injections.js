@@ -1257,6 +1257,46 @@ export function initFleetTimers() {
 }
 
 // ---------------------------------------------------------------
+// "SELECT A FLEET" LAUNCH MODAL — /Game/Map/SolarSystem/{id}
+// Clicking a target's crosshair icon opens a modal listing each eligible fleet with an
+// absolute-time ETA column ("18:32:17 - Sept 04", same format as the Fleets page). Unlike
+// initFleetTimers this is a pre-launch projection, not a fleet already in transit, so there's
+// no Fleet hosting cycle tick to round up to — just the raw ETA-minus-now travel time. Reuses
+// parseFleetArrival/fmtFleetRemaining above since the ETA text format is identical.
+// ---------------------------------------------------------------
+export function initFleetLaunchModalETA() {
+    document.querySelectorAll('table').forEach(table => {
+        const headRow = table.querySelector('thead tr');
+        if (!headRow) return;
+        const headCells = [...headRow.querySelectorAll('th')];
+        const etaIndex = headCells.findIndex(th => th.textContent.trim() === 'ETA');
+        if (etaIndex === -1) return;
+
+        table.querySelectorAll('tbody tr').forEach(row => {
+            const td = row.querySelectorAll('td')[etaIndex];
+            if (!td) return;
+
+            let ms = td.getAttribute('data-aw-launch-eta-ms');
+            if (ms == null) {
+                const d = parseFleetArrival(td.textContent);
+                if (!d) return;
+                ms = String(d.getTime());
+                td.setAttribute('data-aw-launch-eta-ms', ms);
+            }
+            let span = td.querySelector('.aw-fleet-eta');
+            if (!span) {
+                span = document.createElement('span');
+                span.className = 'aw-fleet-eta';
+                span.style.whiteSpace = 'nowrap';
+                span.innerHTML = ' <span style="opacity:.6">|</span> <span class="aw-fleet-eta-t" style="color:#ced4da"></span>';
+                td.appendChild(span);
+            }
+            span.querySelector('.aw-fleet-eta-t').textContent = fmtFleetRemaining(Number(ms) - Date.now());
+        });
+    });
+}
+
+// ---------------------------------------------------------------
 // ALLIANCE RELATION ICONS (issue #114) — every AW page, unconditional
 // Wherever the game itself renders an alliance tag it does so as a link to
 // /Game/Alliance/Profile/{id} with the tag as the link text (confirmed live: system rows,
