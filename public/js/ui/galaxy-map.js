@@ -38,6 +38,7 @@ const DEFAULT_LAYERS = {
     stale: false,
     labels: false,
     isochrones: false,
+    claims: false,
 };
 
 // Isochrone controls: origin system, the fleet the rings are drawn for, and the three
@@ -298,6 +299,27 @@ function draw() {
 
         ctx.globalAlpha = 1;
 
+        if (layers.claims) {
+            const shares = state.claimsBySystem.get(s.id);
+            if (shares && shares.length) {
+                ctx.strokeStyle = 'rgba(251,191,36,0.9)'; // amber — distinct from ownership fill and the free/siege rings
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([3, 3]);
+                ctx.beginPath();
+                ctx.arc(sx, sy, r + 7, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                const label = shares
+                    .map(c => c.planet_count != null ? `${c.alliance_tag} ${c.planet_count}` : c.alliance_tag)
+                    .join(' / ');
+                ctx.fillStyle = 'rgba(251,191,36,0.95)';
+                ctx.font = 'bold 10px ui-sans-serif, system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(label, sx, sy + r + 14);
+            }
+        }
+
         if (s.id === state.hoverId) {
             ctx.strokeStyle = '#fff';
             ctx.lineWidth = 1.5;
@@ -374,6 +396,14 @@ function tooltipHtml(s) {
         lines.push('<div class="mt-1 text-zinc-500">No member is modelled as seeing this.</div>');
     }
 
+    if (state.layers.claims) {
+        const shares = state.claimsBySystem.get(s.id);
+        if (shares && shares.length) {
+            const summary = shares.map(c => `${esc(c.alliance_tag)}${c.planet_count != null ? ` ×${c.planet_count}` : ''}`).join(', ');
+            lines.push(`<div class="mt-1 text-amber-400">Claimed: ${summary}</div>`);
+        }
+    }
+
     return lines.join('');
 }
 
@@ -399,6 +429,183 @@ function recomputeVision() {
     state.seenBy = state.layers.vision
         ? visionCoverage(state.observers, state.systems)
         : new Map();
+}
+
+// ─── CLAIMS (negotiation layer) ────────────────────────────────────────────
+// Not a game fact — a record of who this alliance has agreed a system (or a share of one)
+// belongs to going forward. Loaded from its own endpoint (a separate table from the
+// ownership-from-scans data the rest of the map uses) and kept in a system_id -> shares map
+// for both the canvas overlay and the tooltip.
+function buildClaimsBySystem() {
+    const map = new Map();
+    for (const c of state.claims) {
+        if (!map.has(c.system_id)) map.set(c.system_id, []);
+        map.get(c.system_id).push(c);
+    }
+    state.claimsBySystem = map;
+}
+
+async function loadClaims() {
+    try {
+        const res = await fetch('/hub-api/intel/system-claims');
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+        state.claims = data.claims || [];
+    } catch (err) {
+        console.error('[GalaxyMap] Failed to load system claims:', err);
+        state.claims = [];
+    }
+    buildClaimsBySystem();
+}
+
+function claimSystemLabel(systemId) {
+    const s = state.systems.find(sys => sys.id === systemId);
+    return s ? `${s.name || 'Sys'} #${s.id}` : `#${systemId}`;
+}
+
+function renderClaimsList() {
+    const body = document.getElementById('gm-claims-list-body');
+    const panel = document.getElementById('gm-claims-list');
+    if (!body || !panel) return;
+    panel.classList.toggle('hidden', !state.layers.claims);
+    if (!state.layers.claims) return;
+
+    if (!state.claims.length) {
+        body.innerHTML = '<div class="text-zinc-500">No claims yet — pick a system below and save one.</div>';
+        return;
+    }
+
+    const bySystem = [...state.claimsBySystem.entries()]
+        .sort((a, b) => claimSystemLabel(a[0]).localeCompare(claimSystemLabel(b[0])));
+
+    body.innerHTML = bySystem.map(([systemId, shares]) => {
+        const rows = shares.map(c => `
+            <div class="flex items-start justify-between gap-1.5 pl-2">
+                <div class="min-w-0">
+                    <span class="text-foreground font-medium">${esc(c.alliance_tag)}</span>
+                    ${c.planet_count != null ? `<span class="text-zinc-400"> ×${c.planet_count}</span>` : ''}
+                    ${c.note ? `<div class="text-zinc-500 truncate">${esc(c.note)}</div>` : ''}
+                </div>
+                <div class="flex items-center gap-1 shrink-0">
+                    <button data-edit-system="${systemId}" data-edit-tag="${esc(c.alliance_tag)}"
+                        class="gm-claim-edit text-zinc-400 hover:text-foreground" title="Edit"><i class="fa-solid fa-pen"></i></button>
+                    <button data-del-system="${systemId}" data-del-tag="${esc(c.alliance_tag)}"
+                        class="gm-claim-del text-zinc-400 hover:text-red-400" title="Delete"><i class="fa-solid fa-trash"></i></button>
+                </div>
+            </div>`).join('');
+        return `<div><div class="font-medium text-foreground">${esc(claimSystemLabel(systemId))}</div>${rows}</div>`;
+    }).join('');
+
+    body.querySelectorAll('.gm-claim-edit').forEach(btn => btn.addEventListener('click', () => {
+        editClaim(parseInt(btn.dataset.editSystem, 10), btn.dataset.editTag);
+    }));
+    body.querySelectorAll('.gm-claim-del').forEach(btn => btn.addEventListener('click', () => {
+        deleteClaimUI(parseInt(btn.dataset.delSystem, 10), btn.dataset.delTag);
+    }));
+}
+
+function syncClaimsControlsVisibility() {
+    document.getElementById('gm-claims-controls')?.classList.toggle('hidden', !state.layers.claims);
+    renderClaimsList();
+}
+
+function resetClaimForm() {
+    state.claimEditorSystemId = null;
+    state.claimEditing = null;
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    set('gm-claim-system', '');
+    set('gm-claim-tag', '');
+    set('gm-claim-count', '');
+    set('gm-claim-note', '');
+    document.getElementById('gm-claim-cancel')?.classList.add('hidden');
+}
+
+function editClaim(systemId, tag) {
+    const shares = state.claimsBySystem.get(systemId) || [];
+    const claim = shares.find(c => c.alliance_tag === tag);
+    if (!claim) return;
+    state.claimEditorSystemId = systemId;
+    state.claimEditing = { systemId, tag };
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    set('gm-claim-system', claimSystemLabel(systemId));
+    set('gm-claim-tag', claim.alliance_tag);
+    set('gm-claim-count', claim.planet_count != null ? claim.planet_count : '');
+    set('gm-claim-note', claim.note || '');
+    document.getElementById('gm-claim-cancel')?.classList.remove('hidden');
+}
+
+async function deleteClaimUI(systemId, tag) {
+    try {
+        const res = await fetch(`/hub-api/intel/system-claims/${systemId}/${encodeURIComponent(tag)}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+        await loadClaims();
+        if (state.claimEditing && state.claimEditing.systemId === systemId && state.claimEditing.tag === tag) resetClaimForm();
+        renderClaimsList();
+        draw();
+    } catch (err) {
+        if (typeof window.showToast === 'function') window.showToast(`Failed to delete claim: ${err.message}`);
+        console.error('[GalaxyMap] Failed to delete claim:', err);
+    }
+}
+
+async function submitClaim() {
+    const tag = (document.getElementById('gm-claim-tag')?.value || '').trim();
+    const countRaw = (document.getElementById('gm-claim-count')?.value || '').trim();
+    const note = (document.getElementById('gm-claim-note')?.value || '').trim();
+    const systemId = state.claimEditorSystemId;
+
+    if (!systemId) { if (typeof window.showToast === 'function') window.showToast('Pick a system first.'); return; }
+    if (!tag) { if (typeof window.showToast === 'function') window.showToast('Enter an alliance tag.'); return; }
+
+    try {
+        const res = await fetch('/hub-api/intel/system-claims', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ system_id: systemId, alliance_tag: tag, planet_count: countRaw === '' ? null : countRaw, note }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+        await loadClaims();
+        resetClaimForm();
+        renderClaimsList();
+        draw();
+    } catch (err) {
+        if (typeof window.showToast === 'function') window.showToast(`Failed to save claim: ${err.message}`);
+        console.error('[GalaxyMap] Failed to save claim:', err);
+    }
+}
+
+// Same input-plus-dropdown shape as the isochrone origin picker (wireIsoOriginPicker).
+function wireClaimsSystemPicker() {
+    const input = document.getElementById('gm-claim-system');
+    const drop = document.getElementById('gm-claim-system-drop');
+    if (!input || !drop) return;
+    input.addEventListener('input', () => {
+        const q = input.value.trim().toLowerCase();
+        if (!q) { drop.classList.add('hidden'); return; }
+        const matches = state.systems.filter(s =>
+            (s.name && s.name.toLowerCase().includes(q)) || String(s.id).includes(q)).slice(0, 12);
+        if (!matches.length) { drop.classList.add('hidden'); return; }
+        drop.classList.remove('hidden');
+        drop.innerHTML = matches.map(s =>
+            `<button data-id="${s.id}" class="gm-claim-pick w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-zinc-800 text-left transition-colors">
+                <span class="text-foreground font-medium truncate">${esc(s.name || 'Sys')} #${s.id}</span>
+                <span class="text-zinc-500 ml-auto">${Number(s.x)}/${Number(s.y)}</span>
+            </button>`).join('');
+        drop.querySelectorAll('.gm-claim-pick').forEach(btn => btn.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            state.claimEditorSystemId = parseInt(btn.dataset.id, 10);
+            input.value = claimSystemLabel(state.claimEditorSystemId);
+            drop.classList.add('hidden');
+        }));
+    });
+    input.addEventListener('blur', () => setTimeout(() => drop.classList.add('hidden'), 150));
+}
+
+function wireClaimsControls() {
+    document.getElementById('gm-claim-save')?.addEventListener('click', submitClaim);
+    document.getElementById('gm-claim-cancel')?.addEventListener('click', resetClaimForm);
 }
 
 // ─── ISOCHRONES ──────────────────────────────────────────────────────────────
@@ -566,6 +773,9 @@ function renderLegend() {
             rows.push('<div class="mt-1 text-amber-500/90">Isochrones: pick an origin system first.</div>');
         }
     }
+    if (state.layers.claims) {
+        rows.push(`<div>${dot('rgba(251,191,36,0.9)', false)}claimed for future territory</div>`);
+    }
     body.innerHTML = rows.join('');
 }
 
@@ -623,9 +833,11 @@ async function loadData() {
         recomputeVision();
         recomputeIsochrones();
         reflectIsoControls();
+        await loadClaims();
         fitToData();
         renderLegend();
         renderCoverage();
+        renderClaimsList();
         draw();
     } catch (err) {
         console.error('[GalaxyMap] Load failed:', err);
@@ -702,6 +914,10 @@ export async function initGalaxyMap(userId) {
         offsetX: 0,
         offsetY: 0,
         hoverId: null,
+        claims: [],
+        claimsBySystem: new Map(),
+        claimEditorSystemId: null,   // system selected in the claims-controls picker
+        claimEditing: null,          // { systemId, tag } while editing an existing row, else null
     };
 
     for (const [key, on] of Object.entries(state.layers)) {
@@ -715,6 +931,7 @@ export async function initGalaxyMap(userId) {
             persistPrefs();
             if (key === 'vision') recomputeVision();
             if (key === 'isochrones') { syncIsoControlsVisibility(); recomputeIsochrones(); }
+            if (key === 'claims') syncClaimsControlsVisibility();
             renderLegend();
             renderCoverage();
             draw();
@@ -725,6 +942,9 @@ export async function initGalaxyMap(userId) {
     reflectIsoControls();
     wireIsoOriginPicker();
     wireIsoInputs();
+    syncClaimsControlsVisibility();
+    wireClaimsSystemPicker();
+    wireClaimsControls();
 
     document.getElementById('gm-seed-sectors')?.addEventListener('click', seedPlanetsFromSectors);
     // The empty-state message offers the same seed. Its button only exists after
