@@ -463,6 +463,54 @@ function claimSystemLabel(systemId) {
     return s ? `${s.name || 'Sys'} #${s.id}` : `#${systemId}`;
 }
 
+// The alliance dropdown is populated from the same "known alliances" source as the War Room
+// filter (any alliance with at least one member on record) — not exhaustive, since a claim
+// can target an alliance never scanned into this hub, hence the "Other (type tag)…" escape
+// hatch rather than a closed list.
+async function loadClaimAllianceOptions() {
+    const select = document.getElementById('gm-claim-tag-select');
+    if (!select) return;
+    try {
+        const res = await fetch('/hub-api/intel/war-room/alliances');
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+        const alliances = (data.alliances || []).filter(a => a.tag);
+        const otherOpt = select.querySelector('option[value="__other__"]');
+        select.querySelectorAll('option[data-alliance-tag]').forEach(o => o.remove());
+        alliances
+            .sort((a, b) => String(a.tag).localeCompare(String(b.tag)))
+            .forEach(a => {
+                const opt = document.createElement('option');
+                opt.value = a.tag;
+                opt.dataset.allianceTag = '1';
+                opt.textContent = a.name ? `${a.tag} — ${a.name}` : a.tag;
+                select.insertBefore(opt, otherOpt);
+            });
+    } catch (err) {
+        console.error('[GalaxyMap] Failed to load alliance list for claims:', err);
+    }
+}
+
+function getClaimTagValue() {
+    const select = document.getElementById('gm-claim-tag-select');
+    if (!select) return '';
+    if (select.value === '__other__') return (document.getElementById('gm-claim-tag-custom')?.value || '').trim();
+    return select.value;
+}
+
+// Selects the dropdown option for `tag` if it is one of the known alliances, otherwise
+// falls back to "Other" with the tag typed into the custom field — used both when editing
+// an existing claim and (implicitly) left in its default state for a new one.
+function setClaimTagValue(tag) {
+    const select = document.getElementById('gm-claim-tag-select');
+    const custom = document.getElementById('gm-claim-tag-custom');
+    if (!select || !custom) return;
+    const known = tag && [...select.options].some(o => o.value === tag);
+    select.value = tag && known ? tag : (tag ? '__other__' : '');
+    custom.classList.toggle('hidden', select.value !== '__other__');
+    custom.value = select.value === '__other__' ? tag : '';
+}
+
 function renderClaimsList() {
     const body = document.getElementById('gm-claims-list-body');
     const panel = document.getElementById('gm-claims-list');
@@ -514,7 +562,7 @@ function resetClaimForm() {
     state.claimEditing = null;
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
     set('gm-claim-system', '');
-    set('gm-claim-tag', '');
+    setClaimTagValue('');
     set('gm-claim-count', '');
     set('gm-claim-note', '');
     document.getElementById('gm-claim-cancel')?.classList.add('hidden');
@@ -528,7 +576,7 @@ function editClaim(systemId, tag) {
     state.claimEditing = { systemId, tag };
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
     set('gm-claim-system', claimSystemLabel(systemId));
-    set('gm-claim-tag', claim.alliance_tag);
+    setClaimTagValue(claim.alliance_tag);
     set('gm-claim-count', claim.planet_count != null ? claim.planet_count : '');
     set('gm-claim-note', claim.note || '');
     document.getElementById('gm-claim-cancel')?.classList.remove('hidden');
@@ -550,7 +598,7 @@ async function deleteClaimUI(systemId, tag) {
 }
 
 async function submitClaim() {
-    const tag = (document.getElementById('gm-claim-tag')?.value || '').trim();
+    const tag = getClaimTagValue();
     const countRaw = (document.getElementById('gm-claim-count')?.value || '').trim();
     const note = (document.getElementById('gm-claim-note')?.value || '').trim();
     const systemId = state.claimEditorSystemId;
@@ -606,6 +654,43 @@ function wireClaimsSystemPicker() {
 function wireClaimsControls() {
     document.getElementById('gm-claim-save')?.addEventListener('click', submitClaim);
     document.getElementById('gm-claim-cancel')?.addEventListener('click', resetClaimForm);
+    document.getElementById('gm-claim-tag-select')?.addEventListener('change', (e) => {
+        document.getElementById('gm-claim-tag-custom')?.classList.toggle('hidden', e.target.value !== '__other__');
+    });
+    document.getElementById('gm-claims-copy')?.addEventListener('click', copyClaimsForDiscord);
+}
+
+// One line per system, one bullet per alliance sharing it — plain Discord markdown (bold
+// system names, "-" bullets) rather than a code block, so it reads naturally pasted into a
+// channel rather than as a monospace dump.
+function formatClaimsForDiscord() {
+    const bySystem = [...state.claimsBySystem.entries()]
+        .sort((a, b) => claimSystemLabel(a[0]).localeCompare(claimSystemLabel(b[0])));
+    if (!bySystem.length) return '';
+
+    const lines = ['**Territory Claims**'];
+    for (const [systemId, shares] of bySystem) {
+        const sys = state.systems.find(s => s.id === systemId);
+        const coords = sys && sys.x != null && sys.y != null ? ` (${sys.x}/${sys.y})` : '';
+        lines.push('', `**${claimSystemLabel(systemId)}**${coords}`);
+        for (const c of shares) {
+            const share = c.planet_count != null ? `${c.planet_count} planet${c.planet_count === 1 ? '' : 's'}` : 'whole system';
+            lines.push(`- ${c.alliance_tag} — ${share}${c.note ? ` — ${c.note}` : ''}`);
+        }
+    }
+    return lines.join('\n');
+}
+
+async function copyClaimsForDiscord() {
+    const text = formatClaimsForDiscord();
+    if (!text) { if (typeof window.showToast === 'function') window.showToast('No claims to copy yet.'); return; }
+    try {
+        await navigator.clipboard.writeText(text);
+        if (typeof window.showToast === 'function') window.showToast('Claims copied — paste into Discord.');
+    } catch (err) {
+        console.error('[GalaxyMap] Clipboard copy failed:', err);
+        if (typeof window.showToast === 'function') window.showToast('Copy failed — clipboard permission blocked?');
+    }
 }
 
 // ─── ISOCHRONES ──────────────────────────────────────────────────────────────
@@ -945,6 +1030,7 @@ export async function initGalaxyMap(userId) {
     syncClaimsControlsVisibility();
     wireClaimsSystemPicker();
     wireClaimsControls();
+    loadClaimAllianceOptions();
 
     document.getElementById('gm-seed-sectors')?.addEventListener('click', seedPlanetsFromSectors);
     // The empty-state message offers the same seed. Its button only exists after
