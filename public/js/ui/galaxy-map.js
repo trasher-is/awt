@@ -539,7 +539,7 @@ function claimSystemLabel(systemId) {
 // Labelled in biology rather than raw distance or travel time because that's the unit
 // people actually negotiate in ("I can cover that with N bio"), per bioNeededFor's existing
 // rule (ceil of the straight-line distance) already used by the vision layer.
-const CLAIM_LINK_MAX_BIO = 6;
+const CLAIM_LINK_MAX_BIO = 4;
 
 function computeClaimLinks() {
     const ids = [...state.claimsBySystem.keys()];
