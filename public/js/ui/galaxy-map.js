@@ -25,7 +25,7 @@ import { esc } from '../utils/escape.js';
 import '../utils/vision-model.js';   // side-effect import: the !vision rule, defined once
 import '../utils/travel-model.js';   // side-effect import: THE travel formula, defined once
 
-const { coverage: visionCoverage, visionRadius } = globalThis.AWVision;
+const { coverage: visionCoverage, visionRadius, bioNeededFor, systemDistance } = globalThis.AWVision;
 // All travel math comes from the shared model — this file holds no formula constants.
 const { calcTravelSeconds, isochroneRadius } = globalThis.AWTravelModel;
 
@@ -201,6 +201,15 @@ function draw() {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, w, h);
 
+    for (const star of state.stars) {
+        const { sx, sy } = toScreen(star.x, star.y);
+        if (sx < -10 || sy < -10 || sx > w + 10 || sy > h + 10) continue;
+        ctx.fillStyle = `rgba(255,255,255,${star.a})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, star.r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
     drawGrid(ctx, w, h);
 
     // Isochrones under everything: three "reachable within T" rings around the origin,
@@ -257,6 +266,22 @@ function draw() {
             ctx.beginPath();
             ctx.arc(sx, sy, r, 0, Math.PI * 2);
             ctx.fill();
+        }
+    }
+
+    // Claim proximity lines, under the dots so the dots and their rings stay legible.
+    if (layers.claims && state.claimLinks.length) {
+        ctx.strokeStyle = 'rgba(251,191,36,0.5)';
+        ctx.lineWidth = 1;
+        for (const link of state.claimLinks) {
+            const a = systems.find(sys => sys.id === link.aId);
+            const b = systems.find(sys => sys.id === link.bId);
+            if (!a || !b) continue;
+            const pa = toScreen(a.x, a.y), pb = toScreen(b.x, b.y);
+            ctx.beginPath();
+            ctx.moveTo(pa.sx, pa.sy);
+            ctx.lineTo(pb.sx, pb.sy);
+            ctx.stroke();
         }
     }
 
@@ -338,10 +363,52 @@ function draw() {
             ctx.fillText(`${s.name || '?'} [${s.id}]`, sx, sy - r - 5);
         }
     }
+
+    // Claim link labels last, on top of every dot/ring so the number is never occluded.
+    if (layers.claims && state.claimLinks.length) {
+        ctx.font = `${desktop ? 11 : 9}px ui-sans-serif, system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        for (const link of state.claimLinks) {
+            const a = systems.find(sys => sys.id === link.aId);
+            const b = systems.find(sys => sys.id === link.bId);
+            if (!a || !b) continue;
+            const pa = toScreen(a.x, a.y), pb = toScreen(b.x, b.y);
+            const mx = (pa.sx + pb.sx) / 2, my = (pa.sy + pb.sy) / 2;
+            const text = `${link.bio} bio`;
+            const width = ctx.measureText(text).width;
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            ctx.fillRect(mx - width / 2 - 3, my - 8, width + 6, 14);
+            ctx.fillStyle = 'rgba(251,191,36,0.95)';
+            ctx.fillText(text, mx, my + 3);
+        }
+    }
+}
+
+// Purely decorative backdrop — no data behind these, just distant stars so the black
+// background doesn't read as empty/broken at low zoom. Generated once, in WORLD coordinates
+// (so they pan/zoom with the map like real background objects would) over an area well
+// beyond the systems' own bounding box, and cached on state so panning/zooming doesn't
+// regenerate (and re-jitter) them every frame.
+function ensureStars() {
+    if (state.stars.length || !state.systems.length) return;
+    const xs = state.systems.map(s => s.x), ys = state.systems.map(s => s.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const padX = (maxX - minX) * 0.6 + 20, padY = (maxY - minY) * 0.6 + 20;
+    const stars = [];
+    for (let i = 0; i < 500; i++) {
+        stars.push({
+            x: minX - padX + Math.random() * (maxX - minX + padX * 2),
+            y: minY - padY + Math.random() * (maxY - minY + padY * 2),
+            r: Math.random() < 0.85 ? 0.5 : 1.1,
+            a: 0.12 + Math.random() * 0.35,
+        });
+    }
+    state.stars = stars;
 }
 
 function drawGrid(ctx, w, h) {
-    ctx.strokeStyle = 'rgba(148,163,184,0.07)';
+    ctx.strokeStyle = 'rgba(148,163,184,0.14)';
     ctx.lineWidth = 1;
     const stepWorld = state.scale > 45 ? 1 : state.scale > 20 ? 2 : 5;
     const step = stepWorld * state.scale;
@@ -446,6 +513,7 @@ function buildClaimsBySystem() {
         map.get(c.system_id).push(c);
     }
     state.claimsBySystem = map;
+    state.claimLinks = computeClaimLinks();
 }
 
 async function loadClaims() {
@@ -466,49 +534,27 @@ function claimSystemLabel(systemId) {
     return s ? `${s.name || 'Sys'} #${s.id}` : `#${systemId}`;
 }
 
-// Distance from a claimed system to the SAME origin the Isochrones layer uses (state.iso,
-// defaulted to the alliance's own home on load — see deriveHomeOrigin) — one distance
-// concept for the whole map rather than a second one invented just for claims. Planet index
-// is fixed at 1 for both ends since a claim is system-level, not planet-level (same
-// approximation the isochrone bands already make — see their "planet 1 -> 1" comment).
-function claimDistanceSeconds(systemId) {
-    const origin = state.iso.origin != null ? state.systems.find(s => s.id === state.iso.origin) : null;
-    const target = state.systems.find(s => s.id === systemId);
-    if (!origin || !target || origin.x == null || origin.y == null || target.x == null || target.y == null) return null;
-    return calcTravelSeconds(origin.x, origin.y, 1, target.x, target.y, 1, state.iso.energy, state.iso.speed, state.iso.alliance);
-}
+// Proximity lines between claimed systems, drawn on the canvas only (never saved, never
+// part of the Discord copy — purely a visual read of which claims sit close together).
+// Labelled in biology rather than raw distance or travel time because that's the unit
+// people actually negotiate in ("I can cover that with N bio"), per bioNeededFor's existing
+// rule (ceil of the straight-line distance) already used by the vision layer.
+const CLAIM_LINK_MAX_BIO = 6;
 
-function formatDuration(totalSeconds) {
-    let s = Math.max(0, Math.floor(totalSeconds));
-    const d = Math.floor(s / 86400); s -= d * 86400;
-    const h = Math.floor(s / 3600); s -= h * 3600;
-    const mn = Math.floor(s / 60);
-    if (d > 0) return `${d}d ${h}h`;
-    if (h > 0) return `${h}h ${mn}m`;
-    return `${mn}m`;
-}
-
-// Per-alliance average distance across every system where that alliance holds a share —
-// "averaged up" per the request, so a negotiation can weigh "closer on average" as well as
-// raw planet counts. Only over systems currently in `filterTags` when given (the Discord
-// copy's alliance picker), otherwise every alliance with any claim.
-function claimAveragesByAlliance(filterTags) {
-    const byTag = new Map(); // tag -> { systems, dists }
-    for (const [systemId, shares] of state.claimsBySystem) {
-        const dist = claimDistanceSeconds(systemId);
-        for (const c of shares) {
-            if (filterTags && !filterTags.has(c.alliance_tag)) continue;
-            if (!byTag.has(c.alliance_tag)) byTag.set(c.alliance_tag, { systems: 0, dists: [] });
-            const entry = byTag.get(c.alliance_tag);
-            entry.systems++;
-            if (dist != null) entry.dists.push(dist);
+function computeClaimLinks() {
+    const ids = [...state.claimsBySystem.keys()];
+    const links = [];
+    for (let i = 0; i < ids.length; i++) {
+        const a = state.systems.find(s => s.id === ids[i]);
+        if (!a || a.x == null || a.y == null) continue;
+        for (let j = i + 1; j < ids.length; j++) {
+            const b = state.systems.find(s => s.id === ids[j]);
+            if (!b || b.x == null || b.y == null) continue;
+            const bio = bioNeededFor(systemDistance(a.x, a.y, b.x, b.y));
+            if (bio <= CLAIM_LINK_MAX_BIO) links.push({ aId: a.id, bId: b.id, bio });
         }
     }
-    return [...byTag.entries()].map(([tag, { systems, dists }]) => ({
-        tag,
-        systems,
-        avgSeconds: dists.length ? dists.reduce((a, b) => a + b, 0) / dists.length : null,
-    })).sort((a, b) => a.tag.localeCompare(b.tag));
+    return links;
 }
 
 // The alliance dropdown is populated from the same "known alliances" source as the War Room
@@ -575,16 +621,7 @@ function renderClaimsList() {
     const bySystem = [...state.claimsBySystem.entries()]
         .sort((a, b) => claimSystemLabel(a[0]).localeCompare(claimSystemLabel(b[0])));
 
-    const averages = claimAveragesByAlliance();
-    const originName = state.iso.origin != null ? claimSystemLabel(state.iso.origin) : null;
-    const avgHtml = averages.length ? `
-        <div class="mb-2 pb-2 border-b border-border">
-            <div class="text-zinc-400">Avg. distance${originName ? ` from ${esc(originName)}` : ''} <span class="text-amber-500/80">(standard pace)</span></div>
-            ${averages.map(a => `<div class="flex justify-between gap-2"><span class="text-foreground">${esc(a.tag)}</span><span class="text-zinc-400">${a.systems} sys${a.avgSeconds != null ? ` · avg ${formatDuration(a.avgSeconds)}` : ''}</span></div>`).join('')}
-        </div>` : '';
-
     const systemsHtml = bySystem.map(([systemId, shares]) => {
-        const dist = claimDistanceSeconds(systemId);
         const rows = shares.map(c => `
             <div class="flex items-start justify-between gap-1.5 pl-2">
                 <div class="min-w-0">
@@ -599,10 +636,10 @@ function renderClaimsList() {
                         class="gm-claim-del text-zinc-400 hover:text-red-400" title="Delete"><i class="fa-solid fa-trash"></i></button>
                 </div>
             </div>`).join('');
-        return `<div><div class="font-medium text-foreground">${esc(claimSystemLabel(systemId))}${dist != null ? ` <span class="text-zinc-500 font-normal">· ${formatDuration(dist)}</span>` : ''}</div>${rows}</div>`;
+        return `<div><div class="font-medium text-foreground">${esc(claimSystemLabel(systemId))}</div>${rows}</div>`;
     }).join('');
 
-    body.innerHTML = avgHtml + systemsHtml;
+    body.innerHTML = systemsHtml;
 
     body.querySelectorAll('.gm-claim-edit').forEach(btn => btn.addEventListener('click', () => {
         editClaim(parseInt(btn.dataset.editSystem, 10), btn.dataset.editTag);
@@ -769,23 +806,12 @@ function formatClaimsForDiscord() {
     for (const [systemId, shares] of bySystem) {
         const sys = state.systems.find(s => s.id === systemId);
         const coords = sys && sys.x != null && sys.y != null ? ` (${sys.x}/${sys.y})` : '';
-        const dist = claimDistanceSeconds(systemId);
-        lines.push('', `**${claimSystemLabel(systemId)}**${coords}${dist != null ? ` — ${formatDuration(dist)} away` : ''}`);
+        lines.push('', `**${claimSystemLabel(systemId)}**${coords}`);
         for (const c of shares) {
             const share = c.planet_count != null ? `${c.planet_count} planet${c.planet_count === 1 ? '' : 's'}` : 'whole system';
             lines.push(`- ${c.alliance_tag} — ${share}${c.note ? ` — ${c.note}` : ''}`);
         }
     }
-
-    const averages = claimAveragesByAlliance(filter);
-    if (averages.length) {
-        const originName = state.iso.origin != null ? claimSystemLabel(state.iso.origin) : null;
-        lines.push('', `**Avg. distance${originName ? ` from ${originName}` : ''}** (standard pace)`);
-        for (const a of averages) {
-            lines.push(`- ${a.tag} — ${a.systems} system${a.systems === 1 ? '' : 's'}${a.avgSeconds != null ? `, avg ${formatDuration(a.avgSeconds)}` : ''}`);
-        }
-    }
-
     return lines.join('\n');
 }
 
@@ -932,7 +958,6 @@ function isoChanged() {
     persistPrefs();
     recomputeIsochrones();
     renderLegend();
-    renderClaimsList(); // claim distances/averages are measured from the same iso origin
     draw();
 }
 
@@ -1032,6 +1057,7 @@ async function loadData() {
         recomputeIsochrones();
         reflectIsoControls();
         await loadClaims();
+        ensureStars();
         fitToData();
         renderLegend();
         renderCoverage();
@@ -1114,6 +1140,8 @@ export async function initGalaxyMap(userId) {
         hoverId: null,
         claims: [],
         claimsBySystem: new Map(),
+        claimLinks: [],              // proximity lines between claimed systems (<= CLAIM_LINK_MAX_BIO)
+        stars: [],                   // decorative backdrop, generated once systems are loaded
         claimEditorSystemId: null,   // system selected in the claims-controls picker
         claimEditing: null,          // { systemId, tag } while editing an existing row, else null
         claimsDiscordFilter: null,   // Set of alliance tags to include in "Copy for Discord", or null = all
