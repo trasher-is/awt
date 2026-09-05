@@ -463,6 +463,51 @@ function claimSystemLabel(systemId) {
     return s ? `${s.name || 'Sys'} #${s.id}` : `#${systemId}`;
 }
 
+// Distance from a claimed system to the SAME origin the Isochrones layer uses (state.iso,
+// defaulted to the alliance's own home on load — see deriveHomeOrigin) — one distance
+// concept for the whole map rather than a second one invented just for claims. Planet index
+// is fixed at 1 for both ends since a claim is system-level, not planet-level (same
+// approximation the isochrone bands already make — see their "planet 1 -> 1" comment).
+function claimDistanceSeconds(systemId) {
+    const origin = state.iso.origin != null ? state.systems.find(s => s.id === state.iso.origin) : null;
+    const target = state.systems.find(s => s.id === systemId);
+    if (!origin || !target || origin.x == null || origin.y == null || target.x == null || target.y == null) return null;
+    return calcTravelSeconds(origin.x, origin.y, 1, target.x, target.y, 1, state.iso.energy, state.iso.speed, state.iso.alliance);
+}
+
+function formatDuration(totalSeconds) {
+    let s = Math.max(0, Math.floor(totalSeconds));
+    const d = Math.floor(s / 86400); s -= d * 86400;
+    const h = Math.floor(s / 3600); s -= h * 3600;
+    const mn = Math.floor(s / 60);
+    if (d > 0) return `${d}d ${h}h`;
+    if (h > 0) return `${h}h ${mn}m`;
+    return `${mn}m`;
+}
+
+// Per-alliance average distance across every system where that alliance holds a share —
+// "averaged up" per the request, so a negotiation can weigh "closer on average" as well as
+// raw planet counts. Only over systems currently in `filterTags` when given (the Discord
+// copy's alliance picker), otherwise every alliance with any claim.
+function claimAveragesByAlliance(filterTags) {
+    const byTag = new Map(); // tag -> { systems, dists }
+    for (const [systemId, shares] of state.claimsBySystem) {
+        const dist = claimDistanceSeconds(systemId);
+        for (const c of shares) {
+            if (filterTags && !filterTags.has(c.alliance_tag)) continue;
+            if (!byTag.has(c.alliance_tag)) byTag.set(c.alliance_tag, { systems: 0, dists: [] });
+            const entry = byTag.get(c.alliance_tag);
+            entry.systems++;
+            if (dist != null) entry.dists.push(dist);
+        }
+    }
+    return [...byTag.entries()].map(([tag, { systems, dists }]) => ({
+        tag,
+        systems,
+        avgSeconds: dists.length ? dists.reduce((a, b) => a + b, 0) / dists.length : null,
+    })).sort((a, b) => a.tag.localeCompare(b.tag));
+}
+
 // The alliance dropdown is populated from the same "known alliances" source as the War Room
 // filter (any alliance with at least one member on record) — not exhaustive, since a claim
 // can target an alliance never scanned into this hub, hence the "Other (type tag)…" escape
@@ -520,13 +565,23 @@ function renderClaimsList() {
 
     if (!state.claims.length) {
         body.innerHTML = '<div class="text-zinc-500">No claims yet — pick a system below and save one.</div>';
+        renderClaimsDiscordFilter();
         return;
     }
 
     const bySystem = [...state.claimsBySystem.entries()]
         .sort((a, b) => claimSystemLabel(a[0]).localeCompare(claimSystemLabel(b[0])));
 
-    body.innerHTML = bySystem.map(([systemId, shares]) => {
+    const averages = claimAveragesByAlliance();
+    const originName = state.iso.origin != null ? claimSystemLabel(state.iso.origin) : null;
+    const avgHtml = averages.length ? `
+        <div class="mb-2 pb-2 border-b border-border">
+            <div class="text-zinc-400">Avg. distance${originName ? ` from ${esc(originName)}` : ''} <span class="text-amber-500/80">(standard pace)</span></div>
+            ${averages.map(a => `<div class="flex justify-between gap-2"><span class="text-foreground">${esc(a.tag)}</span><span class="text-zinc-400">${a.systems} sys${a.avgSeconds != null ? ` · avg ${formatDuration(a.avgSeconds)}` : ''}</span></div>`).join('')}
+        </div>` : '';
+
+    const systemsHtml = bySystem.map(([systemId, shares]) => {
+        const dist = claimDistanceSeconds(systemId);
         const rows = shares.map(c => `
             <div class="flex items-start justify-between gap-1.5 pl-2">
                 <div class="min-w-0">
@@ -541,14 +596,48 @@ function renderClaimsList() {
                         class="gm-claim-del text-zinc-400 hover:text-red-400" title="Delete"><i class="fa-solid fa-trash"></i></button>
                 </div>
             </div>`).join('');
-        return `<div><div class="font-medium text-foreground">${esc(claimSystemLabel(systemId))}</div>${rows}</div>`;
+        return `<div><div class="font-medium text-foreground">${esc(claimSystemLabel(systemId))}${dist != null ? ` <span class="text-zinc-500 font-normal">· ${formatDuration(dist)}</span>` : ''}</div>${rows}</div>`;
     }).join('');
+
+    body.innerHTML = avgHtml + systemsHtml;
 
     body.querySelectorAll('.gm-claim-edit').forEach(btn => btn.addEventListener('click', () => {
         editClaim(parseInt(btn.dataset.editSystem, 10), btn.dataset.editTag);
     }));
     body.querySelectorAll('.gm-claim-del').forEach(btn => btn.addEventListener('click', () => {
         deleteClaimUI(parseInt(btn.dataset.delSystem, 10), btn.dataset.delTag);
+    }));
+
+    renderClaimsDiscordFilter();
+}
+
+// Checkbox per alliance currently holding a claim, letting the user pick a subset before
+// "Copy for Discord" — e.g. sharing only their own alliance's rows with a partner, or only
+// the partner's rows back to them. null filter (the default) means "everyone".
+function renderClaimsDiscordFilter() {
+    const el = document.getElementById('gm-claims-discord-filter');
+    if (!el) return;
+    const tags = [...new Set(state.claims.map(c => c.alliance_tag))].sort();
+    if (!tags.length) { el.innerHTML = ''; return; }
+
+    const included = (tag) => state.claimsDiscordFilter == null || state.claimsDiscordFilter.has(tag);
+    el.innerHTML = `<div class="text-zinc-500 mb-1">Include in Discord copy:</div>
+        <div class="flex flex-wrap gap-x-3 gap-y-1">
+            ${tags.map(tag => `
+                <label class="flex items-center gap-1 cursor-pointer select-none">
+                    <input type="checkbox" data-discord-tag="${esc(tag)}" ${included(tag) ? 'checked' : ''}
+                        class="gm-claims-discord-tag w-3 h-3 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
+                    <span class="text-foreground">${esc(tag)}</span>
+                </label>`).join('')}
+        </div>`;
+
+    el.querySelectorAll('.gm-claims-discord-tag').forEach(cb => cb.addEventListener('change', (e) => {
+        const tag = e.target.dataset.discordTag;
+        // Materialize the "all" default into an explicit set on first interaction, so
+        // unchecking one tag doesn't silently exclude every OTHER tag not yet rendered.
+        if (state.claimsDiscordFilter == null) state.claimsDiscordFilter = new Set(tags);
+        if (e.target.checked) state.claimsDiscordFilter.add(tag);
+        else state.claimsDiscordFilter.delete(tag);
     }));
 }
 
@@ -662,9 +751,14 @@ function wireClaimsControls() {
 
 // One line per system, one bullet per alliance sharing it — plain Discord markdown (bold
 // system names, "-" bullets) rather than a code block, so it reads naturally pasted into a
-// channel rather than as a monospace dump.
+// channel rather than as a monospace dump. Filtered to state.claimsDiscordFilter (the
+// checkboxes in the claims list) when it's been narrowed from the "everyone" default, and a
+// system is dropped entirely once none of its shares survive the filter.
 function formatClaimsForDiscord() {
+    const filter = state.claimsDiscordFilter;
     const bySystem = [...state.claimsBySystem.entries()]
+        .map(([systemId, shares]) => [systemId, filter ? shares.filter(c => filter.has(c.alliance_tag)) : shares])
+        .filter(([, shares]) => shares.length)
         .sort((a, b) => claimSystemLabel(a[0]).localeCompare(claimSystemLabel(b[0])));
     if (!bySystem.length) return '';
 
@@ -672,18 +766,33 @@ function formatClaimsForDiscord() {
     for (const [systemId, shares] of bySystem) {
         const sys = state.systems.find(s => s.id === systemId);
         const coords = sys && sys.x != null && sys.y != null ? ` (${sys.x}/${sys.y})` : '';
-        lines.push('', `**${claimSystemLabel(systemId)}**${coords}`);
+        const dist = claimDistanceSeconds(systemId);
+        lines.push('', `**${claimSystemLabel(systemId)}**${coords}${dist != null ? ` — ${formatDuration(dist)} away` : ''}`);
         for (const c of shares) {
             const share = c.planet_count != null ? `${c.planet_count} planet${c.planet_count === 1 ? '' : 's'}` : 'whole system';
             lines.push(`- ${c.alliance_tag} — ${share}${c.note ? ` — ${c.note}` : ''}`);
         }
     }
+
+    const averages = claimAveragesByAlliance(filter);
+    if (averages.length) {
+        const originName = state.iso.origin != null ? claimSystemLabel(state.iso.origin) : null;
+        lines.push('', `**Avg. distance${originName ? ` from ${originName}` : ''}** (standard pace)`);
+        for (const a of averages) {
+            lines.push(`- ${a.tag} — ${a.systems} system${a.systems === 1 ? '' : 's'}${a.avgSeconds != null ? `, avg ${formatDuration(a.avgSeconds)}` : ''}`);
+        }
+    }
+
     return lines.join('\n');
 }
 
 async function copyClaimsForDiscord() {
     const text = formatClaimsForDiscord();
-    if (!text) { if (typeof window.showToast === 'function') window.showToast('No claims to copy yet.'); return; }
+    if (!text) {
+        const msg = state.claims.length ? 'No alliances selected to include.' : 'No claims to copy yet.';
+        if (typeof window.showToast === 'function') window.showToast(msg);
+        return;
+    }
     try {
         await navigator.clipboard.writeText(text);
         if (typeof window.showToast === 'function') window.showToast('Claims copied — paste into Discord.');
@@ -820,6 +929,7 @@ function isoChanged() {
     persistPrefs();
     recomputeIsochrones();
     renderLegend();
+    renderClaimsList(); // claim distances/averages are measured from the same iso origin
     draw();
 }
 
@@ -1003,6 +1113,7 @@ export async function initGalaxyMap(userId) {
         claimsBySystem: new Map(),
         claimEditorSystemId: null,   // system selected in the claims-controls picker
         claimEditing: null,          // { systemId, tag } while editing an existing row, else null
+        claimsDiscordFilter: null,   // Set of alliance tags to include in "Copy for Discord", or null = all
     };
 
     for (const [key, on] of Object.entries(state.layers)) {
