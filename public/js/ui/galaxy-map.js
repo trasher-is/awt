@@ -188,6 +188,9 @@ function fillFor(system) {
 function draw() {
     const { ctx, canvas, systems, layers } = state;
     const w = canvas.clientWidth, h = canvas.clientHeight;
+    // Canvas text has no media queries, so the "bigger on PC" ask is done by hand here,
+    // off the same md: breakpoint (768px) Tailwind uses for the rest of the panel.
+    const desktop = w >= 768;
     const dpr = window.devicePixelRatio || 1;
     if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
         canvas.width = Math.round(w * dpr);
@@ -314,9 +317,9 @@ function draw() {
                     .map(c => c.planet_count != null ? `${c.alliance_tag} ${c.planet_count}` : c.alliance_tag)
                     .join(' / ');
                 ctx.fillStyle = 'rgba(251,191,36,0.95)';
-                ctx.font = 'bold 10px ui-sans-serif, system-ui, sans-serif';
+                ctx.font = `bold ${desktop ? 13 : 10}px ui-sans-serif, system-ui, sans-serif`;
                 ctx.textAlign = 'center';
-                ctx.fillText(label, sx, sy + r + 14);
+                ctx.fillText(label, sx, sy + r + (desktop ? 16 : 14));
             }
         }
 
@@ -330,7 +333,7 @@ function draw() {
 
         if (layers.labels && state.scale > 18) {
             ctx.fillStyle = 'rgba(226,232,240,0.75)';
-            ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
+            ctx.font = `${desktop ? 12 : 10}px ui-sans-serif, system-ui, sans-serif`;
             ctx.textAlign = 'center';
             ctx.fillText(`${s.name || '?'} [${s.id}]`, sx, sy - r - 5);
         }
