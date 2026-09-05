@@ -42,6 +42,10 @@
                 <input type="checkbox" id="gm-layer-isochrones" class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
                 <span class="text-muted-foreground">Isochrones <span class="text-amber-500/80">(standard pace)</span></span>
             </label>
+            <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                <input type="checkbox" id="gm-layer-claims" class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
+                <span class="text-muted-foreground">Claims <span class="text-amber-500/80">(negotiation)</span></span>
+            </label>
         </div>
 
         <div class="flex items-center gap-1 ml-auto">
@@ -88,6 +92,28 @@
         <span class="text-[11px] text-amber-500/80">Band times assume the standard round pace — the current RedZone round runs ×10 faster.</span>
     </div>
 
+    <!-- CLAIMS CONTROLS (shown while the Claims layer is on) -->
+    <div id="gm-claims-controls" class="hidden border-b border-border bg-zinc-950 px-3 md:px-6 py-2 flex items-center gap-x-2 gap-y-2 flex-wrap shrink-0 text-xs">
+        <div class="relative">
+            <input type="text" id="gm-claim-system" placeholder="System…" autocomplete="off"
+                class="h-7 w-40 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+            <div id="gm-claim-system-drop" class="hidden absolute top-8 left-0 z-50 w-56 bg-zinc-900 border border-border rounded shadow-xl max-h-48 overflow-y-auto"></div>
+        </div>
+        <input type="text" id="gm-claim-tag" placeholder="Alliance tag" maxlength="10" autocomplete="off"
+            class="h-7 w-28 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500 uppercase">
+        <input type="number" id="gm-claim-count" placeholder="Planets" min="0" autocomplete="off"
+            class="h-7 w-20 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+        <input type="text" id="gm-claim-note" placeholder="Note (e.g. 6/6 split agreed in Discord)" autocomplete="off"
+            class="h-7 w-64 flex-1 min-w-[10rem] rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+        <button id="gm-claim-save" class="h-7 px-3 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors">
+            <i class="fa-solid fa-flag mr-1"></i>Save claim
+        </button>
+        <button id="gm-claim-cancel" class="hidden h-7 px-2 rounded border border-input bg-zinc-950 text-xs text-muted-foreground hover:bg-accent transition-colors">
+            Cancel edit
+        </button>
+        <span class="basis-full text-[11px] text-zinc-500">Leave Planets blank for "whole system" — add one row per alliance to split it (e.g. TUGA 6 + RAID 6).</span>
+    </div>
+
     <!-- CANVAS -->
     <div id="gm-stage" class="flex-1 relative bg-black overflow-hidden touch-none">
         <canvas id="gm-canvas" class="absolute inset-0 w-full h-full cursor-grab"></canvas>
@@ -103,6 +129,12 @@
         <div id="gm-legend" class="absolute bottom-2 left-2 rounded-md border border-border bg-zinc-900/90 backdrop-blur px-3 py-2 text-[11px] leading-relaxed text-muted-foreground max-w-[16rem]">
             <div class="font-semibold text-foreground mb-1">Legend</div>
             <div id="gm-legend-body" class="flex flex-col gap-0.5"></div>
+        </div>
+
+        <!-- Claims list (shown while the Claims layer is on) -->
+        <div id="gm-claims-list" class="hidden absolute top-2 right-2 rounded-md border border-border bg-zinc-900/90 backdrop-blur px-3 py-2 text-[11px] leading-relaxed text-muted-foreground max-w-[18rem] max-h-[60%] overflow-y-auto">
+            <div class="font-semibold text-foreground mb-1">Claims</div>
+            <div id="gm-claims-list-body" class="flex flex-col gap-1"></div>
         </div>
     </div>
 

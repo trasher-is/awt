@@ -11,6 +11,7 @@ const { requireAuth } = require('./_middleware');
 const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
 const { previousNames, findByFormerName } = require('../utils/round-archive');
 const settingsRepo = require('../repositories/settings');
+const systemClaimsRepo = require('../repositories/systemClaims');
 const router = express.Router();
 
 // --- WHO USED TO BE CALLED THIS ---
@@ -479,6 +480,47 @@ router.get('/intel/joined-dates', requireAuth, (req, res) => {
     } catch (err) {
         console.error('[DB Error] Failed to fetch joined dates:', err);
         res.status(500).json({ error: 'Failed to retrieve joined dates' });
+    }
+});
+
+// SYSTEM CLAIMS — Galaxy Archive "Claims" layer, a negotiation record for future territory
+// (which alliance a system is earmarked for, and how a shared one splits, e.g. 6/6). Open to
+// any logged-in member, same as planet_plans — this is a shared negotiation board, not admin
+// config, so there is no author-lock on editing or deleting someone else's row.
+router.get('/intel/system-claims', requireAuth, (req, res) => {
+    try {
+        res.json({ success: true, claims: systemClaimsRepo.getAllClaims() });
+    } catch (err) {
+        console.error('[DB Error] Failed to fetch system claims:', err);
+        res.status(500).json({ error: 'Failed to retrieve system claims' });
+    }
+});
+
+router.post('/intel/system-claims', requireAuth, (req, res) => {
+    const { system_id, alliance_tag, planet_count, note } = req.body;
+    if (!system_id || !alliance_tag || !String(alliance_tag).trim()) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+    const count = planet_count === '' || planet_count == null ? null : parseInt(planet_count, 10);
+    if (count != null && (!Number.isFinite(count) || count < 0)) {
+        return res.status(400).json({ error: 'planet_count must be a non-negative number' });
+    }
+    try {
+        systemClaimsRepo.upsertClaim(system_id, String(alliance_tag), count, note, req.session.userId);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[DB Error] Failed to save system claim:', err);
+        res.status(500).json({ error: 'Failed to save system claim' });
+    }
+});
+
+router.delete('/intel/system-claims/:systemId/:allianceTag', requireAuth, (req, res) => {
+    try {
+        systemClaimsRepo.deleteClaim(req.params.systemId, req.params.allianceTag);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[DB Error] Failed to delete system claim:', err);
+        res.status(500).json({ error: 'Failed to delete system claim' });
     }
 });
 

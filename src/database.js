@@ -741,12 +741,36 @@ function initDatabase() {
         )
     `);
 
+    // --- SYSTEM CLAIMS (Galaxy Archive "Claims" layer) ---
+    // A negotiation record for future territory, not a live game fact: which alliance(s) a
+    // system is earmarked for, and — when two or more share it — how many planets each gets
+    // (e.g. 6/6, 8/4). One row per (system, alliance); a system with a single uncontested
+    // claim has one row with planet_count NULL ("whole system"), a shared one has a row per
+    // alliance. alliance_tag is free text (not an FK into `alliances`) since the alliance
+    // being negotiated with may never have been scanned into that table — same reasoning as
+    // the alliance_relations_allied/war tag-list settings.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS system_claims (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            system_id INTEGER NOT NULL,
+            alliance_tag TEXT NOT NULL COLLATE NOCASE,
+            planet_count INTEGER,
+            note TEXT,
+            updated_by INTEGER,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(system_id) REFERENCES systems(id) ON DELETE CASCADE,
+            FOREIGN KEY(updated_by) REFERENCES app_users(id) ON DELETE SET NULL,
+            UNIQUE(system_id, alliance_tag)
+        )
+    `);
+
     // The battle-report sync asks for MAX(started_at) on every pull, and the audit log
     // is read back per actor.
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_battle_reports_started ON battle_reports(started_at);
         CREATE INDEX IF NOT EXISTS idx_starbase_audit_actor   ON starbase_order_audit(actor_user_id);
         CREATE INDEX IF NOT EXISTS idx_news_events_credited   ON news_events(credited_player_id, occurred_at);
+        CREATE INDEX IF NOT EXISTS idx_system_claims_system   ON system_claims(system_id);
     `);
 
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
