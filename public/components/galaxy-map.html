@@ -92,26 +92,33 @@
         <span class="text-[11px] text-amber-500/80">Band times assume the standard round pace — the current RedZone round runs ×10 faster.</span>
     </div>
 
-    <!-- CLAIMS CONTROLS (shown while the Claims layer is on) -->
-    <div id="gm-claims-controls" class="hidden border-b border-border bg-zinc-950 px-3 md:px-6 py-2 flex items-center gap-x-2 gap-y-2 flex-wrap shrink-0 text-xs">
+    <!-- CLAIMS CONTROLS (shown while the Claims layer is on). Text is deliberately larger
+         than the other toolbars (text-sm/md:text-base vs. the rest's text-xs) — this panel
+         is filled in and read at a table, not glanced at while flying the map. -->
+    <div id="gm-claims-controls" class="hidden border-b border-border bg-zinc-950 px-3 md:px-6 py-2.5 flex items-center gap-x-2 gap-y-2 flex-wrap shrink-0 text-sm md:text-base">
         <div class="relative">
             <input type="text" id="gm-claim-system" placeholder="System…" autocomplete="off"
-                class="h-7 w-40 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
-            <div id="gm-claim-system-drop" class="hidden absolute top-8 left-0 z-50 w-56 bg-zinc-900 border border-border rounded shadow-xl max-h-48 overflow-y-auto"></div>
+                class="h-8 md:h-9 w-44 md:w-52 rounded border border-input bg-zinc-950 px-2 text-sm md:text-base text-foreground focus:outline-none focus:border-zinc-500">
+            <div id="gm-claim-system-drop" class="hidden absolute top-9 left-0 z-50 w-64 bg-zinc-900 border border-border rounded shadow-xl max-h-48 overflow-y-auto text-sm"></div>
         </div>
-        <input type="text" id="gm-claim-tag" placeholder="Alliance tag" maxlength="10" autocomplete="off"
-            class="h-7 w-28 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500 uppercase">
+        <select id="gm-claim-tag-select"
+            class="h-8 md:h-9 w-40 md:w-48 rounded border border-input bg-zinc-950 px-2 text-sm md:text-base text-foreground focus:outline-none focus:border-zinc-500">
+            <option value="">Alliance…</option>
+            <option value="__other__">Other (type tag)…</option>
+        </select>
+        <input type="text" id="gm-claim-tag-custom" placeholder="Tag" maxlength="10" autocomplete="off"
+            class="hidden h-8 md:h-9 w-28 rounded border border-input bg-zinc-950 px-2 text-sm md:text-base text-foreground focus:outline-none focus:border-zinc-500 uppercase">
         <input type="number" id="gm-claim-count" placeholder="Planets" min="0" autocomplete="off"
-            class="h-7 w-20 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+            class="h-8 md:h-9 w-24 rounded border border-input bg-zinc-950 px-2 text-sm md:text-base text-foreground focus:outline-none focus:border-zinc-500">
         <input type="text" id="gm-claim-note" placeholder="Note (e.g. 6/6 split agreed in Discord)" autocomplete="off"
-            class="h-7 w-64 flex-1 min-w-[10rem] rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
-        <button id="gm-claim-save" class="h-7 px-3 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors">
+            class="h-8 md:h-9 w-64 flex-1 min-w-[10rem] rounded border border-input bg-zinc-950 px-2 text-sm md:text-base text-foreground focus:outline-none focus:border-zinc-500">
+        <button id="gm-claim-save" class="h-8 md:h-9 px-3 rounded border border-input bg-zinc-950 text-sm md:text-base text-foreground hover:bg-accent transition-colors">
             <i class="fa-solid fa-flag mr-1"></i>Save claim
         </button>
-        <button id="gm-claim-cancel" class="hidden h-7 px-2 rounded border border-input bg-zinc-950 text-xs text-muted-foreground hover:bg-accent transition-colors">
+        <button id="gm-claim-cancel" class="hidden h-8 md:h-9 px-2 rounded border border-input bg-zinc-950 text-sm md:text-base text-muted-foreground hover:bg-accent transition-colors">
             Cancel edit
         </button>
-        <span class="basis-full text-[11px] text-zinc-500">Leave Planets blank for "whole system" — add one row per alliance to split it (e.g. TUGA 6 + RAID 6).</span>
+        <span class="basis-full text-xs md:text-sm text-zinc-500">Leave Planets blank for "whole system" — add one row per alliance to split it (e.g. TUGA 6 + RAID 6).</span>
     </div>
 
     <!-- CANVAS -->
@@ -131,9 +138,16 @@
             <div id="gm-legend-body" class="flex flex-col gap-0.5"></div>
         </div>
 
-        <!-- Claims list (shown while the Claims layer is on) -->
-        <div id="gm-claims-list" class="hidden absolute top-2 right-2 rounded-md border border-border bg-zinc-900/90 backdrop-blur px-3 py-2 text-[11px] leading-relaxed text-muted-foreground max-w-[18rem] max-h-[60%] overflow-y-auto">
-            <div class="font-semibold text-foreground mb-1">Claims</div>
+        <!-- Claims list (shown while the Claims layer is on). Larger text than the Legend
+             next to it, same reasoning as the controls bar above. -->
+        <div id="gm-claims-list" class="hidden absolute top-2 right-2 rounded-md border border-border bg-zinc-900/90 backdrop-blur px-3 py-2 text-sm md:text-base leading-relaxed text-muted-foreground max-w-[20rem] md:max-w-[24rem] max-h-[60%] overflow-y-auto">
+            <div class="flex items-center justify-between gap-2 mb-1">
+                <div class="font-semibold text-foreground">Claims</div>
+                <button id="gm-claims-copy" title="Copy all claims, formatted for Discord"
+                    class="h-6 px-2 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors shrink-0">
+                    <i class="fa-solid fa-copy mr-1"></i>Copy for Discord
+                </button>
+            </div>
             <div id="gm-claims-list-body" class="flex flex-col gap-1"></div>
         </div>
     </div>
