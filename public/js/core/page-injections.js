@@ -5,8 +5,10 @@ import '../utils/game-tables.js';    // side-effect import: empire-model.js's ow
 import '../utils/travel-model.js';   // side-effect import: empire-model.js's own dependency
 import '../utils/empire-model.js';   // side-effect import: TRAIT_PCT, the ONE source for race-bonus %/point
 import '../utils/aw-api.js';         // side-effect import: getTravelTime, for initColonizeLaunchWindows
+import '../utils/login-gaps.js';     // side-effect import: AWLoginGaps, the profile's quiet-window analysis
 const { gameFetch } = globalThis.AWGameRate;
 const { formatSqliteUtc } = globalThis.AWSqliteTime;
+const LoginGaps = globalThis.AWLoginGaps;
 const { TRAIT_PCT } = globalThis.AWEmpire.constants;
 const { getTravelTime } = globalThis.AWApi;
 
@@ -841,7 +843,7 @@ export async function initProfileHubIntel() {
     wrap.id = 'awt-hub-intel-block';
     wrap.innerHTML = `
         <div class="row">
-            <div class="col-lg-6">${buildActivityLogCard(data.heatmap)}</div>
+            <div class="col-lg-6">${buildActivityLogCard(data.heatmap, data.loginSamples)}</div>
             <div class="col-lg-6">${buildBuildingsCard(p)}</div>
         </div>`;
     anchor.parentNode.insertBefore(wrap, anchor);
@@ -881,7 +883,7 @@ function hideSupporterPromo() {
 
 // No last-active line here on purpose — the game's own "Idle" field on this same page
 // already says that, more precisely (live seconds/minutes, not our own polling cadence).
-function buildActivityLogCard(heatmap) {
+function buildActivityLogCard(heatmap, loginSamples) {
     const counts = Array.isArray(heatmap) && heatmap.length === 24 ? heatmap : Array(24).fill(0);
     const max = Math.max(1, ...counts);
     const offsetHours = Math.round(-new Date().getTimezoneOffset() / 60);
@@ -903,9 +905,61 @@ function buildActivityLogCard(heatmap) {
                     <div style="display:flex;justify-content:space-between;font-size:9px;color:#888;margin-top:2px;">
                         <span>00h</span><span>12h</span><span>23h</span>
                     </div>
+                    ${buildQuietWindowsSection(loginSamples)}
                 </td></tr>
             </tbody>
         </table>`;
+}
+
+// Quiet windows over the last 7 days (issue #137), from the raw scan observations the
+// profile route returns. login-gaps.js explains what a cell can prove; the short version
+// for the tooltip: green = every scan covering this whole hour found the login counter
+// unchanged, red = it moved somewhere between the scans that cover it, dark = no scan
+// covered it. The bars above are a different thing (when the counter was seen to change,
+// by hour, all time) and stay as they were.
+function buildQuietWindowsSection(loginSamples) {
+    const samples = Array.isArray(loginSamples) ? loginSamples : [];
+    const legend = 'Login counter across scans: green = unchanged over the whole hour (away), red = moved between the scans covering it (logged in somewhere inside), dark = not observed. Times are your local time.';
+    const head = (right) => `
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:8px;font-size:10px;color:#888;">
+            <span title="${legend}" style="cursor:help;border-bottom:1px dotted #555;">Quiet windows · 7 days</span>
+            <span>${right}</span>
+        </div>`;
+    if (samples.length < 2) return head(`not enough scans yet (${samples.length})`);
+
+    const a = LoginGaps.analyze(samples, { now: Date.now(), tzOffsetMin: -new Date().getTimezoneOffset() });
+    const color = { active: '#ef4444', quiet: '#22c55e', unknown: '#2a2a2a', future: 'transparent' };
+    const pad = h => String(h).padStart(2, '0');
+    const rows = a.rows.map(r => {
+        const label = new Date(r.dayStartUtc).toLocaleDateString(undefined, { weekday: 'short' });
+        const cells = r.cells.map((c, h) =>
+            `<div title="${esc(label)} ${pad(h)}:00 — ${c}" style="flex:1;height:8px;background:${color[c]};border-radius:1px;"></div>`).join('');
+        return `<div style="display:flex;align-items:center;gap:3px;margin-top:2px;">
+            <span style="width:26px;font-size:9px;color:#888;text-align:right;">${esc(label)}</span>
+            <div style="display:flex;flex:1;gap:1px;">${cells}</div>
+        </div>`;
+    }).join('');
+
+    const windows = a.windows.slice(0, 3).map(w => {
+        const span = w.hours === 24 ? 'all day' : `${pad(w.startHour)}:00–${pad(w.endHour)}:00`;
+        return `<span style="color:#ddd;">${span}</span> <span style="color:#666;">(quiet on ${w.minObserved} observed day${w.minObserved === 1 ? '' : 's'})</span>`;
+    });
+    const windowsLine = windows.length
+        ? `Best windows: ${windows.join(' · ')}`
+        : 'No hour quiet on 2+ observed days yet';
+
+    let quietLine = '';
+    const q = a.quietSince;
+    if (q && q.unchangedScans > 0) {
+        const hours = Math.round(q.confirmedQuietMs / LoginGaps.HOUR);
+        const span = hours >= 48 ? `${Math.floor(hours / 24)}d ${hours % 24}h` : `${hours}h`;
+        quietLine = `<div style="font-size:10px;color:#888;margin-top:2px;">No login change across the last ${q.unchangedScans} scan${q.unchangedScans === 1 ? '' : 's'} (${span})</div>`;
+    }
+
+    return head(`${a.sampleCount} scan${a.sampleCount === 1 ? '' : 's'} · ${Math.round(a.coverage * 100)}% of hours observed`)
+        + `<div style="margin-top:4px;">${rows}</div>`
+        + `<div style="font-size:10px;color:#aaa;margin-top:5px;">${windowsLine}</div>`
+        + quietLine;
 }
 
 // Total and average per planet (issue #119) — the same Sum/Avg reading the game's own

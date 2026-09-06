@@ -343,6 +343,19 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
             console.error('[DB Error] Login heatmap unavailable:', err.message);
         }
 
+        // --- Raw scan observations for the quiet-window analysis (issue #137) ---
+        // Sent raw, in UTC, and analysed in the browser (public/js/utils/login-gaps.js),
+        // because the grid is drawn in the VIEWER's local time and the server does not
+        // know it. Eight days, not seven: the sample just before the window is what anchors
+        // the first band inside it.
+        let loginSamples = [];
+        try {
+            loginSamples = playersRepo.getPlayerLoginSamples(playerId, 8)
+                .map(row => ({ t: row.observed_at, n: row.total_logins }));
+        } catch (err) {
+            console.error('[DB Error] Login samples unavailable:', err.message);
+        }
+
         // Names this id went by in earlier rounds. A player id survives a round wipe;
         // the name does not, and people rename. Empty for anyone who has not renamed, so
         // the panel shows nothing rather than the player's own name repeated back.
@@ -358,6 +371,7 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
             player: playerInfo,
             activity: formattedActivity,
             heatmap: heatmap,
+            loginSamples,
             systems: systems, // <-- Injected payload
             formerNames
         });
