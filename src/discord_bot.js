@@ -235,6 +235,15 @@ function parseTimerInput(input) {
 
 // Channels (IDs, separated by commas/spaces/newlines) where the bot refuses to run
 // commands — e.g. public/guest channels. Managed from the admin tool via the
+// Discord's "ansi" code-block highlighting — a fixed 4-bit ANSI palette (30-37), no true
+// orange. Used by !holes (issue #116) to color category text instead of icons.
+const ANSI_RED = '[31m';
+const ANSI_GREEN = '[32m';
+const ANSI_YELLOW = '[33m';
+const ANSI_CYAN = '[36m';
+const ANSI_RESET = '[0m';
+function ansi(code, text) { return `${code}${text}${ANSI_RESET}`; }
+
 // app_settings key 'discord_blocked_channels'. getSettingValue is hoisted below.
 // Idle display, preferring a real timestamp (last_activity_at, from the API's background
 // detail sweep — near-total roster coverage) over the DOM-scrape-only idle_time string
@@ -311,6 +320,7 @@ async function handleMessage(message) {
                 { name: '`!intel <player_name>`', value: 'Displays detailed intelligence and stats for a specific player.\n*Example: `!intel PlayerOne`*' },
                 { name: '`!dist <sys1_id> <sys2_id>`', value: 'Calculates the distance and required biology level between two systems.\n*Example: `!dist 100 200`*' },
                 { name: '`!plan <sys_id> <planet_num> <instructions...>`', value: 'Adds a tactical plan/note to a specific planet. (Requires your Discord ID to be linked in the Hub).\n*Example: `!plan 123 4 Send colony ship`*' },
+                { name: '`!plan del <sys_id> <planet_num>`', value: 'Removes a plan. You can only remove your own — an admin account can remove anyone\'s.\n*Example: `!plan del 123 4`*' },
                 { name: '`!vision <system_id> [alliance_tag]`', value: 'Performs a radar scan to see which alliance members have vision over a target system.\n*Example: `!vision 123 RAID`*' },
                 { name: '`!holes [alliance_tag]`', value: 'Scans your alliance\'s territory for a per-system breakdown: your own holdings, free unplanned, 🟧 planned (!plan), 🟨 neutral, 🟩 ally, and 🟥 war-list presence, per the Alliance Relations tags set in Admin.\n*Example: `!holes RAID`*' },
                 { name: '`!tt <sysA> <plnA> <sysB> <plnB> <speed> <nrg>`', value: 'Calculates fleet travel time between two coordinates.\n*Example: `!tt 100 1 200 4 10 5`*\n*(You can also swap speed/energy for a player name: `!tt 100 1 200 4 PlayerOne`)*' },
@@ -994,14 +1004,56 @@ async function handleMessage(message) {
 
     // ----------------------------------------------------
     // !plan <sys_id> <planet_index> <note> - ADD A PLAN
+    // !plan del <sys_id> <planet_index>    - DELETE A PLAN
     // ----------------------------------------------------
     if (command === 'plan') {
+        const sub = (args[0] || '').toLowerCase();
+
+        if (sub === 'del' || sub === 'delete' || sub === 'remove') {
+            const sysId = args[1];
+            const pIdx = args[2];
+
+            if (!sysId || !pIdx) {
+                return message.reply('❌ Usage: `!plan del <system_id> <planet_num>`');
+            }
+
+            const discordName = message.author.username;
+            const user = usersRepo.getUserByDiscordName(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
+
+            if (!user) {
+                return message.reply(`❌ Your Discord username (\`${discordName}\`) is not linked to any Hub account. Add it in the Command Center first.`);
+            }
+
+            try {
+                // Same author-or-admin rule as the web panel's DELETE /plans route
+                // (search.js) — deleting someone else's plan requires an admin account.
+                const isAdmin = user.role === 'admin';
+                const result = isAdmin
+                    ? plansRepo.deletePlanAsAdmin(sysId, pIdx)
+                    : plansRepo.deletePlanAsAuthor(sysId, pIdx, user.id);
+
+                if (result.changes === 0) {
+                    if (plansRepo.planExists(sysId, pIdx)) {
+                        return message.reply('❌ That plan was written by someone else. Ask them or an admin to remove it.');
+                    }
+                    return message.reply(`❌ No plan found for System **#${sysId}** Planet **${pIdx}**.`);
+                }
+
+                message.react('🗑️');
+                message.reply(`🗑️ Plan removed for System **#${sysId}** Planet **${pIdx}**.`);
+            } catch (err) {
+                console.error(err);
+                message.reply('❌ Database error while deleting plan.');
+            }
+            return;
+        }
+
         const sysId = args[0];
         const pIdx = args[1];
         const note = args.slice(2).join(' ');
 
         if (!sysId || !pIdx || !note) {
-            return message.reply('❌ Usage: `!plan <system_id> <planet_num> <instructions...>`');
+            return message.reply('❌ Usage: `!plan <system_id> <planet_num> <instructions...>` or `!plan del <system_id> <planet_num>`');
         }
 
         const discordName = message.author.username;
@@ -1013,7 +1065,7 @@ async function handleMessage(message) {
 
         try {
             plansRepo.createPlan(sysId, pIdx, user.id, note);
-            
+
             message.react('✅');
             message.reply(`✅ Plan saved for System **#${sysId}** Planet **${pIdx}** by ${user.game_name}.`);
         } catch (err) {
@@ -1184,18 +1236,18 @@ async function handleMessage(message) {
             if (freePlanned.length || freeUnplanned.length || neutralSlots.length || allySlots.length || enemySlots.length) {
                 systemsWithHoles++;
 
-                // Issue #116: colorize the categories. Discord embeds can't apply arbitrary
-                // text color, so a colored-square emoji stands in for it — exact colors
-                // (red/green/yellow/orange) that an ANSI code block couldn't give us anyway
-                // (Discord's ansi highlighting has no orange in its 8-color set).
+                // Issue #116: colorize the categories as actual text color, not icons — done
+                // via Discord's "ansi" code-block highlighting (the ONLY way to color text in
+                // a Discord message/embed; plain markdown has no color). Its palette is fixed
+                // 4-bit ANSI (30-37) with no true orange, so "Planned" uses cyan instead.
                 let segments = [`${ownCount} ${tag}`];
-                if (freePlanned.length) segments.push(`🟧 Free planned - *${freePlanned.join(', ')}*`);
+                if (freePlanned.length) segments.push(ansi(ANSI_CYAN, `Planned - ${freePlanned.join(', ')}`));
                 if (freeUnplanned.length) segments.push(`Free unplanned - ${freeUnplanned.join(', ')}`);
-                if (neutralSlots.length) segments.push(`🟨 Neutral - ${neutralSlots.join(', ')}`);
-                if (allySlots.length) segments.push(`🟩 Ally 🤝 - ${allySlots.join(', ')}`);
-                if (enemySlots.length) segments.push(`🟥 War ⚔️ - **${enemySlots.join(', ')}**`);
+                if (neutralSlots.length) segments.push(ansi(ANSI_YELLOW, `Neutral - ${neutralSlots.join(', ')}`));
+                if (allySlots.length) segments.push(ansi(ANSI_GREEN, `Ally - ${allySlots.join(', ')}`));
+                if (enemySlots.length) segments.push(ansi(ANSI_RED, `War - ${enemySlots.join(', ')}`));
 
-                report += `**[${sysId}]** ${data.name || "Unknown System"}: ${segments.join(' | ')}\n`;
+                report += `[${sysId}] ${data.name || "Unknown System"}: ${segments.join(' | ')}\n`;
             }
         }
 
@@ -1203,15 +1255,17 @@ async function handleMessage(message) {
             return message.reply(`🟢 No vulnerabilities located. All slots in [${tag}] territory are securely held by your alliance.`);
         }
 
-        if (report.length > 4000) {
-            report = report.substring(0, 4000) + "\n\n... *(list truncated due to Discord length limits)*";
+        // The ```ansi fence itself eats into the 4096-char embed description limit.
+        const FENCE = '```ansi\n', CLOSE = '\n```';
+        if (report.length > 4000 - FENCE.length - CLOSE.length) {
+            report = report.substring(0, 4000 - FENCE.length - CLOSE.length) + "\n... (list truncated due to Discord length limits)";
         }
 
         const embed = new EmbedBuilder()
             .setTitle(`🕳️ Sector Vulnerability Matrix: [${tag}]`)
-            .setDescription(report)
+            .setDescription(FENCE + report + CLOSE)
             .setColor('#f97316')
-            .setFooter({ text: `Monitored systems: ${systemsWithHoles} | 🟧 Planned (!plan) | 🟨 Neutral | 🟩 Ally | 🟥 War-list` });
+            .setFooter({ text: `Monitored systems: ${systemsWithHoles} | Cyan = Planned (!plan) | Yellow = Neutral | Green = Ally | Red = War-list` });
 
         return message.reply({ embeds: [embed] });
     }
@@ -1579,6 +1633,7 @@ function slashToPrefix(interaction) {
     if (name === 'plan') {
         if (sub === 'add') return `!plan ${s('system')} ${i('planet')} ${s('note')}`;
         if (sub === 'list') return `!sys ${s('system')}`;
+        if (sub === 'delete') return `!plan del ${s('system')} ${i('planet')}`;
     }
     if (name === 'scan') {
         if (sub === 'holes') return '!holes';

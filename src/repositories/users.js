@@ -11,7 +11,7 @@ function getUserByDiscordId(discordId) {
 
 // Consolidates discord_bot.js's !bio and !plan commands — both used byte-identical SQL.
 // See Global Constraints dedup #2.
-const getUserByDiscordNameStmt = db.prepare(`SELECT id, game_name FROM app_users WHERE LOWER(discord_name) = ? OR LOWER(discord_name) = ?`);
+const getUserByDiscordNameStmt = db.prepare(`SELECT id, game_name, role FROM app_users WHERE LOWER(discord_name) = ? OR LOWER(discord_name) = ?`);
 function getUserByDiscordName(discordName, atDiscordName) {
     return getUserByDiscordNameStmt.get(discordName, atDiscordName);
 }
