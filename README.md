@@ -118,6 +118,21 @@ the header arrives already set, but keep `TRUST_PROXY=1` so the real client IP i
 Serving the hub over plain HTTP is supported (`COOKIE_SECURE=false`), it just means the
 session cookie is not marked `Secure`.
 
+## Backups and round resets
+
+Both databases run in WAL mode, so copying `awt.db` while the hub is up is **not** a
+backup. Use the operator script, which takes a consistent snapshot through SQLite's online
+backup API, verifies it and prunes old ones:
+
+```bash
+node scripts/backup-db.js          # -> $AWT_BACKUP_DIR (set it outside this checkout)
+node scripts/restore-db.js <backup-dir> --to /tmp/awt-check   # restore + verify, elsewhere
+```
+
+[`docs/operations.md`](docs/operations.md) has the full procedure — which files matter,
+retention and permissions, the restore order, what happens to sessions, rollback — and the
+list of which tables a round reset ("Nuke data") removes and which it keeps.
+
 ## Tests
 
 ```bash
