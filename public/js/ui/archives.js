@@ -251,7 +251,7 @@ async function loadWarRoomAlliancesList() {
                 : 'bg-zinc-900 text-zinc-300 border-border hover:bg-zinc-800 hover:text-white'
             }`;
             btn.addEventListener('click', () => selectWarRoomAlliance(a.id, a.tag, a.last_scan_time));
-            btn.innerHTML = `<span>[${esc(a.tag)}]</span><span class="px-1 py-0.25 bg-black/40 rounded text-[10px] text-muted-foreground border border-white/5">${a.active_members_count}</span>`;
+            btn.innerHTML = `<span>[${esc(a.tag)}]</span><span class="px-1 py-0.25 bg-black/40 rounded text-[10px] md:text-xs text-muted-foreground border border-white/5">${a.active_members_count}</span>`;
             pillsBox.appendChild(btn);
         });
     } catch (err) {}
@@ -380,23 +380,23 @@ function renderWarRoomTable(data) {
         const tr = document.createElement('tr');
         tr.className = "hover:bg-zinc-900/40 transition-colors border-b border-zinc-900/60";
         tr.innerHTML = `
-            <td class="sticky left-0 z-10 bg-black px-2 py-1 font-bold text-foreground break-words leading-tight w-[110px] border-r border-zinc-800"><a href="/Game/Players/Profile/${p.id}" target="_blank" class="hover:underline hover:text-red-400">${esc(p.name)}</a></td>
-            <td class="px-2 py-1"><span class="px-1.5 py-0.5 rounded text-[11px] font-mono tracking-wide whitespace-nowrap" style="${idleStyle}">${esc(p.idle_display)}</span></td>
-            <td class="px-2 py-1 text-right ${planetsCls}">${planetsCell}</td>
-            <td class="px-2 py-1 text-right text-emerald-400 font-bold">${Math.round(p.calculated_prod).toLocaleString()}</td>
-            <td class="px-2 py-1 text-right text-teal-300">${isUnknown ? q : (p.trade_revenue || 0) + '%'}</td>
-            <td class="px-2 py-1 text-right text-amber-400 font-bold">${isUnknown ? q : p.cv_day.toLocaleString()}</td>
-            <td class="px-2 py-1 text-right text-cyan-400">${isUnknown ? q : p.max_cv.toLocaleString()}</td>
-            <td class="px-2 py-1 text-right">${formatRaceModifier(p.race_speed, isUnknown)}</td>
-            <td class="px-2 py-1 text-right">${formatRaceModifier(p.race_attack, isUnknown)}</td>
-            <td class="px-2 py-1 text-right">${formatWarRoomModifier(p.race_defense, isUnknown)}</td>
-            <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : (p.physics || 0)}</td>
-            <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : (p.mathematics || 0)}</td>
-            <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : (p.energy || 0)}</td>
-            <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : (p.biology || 0)}</td>
-            <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : (p.social || 0)}</td>
-            <td class="px-2 py-1 text-right text-violet-400 font-bold">${Math.round(p.calculated_science).toLocaleString()}</td>
-            <td class="px-2 py-1 text-right text-zinc-400">${lastIntel}</td>
+            <td class="sticky left-0 z-10 bg-black px-2 py-1 md:px-3 md:py-1.5 font-bold text-foreground break-words leading-tight w-[110px] border-r border-zinc-800"><a href="/Game/Players/Profile/${p.id}" target="_blank" class="hover:underline hover:text-red-400">${esc(p.name)}</a></td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5"><span class="px-1.5 py-0.5 rounded text-[11px] md:text-xs font-mono tracking-wide whitespace-nowrap" style="${idleStyle}">${esc(p.idle_display)}</span></td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-right ${planetsCls}">${planetsCell}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-emerald-400 font-bold">${Math.round(p.calculated_prod).toLocaleString()}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-teal-300">${isUnknown ? q : (p.trade_revenue || 0) + '%'}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-amber-400 font-bold">${isUnknown ? q : p.cv_day.toLocaleString()}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-cyan-400">${isUnknown ? q : p.max_cv.toLocaleString()}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-right">${formatRaceModifier(p.race_speed, isUnknown)}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-right">${formatRaceModifier(p.race_attack, isUnknown)}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-right">${formatWarRoomModifier(p.race_defense, isUnknown)}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-zinc-300">${isUnknown ? q : (p.physics || 0)}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-zinc-300">${isUnknown ? q : (p.mathematics || 0)}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-zinc-300">${isUnknown ? q : (p.energy || 0)}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-zinc-300">${isUnknown ? q : (p.biology || 0)}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-zinc-300">${isUnknown ? q : (p.social || 0)}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-violet-400 font-bold">${Math.round(p.calculated_science).toLocaleString()}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-zinc-400">${lastIntel}</td>
         `;
         tbody.appendChild(tr);
     });
@@ -839,7 +839,7 @@ function renderAllyStatsTable() {
     
     tbody.innerHTML = filtered.map(s => `
         <tr class="hover:bg-accent/50 transition-colors border-b border-border/60">
-            <td class="sticky left-0 z-10 bg-black px-2 py-1 font-medium text-foreground break-words leading-tight w-[110px] border-r border-zinc-800">${esc(s.player_name || 'Unknown')}</td><td class="px-2 py-1 text-right text-muted-foreground">${s.player_id}</td><td class="px-2 py-1 text-aw-ally font-semibold">${esc(s.planets_text || '-')}</td><td class="px-2 py-1 font-semibold text-yellow-500 whitespace-nowrap">${formatCultureCountdown(s.next_culture_at)}</td><td class="px-2 py-1 text-right text-blue-400 font-semibold">${esc(s.science_rate || '-')}</td><td class="px-2 py-1 text-right text-purple-400 font-semibold">${esc(s.culture_rate || '-')}</td><td class="px-2 py-1 text-right text-orange-400 font-semibold">${esc(s.production_rate || '-')}</td><td class="px-2 py-1 text-right text-emerald-400">${esc(s.astro_dollars || '-')}</td><td class="px-2 py-1 text-right text-slate-300">${esc(s.production_points || '-')}</td><td class="px-2 py-1 text-pink-400 font-semibold">${esc(s.artefact || 'None')}</td><td class="px-2 py-1 text-sky-400">${esc(s.level_text || '-')}</td><td class="px-2 py-1 text-red-400">${esc(s.cv_limit_text || '-')}</td><td class="px-2 py-1 text-right text-amber-500 font-bold">${s.economy}</td><td class="px-2 py-1 text-right text-cyan-400 font-bold">${s.energy}</td><td class="px-2 py-1 text-right text-indigo-400 font-bold">${s.mathematics}</td><td class="px-2 py-1 text-right text-violet-400 font-bold">${s.physics}</td><td class="px-2 py-1 text-right text-foreground font-bold bg-white/5">${s.population}</td>
+            <td class="sticky left-0 z-10 bg-black px-2 py-1 md:px-3 md:py-1.5 font-medium text-foreground break-words leading-tight w-[110px] border-r border-zinc-800">${esc(s.player_name || 'Unknown')}</td><td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-muted-foreground">${s.player_id}</td><td class="px-2 py-1 md:px-3 md:py-1.5 text-aw-ally font-semibold">${esc(s.planets_text || '-')}</td><td class="px-2 py-1 md:px-3 md:py-1.5 font-semibold text-yellow-500 whitespace-nowrap">${formatCultureCountdown(s.next_culture_at)}</td><td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-blue-400 font-semibold">${esc(s.science_rate || '-')}</td><td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-purple-400 font-semibold">${esc(s.culture_rate || '-')}</td><td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-orange-400 font-semibold">${esc(s.production_rate || '-')}</td><td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-emerald-400">${esc(s.astro_dollars || '-')}</td><td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-slate-300">${esc(s.production_points || '-')}</td><td class="px-2 py-1 md:px-3 md:py-1.5 text-pink-400 font-semibold">${esc(s.artefact || 'None')}</td><td class="px-2 py-1 md:px-3 md:py-1.5 text-sky-400">${esc(s.level_text || '-')}</td><td class="px-2 py-1 md:px-3 md:py-1.5 text-red-400">${esc(s.cv_limit_text || '-')}</td><td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-amber-500 font-bold">${s.economy}</td><td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-cyan-400 font-bold">${s.energy}</td><td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-indigo-400 font-bold">${s.mathematics}</td><td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-violet-400 font-bold">${s.physics}</td><td class="px-2 py-1 md:px-3 md:py-1.5 text-right text-foreground font-bold bg-white/5">${s.population}</td>
         </tr>`).join('');
 }
 
@@ -1031,21 +1031,21 @@ function renderTaBoard() {
         const c1 = taCount(p1.name.toLowerCase(), agreements);
         const full1 = c1 >= maxTas;
         html += `<tr>
-            <td class="sticky left-0 bg-black px-2 py-1 font-semibold text-foreground border border-border/40 whitespace-nowrap">${esc(p1.name)}${p1.isTrader ? ' <span class="text-yellow-400">T</span>' : ''}</td>
-            <td class="px-2 py-1 text-center border border-border/40 ${full1 ? 'text-green-400 font-bold' : 'text-muted-foreground'}">${c1}/${maxTas}</td>`;
+            <td class="sticky left-0 bg-black px-2 py-1 md:px-3 md:py-1.5 font-semibold text-foreground border border-border/40 whitespace-nowrap">${esc(p1.name)}${p1.isTrader ? ' <span class="text-yellow-400">T</span>' : ''}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-center border border-border/40 ${full1 ? 'text-green-400 font-bold' : 'text-muted-foreground'}">${c1}/${maxTas}</td>`;
         members.forEach(p2 => {
             html += taCell(p1, p2, { me: meLower, isAdmin, maxTas, traderSet, agreements, full1 });
         });
         html += `<td class="bg-black border-0"></td>`;
-        html += `<td class="px-2 py-1 text-right border border-border/40 text-amber-400 font-semibold" title="${(p1.hoarded_au || 0).toLocaleString()} A$">${fmtAU(p1.hoarded_au)}</td>`;
-        html += `<td class="px-2 py-1 text-right border border-border/40 text-emerald-400" title="${(p1.visible_au || 0).toLocaleString()} A$">${fmtAU(p1.visible_au)}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-amber-400 font-semibold" title="${(p1.hoarded_au || 0).toLocaleString()} A$">${fmtAU(p1.hoarded_au)}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-emerald-400" title="${(p1.visible_au || 0).toLocaleString()} A$">${fmtAU(p1.visible_au)}</td>`;
         // Ready in: time to reach 20k from visible liquidity. Ready (sold): same once the hoard is sold now.
         const need1 = Math.max(0, TA_TRADE_COST - (p1.visible_au || 0));
         const need2 = Math.max(0, TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0));
         const t1 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0), p1.au_per_h);
         const t2 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0), p1.au_per_h);
-        html += `<td class="px-2 py-1 text-right border border-border/40 text-sky-400 whitespace-nowrap" title="${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${need1.toLocaleString()} A$">${t1}</td>`;
-        html += `<td class="px-2 py-1 text-right border border-border/40 text-sky-300 whitespace-nowrap" title="${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${need2.toLocaleString()} A$ after selling ${(p1.hoarded_au || 0).toLocaleString()} A$ hoard">${t2}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-400 whitespace-nowrap" title="${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${need1.toLocaleString()} A$">${t1}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-300 whitespace-nowrap" title="${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${need2.toLocaleString()} A$ after selling ${(p1.hoarded_au || 0).toLocaleString()} A$ hoard">${t2}</td>`;
         html += `</tr>`;
     });
     html += `</tbody>`;
