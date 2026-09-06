@@ -7,10 +7,13 @@ import '../utils/empire-model.js';   // side-effect import: TRAIT_PCT, the ONE s
 import '../utils/aw-api.js';         // side-effect import: getTravelTime, for initColonizeLaunchWindows
 import '../utils/login-gaps.js';     // side-effect import: AWLoginGaps, the profile's quiet-window analysis
 import '../utils/social-hint.js';    // side-effect import: AWSocialHint, the Science page's Social marker (needs game-tables above)
+import '../utils/research-time.js';  // side-effect import: AWResearch, research time shared by the calculator and the Economy countdown
 const { gameFetch } = globalThis.AWGameRate;
 const { formatSqliteUtc } = globalThis.AWSqliteTime;
 const LoginGaps = globalThis.AWLoginGaps;
 const SocialHint = globalThis.AWSocialHint;
+const Research = globalThis.AWResearch;
+const Tables = globalThis.AWTables;
 const { TRAIT_PCT } = globalThis.AWEmpire.constants;
 const { getTravelTime } = globalThis.AWApi;
 
@@ -522,6 +525,54 @@ export async function initSocialHint() {
     mark.setAttribute('aria-label', mark.title);
 }
 
+// ---------------------------------------------------------------
+// ECONOMY PRICE-DROP COUNTDOWN — /Game/Science  (issue #139)
+// Economy lowers ship prices only at the published breakpoints (0, 4, 7, 10, 14, …); the
+// levels in between cost research and change nothing. Under the Economy row's name: the
+// next level that actually drops the price, the three prices it drops to, and how long
+// that takes at the current rate if Economy is researched from now on. The points come
+// from the doc's science table (game-tables.js), so this makes no game request; the
+// calculator's own fetch of /Info/ScienceTable stays where it was.
+// ---------------------------------------------------------------
+export function initEconomyMilestone() {
+    if (!window.location.pathname.toLowerCase().includes('/game/science')) return;
+    const sci = SCIENCES.find(s => s.name === 'Economy');
+    const row = findScienceRow(sci);
+    if (!row) return;
+    const st = readScienceState(sci);
+    if (!st) return;
+
+    const nameCell = row.cells[0];
+    let box = nameCell.querySelector('[data-hub-inject="economy-next"]');
+    const next = Tables.nextEconomyBreakpoint(st.level);
+    if (!next) {
+        if (box) box.remove();
+        return;
+    }
+    if (!box) {
+        box = document.createElement('div');
+        box.setAttribute('data-hub-inject', 'economy-next');
+        box.style.cssText = 'font-size:10px;line-height:1.3;color:#888;white-space:normal;margin-top:2px;cursor:help;';
+        nameCell.appendChild(box);
+    }
+
+    const eta = Research.secondsToLevel(st, Tables.SCIENCE, next.level, st.rate);
+    const etaText = st.rate > 0 && Number.isFinite(eta.seconds) ? `~${formatDuration(eta.seconds)}` : 'no research rate';
+    const queued = isScienceQueued(row);
+    box.innerHTML = `next price drop <span style="color:#ccc;">lvl ${next.level}</span>`
+        + ` · D ${next.destroyer} / C ${next.cruiser} / B ${next.battleship} PP`
+        + ` · <span style="color:#ccc;">${etaText}</span>`
+        + (queued ? ' <span style="color:#6a6;">in queue</span>' : '');
+
+    const after = Tables.nextEconomyBreakpoint(next.level);
+    const savedPer10Battleships = (Tables.battleshipCost(st.level) - next.battleship) * 10;
+    box.title = `Economy ${st.level}: destroyer ${Tables.destroyerCost(st.level)} / cruiser ${Tables.cruiserCost(st.level)} / battleship ${Tables.battleshipCost(st.level)} PP.`
+        + ` Level ${next.level} lowers them to ${next.destroyer} / ${next.cruiser} / ${next.battleship} PP — ${savedPer10Battleships} PP saved per 10 battleships.`
+        + ` ${eta.levels} level${eta.levels === 1 ? '' : 's'} to go${st.researching ? ' (current research counted)' : ''} at ${Math.round(st.rate).toLocaleString()} pts/h, assuming Economy is researched next and nothing else is queued before it.`
+        + (after ? ` The drop after that is at level ${after.level} (destroyer ${after.destroyer} PP).` : ' It is the last drop: 97 is where the destroyer reaches 1 PP.')
+        + (eta.missing.length ? ` No cost data for level(s) ${eta.missing.join(', ')}.` : '');
+}
+
 export async function initScienceLevelCalculator() {
     if (!window.location.pathname.toLowerCase().includes('/game/science')) return;
     if (document.getElementById('hub-science-calc')) return;
@@ -608,18 +659,10 @@ export async function initScienceLevelCalculator() {
             const url = name === 'Culture' ? '/Info/CultureTable' : '/Info/ScienceTable';
             const table = await getPointsTable(url);
 
-            let total = 0;
-            let startK = st.level + 1;
-            // The in-progress research timer is measured at the CURRENT rate; scale it to
-            // the effective rate so it stays consistent when the what-if inputs change.
-            if (st.researching) { total += st.timerSecs * (st.rate / effRate); startK = st.level + 2; }
-
-            const missing = [];
-            for (let k = startK; k <= target; k++) {
-                const pts = table[k];
-                if (pts == null || isNaN(pts)) { missing.push(k); continue; }
-                total += (pts / effRate) * 3600;
-            }
+            // Shared with the Economy countdown (research-time.js): the in-progress timer is
+            // measured at the CURRENT rate and scaled to the effective one, then every
+            // remaining level's points at the effective rate.
+            const { seconds: total, missing } = Research.secondsToLevel(st, table, target, effRate);
 
             const finish = new Date(Date.now() + total * 1000);
             const dateStr = finish.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +

@@ -125,6 +125,29 @@ function checkLevelTable(label, title, col, arr) {
             T.cruiserCost(l) === T.destroyerCost(l) * 8 && T.battleshipCost(l) === T.destroyerCost(l) * 20));
 
     console.log('');
+    console.log('── The next price drop is the next published row ' + '─'.repeat(31));
+    // From any level at or above one published row and below the next, the next breakpoint
+    // is that next row, with its exact prices.
+    let nextBad = null;
+    for (let i = 0; i < econRows.length - 1 && !nextBad; i++) {
+        const [lvl] = econRows[i].map(cell);
+        const [nextLvl, d, c, b] = econRows[i + 1].map(cell);
+        for (let l = lvl; l < nextLvl; l++) {
+            const n = T.nextEconomyBreakpoint(l);
+            if (!n || n.level !== nextLvl || n.destroyer !== d || n.cruiser !== c || n.battleship !== b) {
+                nextBad = { from: l, expected: [nextLvl, d, c, b], got: n };
+                break;
+            }
+        }
+    }
+    ok('nextEconomyBreakpoint agrees with every consecutive pair of published rows', nextBad === null, nextBad);
+    ok('from 0 the first drop is level 4 (29 / 232 / 580 PP)',
+        JSON.stringify(T.nextEconomyBreakpoint(0)) === JSON.stringify({ level: 4, destroyer: 29, cruiser: 232, battleship: 580 }), T.nextEconomyBreakpoint(0));
+    ok('from 96 the last drop is level 97 (1 PP destroyer)', T.nextEconomyBreakpoint(96) && T.nextEconomyBreakpoint(96).level === 97 && T.nextEconomyBreakpoint(96).destroyer === 1);
+    ok('at 97 and beyond there is no next drop', T.nextEconomyBreakpoint(97) === null && T.nextEconomyBreakpoint(100) === null && T.nextEconomyBreakpoint(250) === null);
+    ok('a fractional or unreadable level is floored / treated as 0', T.nextEconomyBreakpoint(4.9).level === 7 && T.nextEconomyBreakpoint('x').level === 4 && T.nextEconomyBreakpoint(-2).level === 4);
+
+    console.log('');
     console.log('── Starbase levels cost the same as buildings ' + '─'.repeat(34));
     // Why there is no separate starbase cost table. The doc's Costs column is abbreviated
     // ("11.1K") past level 19, so only the exact rows are compared.

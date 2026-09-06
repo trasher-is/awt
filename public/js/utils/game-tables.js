@@ -159,6 +159,22 @@
     const cruiserCost = economy => destroyerCost(economy) * 8;
     const battleshipCost = economy => destroyerCost(economy) * 20;
 
+    // The next economy level that actually lowers the price (issue #139). Most levels change
+    // nothing — only the published breakpoints do (0, 4, 7, 10, 14, …) — and 97 is the last:
+    // from there the answer is null. Derived from the formula above, so it agrees with the
+    // 30 published rows by construction.
+    function nextEconomyBreakpoint(economy) {
+        const from = Math.max(0, Math.floor(Number(economy) || 0));
+        const current = destroyerCost(from);
+        if (current <= 1) return null;
+        for (let level = from + 1; level <= 100; level++) {
+            if (destroyerCost(level) < current) {
+                return { level, destroyer: destroyerCost(level), cruiser: cruiserCost(level), battleship: battleshipCost(level) };
+            }
+        }
+        return null;
+    }
+
     // Population cap for a social level, clamping past the end of the published table.
     function popCap(socialLevel) {
         const lvl = Math.max(0, Math.min(SOCIAL_CAP.length - 1, Math.floor(socialLevel)));
@@ -176,6 +192,6 @@
         ECONOMY_SHIP, ARTIFACTS,
         CIVIL_SHIP_PP, COLONY_DISBAND_PP,
         aggregate, maxLevel, popCap, colonyStartingPP,
-        destroyerCost, cruiserCost, battleshipCost
+        destroyerCost, cruiserCost, battleshipCost, nextEconomyBreakpoint
     };
 });
