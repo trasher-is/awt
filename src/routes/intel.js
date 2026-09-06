@@ -266,6 +266,26 @@ router.get('/intel/planets_db', requireAuth, (req, res) => {
     }
 });
 
+// --- OWN PLANETS (Science page's Social marker, issue #138) ---
+// "Own" is resolved the way /me resolves playerId: the hub account's game name matched
+// against the players table. The populations are what the hub last saw in a system scan by
+// ANY member, so they can lag behind the game; updated_at travels with each row so the
+// client can say how old they are. No player on record yet (fresh round, name not seen) is
+// a normal answer, not an error — the client then shows nothing.
+router.get('/intel/me/planets', requireAuth, (req, res) => {
+    try {
+        const bridge = usersRepo.getUserAllianceIdBridge(req.session.userId);
+        if (!bridge) {
+            return res.json({ success: false, error: 'No player on record for this account yet.' });
+        }
+        const planets = systemsRepo.getPlanetsByOwner(bridge.player_id);
+        res.json({ success: true, playerId: bridge.player_id, planets });
+    } catch (err) {
+        console.error('[DB Error] Failed to fetch own planets:', err);
+        res.status(500).json({ success: false, error: 'Failed to fetch planets' });
+    }
+});
+
 // Get Full Fleets Database
 router.get('/intel/fleets_db', requireAuth, (req, res) => {
     try {

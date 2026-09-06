@@ -6,9 +6,11 @@ import '../utils/travel-model.js';   // side-effect import: empire-model.js's ow
 import '../utils/empire-model.js';   // side-effect import: TRAIT_PCT, the ONE source for race-bonus %/point
 import '../utils/aw-api.js';         // side-effect import: getTravelTime, for initColonizeLaunchWindows
 import '../utils/login-gaps.js';     // side-effect import: AWLoginGaps, the profile's quiet-window analysis
+import '../utils/social-hint.js';    // side-effect import: AWSocialHint, the Science page's Social marker (needs game-tables above)
 const { gameFetch } = globalThis.AWGameRate;
 const { formatSqliteUtc } = globalThis.AWSqliteTime;
 const LoginGaps = globalThis.AWLoginGaps;
+const SocialHint = globalThis.AWSocialHint;
 const { TRAIT_PCT } = globalThis.AWEmpire.constants;
 const { getTravelTime } = globalThis.AWApi;
 
@@ -398,18 +400,34 @@ async function getPointsTable(url) {
 
 // Read {level, rate (pts/h), timerSecs, researching} for a science off the page.
 // `sci` is a SCIENCES entry { name, aliases }.
-function readScienceState(sci) {
-    // Find the row whose first cell exactly equals one of the aliases (the page
-    // abbreviates names), with a numeric level in the second cell.
-    let row = null, level = NaN;
+// The name cell's own text, WITHOUT anything the hub injected into it. The Social marker and
+// the Economy countdown live inside that cell (marked data-hub-inject), and the alias match
+// below has to keep working on the next view pass after they are there.
+function scienceNameText(cell) {
+    let text = '';
+    cell.childNodes.forEach(node => {
+        if (node.nodeType === 1 && node.hasAttribute('data-hub-inject')) return;
+        text += node.nodeType === 1 ? node.innerText : node.textContent;
+    });
+    return text.trim().toLowerCase();
+}
+
+// The row whose first cell exactly equals one of the aliases (the page abbreviates names),
+// with a numeric level in the second cell.
+function findScienceRow(sci) {
+    let row = null;
     document.querySelectorAll('table tr').forEach(r => {
         if (row || !r.cells || r.cells.length < 2 || !r.cells[0]) return;
-        const c0 = r.cells[0].innerText.trim().toLowerCase();
-        if (!sci.aliases.includes(c0)) return;
-        const lvl = parseInt(r.cells[1].innerText, 10);
-        if (!isNaN(lvl)) { row = r; level = lvl; }
+        if (!sci.aliases.includes(scienceNameText(r.cells[0]))) return;
+        if (!isNaN(parseInt(r.cells[1].innerText, 10))) row = r;
     });
+    return row;
+}
+
+function readScienceState(sci) {
+    const row = findScienceRow(sci);
     if (!row) return null;
+    const level = parseInt(row.cells[1].innerText, 10);
 
     // Rate is the shared research output, shown in a header like "Science +293.3/h"
     // (or "Culture +X/h"); also tolerate abbreviated "Sci"/"Cul" labels on mobile.
@@ -439,6 +457,69 @@ function readScienceState(sci) {
     const baseGrowth = bonusPct > -100 ? rate / (1 + bonusPct / 100) : rate;
 
     return { level, rate, bonusPct, baseGrowth, timerSecs, researching: !!timer };
+}
+
+// Whether a science is being researched now or sits in the queue — the same icons
+// initScienceTimers reads, plus the live timer.
+const QUEUE_ICON_SELECTOR = '.bi-1-circle, .bi-2-circle, .bi-3-circle, .bi-repeat';
+function isScienceQueued(row) {
+    if (!row) return false;
+    if (row.querySelector('.timer-active')) return true;
+    const queueCell = row.cells[5];
+    return !!(queueCell && queueCell.querySelector(QUEUE_ICON_SELECTOR));
+}
+
+// ---------------------------------------------------------------
+// SOCIAL MARKER — /Game/Science  (issue #138)
+// A small triangle next to the Social row when own planets sit at the population cap:
+// grey for one planet, amber for half or more, nothing when Social is already queued or
+// when the hub has no planets of this member on record. The rule and the tooltip text live
+// in public/js/utils/social-hint.js; the planets come from the hub's own database
+// (/hub-api/intel/me/planets), so this makes no game request.
+// ---------------------------------------------------------------
+let _ownPlanets = { at: 0, promise: null };
+function getOwnPlanets() {
+    // One hub request per minute at most, however often the view hooks re-run.
+    if (_ownPlanets.promise && Date.now() - _ownPlanets.at < 60 * 1000) return _ownPlanets.promise;
+    _ownPlanets = {
+        at: Date.now(),
+        promise: fetch('/hub-api/intel/me/planets').then(r => r.json()).catch(() => null),
+    };
+    return _ownPlanets.promise;
+}
+
+export async function initSocialHint() {
+    if (!window.location.pathname.toLowerCase().includes('/game/science')) return;
+    const sci = SCIENCES.find(s => s.name === 'Social');
+    const row = findScienceRow(sci);
+    if (!row) return;
+    const state = readScienceState(sci);
+    if (!state) return;
+
+    const own = await getOwnPlanets();
+    // The row may have been re-rendered while the request was in flight.
+    const liveRow = findScienceRow(sci);
+    if (!liveRow) return;
+    const nameCell = liveRow.cells[0];
+    let mark = nameCell.querySelector('[data-hub-inject="social-hint"]');
+
+    const result = (own && own.success)
+        ? SocialHint.evaluate({ socialLevel: state.level, planets: own.planets, queued: isScienceQueued(liveRow) })
+        : { state: 'none' };
+    if (result.state === 'none') {
+        if (mark) mark.remove();
+        return;
+    }
+    if (!mark) {
+        mark = document.createElement('span');
+        mark.setAttribute('data-hub-inject', 'social-hint');
+        mark.style.cssText = 'margin-left:6px;font-size:10px;vertical-align:middle;cursor:help;';
+        mark.textContent = '▲';
+        nameCell.appendChild(mark);
+    }
+    mark.style.color = result.state === 'high' ? '#f59e0b' : '#9ca3af';
+    mark.title = SocialHint.message(result);
+    mark.setAttribute('aria-label', mark.title);
 }
 
 export async function initScienceLevelCalculator() {
