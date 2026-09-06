@@ -15,6 +15,7 @@ const usersRepo = require('../repositories/users');
 const settingsRepo = require('../repositories/settings');
 const incomingRepo = require('../repositories/incoming');
 const tradeRepo = require('../repositories/trade');
+const routingRepo = require('../repositories/routing');
 const { archiveRound, listRounds, roundDetail } = require('../utils/round-archive');
 const router = express.Router();
 
@@ -299,6 +300,14 @@ router.post('/admin/rounds/archive', requireAdmin, (req, res) => {
 });
 
 // Nuke All Intel (Requires Master Admin Password)
+//
+// WHAT A ROUND RESET REMOVES, AND WHAT IT KEEPS — the full list lives in
+// docs/operations.md ("Round-scoped records"); keep the two in step. Everything deleted
+// below describes THIS round's map or the people on it: systems, planets, fleets, events,
+// plans, battle/news reports, incoming alerts, trade agreements, alliance stats, and —
+// since #128 — routes, their legs and the takeover board. Accounts, settings, broadcasts,
+// Discord state, the redzone planner, the starbase-order audit and the round archive
+// itself are never touched here.
 router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
     const { password, label, note } = req.body;
 
@@ -322,6 +331,15 @@ router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
 
             fleetsRepo.deleteAllFleets();
             plansRepo.deleteAllPlans();
+            // Routes are plans over system ids, and the takeover board is keyed by
+            // (system_id, planet_index) with no foreign key to systems. Neither was
+            // cleared before (#128): the next scan reuses the same ids, so an old route
+            // displayed new coordinates with last round's travel times, and last round's
+            // assignments reattached to planets nobody had assigned. Same transaction as
+            // the snapshot and the map: if anything here fails, nothing is deleted.
+            routingRepo.deleteAllRouteLegs();
+            routingRepo.deleteAllRoutes();
+            systemsRepo.deleteAllTakeovers();
             systemsRepo.deleteAllPlanetEvents();
             // Battle reports describe battles on the map being wiped — they go with it.
             // News events are the same kind of record (walkover conquests/bombardments on

@@ -82,8 +82,23 @@ function deleteRoute(id) {
     deleteRouteStmt.run(id);
 }
 
+// Round-scoped: a route is a plan over system ids on THIS round's map. The next round
+// reuses the ids with new coordinates, so a surviving route would render new positions
+// with last round's travel times (issue #128). Both tables are cleared explicitly by the
+// round reset in src/routes/admin.js — route_legs cascades from routes, but nothing
+// cascades from systems, and an explicit delete does not depend on foreign_keys being on.
+const deleteAllRouteLegsStmt = db.prepare(`DELETE FROM route_legs`);
+function deleteAllRouteLegs() {
+    return deleteAllRouteLegsStmt.run().changes;
+}
+
+const deleteAllRoutesStmt = db.prepare(`DELETE FROM routes`);
+function deleteAllRoutes() {
+    return deleteAllRoutesStmt.run().changes;
+}
+
 module.exports = {
     purgeExpiredRoutes, getRouteLegsForRouteIds, getRoutesForUser, getRouteById,
     getRouteOwnership, updateRoute, insertRoute, deleteRouteLegsForRoute, insertRouteLeg,
-    deleteRoute
+    deleteRoute, deleteAllRouteLegs, deleteAllRoutes
 };

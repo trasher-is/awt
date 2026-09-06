@@ -375,6 +375,15 @@ function upsertTakeover(systemId, planetIndex, assignedName, pipelineStatus, tar
     upsertTakeoverStmt.run(systemId, planetIndex, assignedName, pipelineStatus, targetArrivalTime);
 }
 
+// Round-scoped. planet_takeovers is keyed by (system_id, planet_index) with NO foreign key
+// to systems, so a round reset that only deletes systems leaves last round's assignments
+// behind — and the next scan reuses the same ids, so they reattach to the new map as if
+// someone had just assigned them (issue #128). Called by the reset in src/routes/admin.js.
+const deleteAllTakeoversStmt = db.prepare(`DELETE FROM planet_takeovers`);
+function deleteAllTakeovers() {
+    return deleteAllTakeoversStmt.run().changes;
+}
+
 module.exports = {
     countSystems, countPlanets, getSystemCoords, getFullSystem, listSystemIds, getSystemsByIds,
     listSystemsWithCoordsLimited, searchSystemsByQueryPrefix, searchSystemsByNameOrId,
@@ -384,5 +393,5 @@ module.exports = {
     getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getOldPlanet, upsertPlanet,
     getPlanetsForAllianceTag, getPlanetOwnerName, getPlanetNameByLocation, getPlanetNameByGameId, getPlanetLocationByGameId,
     clearMovedPlanet, deleteAllPlanets, logPlanetEvent, getPlanetHistory, deleteAllPlanetEvents,
-    getTakeoverBoard, upsertTakeover,
+    getTakeoverBoard, upsertTakeover, deleteAllTakeovers,
 };
