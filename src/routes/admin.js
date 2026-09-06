@@ -15,6 +15,7 @@ const usersRepo = require('../repositories/users');
 const settingsRepo = require('../repositories/settings');
 const incomingRepo = require('../repositories/incoming');
 const tradeRepo = require('../repositories/trade');
+const routingRepo = require('../repositories/routing');
 const { archiveRound, listRounds, roundDetail } = require('../utils/round-archive');
 const router = express.Router();
 
@@ -214,9 +215,20 @@ router.post('/admin/users/:id/password', requireAdmin, (req, res) => {
             return res.status(403).json({ error: 'Only the Master Admin can change this password.' });
         }
 
+        const targetId = Number(req.params.id);
         const hash = bcrypt.hashSync(new_password, 10);
-        usersRepo.setUserPasswordHash(req.params.id, hash);
-        res.json({ success: true });
+        // The new hash and the version bump land together: every session the account
+        // holds carries the old version and is refused on its next request (see
+        // src/utils/session-account.js). A reset that left other devices logged in
+        // would not be a reset.
+        const version = db.transaction(() => {
+            usersRepo.setUserPasswordHash(targetId, hash);
+            return usersRepo.bumpSessionVersion(targetId);
+        })();
+        // The one session that may survive is the one that just typed the new password —
+        // someone changing their OWN password should not be thrown out mid-task.
+        if (req.session.userId === targetId) req.session.sessionVersion = version;
+        res.json({ success: true, otherSessionsInvalidated: true });
     } catch (err) {
         console.error('[DB Error] Failed to change password:', err);
         res.status(500).json({ error: 'Failed to change password' });
@@ -288,6 +300,14 @@ router.post('/admin/rounds/archive', requireAdmin, (req, res) => {
 });
 
 // Nuke All Intel (Requires Master Admin Password)
+//
+// WHAT A ROUND RESET REMOVES, AND WHAT IT KEEPS — the full list lives in
+// docs/operations.md ("Round-scoped records"); keep the two in step. Everything deleted
+// below describes THIS round's map or the people on it: systems, planets, fleets, events,
+// plans, battle/news reports, incoming alerts, trade agreements, alliance stats, and —
+// since #128 — routes, their legs and the takeover board. Accounts, settings, broadcasts,
+// Discord state, the redzone planner, the starbase-order audit and the round archive
+// itself are never touched here.
 router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
     const { password, label, note } = req.body;
 
@@ -311,6 +331,15 @@ router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
 
             fleetsRepo.deleteAllFleets();
             plansRepo.deleteAllPlans();
+            // Routes are plans over system ids, and the takeover board is keyed by
+            // (system_id, planet_index) with no foreign key to systems. Neither was
+            // cleared before (#128): the next scan reuses the same ids, so an old route
+            // displayed new coordinates with last round's travel times, and last round's
+            // assignments reattached to planets nobody had assigned. Same transaction as
+            // the snapshot and the map: if anything here fails, nothing is deleted.
+            routingRepo.deleteAllRouteLegs();
+            routingRepo.deleteAllRoutes();
+            systemsRepo.deleteAllTakeovers();
             systemsRepo.deleteAllPlanetEvents();
             // Battle reports describe battles on the map being wiped — they go with it.
             // News events are the same kind of record (walkover conquests/bombardments on

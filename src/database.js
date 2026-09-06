@@ -138,6 +138,12 @@ function initDatabase() {
     // Numeric Discord user id (snowflake) for real @mentions. Backfilled automatically
     // when a linked user runs any bot command — see discord_bot messageCreate handler.
     addColumn('app_users', 'discord_id', 'TEXT');
+    // Bumped on every password reset. A session records the value it saw at login and
+    // src/utils/session-account.js refuses any session whose copy no longer matches, so a
+    // reset password logs out every other device instead of only the one that typed it.
+    // Sessions created before this column existed carry no copy at all and are read as 0,
+    // which matches the default here — nobody is logged out by the migration itself.
+    addColumn('app_users', 'session_version', 'INTEGER NOT NULL DEFAULT 0');
     addColumn('players', 'has_intel', 'INTEGER DEFAULT 0');
     addColumn('players', 'intel_updated_at', 'TEXT');
     // Set only by upsertPlayerFull (the deep profile/Statistics-page scrape) — unlike

@@ -1,8 +1,10 @@
 import { esc } from '../utils/escape.js';
 import '../utils/game-rate-limit.js'; // side-effect import: the shared 5/s gate AWApi rides
 import '../utils/aw-api.js';         // side-effect import: the game API client, gate included
+import '../utils/request-sequence.js'; // side-effect import: "only the latest request renders"
 
 const AWApi = globalThis.AWApi;
+const { createKeyedSequencers } = globalThis.AWRequestSeq;
 
 // Same convention as system-intel.js's describeApiError: one line for an AWApi failure,
 // verbatim — the status code and reason, no guessing. Not imported from there because
@@ -14,11 +16,15 @@ function describeApiError(r) {
     return `HTTP ${r.status} (${r.reason})`;
 }
 
-let searchTimeout = null;
+// Debounce state and request state are kept PER SEARCH TYPE. One shared timer meant typing
+// in the system box cancelled a pending player search, and one shared "latest request"
+// would let a system search hide a player result that was still wanted.
+const searchTimers = new Map();
+const searchSeqs = createKeyedSequencers();
 
-export function handleSearchInput(type) { 
-    clearTimeout(searchTimeout); 
-    searchTimeout = setTimeout(() => { executeSearch(type); }, 300); 
+export function handleSearchInput(type) {
+    clearTimeout(searchTimers.get(type));
+    searchTimers.set(type, setTimeout(() => { executeSearch(type); }, 300));
 }
 
 async function executeSearch(type) {
@@ -26,16 +32,24 @@ async function executeSearch(type) {
     const resultsContainer = document.getElementById(`search-${type}-results`);
     if (!input || !resultsContainer) return;
 
+    const seq = searchSeqs.for(type);
     const q = input.value.trim();
     if (!q) {
+        // Whatever is still in flight for this box belongs to text that no longer exists.
+        seq.cancel();
         resultsContainer.innerHTML = '';
         return;
     }
 
+    // Only the request holding the current token may paint this box — results, "not
+    // found", or an error. Typing again moves the token on; the older response, however
+    // late it lands, then returns without touching the DOM (issue #129).
+    const token = seq.next();
     resultsContainer.innerHTML = '<div class="text-s text-muted-foreground text-center py-2"><i class="fa-solid fa-circle-notch fa-spin"></i> Searching...</div>';
     try {
         const res = await fetch(`/hub-api/search/${type}?q=${encodeURIComponent(q)}`);
         const data = await res.json();
+        if (!seq.isCurrent(token)) return;
 
         if (!data.success || data.results.length === 0) {
             if (type === 'alliance' || type === 'system' || type === 'player') {
@@ -46,7 +60,7 @@ async function executeSearch(type) {
                             <i class="fa-solid fa-cloud-arrow-down mr-1"></i>Search the game directly
                         </button>
                     </div>`;
-                document.getElementById(`btn-search-live-${type}`)?.addEventListener('click', () => searchLiveViaApi(type, q, resultsContainer));
+                document.getElementById(`btn-search-live-${type}`)?.addEventListener('click', () => searchLiveViaApi(type, q, resultsContainer, seq));
             } else {
                 resultsContainer.innerHTML = '<div class="text-s text-muted-foreground text-center py-2 bg-card rounded border border-border">Not found.</div>';
             }
@@ -106,20 +120,29 @@ async function executeSearch(type) {
                 });
             });
         }
-    } catch (err) { resultsContainer.innerHTML = '<div class="text-s text-red-500 text-center py-2">Error.</div>'; }
+    } catch (err) {
+        if (!seq.isCurrent(token)) return;
+        resultsContainer.innerHTML = '<div class="text-s text-red-500 text-center py-2">Error.</div>';
+    }
 }
 
 // A manual, member-triggered escape hatch: the hub's own DB found nothing, so ask the
 // game's REST API directly, sync whatever it finds into the hub's DB through the existing
 // sync routes, then re-run the same DB-backed search so the result renders through the
 // normal path. Never fires automatically — only on this explicit click.
-async function searchLiveViaApi(type, q, resultsContainer) {
-    resultsContainer.innerHTML = '<div class="text-s text-muted-foreground text-center py-2"><i class="fa-solid fa-circle-notch fa-spin"></i> Asking the game…</div>';
+//
+// The API call and the sync always run to completion once clicked — the data is wanted in
+// the hub regardless. Only the PAINTING is guarded: if the member typed something else
+// meanwhile, this box now belongs to that newer search.
+async function searchLiveViaApi(type, q, resultsContainer, seq) {
+    const token = seq.next();
+    const paint = html => { if (seq.isCurrent(token)) resultsContainer.innerHTML = html; };
+    paint('<div class="text-s text-muted-foreground text-center py-2"><i class="fa-solid fa-circle-notch fa-spin"></i> Asking the game…</div>');
     try {
         if (type === 'alliance') {
             const res = await AWApi.searchAlliances({ q, limit: 20 });
             if (!res.ok) {
-                resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">${res.reason === 'session' ? 'Log into the game first, then try again.' : `The game did not answer: ${describeApiError(res)}`}</div>`;
+                paint(`<div class="text-s text-red-500 text-center py-2">${res.reason === 'session' ? 'Log into the game first, then try again.' : `The game did not answer: ${describeApiError(res)}`}</div>`);
                 return;
             }
             const alliances = (Array.isArray(res.data) ? res.data : []).map(a => ({
@@ -136,14 +159,14 @@ async function searchLiveViaApi(type, q, resultsContainer) {
                 });
                 const syncBody = await syncRes.json().catch(() => ({}));
                 if (!syncRes.ok || !syncBody.success) {
-                    resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">Sync failed: ${syncBody.error || `HTTP ${syncRes.status}`}</div>`;
+                    paint(`<div class="text-s text-red-500 text-center py-2">Sync failed: ${syncBody.error || `HTTP ${syncRes.status}`}</div>`);
                     return;
                 }
             }
         } else if (type === 'system') {
             const res = await AWApi.searchSolarSystems({ q, limit: 20 });
             if (!res.ok) {
-                resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">${res.reason === 'session' ? 'Log into the game first, then try again.' : `The game did not answer: ${describeApiError(res)}`}</div>`;
+                paint(`<div class="text-s text-red-500 text-center py-2">${res.reason === 'session' ? 'Log into the game first, then try again.' : `The game did not answer: ${describeApiError(res)}`}</div>`);
                 return;
             }
             // The ONE shared API->sync mapper (aw-api.js) — never a local copy of it.
@@ -156,14 +179,14 @@ async function searchLiveViaApi(type, q, resultsContainer) {
                 });
                 const syncBody = await syncRes.json().catch(() => ({}));
                 if (!syncRes.ok || !syncBody.success) {
-                    resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">Sync failed: ${syncBody.error || `HTTP ${syncRes.status}`}</div>`;
+                    paint(`<div class="text-s text-red-500 text-center py-2">Sync failed: ${syncBody.error || `HTTP ${syncRes.status}`}</div>`);
                     return;
                 }
             }
         } else if (type === 'player') {
             const res = await AWApi.searchPlayers({ q, limit: 20 });
             if (!res.ok) {
-                resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">${res.reason === 'session' ? 'Log into the game first, then try again.' : `The game did not answer: ${describeApiError(res)}`}</div>`;
+                paint(`<div class="text-s text-red-500 text-center py-2">${res.reason === 'session' ? 'Log into the game first, then try again.' : `The game did not answer: ${describeApiError(res)}`}</div>`);
                 return;
             }
             // The ONE shared API->sync mapper (aw-api.js) — never a local copy of it.
@@ -176,15 +199,18 @@ async function searchLiveViaApi(type, q, resultsContainer) {
                 });
                 const syncBody = await syncRes.json().catch(() => ({}));
                 if (!syncRes.ok || !syncBody.success) {
-                    resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">Sync failed: ${syncBody.error || `HTTP ${syncRes.status}`}</div>`;
+                    paint(`<div class="text-s text-red-500 text-center py-2">Sync failed: ${syncBody.error || `HTTP ${syncRes.status}`}</div>`);
                     return;
                 }
             }
         }
-        // Re-run the same DB-backed search now that the sync (if anything was found) landed.
+        // Re-run the DB-backed search for whatever is in the box NOW that the sync (if
+        // anything was found) landed. If the member typed on, this is their newer query,
+        // which is the right thing to show; if they cleared the box, it stays empty.
+        if (!seq.isCurrent(token)) return;
         await executeSearch(type);
     } catch (err) {
-        resultsContainer.innerHTML = `<div class="text-s text-red-500 text-center py-2">Live search failed: ${err.message}</div>`;
+        paint(`<div class="text-s text-red-500 text-center py-2">Live search failed: ${err.message}</div>`);
     }
 }
 

@@ -53,7 +53,29 @@ cp .env.example .env      # then fill it in
 npm start                 # or: npm run dev  (nodemon)
 ```
 
-Node 18 or newer. The database file is created automatically on first start.
+**Node 22** — the version in [`.nvmrc`](.nvmrc) and `package.json#engines`. That is the
+runtime the committed lockfile was resolved for: `better-sqlite3` ships a native binary
+per Node ABI and its own range stops before Node 26, so a newer Node fails at startup
+with an ABI mismatch (`was compiled against a different Node.js version`) even though
+`npm install` went through. `nvm use` / `fnm use` / `volta pin` all read the same file.
+The database file is created automatically on first start.
+
+### Switching Node versions
+
+The SQLite binary in `node_modules` is built for one Node ABI. After changing the Node
+version (or restoring `node_modules` from a machine that ran a different one), rebuild it
+before starting the hub:
+
+```bash
+npm ci                          # clean install for the current Node — what CI runs
+# or, keeping the rest of node_modules:
+npm rebuild better-sqlite3
+```
+
+Pull requests are checked by the workflow in `.github/workflows/ci.yml`: a clean
+`npm ci` on the `.nvmrc` runtime followed by `npm test`, once in UTC and once in
+Europe/Warsaw. It reports only — merging to `main` stays a human decision
+(see `AGENTS.md`).
 
 On a completely fresh database the server creates an `admin` account and prints a
 **one-time password to the console**. Log in with it and change it in the admin panel
@@ -95,6 +117,21 @@ the header arrives already set, but keep `TRUST_PROXY=1` so the real client IP i
 
 Serving the hub over plain HTTP is supported (`COOKIE_SECURE=false`), it just means the
 session cookie is not marked `Secure`.
+
+## Backups and round resets
+
+Both databases run in WAL mode, so copying `awt.db` while the hub is up is **not** a
+backup. Use the operator script, which takes a consistent snapshot through SQLite's online
+backup API, verifies it and prunes old ones:
+
+```bash
+node scripts/backup-db.js          # -> $AWT_BACKUP_DIR (set it outside this checkout)
+node scripts/restore-db.js <backup-dir> --to /tmp/awt-check   # restore + verify, elsewhere
+```
+
+[`docs/operations.md`](docs/operations.md) has the full procedure — which files matter,
+retention and permissions, the restore order, what happens to sessions, rollback — and the
+list of which tables a round reset ("Nuke data") removes and which it keeps.
 
 ## Tests
 

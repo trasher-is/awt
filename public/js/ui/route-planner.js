@@ -6,12 +6,28 @@
 // travel formula for free.
 
 import { esc } from '../utils/escape.js';
+import '../utils/request-sequence.js'; // side-effect import: "only the latest request renders"
+import '../utils/fresh-cache.js';      // side-effect import: reference data with a lifetime
+
+const { createSequencer } = globalThis.AWRequestSeq;
+const { createFreshCache } = globalThis.AWFreshCache;
 
 const MAX_STOPS = 7;   // start + up to 6 legs, matching the server's MAX_LEGS
-let sysCache = null, playerCache = null;
 let editingId = null;
 let previewTimer = null;
 let me = { id: null, role: null };
+
+// The preview pane belongs to the most recent set of inputs. A slower response for the
+// previous inputs must not paint its ETA over the current ones (issue #129).
+const previewSeq = createSequencer();
+
+// Systems and players used to be cached in module variables forever: opened against an
+// empty database, the planner cached [] and never asked again, so a sync a minute later
+// was invisible until the dashboard was reloaded (issue #133). These caches expire — a
+// full list after a minute, an empty one after seconds — keep old data through a failed
+// refresh, and expose the failure so the panel can offer a retry.
+const systemsCache = createFreshCache();
+const playersCache = createFreshCache();
 
 // ─── SMALL HELPERS ────────────────────────────────────────────────────────────
 
@@ -46,22 +62,70 @@ async function getJson(url, options) {
     return data;
 }
 
-async function loadSystems() {
-    if (sysCache) return sysCache;
-    try {
-        const d = await getJson('/hub-api/intel/systems_db');
-        if (d.success) sysCache = d.systems;
-    } catch (e) {}
-    return sysCache || [];
+// A failed load THROWS here rather than returning [] — the cache records it as an error
+// with a retry, instead of remembering an empty list as if the database were empty.
+async function fetchSystems() {
+    const d = await getJson('/hub-api/intel/systems_db');
+    if (!d.success) throw new Error(d.error || 'Could not load systems');
+    return Array.isArray(d.systems) ? d.systems : [];
 }
 
-async function loadPlayers() {
-    if (playerCache) return playerCache;
-    try {
-        const d = await getJson('/hub-api/intel/players');
-        if (d.success) playerCache = d.players;
-    } catch (e) {}
-    return playerCache || [];
+async function fetchPlayers() {
+    const d = await getJson('/hub-api/intel/players');
+    if (!d.success) throw new Error(d.error || 'Could not load players');
+    return Array.isArray(d.players) ? d.players : [];
+}
+
+async function loadSystems(opts) {
+    const r = await systemsCache.get(fetchSystems, opts);
+    renderDataStatus();
+    return r.data || [];
+}
+
+async function loadPlayers(opts) {
+    const r = await playersCache.get(fetchPlayers, opts);
+    renderDataStatus();
+    return r.data || [];
+}
+
+// Both reference lists at once: on panel open (respecting freshness, so reopening within
+// the TTL costs nothing) and on the explicit Refresh/Retry button (forced).
+async function refreshReferenceData(opts) {
+    await Promise.all([loadSystems(opts), loadPlayers(opts)]);
+}
+
+function ageText(ms) {
+    if (ms == null) return '';
+    if (ms < 5000) return 'just now';
+    if (ms < 60000) return `${Math.round(ms / 1000)}s ago`;
+    return `${Math.round(ms / 60000)} min ago`;
+}
+
+// One line under the waypoints: what the planner is searching in, how old it is, and —
+// when a load failed — that it failed, with the button next to it acting as Retry.
+function renderDataStatus() {
+    const el = $('rp-data-status');
+    const btn = $('rp-data-refresh');
+    if (!el) return;
+    const s = systemsCache.peek(), p = playersCache.peek();
+    const failed = [s.error && 'systems', p.error && 'players'].filter(Boolean);
+    if (failed.length) {
+        const why = (s.error || p.error).message;
+        el.innerHTML = `<span class="text-red-400"><i class="fa-solid fa-triangle-exclamation"></i> Could not load ${failed.join(' and ')}${esc(why ? ` (${why})` : '')}.</span>`
+            + (s.loaded || p.loaded ? ' <span>Showing the last data loaded.</span>' : '');
+        if (btn) btn.textContent = 'Retry';
+        return;
+    }
+    if (!s.loaded && !p.loaded) {
+        el.textContent = 'Loading systems and players…';
+        if (btn) btn.textContent = 'Refresh data';
+        return;
+    }
+    const sysN = s.data ? s.data.length : 0, plN = p.data ? p.data.length : 0;
+    const age = Math.max(s.ageMs || 0, p.ageMs || 0);
+    el.textContent = `${sysN} systems · ${plN} players in the hub · updated ${ageText(age)}`
+        + (sysN === 0 ? ' — nothing scanned yet? Sync the galaxy, then Refresh.' : '');
+    if (btn) btn.textContent = 'Refresh data';
 }
 
 // ─── WAYPOINT ROWS ────────────────────────────────────────────────────────────
@@ -120,12 +184,17 @@ function wireWaypointRow(row) {
     const input = row.querySelector('.rp-sys-input');
     const hidden = row.querySelector('.rp-sys-id');
     const drop = row.querySelector('.rp-sys-drop');
+    // loadSystems() is async (a first load, or a refresh, may be in flight), so two
+    // keystrokes race: the dropdown must show matches for the LAST text typed.
+    const rowSeq = createSequencer();
 
     input.addEventListener('input', async () => {
         const q = input.value.trim().toLowerCase();
         hidden.value = '';                       // typing invalidates the previous pick
-        if (!q) { drop.classList.add('hidden'); schedulePreview(); return; }
+        if (!q) { rowSeq.cancel(); drop.classList.add('hidden'); schedulePreview(); return; }
+        const token = rowSeq.next();
         const systems = await loadSystems();
+        if (!rowSeq.isCurrent(token)) return;
         const matches = systems.filter(s =>
             (s.name && s.name.toLowerCase().includes(q)) || String(s.id).includes(q)).slice(0, 12);
         if (!matches.length) { drop.classList.add('hidden'); return; }
@@ -186,6 +255,9 @@ function showError(msg) {
 }
 
 async function preview() {
+    // Every preview — including the "incomplete" placeholder — takes the token, so a
+    // response for inputs the member has since changed can never paint the pane.
+    const token = previewSeq.next();
     const payload = currentPayload();
     const incomplete = payload.waypoints.some(w => !w.systemId);
     if (incomplete) {
@@ -202,6 +274,7 @@ async function preview() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
+        if (!previewSeq.isCurrent(token)) return;
         showError('');
         $('rp-total').textContent = d.totalTime;
         $('rp-legs').innerHTML = d.legs.map(renderLeg).join('');
@@ -209,11 +282,18 @@ async function preview() {
             ? `Arrives <span class="text-foreground">${esc(fmtLocal(d.arrivesAt))}</span> local · <span class="font-mono">${esc(fmtUtc(d.arrivesAt))}</span>`
             : 'Set a planned start to get arrival times.';
     } catch (err) {
+        if (!previewSeq.isCurrent(token)) return;
         $('rp-total').textContent = '--:--:--';
         $('rp-legs').innerHTML = '';
         $('rp-arrival').textContent = '';
         showError(err.message);
     }
+}
+
+// Closing the panel: nothing pending may paint it, and the debounced preview is dropped.
+function cancelPendingWork() {
+    clearTimeout(previewTimer);
+    previewSeq.cancel();
 }
 
 function renderLeg(l) {
@@ -380,10 +460,13 @@ async function loadShared() {
 function wirePlayerSearch() {
     const input = $('rp-player-input'), drop = $('rp-player-dropdown');
     if (!input || !drop) return;
+    const playerSeq = createSequencer();
     input.addEventListener('input', async () => {
         const q = input.value.trim().toLowerCase();
-        if (!q) { drop.classList.add('hidden'); return; }
+        if (!q) { playerSeq.cancel(); drop.classList.add('hidden'); return; }
+        const token = playerSeq.next();
         const players = await loadPlayers();
+        if (!playerSeq.isCurrent(token)) return;
         const matches = players.filter(p => p.name && p.name.toLowerCase().includes(q)).slice(0, 12);
         if (!matches.length) { drop.classList.add('hidden'); return; }
         drop.classList.remove('hidden');
@@ -408,8 +491,31 @@ function wirePlayerSearch() {
 }
 
 export async function initRoutePlanner() {
+    const panel = $('route-planner-panel');
     $('close-route-planner-btn')?.addEventListener('click', () => {
-        $('route-planner-panel')?.classList.replace('translate-x-0', 'translate-x-full');
+        cancelPendingWork();
+        panel?.classList.replace('translate-x-0', 'translate-x-full');
+    });
+
+    // archives.js runs this initialiser ONCE and afterwards only toggles the panel's
+    // translate class, so "reopened" has to be observed rather than called. On open the
+    // reference lists are refreshed if their TTL ran out (a reopen within the TTL costs no
+    // request); on close, pending preview work is dropped.
+    if (panel && typeof MutationObserver === 'function') {
+        let wasOpen = panel.classList.contains('translate-x-0');
+        new MutationObserver(() => {
+            const open = panel.classList.contains('translate-x-0');
+            if (open === wasOpen) return;
+            wasOpen = open;
+            if (open) refreshReferenceData();
+            else cancelPendingWork();
+        }).observe(panel, { attributes: true, attributeFilter: ['class'] });
+    }
+
+    $('rp-data-refresh')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try { await refreshReferenceData({ force: true }); } finally { btn.disabled = false; }
     });
 
     try {
@@ -443,4 +549,6 @@ export async function initRoutePlanner() {
     wirePlayerSearch();
     preview();
     loadShared();
+    // One load of both lists per panel open at most — never one per keystroke.
+    refreshReferenceData();
 }

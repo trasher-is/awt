@@ -114,6 +114,31 @@ function getActiveMemberNames() {
     return getActiveMemberNamesStmt.all();
 }
 
+// --- app_users: the account behind a session ---
+
+// Read on EVERY request that carries a logged-in session (src/utils/session-account.js),
+// so it is a primary-key lookup of exactly the columns that decide whether the session is
+// still honest: does the account exist, is it active, has its password been reset since
+// login, and what role does it hold NOW rather than at login.
+const getSessionAccountByIdStmt = db.prepare(`
+    SELECT id, game_name, role, is_active, session_version FROM app_users WHERE id = ?
+`);
+function getSessionAccountById(id) {
+    return getSessionAccountByIdStmt.get(id);
+}
+
+// Invalidates every session this account holds (they all carry the old number). Returns
+// the new version so the caller can keep ITS OWN session alive when someone resets their
+// own password — see the password route in src/routes/admin.js.
+const bumpSessionVersionStmt = db.prepare(`
+    UPDATE app_users SET session_version = COALESCE(session_version, 0) + 1 WHERE id = ?
+    RETURNING session_version
+`);
+function bumpSessionVersion(id) {
+    const row = bumpSessionVersionStmt.get(id);
+    return row ? Number(row.session_version) : null;
+}
+
 // --- app_users: write ---
 
 const updateUserGameNameStmt = db.prepare(`UPDATE app_users SET game_name = ? WHERE id = ?`);
@@ -217,7 +242,7 @@ module.exports = {
     getUserMentionByGameName, getActiveRecipientsExcludingAdmin, getValidActiveUserIds,
     getUserByGameName, getUserAllianceIdBridge, getUserById, getAllUsersWithIdle,
     getUserNameById, getUserDiscordInfoById, getUserActiveStatusById, getAdminPasswordHash,
-    getActiveMemberNames,
+    getActiveMemberNames, getSessionAccountById, bumpSessionVersion,
     updateUserGameName, deleteUser, createUser, updateUserDiscordName, clearUserDiscordFields,
     setUserActive, setUserRole, setUserPasswordHash, updateUserDiscordLink, banUser,
     deleteExpiredLinkCodes, getLinkCodeWithUser, markLinkCodeUsed, mintLinkCode,

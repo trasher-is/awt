@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const db = require('../database');
 const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
+const { HUB_SESSION_COOKIE } = require('../utils/session-account');
 const router = express.Router();
 
 // --- 1. LOGIN SYSTEM ---
@@ -16,20 +17,49 @@ router.post('/login', (req, res) => {
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
     if (user.is_active === 0) return res.status(403).json({ error: 'Account has been deactivated' });
 
-    // Check password
-    if (bcrypt.compareSync(password, user.password_hash)) {
+    // Check password. bcrypt throws on a non-string, which used to surface as a 500.
+    if (typeof password !== 'string' || !bcrypt.compareSync(password, user.password_hash)) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // A NEW session id on every successful login. The id the browser held before this
+    // point was handed out unauthenticated (or belongs to an earlier login), and keeping it
+    // would let anyone who planted or captured it inherit the authenticated session. The
+    // session is persisted before the response goes out, so the page the client loads next
+    // finds it in the store rather than racing the write.
+    req.session.regenerate(err => {
+        if (err) {
+            console.error('[Auth] Could not regenerate the session at login:', err);
+            return res.status(500).json({ error: 'Could not start a session' });
+        }
         req.session.userId = user.id;
         req.session.role = user.role;
         req.session.gameName = user.game_name;
-        return res.json({ success: true, role: user.role });
-    } else {
-        return res.status(401).json({ error: 'Invalid credentials' });
-    }
+        // Compared on every request by src/utils/session-account.js; a password reset
+        // bumps the account's copy and this session stops matching.
+        req.session.sessionVersion = Number(user.session_version || 0);
+        req.session.save(saveErr => {
+            if (saveErr) {
+                console.error('[Auth] Could not persist the session at login:', saveErr);
+                return res.status(500).json({ error: 'Could not start a session' });
+            }
+            res.json({ success: true, role: user.role });
+        });
+    });
 });
 
+// Explicit: the store entry is removed and the cookie cleared before the answer goes
+// out, so "logged out" means it and is not a promise the store may still be keeping.
 router.post('/logout', (req, res) => {
-    req.session.destroy();
-    res.json({ success: true });
+    const finish = () => {
+        res.clearCookie(HUB_SESSION_COOKIE);
+        res.json({ success: true });
+    };
+    if (!req.session) return finish();
+    req.session.destroy(err => {
+        if (err) console.error('[Auth] Could not destroy the session at logout:', err);
+        finish();
+    });
 });
 
 // --- TOOL USER CONTEXT ---
