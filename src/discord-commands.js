@@ -129,7 +129,10 @@ function buildCommands() {
                 .addIntegerOption(o => o.setName('planet').setDescription('Planet index').setRequired(true).setMinValue(1).setMaxValue(12))
                 .addStringOption(o => o.setName('note').setDescription('What to record').setRequired(true)))
             .addSubcommand(s => s.setName('list').setDescription('Notes recorded for a system')
-                .addStringOption(o => systemOption(o))),
+                .addStringOption(o => systemOption(o)))
+            .addSubcommand(s => s.setName('delete').setDescription('Remove a plan (yours, or anyone\'s if you\'re an admin)')
+                .addStringOption(o => systemOption(o))
+                .addIntegerOption(o => o.setName('planet').setDescription('Planet index').setRequired(true).setMinValue(1).setMaxValue(12))),
 
         new SlashCommandBuilder()
             .setName('scan')

@@ -37,6 +37,7 @@ ok('getUserById returns id+game_name+discord fields', users.getUserById(caveman.
 
 const byName = users.getUserByDiscordName('cavemandiscord', '@cavemandiscord');
 ok('getUserByDiscordName matches case-insensitively', byName && byName.id === caveman.id);
+ok('getUserByDiscordName includes role (needed by !plan del\'s author-or-admin check)', byName.role === 'user');
 
 users.clearUserDiscordFields(caveman.id);
 ok('clearUserDiscordFields nulls both fields', users.getUserById(caveman.id).discord_id === null && users.getUserById(caveman.id).discord_name === null);
