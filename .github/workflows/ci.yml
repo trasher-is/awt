@@ -1,0 +1,63 @@
+# Pull-request CI: a clean install on the pinned runtime, then the discovered test suite.
+#
+# What this deliberately is NOT:
+#   - a merge gate that acts on its own. It reports; a human reads the result, reviews the
+#     diff, approves and merges. `main` stays human-gated (AGENTS.md, section 1).
+#   - a consumer of any secret. The tests run against temporary synthetic databases, no
+#     Discord token is set and nothing here talks to the production game.
+#
+# The timezone matrix exists because the test suite once passed only in UTC (issue #131):
+# a UTC-only runner would have kept that hidden. Europe/Warsaw is where the hub is run
+# from; UTC is what most CI boxes default to.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: npm test (Node from .nvmrc, TZ=${{ matrix.tz }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        tz: ['UTC', 'Europe/Warsaw']
+    env:
+      TZ: ${{ matrix.tz }}
+      # Belt and braces: the suites never read these, but an accidental require of
+      # server.js must not find a token or a production URL either.
+      DISCORD_TOKEN: ''
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # One source of truth for the runtime: .nvmrc, mirrored by package.json#engines.
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Show the runtime the lockfile was installed for
+        run: |
+          node --version
+          npm --version
+
+      # `npm ci` installs exactly the lockfile and compiles/downloads the better-sqlite3
+      # binary for THIS Node ABI — the same step an operator runs after a runtime switch
+      # (README, "Switching Node versions").
+      - name: Clean install
+        run: npm ci
+
+      - name: Test
+        run: npm test
