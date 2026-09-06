@@ -70,6 +70,46 @@ if (stated >= worst) {
     failed = true;
 }
 
+// ─── 1b. SURVIVORS vs the game ────────────────────────────────────────────────
+// Was an empty array with zero coverage until 2026-09-06 (see survivors._note). Checks
+// every ship type on both sides plus the defending starbase's surviving CV fraction.
+console.log('\n── Survivors vs in-game observations ' + '─'.repeat(40));
+
+const survCases = fixtures.survivors.cases || [];
+const SURV_GATE = (fixtures.survivors.gate && fixtures.survivors.gate.survivorMaxErrorUnits) || 0.5;
+let survWorst = 0, survWorstId = '';
+for (const c of survCases) {
+    const r = model.simulate({
+        defFleet: c.def.fleet,
+        atkFleet: c.atk.fleet,
+        sbLevel: c.def.starbase || 0,
+        def: toStats(c.def),
+        atk: toStats(c.atk)
+    });
+    if (!r) {
+        console.log(`❌ ${c.id}: the model returned no result for this fixture`);
+        failed = true;
+        continue;
+    }
+    const diffs = [
+        ...c.observedDefSurvivors.map((v, i) => Math.abs(r.survDef[i] - v)),
+        ...c.observedAtkSurvivors.map((v, i) => Math.abs(r.survAtk[i] - v)),
+        Math.abs(r.survSB - (c.observedDefStarbaseSurvivorFrac || 0)),
+    ];
+    const err = Math.max(...diffs);
+    if (err > survWorst) { survWorst = err; survWorstId = c.id; }
+    const flag = err <= SURV_GATE ? '✅' : '❌';
+    if (err > SURV_GATE) failed = true;
+    console.log(`${flag} ${c.id}`);
+    console.log(`     def [${r.survDef.map(n => n.toFixed(2)).join(', ')}] game [${c.observedDefSurvivors.join(', ')}]`);
+    console.log(`     atk [${r.survAtk.map(n => n.toFixed(2)).join(', ')}] game [${c.observedAtkSurvivors.join(', ')}]   err ${err.toFixed(3)}   (${c.desc})`);
+}
+if (survCases.length) {
+    console.log(`\nWorst survivor error: ${survWorst.toFixed(3)} units on "${survWorstId}"  (gate: ${SURV_GATE} units)`);
+} else {
+    console.log('⚠️  no survivor fixtures — see survivors._note');
+}
+
 // ─── 2. STARBASE CV table (exact) ─────────────────────────────────────────────
 console.log('\n── Starbase CV table (exact match required) ' + '─'.repeat(33));
 let sbBad = 0;

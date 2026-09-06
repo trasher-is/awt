@@ -1,12 +1,12 @@
 {
   "_readme": [
     "Ground truth for the battle model. Every entry here is a REAL in-game observation,",
-    "not a model output. Never edit a number in this file to make a test pass — the whole",
+    "not a model output. Never edit a number in this file to make a test pass \u2014 the whole",
     "point is that the model is fitted to these, not the other way round.",
     "",
     "Provenance: the model was recalibrated against 24 in-game samples on 2026-06-27/28",
     "(commits fb2013f, eabbe83, 2758b16, 807eecf, 0910caa, d029342, 50d6c8c, 7853be9,",
-    "7289025, 62232a3, 243bdfe, 2cc1467). The raw samples were never committed — only",
+    "7289025, 62232a3, 243bdfe, 2cc1467). The raw samples were never committed \u2014 only",
     "summary numbers inside the commit messages survived. The entries below are the ones",
     "whose INPUTS are stated unambiguously enough to be replayed. The remaining ~15",
     "samples are unrecoverable: their win percentages are quoted but the fleets and stats",
@@ -16,75 +16,234 @@
     "confidence: 'observed' = the game reported this number for these exact inputs.",
     "Anything less than 'observed' does not belong in this file."
   ],
-
   "gate": {
     "winChanceMaxErrorPp": 1.5,
     "_note": "Worst error across the current fixtures is 0.37 pp (physics diff 10). The gate sits just above that so a real regression fails the build while normal float noise does not. Tighten it as better samples arrive."
   },
-
   "winChance": [
     {
       "id": "phys-diff-4",
       "desc": "1000 destroyers each side, defender 4 physics behind",
-      "source": "commit 243bdfe — 1000-D-vs-1000-D equal-CV sweep, 'diff4=39.8%'",
+      "source": "commit 243bdfe \u2014 1000-D-vs-1000-D equal-CV sweep, 'diff4=39.8%'",
       "confidence": "observed",
-      "def": { "fleet": [1000, 0, 0], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
-      "atk": { "fleet": [1000, 0, 0], "physics": 4, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "def": {
+        "fleet": [
+          1000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          1000,
+          0,
+          0
+        ],
+        "physics": 4,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
       "observedDefenderWinPct": 39.8
     },
     {
       "id": "phys-diff-5",
       "desc": "1000 destroyers each side, defender 5 physics behind",
-      "source": "commit 243bdfe — 'diff5=37.4%'",
+      "source": "commit 243bdfe \u2014 'diff5=37.4%'",
       "confidence": "observed",
-      "def": { "fleet": [1000, 0, 0], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
-      "atk": { "fleet": [1000, 0, 0], "physics": 5, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "def": {
+        "fleet": [
+          1000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          1000,
+          0,
+          0
+        ],
+        "physics": 5,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
       "observedDefenderWinPct": 37.4
     },
     {
       "id": "phys-diff-6-threshold",
-      "desc": "1000 destroyers each side, defender 6 physics behind — the bracket threshold",
-      "source": "commit 243bdfe — 'real jumps to ~5% (diff6)'",
+      "desc": "1000 destroyers each side, defender 6 physics behind \u2014 the bracket threshold",
+      "source": "commit 243bdfe \u2014 'real jumps to ~5% (diff6)'",
       "confidence": "observed",
-      "def": { "fleet": [1000, 0, 0], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
-      "atk": { "fleet": [1000, 0, 0], "physics": 6, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "def": {
+        "fleet": [
+          1000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          1000,
+          0,
+          0
+        ],
+        "physics": 6,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
       "observedDefenderWinPct": 5.0
     },
     {
       "id": "phys-diff-10",
       "desc": "1000 destroyers each side, defender 10 physics behind",
-      "source": "commit 243bdfe — 'keeps dropping (diff10=1.2%)'",
+      "source": "commit 243bdfe \u2014 'keeps dropping (diff10=1.2%)'",
       "confidence": "observed",
-      "def": { "fleet": [1000, 0, 0], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
-      "atk": { "fleet": [1000, 0, 0], "physics": 10, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "def": {
+        "fleet": [
+          1000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          1000,
+          0,
+          0
+        ],
+        "physics": 10,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
       "observedDefenderWinPct": 1.2
     },
     {
       "id": "race-attack-minus4-vs-plus4",
-      "desc": "1000 destroyers each side, race attack -4 against +4 — decisive in-game",
-      "source": "commit 243bdfe — 'a 6+ diff is effectively decisive in-game (-4 vs +4 => ~0%)'",
+      "desc": "1000 destroyers each side, race attack -4 against +4 \u2014 decisive in-game",
+      "source": "commit 243bdfe \u2014 'a 6+ diff is effectively decisive in-game (-4 vs +4 => ~0%)'",
       "confidence": "observed",
-      "def": { "fleet": [1000, 0, 0], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": -4, "raceDefense": 0, "level": 0 },
-      "atk": { "fleet": [1000, 0, 0], "physics": 0, "mathematics": 0, "raceAttack": 4, "raceDefense": 0, "level": 0 },
+      "def": {
+        "fleet": [
+          1000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": -4,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          1000,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 4,
+        "raceDefense": 0,
+        "level": 0
+      },
       "observedDefenderWinPct": 0.0
     },
     {
       "id": "composition-1000d-vs-125c",
       "desc": "1000 destroyers (2000 attack) against 125 cruisers (1000 attack) at equal CV",
-      "source": "commit 7289025 — 'in-game 72.66'; the attack-ratio term exists because of this sample",
+      "source": "commit 7289025 \u2014 'in-game 72.66'; the attack-ratio term exists because of this sample",
       "confidence": "observed",
-      "def": { "fleet": [1000, 0, 0], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
-      "atk": { "fleet": [0, 125, 0], "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
+      "def": {
+        "fleet": [
+          1000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          0,
+          125,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
       "observedDefenderWinPct": 72.66
     },
     {
       "id": "player-level-diff-1",
       "desc": "equal full D/C/B fleets, defender 1 player level behind",
-      "source": "commit 243bdfe — 'player level: 48.2/46.5/32.0% for diff 1/2/11'",
+      "source": "commit 243bdfe \u2014 'player level: 48.2/46.5/32.0% for diff 1/2/11'",
       "confidence": "observed",
-      "_composition_note": "The sample's exact fleet is not recorded, only that both sides were full D/C/B (the level term needs that). With identical fleets the force and attack ratios are both zero, so the answer is the same for any equal full composition that avoids annihilation — 100/100/100 is a representative stand-in, not a guess at the original numbers.",
-      "def": { "fleet": [100, 100, 100], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
-      "atk": { "fleet": [100, 100, 100], "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 1 },
+      "_composition_note": "The sample's exact fleet is not recorded, only that both sides were full D/C/B (the level term needs that). With identical fleets the force and attack ratios are both zero, so the answer is the same for any equal full composition that avoids annihilation \u2014 100/100/100 is a representative stand-in, not a guess at the original numbers.",
+      "def": {
+        "fleet": [
+          100,
+          100,
+          100
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          100,
+          100,
+          100
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 1
+      },
       "observedDefenderWinPct": 48.2
     },
     {
@@ -92,8 +251,31 @@
       "desc": "equal full D/C/B fleets, defender 2 player levels behind",
       "source": "commit 243bdfe",
       "confidence": "observed",
-      "def": { "fleet": [100, 100, 100], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
-      "atk": { "fleet": [100, 100, 100], "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 2 },
+      "def": {
+        "fleet": [
+          100,
+          100,
+          100
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          100,
+          100,
+          100
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 2
+      },
       "observedDefenderWinPct": 46.5
     },
     {
@@ -101,26 +283,530 @@
       "desc": "equal full D/C/B fleets, defender 11 player levels behind",
       "source": "commit 243bdfe",
       "confidence": "observed",
-      "def": { "fleet": [100, 100, 100], "starbase": 0, "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 0 },
-      "atk": { "fleet": [100, 100, 100], "physics": 0, "mathematics": 0, "raceAttack": 0, "raceDefense": 0, "level": 11 },
+      "def": {
+        "fleet": [
+          100,
+          100,
+          100
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          100,
+          100,
+          100
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 11
+      },
       "observedDefenderWinPct": 32.0
+    },
+    {
+      "id": "math-diff-no-winpct-effect",
+      "desc": "1000 destroyers each side, defender 8 mathematics ahead of attacker \u2014 regression guard: mathematics must NOT move win%",
+      "source": "scripts/battle-harvest/results.jsonl, round 1, block 6-math-grid (harvested from the live calculator 2026-09-06)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          1000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 8,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          1000,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 50.0
+    },
+    {
+      "id": "race-defense-diff-no-winpct-effect",
+      "desc": "1000 destroyers each side, defender +3 race defense \u2014 regression guard: race defense must NOT move win% (it only changes survivors)",
+      "source": "scripts/battle-harvest/results.jsonl, round 1, block 8-racedef-1v1 (harvested from the live calculator 2026-09-06)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          1000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 3,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          1000,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 50.0
+    },
+    {
+      "id": "starbase-alone-vs-fleet",
+      "desc": "level-10 starbase alone (CV 227) defending against 100 attacking destroyers (CV 300)",
+      "source": "scripts/battle-harvest/results.jsonl, round 1, block 3-sb-alone (harvested from the live calculator 2026-09-06)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          0,
+          0,
+          0
+        ],
+        "starbase": 10,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          100,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 2.26
+    },
+    {
+      "id": "force-ratio-1.2x-same-type",
+      "desc": "destroyer mirror at a 1.2x CV ratio (6 vs 5) \u2014 inside the smooth zone between 1x parity and the 1.5x certainty threshold",
+      "source": "reverse-engineering session, live-probed against the calculator to map the 1x-1.5x boundary (2026-09-06); reproduced in scripts/battle-harvest/debs_results.jsonl-style probes",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          5,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          6,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 20.0
     }
   ],
-
   "starbaseCv": {
     "_source": "commit db73cd5 ('Confirmed: lvl1=2, 2=5, 3=10, 4=16, 5=26, 6=42, 7=64, 15=1748, 20=13297') and public/js/ui/battle-calc.js ('confirmed: SB10 cv = 227'). These are exact integers read off the game, so the test demands an exact match.",
-    "levels": { "1": 2, "2": 5, "3": 10, "4": 16, "5": 26, "6": 42, "7": 64, "10": 227, "15": 1748, "20": 13297 }
+    "levels": {
+      "1": 2,
+      "2": 5,
+      "3": 10,
+      "4": 16,
+      "5": 26,
+      "6": 42,
+      "7": 64,
+      "10": 227,
+      "15": 1748,
+      "20": 13297
+    }
   },
-
   "survivors": {
-    "_status": "EMPTY — no ground truth.",
+    "_status": "8 cases across mirror/reference/race-defense/mathematics/starbase/annihilation, added 2026-09-06 from the reverse-engineering session's harvested data (scripts/battle-harvest/).",
     "_note": [
-      "Not an oversight. The survivor half of the model (lossFraction = ΣenemyCV / Σ(att+2·def))",
-      "was reverse-engineered from in-game samples in commit fb2013f, but not one of those",
-      "samples was written down. So the numbers the UI and the bot present as survivor counts",
-      "currently have ZERO regression coverage, while the win percentages have nine fixtures.",
-      "This is the single biggest gap in the harness. docs/battle-model.md explains how to fill it."
+      "Was EMPTY until 2026-09-06. The survivor half of the model was reverse-engineered from",
+      "~4200 live-calculator observations across four harvest rounds (see scripts/battle-harvest/",
+      "and docs referenced from results.md at the repo root at the time), not guessed \u2014 these 8",
+      "cases are a representative slice: a no-modifier baseline, the documented 72.66% reference",
+      "fight, race defense bonus/malus, mathematics below and above its +-6 gap bracket, a lone",
+      "starbase, and the loser-of-a-certain-fight annihilation rule.",
+      "Survivor error gate: survivorMaxErrorUnits below. Widen it if a real regression needs it,",
+      "never to make a fixture pass."
     ],
-    "cases": []
+    "cases": [
+      {
+        "id": "baseline-mirror-1000v1000",
+        "desc": "1000 destroyers each side, no modifiers \u2014 the reference 25% mutual-mirror loss",
+        "source": "scripts/battle-harvest/results.jsonl, round 1 (harvested from the live calculator 2026-09-06)",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            1000,
+            0,
+            0
+          ],
+          "starbase": 0,
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "atk": {
+          "fleet": [
+            1000,
+            0,
+            0
+          ],
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "observedDefSurvivors": [
+          250,
+          0,
+          0
+        ],
+        "observedAtkSurvivors": [
+          250,
+          0,
+          0
+        ],
+        "observedDefStarbaseSurvivorFrac": 0
+      },
+      {
+        "id": "reference-8de-vs-1cr",
+        "desc": "8 destroyers vs 1 cruiser at equal CV (24) \u2014 the documented 72.66% reference case, this time checking survivors rather than win%",
+        "source": "scripts/battle-harvest/results.jsonl, round 1; matches the 72.66% figure already cited in the win% history above",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            0,
+            1,
+            0
+          ],
+          "starbase": 0,
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "atk": {
+          "fleet": [
+            8,
+            0,
+            0
+          ],
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "observedDefSurvivors": [
+          0,
+          0.4,
+          0
+        ],
+        "observedAtkSurvivors": [
+          2,
+          0,
+          0
+        ],
+        "observedDefStarbaseSurvivorFrac": 0
+      },
+      {
+        "id": "race-defense-bonus-rd3",
+        "desc": "1000 destroyers each side, defender +3 race defense \u2014 own losses divided by (1 + 0.12*3)",
+        "source": "scripts/battle-harvest/results.jsonl, round 1, block 8-racedef-1v1",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            1000,
+            0,
+            0
+          ],
+          "starbase": 0,
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 3,
+          "level": 0
+        },
+        "atk": {
+          "fleet": [
+            1000,
+            0,
+            0
+          ],
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "observedDefSurvivors": [
+          448.53,
+          0,
+          0
+        ],
+        "observedAtkSurvivors": [
+          250,
+          0,
+          0
+        ],
+        "observedDefStarbaseSurvivorFrac": 0
+      },
+      {
+        "id": "race-defense-malus-near-floor",
+        "desc": "1000 destroyers each side, defender -2 race defense \u2014 own losses divided by (1 - 0.12*2), well below the 1-survivor floor but not yet clipped by it",
+        "source": "scripts/battle-harvest/results.jsonl, round 1, block 8-racedef-1v1",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            1000,
+            0,
+            0
+          ],
+          "starbase": 0,
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": -2,
+          "level": 0
+        },
+        "atk": {
+          "fleet": [
+            1000,
+            0,
+            0
+          ],
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "observedDefSurvivors": [
+          13.16,
+          0,
+          0
+        ],
+        "observedAtkSurvivors": [
+          250,
+          0,
+          0
+        ],
+        "observedDefStarbaseSurvivorFrac": 0
+      },
+      {
+        "id": "math-below-bracket",
+        "desc": "1000 destroyers each side, attacker 4 mathematics ahead (own absolute level, below the +-6 gap bracket)",
+        "source": "scripts/battle-harvest/results.jsonl, round 1, block 6-math-grid",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            1000,
+            0,
+            0
+          ],
+          "starbase": 0,
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "atk": {
+          "fleet": [
+            1000,
+            0,
+            0
+          ],
+          "physics": 0,
+          "mathematics": 4,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "observedDefSurvivors": [
+          250,
+          0,
+          0
+        ],
+        "observedAtkSurvivors": [
+          254.47,
+          0,
+          0
+        ],
+        "observedDefStarbaseSurvivorFrac": 0
+      },
+      {
+        "id": "math-bracket-bonus",
+        "desc": "1000 destroyers each side, attacker 8 mathematics ahead of defender \u2014 past the +-6 gap bracket, +25% toughness on top of the absolute-level slope",
+        "source": "scripts/battle-harvest/results.jsonl, round 1, block 6-math-grid; this same case caught the original 'is it a gap or an absolute level' confusion resolved in round 3",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            1000,
+            0,
+            0
+          ],
+          "starbase": 0,
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "atk": {
+          "fleet": [
+            1000,
+            0,
+            0
+          ],
+          "physics": 0,
+          "mathematics": 8,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "observedDefSurvivors": [
+          1,
+          0,
+          0
+        ],
+        "observedAtkSurvivors": [
+          407.11,
+          0,
+          0
+        ],
+        "observedDefStarbaseSurvivorFrac": 0
+      },
+      {
+        "id": "starbase-alone-survival",
+        "desc": "level-11 starbase alone (CV 342) defending against 100 attacking destroyers (CV 300) -- the defending starbase survives a fraction of its CV. NOTE: the live calculator's own on-screen 'Starbase' row for this field shows 8.85, which is NOT this fraction (0.4152) nor CV directly (142) -- it is that same 142 remaining CV re-expressed as a fractional 'effective level' by linearly interpolating between the two integer starbase levels whose table CV brackets it (level 8 = 99 CV, level 9 = 150 CV -> 8 + (142-99)/(150-99) = 8.84, matching the displayed 8.85 to within rounding). The 0.4152 checked here is the actual CV fraction the model computes; converting it to that display format is a UI concern, not a model one.",
+        "source": "scripts/battle-harvest/results.jsonl, round 1, block 3-sb-alone; same case as the win% fixture above",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            0,
+            0,
+            0
+          ],
+          "starbase": 11,
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "atk": {
+          "fleet": [
+            100,
+            0,
+            0
+          ],
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "observedDefSurvivors": [
+          0,
+          0,
+          0
+        ],
+        "observedAtkSurvivors": [
+          14.5,
+          0,
+          0
+        ],
+        "observedDefStarbaseSurvivorFrac": 0.4152
+      },
+      {
+        "id": "annihilated-loser-of-certain-fight",
+        "desc": "2 attacking destroyers vs 1 defending destroyer \u2014 a deterministic (100/0) same-type fight; the loser is wiped to exactly 0, not the partial loss the CV-ratio formula alone would give",
+        "source": "scripts/battle-harvest/results.jsonl, round 1, block 1-devde",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            1,
+            0,
+            0
+          ],
+          "starbase": 0,
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "atk": {
+          "fleet": [
+            2,
+            0,
+            0
+          ],
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "observedDefSurvivors": [
+          0,
+          0,
+          0
+        ],
+        "observedAtkSurvivors": [
+          1.25,
+          0,
+          0
+        ],
+        "observedDefStarbaseSurvivorFrac": 0
+      }
+    ],
+    "gate": {
+      "survivorMaxErrorUnits": 0.5,
+      "_note": "Worst error across these 8 cases should be near-exact (<0.01) since they come directly from the same data the formula was fit to; 0.5 leaves headroom for float noise without hiding a real regression."
+    }
   }
 }
