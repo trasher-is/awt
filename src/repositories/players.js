@@ -10,14 +10,23 @@ const db = require('../database');
 // idle_time, a timestamp can be turned into an ALWAYS-CURRENT "idle for Xh Ym" at render
 // time, rather than staying frozen at whatever it read when scraped. The client prefers
 // last_activity_at when present, falling back to idle_time only when it's null.
+//
+// Every column the War Room can show (issue #113) is selected here; the panel decides what
+// is visible. Public-profile fields (level, points, ranking, joined, battles...) are shown
+// as-is; deep-scan fields stay behind has_intel / stats_scraped_at on the client, so a
+// never-scanned player reads "?" rather than a zero dressed up as a fact.
 const getWarRoomPlayersStmt = db.prepare(`
     SELECT p.id, p.name, p.economy, p.social, p.physics, p.mathematics, p.energy, p.biology, p.idle_time,
            p.last_activity_at,
            p.race_attack, p.race_defense, p.race_speed, p.race_production, p.race_science,
-           p.updated_at as player_scan_time, p.intel_updated_at,
+           p.race_growth, p.race_culture, p.race_trader, p.race_sul,
+           p.updated_at as player_scan_time, p.intel_updated_at, p.stats_scraped_at,
            p.total_population, p.total_factories, p.total_farms, p.total_cybernetics, p.total_labs,
            p.trade_revenue, p.artefact,
-           p.level, p.culture_level, p.has_intel,
+           p.level, p.culture_level, p.science_level, p.points, p.ranking, p.has_intel,
+           p.cv_used, p.cv_limit,
+           p.science_rate, p.culture_rate, p.production_rate, p.astro_dollars, p.production_points,
+           p.eco_bonus, p.number_of_battles, p.battle_luckiness, p.country, p.joined, p.logins, p.last_login_at,
            a.tag as alliance_tag,
            (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as total_planets
     FROM players p

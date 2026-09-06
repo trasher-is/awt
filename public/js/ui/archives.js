@@ -1,6 +1,10 @@
 // public/js/ui/archives.js
 import { esc } from '../utils/escape.js';
 import { navToIframe } from './search.js';
+// The three player-stats tables (players archive, war room, alliance stats) are column-
+// driven: header, rows, sort and the column picker all come from one definition per column.
+import { STAT_TABLES, renderHeaderCells, renderRowCells, sortRows, enrichWarRoomRow, parseSqliteUtc } from './stat-columns.js';
+import { mountColumnPicker } from './column-picker.js';
 import '../utils/battle-model.js';   // side-effect import: cvOf, so CV is defined once
 import '../utils/parse-number.js';   // side-effect import: locale-aware sorting
 import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
@@ -8,14 +12,44 @@ import '../utils/game-rate-limit.js';
 const { gameFetch } = globalThis.AWGameRate;
 
 const { cvOf } = globalThis.AWBattleModel;
-const { compareNumeric } = globalThis.AWNumber;
 const { formatSqliteUtc } = globalThis.AWSqliteTime;
 
-let rawDbPlayers = [], dbSortCol = 'points', dbSortAsc = false;
+let rawDbPlayers = [];
+const playerSort = { col: 'points', asc: false };
 let rawDbSystems = [], sysDbSortCol = 'id', sysDbSortAsc = true;
 let rawDbPlanets = [], plnDbSortCol = 'system_id', plnDbSortAsc = true;
 let rawDbFleets = [], fltDbSortCol = 'cv', fltDbSortAsc = false;
-let rawDbAllyStats = [], allyStatsSortCol = 'player_id', allyStatsSortAsc = true;
+let rawDbAllyStats = [];
+const allySort = { col: 'player_id', asc: true };
+
+function toggleSort(state, key, defaultAsc) {
+    if (state.col === key) state.asc = !state.asc;
+    else { state.col = key; state.asc = defaultAsc; }
+}
+
+// Wire a column-driven table: paint the header from the definitions, sort on header click,
+// mount the column picker. `render` repaints the body from the current sort state.
+function wireStatTable({ panel, table, headRowId, pickerMountId, tableId, tableKey, sortState, defaultAsc, render }) {
+    const headRow = panel.querySelector(`#${headRowId}`);
+    const paintHead = () => {
+        if (headRow) headRow.innerHTML = renderHeaderCells(table.columns, { sortCol: sortState.col, sortAsc: sortState.asc, headBase: table.headBase });
+    };
+    headRow?.addEventListener('click', e => {
+        const th = e.target.closest('th[data-col]');
+        if (!th) return;
+        const column = table.columns.find(c => c.key === th.dataset.col);
+        if (!column) return;
+        toggleSort(sortState, column.key, defaultAsc(column));
+        paintHead();
+        render();
+    });
+    paintHead();
+    mountColumnPicker({ mountEl: panel.querySelector(`#${pickerMountId}`), tableId, tableKey, columns: table.columns });
+    return paintHead;
+}
+
+const rowsHtml = (table, rows, rowCls) =>
+    rows.map(r => `<tr class="${rowCls}">${renderRowCells(table.columns, r, table.cellBase)}</tr>`).join('');
 
 function closeOtherPanels(exceptId) {
     ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'battle-calc-panel', 'travel-calc-panel', 'route-planner-panel', 'galaxy-map-panel', 'build-order-panel', 'battle-reports-panel'].forEach(id => {
@@ -31,11 +65,11 @@ function convertLegacyClickAttributes(panel, panelContextType) {
             const columnField = match[1];
             th.removeAttribute('onclick'); 
             th.addEventListener('click', () => {
-                if (panelContextType === 'player') { if (dbSortCol === columnField) dbSortAsc = !dbSortAsc; else { dbSortCol = columnField; dbSortAsc = false; } renderPlayerTable(); }
+                if (panelContextType === 'player') { toggleSort(playerSort, columnField, false); renderPlayerTable(); }
                 if (panelContextType === 'system') { if (sysDbSortCol === columnField) sysDbSortAsc = !sysDbSortAsc; else { sysDbSortCol = columnField; sysDbSortAsc = true; } renderSystemTable(); }
                 if (panelContextType === 'planet') { if (plnDbSortCol === columnField) plnDbSortAsc = !plnDbSortAsc; else { plnDbSortCol = columnField; plnDbSortAsc = true; } renderPlanetTable(); }
                 if (panelContextType === 'fleet') { if (fltDbSortCol === columnField) fltDbSortAsc = !fltDbSortAsc; else { fltDbSortCol = columnField; fltDbSortAsc = false; } renderFleetTable(); }
-                if (panelContextType === 'ally') { if (allyStatsSortCol === columnField) allyStatsSortAsc = !allyStatsSortAsc; else { allyStatsSortCol = columnField; allyStatsSortAsc = true; } renderAllyStatsTable(); }
+                if (panelContextType === 'ally') { toggleSort(allySort, columnField, true); renderAllyStatsTable(); }
             });
         }
     });
@@ -53,6 +87,8 @@ export async function openDatabasePanel() {
         document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
         panel = document.getElementById('database-panel');
         convertLegacyClickAttributes(panel, 'player');
+        // A new column always sorts descending first, as this table has always done.
+        wireStatTable({ panel, table: STAT_TABLES.players, headRowId: 'players-db-head-row', pickerMountId: 'players-db-columns', tableId: 'playersDbTable', tableKey: 'players', sortState: playerSort, defaultAsc: () => false, render: renderPlayerTable });
         panel.querySelector('#db-search-input')?.addEventListener('input', renderPlayerTable);
     }
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
@@ -60,12 +96,12 @@ export async function openDatabasePanel() {
     panel.classList.replace('translate-x-full', 'translate-x-0');
     if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
 
-    document.getElementById('db-table-body').innerHTML = '<tr><td colspan="26" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Intelligence...</td></tr>';
+    document.getElementById('db-table-body').innerHTML = '<tr><td colspan="99" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Intelligence...</td></tr>';
     try {
         const res = await fetch('/hub-api/intel/players');
         const data = await res.json();
         if (data.success) { rawDbPlayers = data.players; renderPlayerTable(); }
-    } catch (err) { document.getElementById('db-table-body').innerHTML = '<tr><td colspan="26" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
+    } catch (err) { document.getElementById('db-table-body').innerHTML = '<tr><td colspan="99" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
 }
 
 export async function openSystemDatabasePanel() {
@@ -136,8 +172,7 @@ export async function openFleetDatabasePanel() {
 
 // --- WAR ROOM (ENEMY INTEL) LOGIKA ---
 let warRoomData = [];
-let warRoomSortCol = '';
-let warRoomSortAsc = false;
+const warRoomSort = { col: null, asc: false };   // null = the order the server returned
 let selectedAllianceId = null;
 
 export async function openEnemyIntelPanel() {
@@ -153,13 +188,8 @@ export async function openEnemyIntelPanel() {
 
         panel.querySelector('#btn-refresh-enemy-intel')?.addEventListener('click', refreshActiveWarAlliance);
 
-        panel.querySelectorAll('th[data-sort-col]').forEach(th => {
-            th.addEventListener('click', (e) => {
-                const col = e.currentTarget.getAttribute('data-sort-col');
-                const type = e.currentTarget.getAttribute('data-sort-type');
-                sortWarRoom(col, type);
-            });
-        });
+        // Text columns sort A-Z first, numbers largest-first — as this table always has.
+        wireStatTable({ panel, table: STAT_TABLES.warRoom, headRowId: 'war-room-head-row', pickerMountId: 'war-room-columns', tableId: 'warIntelTable', tableKey: 'warRoom', sortState: warRoomSort, defaultAsc: c => c.sort === 'string', render: renderWarRoomTable });
     }
 
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
@@ -170,64 +200,8 @@ export async function openEnemyIntelPanel() {
     loadWarRoomAlliancesList();
 }
 
-// SQLite CURRENT_TIMESTAMP returns 'YYYY-MM-DD HH:MM:SS' in UTC with no zone marker.
-// new Date() would read that as local time, so we explicitly tag it as UTC before parsing.
-function parseSqliteUtc(ts) {
-    if (!ts) return null;
-    const d = new Date(ts.replace(' ', 'T') + 'Z');
-    return isNaN(d.getTime()) ? null : d;
-}
-
-function parseIdleStringToSeconds(idleStr) {
-    if (!idleStr || idleStr === 'Unknown') return -1;
-    if (/active|online/i.test(idleStr)) return 0;
-    
-    let secs = 0;
-    const d = idleStr.match(/(\d+)\s*d/);
-    const h = idleStr.match(/(\d+)\s*h/);
-    const m = idleStr.match(/(\d+)\s*m/);
-    const s = idleStr.match(/(\d+)\s*s/);
-    
-    if (!d && !h && !m && !s) return -1;
-    if (d) secs += parseInt(d[1]) * 86400;
-    if (h) secs += parseInt(h[1]) * 3600;
-    if (m) secs += parseInt(m[1]) * 60;
-    if (s) secs += parseInt(s[1]);
-    return secs;
-}
-
-// Idle display, preferring a real timestamp (last_activity_at, from the API's background
-// detail sweep — near-total roster coverage) over the DOM-scrape-only idle_time string
-// (about half the roster, and frozen at whatever moment it was last scraped, so it only
-// gets MORE wrong the longer it's been since). last_activity_at is raw ISO8601 with its own
-// offset (e.g. "...T...+02:00"), NOT SQLite's space-separated format — parseSqliteUtc above
-// assumes the latter and would silently fail on it, so this reads it directly instead.
-function computeIdleDisplay(p) {
-    if (p.last_activity_at) {
-        const d = new Date(p.last_activity_at);
-        if (!isNaN(d.getTime())) {
-            const secs = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
-            return { secs, text: formatIdleSeconds(secs) };
-        }
-    }
-    if (p.idle_time) return { secs: parseIdleStringToSeconds(p.idle_time), text: p.idle_time };
-    return { secs: -1, text: 'Unknown' };
-}
-function formatIdleSeconds(secs) {
-    if (secs < 60) return 'active';
-    const days = Math.floor(secs / 86400);
-    const hours = Math.floor((secs % 86400) / 3600);
-    const mins = Math.floor((secs % 3600) / 60);
-    if (days > 0) return `${days}d ${hours}h`;
-    if (hours > 0) return `${hours}h ${mins}m`;
-    return `${mins}m`;
-}
-
-function formatRaceModifier(val, isMasked) {
-    if (isMasked) return '<span class="text-zinc-600">?</span>';
-    if (val === null || val === undefined) return '<span class="text-zinc-500">-</span>';
-    return val > 0 ? `<span class="text-emerald-500 font-bold">+${val}</span>` : val < 0 ? `<span class="text-rose-500 font-bold">${val}</span>` : `<span class="text-zinc-400">${val}</span>`;
-}
+// parseSqliteUtc, the idle helpers and formatRaceModifier moved to stat-columns.js, where
+// the column definitions that use them live.
 
 async function loadWarRoomAlliancesList() {
     try {
@@ -251,7 +225,7 @@ async function loadWarRoomAlliancesList() {
                 : 'bg-zinc-900 text-zinc-300 border-border hover:bg-zinc-800 hover:text-white'
             }`;
             btn.addEventListener('click', () => selectWarRoomAlliance(a.id, a.tag, a.last_scan_time));
-            btn.innerHTML = `<span>[${esc(a.tag)}]</span><span class="px-1 py-0.25 bg-black/40 rounded text-[10px] text-muted-foreground border border-white/5">${a.active_members_count}</span>`;
+            btn.innerHTML = `<span>[${esc(a.tag)}]</span><span class="px-1 py-0.25 bg-black/40 rounded text-[10px] md:text-xs text-muted-foreground border border-white/5">${a.active_members_count}</span>`;
             pillsBox.appendChild(btn);
         });
     } catch (err) {}
@@ -272,157 +246,35 @@ function selectWarRoomAlliance(allianceId, tag, lastScanTime) {
     loadWarRoomAlliancesList();
 }
 
-// Production bonus from a player's artifact. Only Cathedral (CD), Major (MJ) and
-// Horizon (HOR) artifacts at levels 1-3 boost production: +10% / +20% / +30%.
-// Anything else (incl. "N/A" or empty) is neutral (1x).
-function artifactProdMultiplier(artefact) {
-    if (!artefact) return 1;
-    const m = String(artefact).toUpperCase().match(/(CD|MJ|HOR)\s*([123])/);
-    if (!m) return 1;
-    return 1 + parseInt(m[2], 10) * 0.10;
-}
-
 async function loadWarRoomMatrixData() {
     if (!selectedAllianceId) return;
     const tbody = document.getElementById('enemy-intel-table-body');
-    tbody.innerHTML = `<tr><td colspan="16" class="text-center py-6 font-mono text-zinc-400"><i class="fa-solid fa-spinner fa-spin me-2 text-red-500"></i> Decrypting intelligence matrices from DB indexes...</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="99" class="text-center py-6 font-mono text-zinc-400"><i class="fa-solid fa-spinner fa-spin me-2 text-red-500"></i> Decrypting intelligence matrices from DB indexes...</td></tr>`;
 
     try {
         const res = await fetch(`/hub-api/intel/war-room/players?alliance_id=${selectedAllianceId}`);
         const data = await res.json();
         if (!data.success) throw new Error(data.error);
 
-        warRoomData = data.players.map(p => {
-            const factories = p.total_factories || 0;
-            const pop = p.total_population || 0;
-            const eco = p.economy || 0;
-            const social = p.social || 0;
-
-            // ~Prod/h = (factories + population) base, scaled by race production trait,
-            // trade revenue %, and a qualifying production artifact.
-            //   race_production: -4..+4, each step = 4%  ->  1 + race_production*0.04
-            //   trade_revenue:   stored as % (e.g. 49 = +49%)  ->  1 + tr/100
-            //   artifact:        CD/MJ/HOR lvl 1/2/3 = +10/20/30%
-            const base = factories + pop;
-            const raceMult = 1 + (p.race_production || 0) * 0.04;
-            const trMult = 1 + (p.trade_revenue || 0) / 100;
-            const estimatedProd = base * raceMult * trMult * artifactProdMultiplier(p.artefact);
-            const dailyPP = estimatedProd * 24;
-            // A destroyer is 3 CV. The game's economy table (docs/game-rules.md) ends at
-            // economy 97 = 1 PP and levels 98-100 stay there, so clamp at 1: the bare
-            // subtraction hit zero at economy 100 and the guard below then reported 0 CV/day
-            // for the strongest economies in the game.
-            const costFor3CV = Math.max(1, 30 - Math.floor(eco * 0.3));
-            const cvDay = Math.floor((dailyPP / costFor3CV) * 3);
-            // MaxCombatValue = Σpopulation × (social + 3) × 11. The factor is 11, not 10.
-            const maxCv = pop * (social + 3) * 11;
-            const idle = computeIdleDisplay(p);
-
-            // ~Science/h = (labs + population) base, scaled by the race science trait
-            // and trade revenue %, mirroring the production formula.
-            //   race_science: -4..+4, each step = 8%  ->  1 + race_science*0.08
-            //   trade_revenue: stored as % (e.g. 49 = +49%)  ->  1 + tr/100
-            // The science trait is 8% per point, NOT the 4% that production uses — this
-            // column copied production's rate for months and understated a +4 science race
-            // by 16%. Confirmed against the build-order simulator's mechanics 2026-08-07.
-            const labs = p.total_labs || 0;
-            const sciBase = labs + pop;
-            const sciMult = 1 + (p.race_science || 0) * 0.08;
-            const estimatedScience = sciBase * sciMult * trMult;
-
-            return { ...p, calculated_prod: estimatedProd, calculated_science: estimatedScience, cv_day: cvDay, max_cv: maxCv, idle_seconds: idle.secs, idle_display: idle.text };
-        });
-
-        if (warRoomSortCol) executeWarRoomSortingRoutine();
-        else renderWarRoomTable(warRoomData);
+        // ~Prod/h, ~CV/Day, Max CV, ~Sci/h and the idle reading are derived in
+        // stat-columns.js (enrichWarRoomRow), next to the columns that display them.
+        warRoomData = data.players.map(p => enrichWarRoomRow(p));
+        renderWarRoomTable();
     } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="17" class="text-center py-6 text-red-500 font-bold">API Sync Failure Exception Event: ${esc(err.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="99" class="text-center py-6 text-red-500 font-bold">API Sync Failure Exception Event: ${esc(err.message)}</td></tr>`;
     }
 }
 
-function renderWarRoomTable(data) {
+function renderWarRoomTable() {
     const tbody = document.getElementById('enemy-intel-table-body');
-    tbody.innerHTML = '';
-
-    if(data.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="17" class="text-center py-6 text-zinc-500">No scanned player rows mapped to this target index loop</td></tr>`;
+    if (!tbody) return;
+    if (warRoomData.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="99" class="text-center py-6 text-zinc-500">No scanned player rows mapped to this target index loop</td></tr>`;
         return;
     }
-
-    data.forEach(p => {
-        // Changed from !p.economy to !p.has_intel check
-        const isUnknown = !p.has_intel;
-        let idleStyle = "color: #a1a1aa;"; 
-        if (p.idle_seconds >= 0) {
-            const idleMins = p.idle_seconds / 60;
-            const cappedMins = Math.min(idleMins, 360); 
-            const hue = 120 - (cappedMins / 360) * 120;
-            idleStyle = `background-color: hsla(${hue}, 75%, 12%, 0.45); color: hsl(${hue}, 90%, 65%); border: 1px solid hsla(${hue}, 75%, 25%, 0.3);`;
-        }
-
-        const q = '<span class="text-zinc-600 font-bold">?</span>';
-
-        // Planets vs culture level. culture_level is parsed/stored for every player
-        // regardless of intel, so it's always shown (not masked). Planets below the
-        // culture level means the player can build more planets -> flag it red.
-        const planets = p.total_planets || 0;
-        const culture = p.culture_level || 0;
-        const planetsBelow = culture > 0 && planets < culture;
-        const planetsCls = planetsBelow ? 'text-rose-500 font-bold' : 'text-zinc-400 font-bold';
-        const planetsCell = `<span title="Culture level: ${culture}">${planets} / ${culture || '?'}</span>`;
-
-        // Last intel timestamp (UTC in DB -> browser-local display).
-        const intelDate = parseSqliteUtc(p.intel_updated_at);
-        const lastIntel = intelDate
-            ? `<span title="${intelDate.toLocaleString()}">${intelDate.toLocaleDateString()}</span>`
-            : '<span class="text-zinc-600">never</span>';
-
-        const tr = document.createElement('tr');
-        tr.className = "hover:bg-zinc-900/40 transition-colors border-b border-zinc-900/60";
-        tr.innerHTML = `
-            <td class="sticky left-0 z-10 bg-black px-2 py-1 font-bold text-foreground break-words leading-tight w-[110px] border-r border-zinc-800"><a href="/Game/Players/Profile/${p.id}" target="_blank" class="hover:underline hover:text-red-400">${esc(p.name)}</a></td>
-            <td class="px-2 py-1"><span class="px-1.5 py-0.5 rounded text-[11px] font-mono tracking-wide whitespace-nowrap" style="${idleStyle}">${esc(p.idle_display)}</span></td>
-            <td class="px-2 py-1 text-right ${planetsCls}">${planetsCell}</td>
-            <td class="px-2 py-1 text-right text-emerald-400 font-bold">${Math.round(p.calculated_prod).toLocaleString()}</td>
-            <td class="px-2 py-1 text-right text-teal-300">${isUnknown ? q : (p.trade_revenue || 0) + '%'}</td>
-            <td class="px-2 py-1 text-right text-amber-400 font-bold">${isUnknown ? q : p.cv_day.toLocaleString()}</td>
-            <td class="px-2 py-1 text-right text-cyan-400">${isUnknown ? q : p.max_cv.toLocaleString()}</td>
-            <td class="px-2 py-1 text-right">${formatRaceModifier(p.race_speed, isUnknown)}</td>
-            <td class="px-2 py-1 text-right">${formatRaceModifier(p.race_attack, isUnknown)}</td>
-            <td class="px-2 py-1 text-right">${formatWarRoomModifier(p.race_defense, isUnknown)}</td>
-            <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : (p.physics || 0)}</td>
-            <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : (p.mathematics || 0)}</td>
-            <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : (p.energy || 0)}</td>
-            <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : (p.biology || 0)}</td>
-            <td class="px-2 py-1 text-right text-zinc-300">${isUnknown ? q : (p.social || 0)}</td>
-            <td class="px-2 py-1 text-right text-violet-400 font-bold">${Math.round(p.calculated_science).toLocaleString()}</td>
-            <td class="px-2 py-1 text-right text-zinc-400">${lastIntel}</td>
-        `;
-        tbody.appendChild(tr);
-    });
-}
-
-function formatWarRoomModifier(val, isMasked) {
-     return formatRaceModifier(val, isMasked);
-}
-
-function sortWarRoom(colKey, type) {
-    if (warRoomSortCol === colKey) warRoomSortAsc = !warRoomSortAsc;
-    else { warRoomSortCol = colKey; warRoomSortAsc = (type === 'string'); }
-    executeWarRoomSortingRoutine();
-}
-
-function executeWarRoomSortingRoutine() {
-    warRoomData.sort((a, b) => {
-        let valA = a[warRoomSortCol]; let valB = b[warRoomSortCol];
-        if (typeof valA === 'string') { valA = valA ? valA.toLowerCase() : ''; valB = valB ? valB.toLowerCase() : ''; } 
-        else { valA = valA === null || valA === undefined ? (warRoomSortAsc ? 99999999 : -99999999) : valA; valB = valB === null || valB === undefined ? (warRoomSortAsc ? 99999999 : -99999999) : valB; }
-
-        if (valA < valB) return warRoomSortAsc ? -1 : 1;
-        if (valA > valB) return warRoomSortAsc ? 1 : -1;
-        return 0;
-    });
-    renderWarRoomTable(warRoomData);
+    const table = STAT_TABLES.warRoom;
+    const rows = warRoomSort.col ? sortRows(warRoomData, table.columns, warRoomSort.col, warRoomSort.asc) : warRoomData;
+    tbody.innerHTML = rowsHtml(table, rows, 'hover:bg-zinc-900/40 transition-colors border-b border-zinc-900/60');
 }
 
 // UPDATED: Live re-filtering of enemy alliance members from the game page
@@ -492,7 +344,9 @@ export async function openAllianceStatsPanel() {
         document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
         panel = document.getElementById('alliance-stats-panel');
         convertLegacyClickAttributes(panel, 'ally');
-        
+        // A new column always sorts ascending first, as this table has always done.
+        wireStatTable({ panel, table: STAT_TABLES.allyStats, headRowId: 'ally-stats-head-row', pickerMountId: 'ally-stats-columns', tableId: 'allyStatsTable', tableKey: 'allyStats', sortState: allySort, defaultAsc: () => true, render: renderAllyStatsTable });
+
         const updateBtn = document.getElementById('btn-update-alliance-stats');
         if (updateBtn) {
             updateBtn.removeAttribute('onclick');
@@ -503,8 +357,8 @@ export async function openAllianceStatsPanel() {
     closeOtherPanels('alliance-stats-panel');
     panel.classList.replace('translate-x-full', 'translate-x-0');
     if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
-    
-    document.getElementById('ally-stats-table-body').innerHTML = '<tr><td colspan="17" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Reading Alliance Records...</td></tr>';
+
+    document.getElementById('ally-stats-table-body').innerHTML = '<tr><td colspan="99" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Reading Alliance Records...</td></tr>';
     await refreshAllianceStatsData();
 }
 
@@ -694,72 +548,17 @@ export async function triggerAllianceStatsUpdate() {
     }
 }
 
-// Parse a DB timestamp that may be ISO ("2026-06-22T10:00:00.000Z") or a sqlite
-// "YYYY-MM-DD HH:MM:SS" (UTC, no zone) into a localized short string.
-function fmtIntelDate(val) {
-    if (!val) return '-';
-    let d = new Date(val);
-    if (isNaN(d) && typeof val === 'string') d = new Date(val.replace(' ', 'T') + 'Z');
-    if (isNaN(d)) return '-';
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
-           d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-// True if the intel timestamp is parseable and older than 24h (used to grey stale sciences).
-function isIntelStale(val) {
-    if (!val) return false;
-    let d = new Date(val);
-    if (isNaN(d) && typeof val === 'string') d = new Date(val.replace(' ', 'T') + 'Z');
-    if (isNaN(d)) return false;
-    return (Date.now() - d.getTime()) > 24 * 3600 * 1000;
-}
-
+// Column definitions, gating ("?" until intel is captured) and the stale-science greying
+// live in stat-columns.js (PLAYER_COLUMNS); this only filters, sorts and paints.
 function renderPlayerTable() {
     const input = document.getElementById('db-search-input');
     const q = (input ? input.value : '').toLowerCase();
-    let f = rawDbPlayers.filter(p => (p.name && p.name.toLowerCase().includes(q)) || (p.id && p.id.toString().includes(q)) || (p.alliance_tag && p.alliance_tag.toLowerCase().includes(q)));
-    f.sort((a, b) => { let v1 = a[dbSortCol]||0, v2 = b[dbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (dbSortAsc?-1:1) : (v1>v2 ? (dbSortAsc?1:-1) : 0); });
-    const countEl = document.getElementById('db-result-count'); if (countEl) countEl.innerText = f.length;
+    const f = rawDbPlayers.filter(p => (p.name && p.name.toLowerCase().includes(q)) || (p.id && p.id.toString().includes(q)) || (p.alliance_tag && p.alliance_tag.toLowerCase().includes(q)));
+    const table = STAT_TABLES.players;
+    const sorted = sortRows(f, table.columns, playerSort.col, playerSort.asc);
+    const countEl = document.getElementById('db-result-count'); if (countEl) countEl.innerText = sorted.length;
     const tbody = document.getElementById('db-table-body'); if (!tbody) return;
-
-    const q0 = '<span class="text-zinc-600">?</span>';   // intel-gated unknown
-    tbody.innerHTML = f.map(p => {
-        const intel = !!p.has_intel;
-        // Public columns are always shown; deep-scan columns show "?" until intel is captured.
-        const gated = (val, fmt) => intel ? (fmt ? fmt(val) : (val ?? 0)) : q0;
-        // Sciences go grey once the captured intel is older than 24h.
-        const stale = isIntelStale(p.intel_updated_at);
-        const sci = (color) => stale ? 'text-zinc-500' : color;
-        return `
-        <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3 font-medium text-foreground sticky left-0 z-10 bg-card"><a href="/Game/Players/Profile/${p.id}" target="_blank" class="hover:underline hover:text-primary">${esc(p.name || 'Unknown')}</a></td>
-            <td class="p-3 text-aw-warning">${p.alliance_tag ? `[${esc(p.alliance_tag)}]` : '-'}</td>
-            <td class="p-3">${p.level || 0}</td>
-            <td class="p-3 text-blue-300">${p.science_level || 0}</td>
-            <td class="p-3 text-purple-300">${p.culture_level || 0}</td>
-            <td class="p-3 text-primary font-medium">${(p.points || 0).toLocaleString()}</td>
-            <td class="p-3 border-l border-border">${p.planet_count || 0}</td>
-            <td class="p-3 text-primary">${(p.total_population || 0).toLocaleString()}</td>
-            <td class="p-3 whitespace-nowrap">${intel ? `${(p.cv_used || 0).toLocaleString()}/${(p.cv_limit || 0).toLocaleString()}` : q0}</td>
-            <td class="p-3 border-l border-border">${formatRaceModifier(p.race_growth, !intel)}</td>
-            <td class="p-3">${formatRaceModifier(p.race_science, !intel)}</td>
-            <td class="p-3">${formatRaceModifier(p.race_culture, !intel)}</td>
-            <td class="p-3">${formatRaceModifier(p.race_production, !intel)}</td>
-            <td class="p-3">${formatRaceModifier(p.race_speed, !intel)}</td>
-            <td class="p-3">${formatRaceModifier(p.race_attack, !intel)}</td>
-            <td class="p-3">${formatRaceModifier(p.race_defense, !intel)}</td>
-            <td class="p-3 text-center">${intel ? (p.race_trader > 0 ? '<i class="fa-solid fa-check text-emerald-400"></i>' : '') : q0}</td>
-            <td class="p-3 text-primary border-l border-border">${intel ? (p.trade_revenue || 0) + '%' : q0}</td>
-            <td class="p-3 ${sci('text-green-400')} border-l border-border">${gated(p.biology)}</td>
-            <td class="p-3 ${sci('text-yellow-400')}">${gated(p.economy)}</td>
-            <td class="p-3 ${sci('text-purple-400')}">${gated(p.energy)}</td>
-            <td class="p-3 ${sci('text-orange-400')}">${gated(p.mathematics)}</td>
-            <td class="p-3 ${sci('text-blue-400')}">${gated(p.physics)}</td>
-            <td class="p-3 ${sci('text-pink-400')}">${gated(p.social)}</td>
-            <td class="p-3 border-l border-border">${intel ? esc(p.artefact || '-') : q0}</td>
-            <td class="p-3 text-muted-foreground border-l border-border">${fmtIntelDate(p.intel_updated_at)}</td>
-        </tr>`;
-    }).join('');
+    tbody.innerHTML = rowsHtml(table, sorted, 'hover:bg-accent/50 transition-colors');
 }
 
 function renderSystemTable() {
@@ -801,29 +600,12 @@ function renderFleetTable() {
         </tr>`).join('');
 }
 
+// The sheet columns that hold localised number TEXT ("999.9", "1,000") are marked
+// sort: 'numtext' in ALLY_STATS_COLUMNS, so sortRows hands them to the shared locale-aware
+// parser instead of comparing them as strings.
 function renderAllyStatsTable() {
-    let filtered = [...rawDbAllyStats];
-    filtered.sort((a, b) => {
-        const v1 = a[allyStatsSortCol] ?? 0, v2 = b[allyStatsSortCol] ?? 0;
-        // These columns hold localised number TEXT. Stripping every non-digit read
-        // "999.9" as 9999 and sorted it above "1,000" (1000). The shared parser knows
-        // which separator is the decimal point.
-        if (['science_rate', 'culture_rate', 'production_rate', 'astro_dollars', 'production_points'].includes(allyStatsSortCol)) {
-            const cmp = compareNumeric(v1, v2);
-            return allyStatsSortAsc ? cmp : -cmp;
-        }
-        const s1 = typeof v1 === 'string' ? v1.toLowerCase() : v1;
-        const s2 = typeof v2 === 'string' ? v2.toLowerCase() : v2;
-        return s1 < s2 ? (allyStatsSortAsc ? -1 : 1) : (s1 > s2 ? (allyStatsSortAsc ? 1 : -1) : 0);
-    });
-
-    const formatCultureCountdown = (isoStr) => {
-        if (!isoStr) return '-';
-        const msLeft = new Date(isoStr) - Date.now();
-        if (msLeft <= 0) return 'Ready';
-        const totalSecs = Math.floor(msLeft / 1000);
-        return `${Math.floor(totalSecs / 3600)}h ${Math.floor((totalSecs % 3600) / 60)}m ${totalSecs % 60}s`;
-    };
+    const table = STAT_TABLES.allyStats;
+    const filtered = sortRows(rawDbAllyStats, table.columns, allySort.col, allySort.asc);
 
     const stLabel = document.getElementById('alliance-stats-last-updated');
     if (stLabel && filtered.length > 0) {
@@ -836,11 +618,8 @@ function renderAllyStatsTable() {
 
     const tbody = document.getElementById('ally-stats-table-body');
     if (!tbody) return;
-    
-    tbody.innerHTML = filtered.map(s => `
-        <tr class="hover:bg-accent/50 transition-colors border-b border-border/60">
-            <td class="sticky left-0 z-10 bg-black px-2 py-1 font-medium text-foreground break-words leading-tight w-[110px] border-r border-zinc-800">${esc(s.player_name || 'Unknown')}</td><td class="px-2 py-1 text-right text-muted-foreground">${s.player_id}</td><td class="px-2 py-1 text-aw-ally font-semibold">${esc(s.planets_text || '-')}</td><td class="px-2 py-1 font-semibold text-yellow-500 whitespace-nowrap">${formatCultureCountdown(s.next_culture_at)}</td><td class="px-2 py-1 text-right text-blue-400 font-semibold">${esc(s.science_rate || '-')}</td><td class="px-2 py-1 text-right text-purple-400 font-semibold">${esc(s.culture_rate || '-')}</td><td class="px-2 py-1 text-right text-orange-400 font-semibold">${esc(s.production_rate || '-')}</td><td class="px-2 py-1 text-right text-emerald-400">${esc(s.astro_dollars || '-')}</td><td class="px-2 py-1 text-right text-slate-300">${esc(s.production_points || '-')}</td><td class="px-2 py-1 text-pink-400 font-semibold">${esc(s.artefact || 'None')}</td><td class="px-2 py-1 text-sky-400">${esc(s.level_text || '-')}</td><td class="px-2 py-1 text-red-400">${esc(s.cv_limit_text || '-')}</td><td class="px-2 py-1 text-right text-amber-500 font-bold">${s.economy}</td><td class="px-2 py-1 text-right text-cyan-400 font-bold">${s.energy}</td><td class="px-2 py-1 text-right text-indigo-400 font-bold">${s.mathematics}</td><td class="px-2 py-1 text-right text-violet-400 font-bold">${s.physics}</td><td class="px-2 py-1 text-right text-foreground font-bold bg-white/5">${s.population}</td>
-        </tr>`).join('');
+
+    tbody.innerHTML = rowsHtml(table, filtered, 'hover:bg-accent/50 transition-colors border-b border-border/60');
 }
 
 // ============================================================
@@ -1031,21 +810,21 @@ function renderTaBoard() {
         const c1 = taCount(p1.name.toLowerCase(), agreements);
         const full1 = c1 >= maxTas;
         html += `<tr>
-            <td class="sticky left-0 bg-black px-2 py-1 font-semibold text-foreground border border-border/40 whitespace-nowrap">${esc(p1.name)}${p1.isTrader ? ' <span class="text-yellow-400">T</span>' : ''}</td>
-            <td class="px-2 py-1 text-center border border-border/40 ${full1 ? 'text-green-400 font-bold' : 'text-muted-foreground'}">${c1}/${maxTas}</td>`;
+            <td class="sticky left-0 bg-black px-2 py-1 md:px-3 md:py-1.5 font-semibold text-foreground border border-border/40 whitespace-nowrap">${esc(p1.name)}${p1.isTrader ? ' <span class="text-yellow-400">T</span>' : ''}</td>
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-center border border-border/40 ${full1 ? 'text-green-400 font-bold' : 'text-muted-foreground'}">${c1}/${maxTas}</td>`;
         members.forEach(p2 => {
             html += taCell(p1, p2, { me: meLower, isAdmin, maxTas, traderSet, agreements, full1 });
         });
         html += `<td class="bg-black border-0"></td>`;
-        html += `<td class="px-2 py-1 text-right border border-border/40 text-amber-400 font-semibold" title="${(p1.hoarded_au || 0).toLocaleString()} A$">${fmtAU(p1.hoarded_au)}</td>`;
-        html += `<td class="px-2 py-1 text-right border border-border/40 text-emerald-400" title="${(p1.visible_au || 0).toLocaleString()} A$">${fmtAU(p1.visible_au)}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-amber-400 font-semibold" title="${(p1.hoarded_au || 0).toLocaleString()} A$">${fmtAU(p1.hoarded_au)}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-emerald-400" title="${(p1.visible_au || 0).toLocaleString()} A$">${fmtAU(p1.visible_au)}</td>`;
         // Ready in: time to reach 20k from visible liquidity. Ready (sold): same once the hoard is sold now.
         const need1 = Math.max(0, TA_TRADE_COST - (p1.visible_au || 0));
         const need2 = Math.max(0, TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0));
         const t1 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0), p1.au_per_h);
         const t2 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0), p1.au_per_h);
-        html += `<td class="px-2 py-1 text-right border border-border/40 text-sky-400 whitespace-nowrap" title="${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${need1.toLocaleString()} A$">${t1}</td>`;
-        html += `<td class="px-2 py-1 text-right border border-border/40 text-sky-300 whitespace-nowrap" title="${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${need2.toLocaleString()} A$ after selling ${(p1.hoarded_au || 0).toLocaleString()} A$ hoard">${t2}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-400 whitespace-nowrap" title="${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${need1.toLocaleString()} A$">${t1}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-300 whitespace-nowrap" title="${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${need2.toLocaleString()} A$ after selling ${(p1.hoarded_au || 0).toLocaleString()} A$ hoard">${t2}</td>`;
         html += `</tr>`;
     });
     html += `</tbody>`;
