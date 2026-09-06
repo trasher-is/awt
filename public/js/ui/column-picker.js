@@ -40,13 +40,17 @@ export async function mountColumnPicker({ mountEl, tableId, tableKey, columns, o
     if (!mountEl || mountEl.dataset.awtPicker) return null;
     mountEl.dataset.awtPicker = tableKey;
 
+    // The default visibility is applied BEFORE the member lookup below resolves, so the
+    // first paint never flashes all forty-odd columns for one round-trip; the member's own
+    // preference then replaces it.
+    const style = document.createElement('style');
+    style.dataset.awtColumns = tableKey;
+    style.textContent = Prefs.hiddenCss(tableId, Prefs.hiddenKeys(columns, Prefs.defaultVisible(columns)));
+    document.head.appendChild(style);
+
     const userId = await getViewerId();
     const storageKey = Prefs.storageKey(tableKey, userId);
     let visible = Prefs.resolveVisible(columns, readStored(storageKey));
-
-    const style = document.createElement('style');
-    style.dataset.awtColumns = tableKey;
-    document.head.appendChild(style);
 
     mountEl.innerHTML = `
         <div class="relative">
