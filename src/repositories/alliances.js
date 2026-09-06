@@ -178,8 +178,28 @@ function getTradeAnalysisRows() {
     return getTradeAnalysisRowsStmt.all();
 }
 
+// The member-page sheet (alliance_member_stats) plus the same member's row in players, so the
+// Alliance Stats panel can show every stat the hub holds (issue #113). Every players column
+// is aliased with a pl_ prefix ON PURPOSE: both tables have economy/energy/mathematics/
+// physics, and an unaliased join would let one silently overwrite the other in the row
+// object — the member-page value (fresh, typed by the member) must never lose to the
+// intel-scrape value (often 0 for a never-scanned member).
 const getAllianceStatsForArchiveStmt = db.prepare(`
-    SELECT s.*, p.name as player_name
+    SELECT s.*, p.name as player_name,
+           p.points AS pl_points, p.ranking AS pl_ranking, p.level AS pl_level,
+           p.science_level AS pl_science_level, p.culture_level AS pl_culture_level,
+           p.total_planets AS pl_total_planets, p.total_population AS pl_total_population,
+           p.total_farms AS pl_total_farms, p.total_factories AS pl_total_factories,
+           p.total_labs AS pl_total_labs, p.total_cybernetics AS pl_total_cybernetics,
+           p.cv_used AS pl_cv_used, p.cv_limit AS pl_cv_limit,
+           p.biology AS pl_biology, p.social AS pl_social, p.trade_revenue AS pl_trade_revenue,
+           p.race_growth AS pl_race_growth, p.race_science AS pl_race_science, p.race_culture AS pl_race_culture,
+           p.race_production AS pl_race_production, p.race_speed AS pl_race_speed, p.race_attack AS pl_race_attack,
+           p.race_defense AS pl_race_defense, p.race_trader AS pl_race_trader, p.race_sul AS pl_race_sul,
+           p.eco_bonus AS pl_eco_bonus, p.number_of_battles AS pl_number_of_battles, p.battle_luckiness AS pl_battle_luckiness,
+           p.last_activity_at AS pl_last_activity_at, p.has_intel AS pl_has_intel,
+           p.stats_scraped_at AS pl_stats_scraped_at, p.intel_updated_at AS pl_intel_updated_at,
+           (SELECT COUNT(*) FROM planets WHERE owner_id = s.player_id) AS pl_planet_count
     FROM alliance_member_stats s
     LEFT JOIN players p ON s.player_id = p.id
     ORDER BY s.player_id ASC
