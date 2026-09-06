@@ -32,6 +32,11 @@
                 <p class="text-xs text-muted-foreground">
                     The first row is where the fleet starts, the last is the target. Anything between them is a jump.
                 </p>
+                <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground border-t border-border pt-2">
+                    <span id="rp-data-status">Loading systems and players…</span>
+                    <button id="rp-data-refresh" class="shrink-0 h-6 px-2 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+                            title="Reload the system and player lists from the hub (after a galaxy or player sync)">Refresh data</button>
+                </div>
             </div>
 
             <!-- FLEET PARAMETERS -->
