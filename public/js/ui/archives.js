@@ -52,7 +52,7 @@ const rowsHtml = (table, rows, rowCls) =>
     rows.map(r => `<tr class="${rowCls}">${renderRowCells(table.columns, r, table.cellBase)}</tr>`).join('');
 
 function closeOtherPanels(exceptId) {
-    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'battle-calc-panel', 'travel-calc-panel', 'route-planner-panel', 'galaxy-map-panel', 'build-order-panel', 'battle-reports-panel'].forEach(id => {
+    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'battle-calc-panel', 'travel-calc-panel', 'route-planner-panel', 'galaxy-map-panel', 'build-order-panel', 'empire-sim-panel', 'battle-reports-panel'].forEach(id => {
         if (id !== exceptId) document.getElementById(id)?.classList.replace('translate-x-0', 'translate-x-full');
     });
 }
@@ -1079,6 +1079,21 @@ export async function openBuildOrderPanel() {
     }
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
     closeOtherPanels('build-order-panel');
+    panel.classList.replace('translate-x-full', 'translate-x-0');
+    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
+}
+
+export async function openEmpireSimPanel() {
+    let panel = document.getElementById('empire-sim-panel');
+    if (!panel) {
+        const res = await fetch('/hub-assets/components/empire-sim.html');
+        document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
+        panel = document.getElementById('empire-sim-panel');
+        const { initEmpireSim } = await import('./empire-sim.js');
+        initEmpireSim();
+    }
+    if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
+    closeOtherPanels('empire-sim-panel');
     panel.classList.replace('translate-x-full', 'translate-x-0');
     if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
 }
