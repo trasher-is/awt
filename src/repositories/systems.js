@@ -215,6 +215,22 @@ function getPlanetCoordsForPlayer(playerId) {
     return getPlanetCoordsForPlayerStmt.all(playerId);
 }
 
+// A member's own planets with the population the hub last saw (intel.js, /intel/me/planets,
+// for the Science page's Social marker — issue #138). updated_at travels with each row
+// because the population comes from whichever member last scanned that system, so the
+// client has to say how old it is.
+const getPlanetsByOwnerStmt = db.prepare(`
+    SELECT p.system_id, p.planet_index, p.game_planet_id, p.name, p.population, p.updated_at,
+           s.name AS system_name
+    FROM planets p
+    LEFT JOIN systems s ON p.system_id = s.id
+    WHERE p.owner_id = ?
+    ORDER BY p.system_id ASC, p.planet_index ASC
+`);
+function getPlanetsByOwner(playerId) {
+    return getPlanetsByOwnerStmt.all(playerId);
+}
+
 // starbase/has_fleet/is_sieged are selected because the fog-of-war guard in sync.js
 // restores them: reading them off a row that never carried them bound `undefined`
 // (-> NULL) and quietly erased the very values the guard exists to preserve.
@@ -390,7 +406,7 @@ module.exports = {
     getSystemsDbSummary, getGalaxyMapSystems, getGalaxyMapOwnership, upsertSystemStub,
     upsertSystemFull, setSystemInVision, deleteAllSystems, countBestGuardedAt, clearBestGuarded, insertBestGuarded,
     getSystemPlanetsWithIntel, getSystemPlanetsForBot, getPlanetsFullDb,
-    getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getOldPlanet, upsertPlanet,
+    getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getPlanetsByOwner, getOldPlanet, upsertPlanet,
     getPlanetsForAllianceTag, getPlanetOwnerName, getPlanetNameByLocation, getPlanetNameByGameId, getPlanetLocationByGameId,
     clearMovedPlanet, deleteAllPlanets, logPlanetEvent, getPlanetHistory, deleteAllPlanetEvents,
     getTakeoverBoard, upsertTakeover, deleteAllTakeovers,

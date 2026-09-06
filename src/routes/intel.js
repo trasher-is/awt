@@ -266,6 +266,26 @@ router.get('/intel/planets_db', requireAuth, (req, res) => {
     }
 });
 
+// --- OWN PLANETS (Science page's Social marker, issue #138) ---
+// "Own" is resolved the way /me resolves playerId: the hub account's game name matched
+// against the players table. The populations are what the hub last saw in a system scan by
+// ANY member, so they can lag behind the game; updated_at travels with each row so the
+// client can say how old they are. No player on record yet (fresh round, name not seen) is
+// a normal answer, not an error — the client then shows nothing.
+router.get('/intel/me/planets', requireAuth, (req, res) => {
+    try {
+        const bridge = usersRepo.getUserAllianceIdBridge(req.session.userId);
+        if (!bridge) {
+            return res.json({ success: false, error: 'No player on record for this account yet.' });
+        }
+        const planets = systemsRepo.getPlanetsByOwner(bridge.player_id);
+        res.json({ success: true, playerId: bridge.player_id, planets });
+    } catch (err) {
+        console.error('[DB Error] Failed to fetch own planets:', err);
+        res.status(500).json({ success: false, error: 'Failed to fetch planets' });
+    }
+});
+
 // Get Full Fleets Database
 router.get('/intel/fleets_db', requireAuth, (req, res) => {
     try {
@@ -343,6 +363,19 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
             console.error('[DB Error] Login heatmap unavailable:', err.message);
         }
 
+        // --- Raw scan observations for the quiet-window analysis (issue #137) ---
+        // Sent raw, in UTC, and analysed in the browser (public/js/utils/login-gaps.js),
+        // because the grid is drawn in the VIEWER's local time and the server does not
+        // know it. Eight days, not seven: the sample just before the window is what anchors
+        // the first band inside it.
+        let loginSamples = [];
+        try {
+            loginSamples = playersRepo.getPlayerLoginSamples(playerId, 8)
+                .map(row => ({ t: row.observed_at, n: row.total_logins }));
+        } catch (err) {
+            console.error('[DB Error] Login samples unavailable:', err.message);
+        }
+
         // Names this id went by in earlier rounds. A player id survives a round wipe;
         // the name does not, and people rename. Empty for anyone who has not renamed, so
         // the panel shows nothing rather than the player's own name repeated back.
@@ -358,6 +391,7 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
             player: playerInfo,
             activity: formattedActivity,
             heatmap: heatmap,
+            loginSamples,
             systems: systems, // <-- Injected payload
             formerNames
         });

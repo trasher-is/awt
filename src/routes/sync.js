@@ -309,6 +309,13 @@ router.post('/sync/player', requireAuth, (req, res) => {
         if (player.logins > 0 && (!oldPlayer || oldPlayer.logins !== player.logins)) {
             playersRepo.insertPlayerLogin(player.id, player.logins);
         }
+
+        // Issue #137: the scan itself is the observation, whether or not the counter moved.
+        // A scrape that did not carry the counter (0) is no observation and records nothing.
+        const observedLogins = Number(player.logins);
+        if (Number.isInteger(observedLogins) && observedLogins > 0) {
+            playersRepo.recordLoginSample(player.id, observedLogins);
+        }
     });
 
     try {
@@ -488,6 +495,13 @@ router.post('/sync/player-detail', requireAuth, (req, res) => {
 
     try {
         playersRepo.upsertPlayerFromApiDetail(detail);
+        // Issue #137: the API detail carries the same login counter the profile scrape does,
+        // and the background sweep reaches far more players — so it is the denser source of
+        // "counter unchanged at time T" observations for the profile's quiet-window analysis.
+        const observedLogins = Number(p.logins);
+        if (Number.isInteger(observedLogins) && observedLogins > 0) {
+            playersRepo.recordLoginSample(p.id, observedLogins);
+        }
         res.json({ success: true });
     } catch (err) {
         console.error(`[DB Error] Failed to sync player detail ${p.id}:`, err);

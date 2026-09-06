@@ -779,6 +779,24 @@ function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_system_claims_system   ON system_claims(system_id);
     `);
 
+    // Every scan that carried a player's login counter, changed or not (issue #137).
+    // player_logins above records only the scans where the counter moved, which draws a
+    // "logins over time" line but cannot say when a player was NOT around: the hub never
+    // sees a login time, only that the counter rose somewhere between two scans, so a quiet
+    // hour is provable only from a scan that found the counter unchanged. Pruned per player
+    // on write (14 days); the profile reads 8. Cascades with the player row, so the round
+    // nuke needs no extra delete.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS player_login_samples (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id INTEGER NOT NULL,
+            total_logins INTEGER NOT NULL,
+            observed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_player_login_samples_player ON player_login_samples(player_id, observed_at);
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

@@ -5,8 +5,15 @@ import '../utils/game-tables.js';    // side-effect import: empire-model.js's ow
 import '../utils/travel-model.js';   // side-effect import: empire-model.js's own dependency
 import '../utils/empire-model.js';   // side-effect import: TRAIT_PCT, the ONE source for race-bonus %/point
 import '../utils/aw-api.js';         // side-effect import: getTravelTime, for initColonizeLaunchWindows
+import '../utils/login-gaps.js';     // side-effect import: AWLoginGaps, the profile's quiet-window analysis
+import '../utils/social-hint.js';    // side-effect import: AWSocialHint, the Science page's Social marker (needs game-tables above)
+import '../utils/research-time.js';  // side-effect import: AWResearch, research time shared by the calculator and the Economy countdown
 const { gameFetch } = globalThis.AWGameRate;
 const { formatSqliteUtc } = globalThis.AWSqliteTime;
+const LoginGaps = globalThis.AWLoginGaps;
+const SocialHint = globalThis.AWSocialHint;
+const Research = globalThis.AWResearch;
+const Tables = globalThis.AWTables;
 const { TRAIT_PCT } = globalThis.AWEmpire.constants;
 const { getTravelTime } = globalThis.AWApi;
 
@@ -396,18 +403,37 @@ async function getPointsTable(url) {
 
 // Read {level, rate (pts/h), timerSecs, researching} for a science off the page.
 // `sci` is a SCIENCES entry { name, aliases }.
-function readScienceState(sci) {
-    // Find the row whose first cell exactly equals one of the aliases (the page
-    // abbreviates names), with a numeric level in the second cell.
-    let row = null, level = NaN;
+// The name cell's own text, WITHOUT anything the hub injected into it. The Social marker and
+// the Economy countdown live inside that cell (marked data-hub-inject), and the alias match
+// below has to keep working on the next view pass after they are there.
+function scienceNameText(cell) {
+    // Nothing injected here (every first pass, every row but Social/Economy): the exact
+    // reading the calculator always used.
+    if (!cell.querySelector('[data-hub-inject]')) return cell.innerText.trim().toLowerCase();
+    let text = '';
+    cell.childNodes.forEach(node => {
+        if (node.nodeType === 1 && node.hasAttribute('data-hub-inject')) return;
+        text += node.nodeType === 1 ? node.innerText : node.textContent;
+    });
+    return text.trim().toLowerCase();
+}
+
+// The row whose first cell exactly equals one of the aliases (the page abbreviates names),
+// with a numeric level in the second cell.
+function findScienceRow(sci) {
+    let row = null;
     document.querySelectorAll('table tr').forEach(r => {
         if (row || !r.cells || r.cells.length < 2 || !r.cells[0]) return;
-        const c0 = r.cells[0].innerText.trim().toLowerCase();
-        if (!sci.aliases.includes(c0)) return;
-        const lvl = parseInt(r.cells[1].innerText, 10);
-        if (!isNaN(lvl)) { row = r; level = lvl; }
+        if (!sci.aliases.includes(scienceNameText(r.cells[0]))) return;
+        if (!isNaN(parseInt(r.cells[1].innerText, 10))) row = r;
     });
+    return row;
+}
+
+function readScienceState(sci) {
+    const row = findScienceRow(sci);
     if (!row) return null;
+    const level = parseInt(row.cells[1].innerText, 10);
 
     // Rate is the shared research output, shown in a header like "Science +293.3/h"
     // (or "Culture +X/h"); also tolerate abbreviated "Sci"/"Cul" labels on mobile.
@@ -437,6 +463,117 @@ function readScienceState(sci) {
     const baseGrowth = bonusPct > -100 ? rate / (1 + bonusPct / 100) : rate;
 
     return { level, rate, bonusPct, baseGrowth, timerSecs, researching: !!timer };
+}
+
+// Whether a science is being researched now or sits in the queue — the same icons
+// initScienceTimers reads, plus the live timer.
+const QUEUE_ICON_SELECTOR = '.bi-1-circle, .bi-2-circle, .bi-3-circle, .bi-repeat';
+function isScienceQueued(row) {
+    if (!row) return false;
+    if (row.querySelector('.timer-active')) return true;
+    const queueCell = row.cells[5];
+    return !!(queueCell && queueCell.querySelector(QUEUE_ICON_SELECTOR));
+}
+
+// ---------------------------------------------------------------
+// SOCIAL MARKER — /Game/Science  (issue #138)
+// A small triangle next to the Social row when own planets sit at the population cap:
+// grey for one planet, amber for half or more, nothing when Social is already queued or
+// when the hub has no planets of this member on record. The rule and the tooltip text live
+// in public/js/utils/social-hint.js; the planets come from the hub's own database
+// (/hub-api/intel/me/planets), so this makes no game request.
+// ---------------------------------------------------------------
+let _ownPlanets = { at: 0, promise: null };
+function getOwnPlanets() {
+    // One hub request per minute at most, however often the view hooks re-run.
+    if (_ownPlanets.promise && Date.now() - _ownPlanets.at < 60 * 1000) return _ownPlanets.promise;
+    _ownPlanets = {
+        at: Date.now(),
+        promise: fetch('/hub-api/intel/me/planets').then(r => r.json()).catch(() => null),
+    };
+    return _ownPlanets.promise;
+}
+
+export async function initSocialHint() {
+    if (!window.location.pathname.toLowerCase().includes('/game/science')) return;
+    const sci = SCIENCES.find(s => s.name === 'Social');
+    const row = findScienceRow(sci);
+    if (!row) return;
+    const state = readScienceState(sci);
+    if (!state) return;
+
+    const own = await getOwnPlanets();
+    // The row may have been re-rendered while the request was in flight.
+    const liveRow = findScienceRow(sci);
+    if (!liveRow) return;
+    const nameCell = liveRow.cells[0];
+    let mark = nameCell.querySelector('[data-hub-inject="social-hint"]');
+
+    const result = (own && own.success)
+        ? SocialHint.evaluate({ socialLevel: state.level, planets: own.planets, queued: isScienceQueued(liveRow) })
+        : { state: 'none' };
+    if (result.state === 'none') {
+        if (mark) mark.remove();
+        return;
+    }
+    if (!mark) {
+        mark = document.createElement('span');
+        mark.setAttribute('data-hub-inject', 'social-hint');
+        mark.style.cssText = 'margin-left:6px;font-size:10px;vertical-align:middle;cursor:help;';
+        mark.textContent = '▲';
+        nameCell.appendChild(mark);
+    }
+    mark.style.color = result.state === 'high' ? '#f59e0b' : '#9ca3af';
+    mark.title = SocialHint.message(result);
+    mark.setAttribute('aria-label', mark.title);
+}
+
+// ---------------------------------------------------------------
+// ECONOMY PRICE-DROP COUNTDOWN — /Game/Science  (issue #139)
+// Economy lowers ship prices only at the published breakpoints (0, 4, 7, 10, 14, …); the
+// levels in between cost research and change nothing. Under the Economy row's name: the
+// next level that actually drops the price, the three prices it drops to, and how long
+// that takes at the current rate if Economy is researched from now on. The points come
+// from the doc's science table (game-tables.js), so this makes no game request; the
+// calculator's own fetch of /Info/ScienceTable stays where it was.
+// ---------------------------------------------------------------
+export function initEconomyMilestone() {
+    if (!window.location.pathname.toLowerCase().includes('/game/science')) return;
+    const sci = SCIENCES.find(s => s.name === 'Economy');
+    const row = findScienceRow(sci);
+    if (!row) return;
+    const st = readScienceState(sci);
+    if (!st) return;
+
+    const nameCell = row.cells[0];
+    let box = nameCell.querySelector('[data-hub-inject="economy-next"]');
+    const next = Tables.nextEconomyBreakpoint(st.level);
+    if (!next) {
+        if (box) box.remove();
+        return;
+    }
+    if (!box) {
+        box = document.createElement('div');
+        box.setAttribute('data-hub-inject', 'economy-next');
+        box.style.cssText = 'font-size:10px;line-height:1.3;color:#888;white-space:normal;margin-top:2px;cursor:help;';
+        nameCell.appendChild(box);
+    }
+
+    const eta = Research.secondsToLevel(st, Tables.SCIENCE, next.level, st.rate);
+    const etaText = st.rate > 0 && Number.isFinite(eta.seconds) ? `~${formatDuration(eta.seconds)}` : 'no research rate';
+    const queued = isScienceQueued(row);
+    box.innerHTML = `next price drop <span style="color:#ccc;">lvl ${next.level}</span>`
+        + ` · D ${next.destroyer} / C ${next.cruiser} / B ${next.battleship} PP`
+        + ` · <span style="color:#ccc;">${etaText}</span>`
+        + (queued ? ' <span style="color:#6a6;">in queue</span>' : '');
+
+    const after = Tables.nextEconomyBreakpoint(next.level);
+    const savedPer10Battleships = (Tables.battleshipCost(st.level) - next.battleship) * 10;
+    box.title = `Economy ${st.level}: destroyer ${Tables.destroyerCost(st.level)} / cruiser ${Tables.cruiserCost(st.level)} / battleship ${Tables.battleshipCost(st.level)} PP.`
+        + ` Level ${next.level} lowers them to ${next.destroyer} / ${next.cruiser} / ${next.battleship} PP — ${savedPer10Battleships} PP saved per 10 battleships.`
+        + ` ${eta.levels} level${eta.levels === 1 ? '' : 's'} to go${st.researching ? ' (current research counted)' : ''} at ${Math.round(st.rate).toLocaleString()} pts/h, assuming Economy is researched next and nothing else is queued before it.`
+        + (after ? ` The drop after that is at level ${after.level} (destroyer ${after.destroyer} PP).` : ' It is the last drop: 97 is where the destroyer reaches 1 PP.')
+        + (eta.missing.length ? ` No cost data for level(s) ${eta.missing.join(', ')}.` : '');
 }
 
 export async function initScienceLevelCalculator() {
@@ -525,18 +662,10 @@ export async function initScienceLevelCalculator() {
             const url = name === 'Culture' ? '/Info/CultureTable' : '/Info/ScienceTable';
             const table = await getPointsTable(url);
 
-            let total = 0;
-            let startK = st.level + 1;
-            // The in-progress research timer is measured at the CURRENT rate; scale it to
-            // the effective rate so it stays consistent when the what-if inputs change.
-            if (st.researching) { total += st.timerSecs * (st.rate / effRate); startK = st.level + 2; }
-
-            const missing = [];
-            for (let k = startK; k <= target; k++) {
-                const pts = table[k];
-                if (pts == null || isNaN(pts)) { missing.push(k); continue; }
-                total += (pts / effRate) * 3600;
-            }
+            // Shared with the Economy countdown (research-time.js): the in-progress timer is
+            // measured at the CURRENT rate and scaled to the effective one, then every
+            // remaining level's points at the effective rate.
+            const { seconds: total, missing } = Research.secondsToLevel(st, table, target, effRate);
 
             const finish = new Date(Date.now() + total * 1000);
             const dateStr = finish.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
@@ -841,7 +970,7 @@ export async function initProfileHubIntel() {
     wrap.id = 'awt-hub-intel-block';
     wrap.innerHTML = `
         <div class="row">
-            <div class="col-lg-6">${buildActivityLogCard(data.heatmap)}</div>
+            <div class="col-lg-6">${buildActivityLogCard(data.heatmap, data.loginSamples)}</div>
             <div class="col-lg-6">${buildBuildingsCard(p)}</div>
         </div>`;
     anchor.parentNode.insertBefore(wrap, anchor);
@@ -881,7 +1010,7 @@ function hideSupporterPromo() {
 
 // No last-active line here on purpose — the game's own "Idle" field on this same page
 // already says that, more precisely (live seconds/minutes, not our own polling cadence).
-function buildActivityLogCard(heatmap) {
+function buildActivityLogCard(heatmap, loginSamples) {
     const counts = Array.isArray(heatmap) && heatmap.length === 24 ? heatmap : Array(24).fill(0);
     const max = Math.max(1, ...counts);
     const offsetHours = Math.round(-new Date().getTimezoneOffset() / 60);
@@ -903,9 +1032,61 @@ function buildActivityLogCard(heatmap) {
                     <div style="display:flex;justify-content:space-between;font-size:9px;color:#888;margin-top:2px;">
                         <span>00h</span><span>12h</span><span>23h</span>
                     </div>
+                    ${buildQuietWindowsSection(loginSamples)}
                 </td></tr>
             </tbody>
         </table>`;
+}
+
+// Quiet windows over the last 7 days (issue #137), from the raw scan observations the
+// profile route returns. login-gaps.js explains what a cell can prove; the short version
+// for the tooltip: green = every scan covering this whole hour found the login counter
+// unchanged, red = it moved somewhere between the scans that cover it, dark = no scan
+// covered it. The bars above are a different thing (when the counter was seen to change,
+// by hour, all time) and stay as they were.
+function buildQuietWindowsSection(loginSamples) {
+    const samples = Array.isArray(loginSamples) ? loginSamples : [];
+    const legend = 'Login counter across scans: green = unchanged over the whole hour (away), red = moved between the scans covering it (logged in somewhere inside), dark = not observed. Times are your local time.';
+    const head = (right) => `
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:8px;font-size:10px;color:#888;">
+            <span title="${legend}" style="cursor:help;border-bottom:1px dotted #555;">Quiet windows · 7 days</span>
+            <span>${right}</span>
+        </div>`;
+    if (samples.length < 2) return head(`not enough scans yet (${samples.length})`);
+
+    const a = LoginGaps.analyze(samples, { now: Date.now(), tzOffsetMin: -new Date().getTimezoneOffset() });
+    const color = { active: '#ef4444', quiet: '#22c55e', unknown: '#2a2a2a', future: 'transparent' };
+    const pad = h => String(h).padStart(2, '0');
+    const rows = a.rows.map(r => {
+        const label = new Date(r.dayStartUtc).toLocaleDateString(undefined, { weekday: 'short' });
+        const cells = r.cells.map((c, h) =>
+            `<div title="${esc(label)} ${pad(h)}:00 — ${c}" style="flex:1;height:8px;background:${color[c]};border-radius:1px;"></div>`).join('');
+        return `<div style="display:flex;align-items:center;gap:3px;margin-top:2px;">
+            <span style="width:26px;font-size:9px;color:#888;text-align:right;">${esc(label)}</span>
+            <div style="display:flex;flex:1;gap:1px;">${cells}</div>
+        </div>`;
+    }).join('');
+
+    const windows = a.windows.slice(0, 3).map(w => {
+        const span = w.hours === 24 ? 'all day' : `${pad(w.startHour)}:00–${pad(w.endHour)}:00`;
+        return `<span style="color:#ddd;">${span}</span> <span style="color:#666;">(quiet on ${w.minObserved} observed day${w.minObserved === 1 ? '' : 's'})</span>`;
+    });
+    const windowsLine = windows.length
+        ? `Best windows: ${windows.join(' · ')}`
+        : 'No hour quiet on 2+ observed days yet';
+
+    let quietLine = '';
+    const q = a.quietSince;
+    if (q && q.unchangedScans > 0) {
+        const hours = Math.round(q.confirmedQuietMs / LoginGaps.HOUR);
+        const span = hours >= 48 ? `${Math.floor(hours / 24)}d ${hours % 24}h` : `${hours}h`;
+        quietLine = `<div style="font-size:10px;color:#888;margin-top:2px;">No login change across the last ${q.unchangedScans} scan${q.unchangedScans === 1 ? '' : 's'} (${span})</div>`;
+    }
+
+    return head(`${a.sampleCount} scan${a.sampleCount === 1 ? '' : 's'} · ${Math.round(a.coverage * 100)}% of hours observed`)
+        + `<div style="margin-top:4px;">${rows}</div>`
+        + `<div style="font-size:10px;color:#aaa;margin-top:5px;">${windowsLine}</div>`
+        + quietLine;
 }
 
 // Total and average per planet (issue #119) — the same Sum/Avg reading the game's own

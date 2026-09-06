@@ -263,6 +263,27 @@ function insertPlayerLogin(playerId, totalLogins) {
     insertPlayerLoginStmt.run(playerId, totalLogins);
 }
 
+// --- player_login_samples: every observation of the counter (sync.js writes, intel.js reads) ---
+// Unlike player_logins, a row lands here on EVERY scan that carried the counter, changed or
+// not — "unchanged at time T" is the fact the profile's quiet-window analysis (issue #137)
+// needs and nothing else records. See database.js for the table's rationale.
+const insertLoginSampleStmt = db.prepare(`INSERT INTO player_login_samples (player_id, total_logins) VALUES (?, ?)`);
+const pruneLoginSamplesStmt = db.prepare(`DELETE FROM player_login_samples WHERE player_id = ? AND observed_at < datetime('now', ?)`);
+function recordLoginSample(playerId, totalLogins, keepDays = 14) {
+    insertLoginSampleStmt.run(playerId, totalLogins);
+    pruneLoginSamplesStmt.run(playerId, `-${Math.max(1, Math.floor(keepDays))} days`);
+}
+
+const getPlayerLoginSamplesStmt = db.prepare(`
+    SELECT observed_at, total_logins
+    FROM player_login_samples
+    WHERE player_id = ? AND observed_at >= datetime('now', ?)
+    ORDER BY observed_at ASC
+`);
+function getPlayerLoginSamples(playerId, days = 8) {
+    return getPlayerLoginSamplesStmt.all(playerId, `-${Math.max(1, Math.floor(days))} days`);
+}
+
 // Alliance-scan member upsert: unconditionally overwrites alliance_id (unlike
 // upsertPlayerBasic above, which preserves it when the new value is null). Two distinct
 // call shapes in the original code — kept separate per the no-behavior-change rule.
@@ -732,7 +753,7 @@ function suggestPlayersTopByPoints(limit) {
 module.exports = {
     getWarRoomPlayers, getAllianceIntelPlayerIds, countPlayers, listPlayerIds, getFullPlayersDb, getJoinedDates,
     getAllianceTagForMembers, getVisionObservers, getPlayerWithPlanetCount,
-    getPlayerLoginHistory, getPlayerLoginHeatmap,
+    getPlayerLoginHistory, getPlayerLoginHeatmap, recordLoginSample, getPlayerLoginSamples,
     upsertPlayerBasic, getPlayerNameWithTag, getPlayerRestartCheck, playerExistsById, resetPlayerOnRestart,
     upsertPlayerFull, insertPlayerLogin, upsertAllianceMemberBasic, upsertPlayerNameOnly,
     getPlayerBiologyByName, getThreatPlayersByBiology, getThreatPlayersByScience,
