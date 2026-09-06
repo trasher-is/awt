@@ -312,7 +312,7 @@ async function handleMessage(message) {
                 { name: '`!dist <sys1_id> <sys2_id>`', value: 'Calculates the distance and required biology level between two systems.\n*Example: `!dist 100 200`*' },
                 { name: '`!plan <sys_id> <planet_num> <instructions...>`', value: 'Adds a tactical plan/note to a specific planet. (Requires your Discord ID to be linked in the Hub).\n*Example: `!plan 123 4 Send colony ship`*' },
                 { name: '`!vision <system_id> [alliance_tag]`', value: 'Performs a radar scan to see which alliance members have vision over a target system.\n*Example: `!vision 123 RAID`*' },
-                { name: '`!holes [alliance_tag]`', value: 'Scans your alliance\'s territory for a per-system breakdown: your own holdings, free (planned/unplanned), and other alliances\' presence split into Ally 🤝/Neutral/Enemy ⚔️, per the Alliance Relations tags set in Admin.\n*Example: `!holes RAID`*' },
+                { name: '`!holes [alliance_tag]`', value: 'Scans your alliance\'s territory for a per-system breakdown: your own holdings, free unplanned, 🟧 planned (!plan), 🟨 neutral, 🟩 ally, and 🟥 war-list presence, per the Alliance Relations tags set in Admin.\n*Example: `!holes RAID`*' },
                 { name: '`!tt <sysA> <plnA> <sysB> <plnB> <speed> <nrg>`', value: 'Calculates fleet travel time between two coordinates.\n*Example: `!tt 100 1 200 4 10 5`*\n*(You can also swap speed/energy for a player name: `!tt 100 1 200 4 PlayerOne`)*' },
                 { name: '`!ghosts <sys_id> <planet_num> <alliance_tag>`', value: 'Calculates the shortest/longest hidden fleet arrival window from hostile members with radar vision over a system.\n*Example: `!ghosts 1 10 AO`*' },
                 { name: '`!bio`', value: 'Generates intelligence alerts highlighting players who possess a +6 biology or science advantage over your personal bio level.' },
@@ -1184,12 +1184,16 @@ async function handleMessage(message) {
             if (freePlanned.length || freeUnplanned.length || neutralSlots.length || allySlots.length || enemySlots.length) {
                 systemsWithHoles++;
 
+                // Issue #116: colorize the categories. Discord embeds can't apply arbitrary
+                // text color, so a colored-square emoji stands in for it — exact colors
+                // (red/green/yellow/orange) that an ANSI code block couldn't give us anyway
+                // (Discord's ansi highlighting has no orange in its 8-color set).
                 let segments = [`${ownCount} ${tag}`];
-                if (freePlanned.length) segments.push(`Free planned - *${freePlanned.join(', ')}*`);
+                if (freePlanned.length) segments.push(`🟧 Free planned - *${freePlanned.join(', ')}*`);
                 if (freeUnplanned.length) segments.push(`Free unplanned - ${freeUnplanned.join(', ')}`);
-                if (neutralSlots.length) segments.push(`Neutral - ${neutralSlots.join(', ')}`);
-                if (allySlots.length) segments.push(`Ally 🤝 - ${allySlots.join(', ')}`);
-                if (enemySlots.length) segments.push(`Enemy ⚔️ - **${enemySlots.join(', ')}**`);
+                if (neutralSlots.length) segments.push(`🟨 Neutral - ${neutralSlots.join(', ')}`);
+                if (allySlots.length) segments.push(`🟩 Ally 🤝 - ${allySlots.join(', ')}`);
+                if (enemySlots.length) segments.push(`🟥 War ⚔️ - **${enemySlots.join(', ')}**`);
 
                 report += `**[${sysId}]** ${data.name || "Unknown System"}: ${segments.join(' | ')}\n`;
             }
@@ -1207,7 +1211,7 @@ async function handleMessage(message) {
             .setTitle(`🕳️ Sector Vulnerability Matrix: [${tag}]`)
             .setDescription(report)
             .setColor('#f97316')
-            .setFooter({ text: `Monitored systems: ${systemsWithHoles} | *Italics* = Spoken for (!plan) | **Bold** = War-list alliance` });
+            .setFooter({ text: `Monitored systems: ${systemsWithHoles} | 🟧 Planned (!plan) | 🟨 Neutral | 🟩 Ally | 🟥 War-list` });
 
         return message.reply({ embeds: [embed] });
     }
