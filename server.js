@@ -23,6 +23,8 @@ const { rateLimit } = require('./src/utils/rate-limit');
 const { gameTrafficGate } = require('./src/utils/game-traffic');
 const { hubBody } = require('./src/utils/hub-body');
 const { splitSessionsDatabase } = require('./src/utils/session-store');
+const { sessionAccountGuard } = require('./src/utils/session-account');
+const usersRepo = require('./src/repositories/users');
 
 // Behind a TLS terminator every request arrives from the same socket address. Without
 // this, req.ip is the proxy for everyone — the rate limiters below would throttle all
@@ -152,6 +154,15 @@ app.use(session({
         secure: COOKIE_SECURE
     }
 }));
+
+// --- THE ACCOUNT BEHIND THE SESSION ---
+// Directly after the session is loaded and before ANYTHING reads it: the hub routers, the
+// two direct admin traffic endpoints below, the /api/v1 chain, /dashboard, /admin and the
+// catch-all game proxy. A session used to be a thirty-day snapshot of the account taken at
+// login; this re-reads the row on every request, drops the session when the account was
+// deactivated, deleted or had its password reset, and refreshes the role otherwise. See
+// src/utils/session-account.js for why one mount here beats a check in each gate.
+app.use(sessionAccountGuard({ loadAccount: usersRepo.getSessionAccountById }));
 
 // Reverse-proxy sanity check, once, on the first real request. A proxy that terminates
 // TLS but forwards neither X-Forwarded-Proto nor X-Forwarded-For leaves the app blind:

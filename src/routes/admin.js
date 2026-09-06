@@ -214,9 +214,20 @@ router.post('/admin/users/:id/password', requireAdmin, (req, res) => {
             return res.status(403).json({ error: 'Only the Master Admin can change this password.' });
         }
 
+        const targetId = Number(req.params.id);
         const hash = bcrypt.hashSync(new_password, 10);
-        usersRepo.setUserPasswordHash(req.params.id, hash);
-        res.json({ success: true });
+        // The new hash and the version bump land together: every session the account
+        // holds carries the old version and is refused on its next request (see
+        // src/utils/session-account.js). A reset that left other devices logged in
+        // would not be a reset.
+        const version = db.transaction(() => {
+            usersRepo.setUserPasswordHash(targetId, hash);
+            return usersRepo.bumpSessionVersion(targetId);
+        })();
+        // The one session that may survive is the one that just typed the new password —
+        // someone changing their OWN password should not be thrown out mid-task.
+        if (req.session.userId === targetId) req.session.sessionVersion = version;
+        res.json({ success: true, otherSessionsInvalidated: true });
     } catch (err) {
         console.error('[DB Error] Failed to change password:', err);
         res.status(500).json({ error: 'Failed to change password' });
