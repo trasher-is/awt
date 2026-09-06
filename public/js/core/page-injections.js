@@ -908,8 +908,29 @@ function buildActivityLogCard(heatmap) {
         </table>`;
 }
 
+// Total and average per planet (issue #119) — the same Sum/Avg reading the game's own
+// Planets → Buildings tab gives for your OWN planets, here for someone else's.
+//
+// The denominator is the profile page's own planet count (total_planets: public, complete,
+// refreshed on every profile scrape), falling back to the planets the hub happens to have
+// scanned. The numerator is the Statistics-page total, which the game itself reports up to
+// four days behind — so the average is "recent buildings over current planets" and is
+// labelled as such. A per-planet MAXIMUM is not shown: the hub has no per-planet building
+// counts for other players (the Statistics page only publishes totals), so there is nothing
+// truthful to put in that column.
+const BUILDING_ROWS = [
+    ['Farms', 'total_farms'],
+    ['Factories', 'total_factories'],
+    ['Labs', 'total_labs'],
+    ['Cybernetics', 'total_cybernetics'],
+];
+
 function buildBuildingsCard(p) {
-    const row = (label, val) => `<tr><td>${esc(label)}</td><td class="lowlight">${val ?? 0}</td></tr>`;
+    const planets = Number(p.total_planets) || Number(p.planet_count) || 0;
+    const num = v => Number(v) || 0;
+    const avg = total => (planets > 0 ? (num(total) / planets).toFixed(1) : '—');
+    const row = (label, val, strong) => `<tr${strong ? ' style="font-weight:bold;"' : ''}><td>${esc(label)}</td><td class="lowlight">${num(val)}</td><td class="lowlight">${avg(val)}</td></tr>`;
+    const all = BUILDING_ROWS.reduce((sum, [, field]) => sum + num(p[field]), 0);
     // The disclaimer is about the GAME's own Statistics page, not our scrape timing: it
     // reports building counts up to ~4 days behind live, so even a scrape taken this
     // second would still show old numbers. stats_scraped_at (when the Hub itself last
@@ -917,14 +938,18 @@ function buildBuildingsCard(p) {
     const scrapedTitle = p.stats_scraped_at
         ? ` title="Hub last scraped this: ${esc(formatSqliteUtc(p.stats_scraped_at))}"`
         : '';
+    const avgTitle = planets > 0
+        ? `Total ÷ ${planets} planet${planets === 1 ? '' : 's'} (planet count from the profile page)`
+        : 'No planet count on record yet';
     return `
         <table class="table">
-            <thead><tr${scrapedTitle}><th colspan="2"><i class="bi bi-building"></i> Buildings <span style="font-weight:normal;font-size:10px;color:#c96;">(4 day old data)</span></th></tr></thead>
+            <thead>
+                <tr${scrapedTitle}><th colspan="3"><i class="bi bi-building"></i> Buildings <span style="font-weight:normal;font-size:10px;color:#c96;">(4 day old data)</span></th></tr>
+                <tr style="font-size:11px;"><th></th><th>Total</th><th title="${esc(avgTitle)}">Avg / planet${planets > 0 ? ` <span style="font-weight:normal;color:#888;">(${planets})</span>` : ''}</th></tr>
+            </thead>
             <tbody>
-                ${row('Farms', p.total_farms)}
-                ${row('Factories', p.total_factories)}
-                ${row('Labs', p.total_labs)}
-                ${row('Cybernetics', p.total_cybernetics)}
+                ${BUILDING_ROWS.map(([label, field]) => row(label, p[field], false)).join('')}
+                ${row('All buildings', all, true)}
             </tbody>
         </table>`;
 }
