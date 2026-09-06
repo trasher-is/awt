@@ -1,0 +1,232 @@
+<div id="empire-sim-panel" class="fixed top-0 right-0 h-full w-full md:w-[calc(100%-3.5rem)] bg-black border-l border-border transform translate-x-full transition-transform duration-300 z-40 flex flex-col shadow-2xl overflow-hidden">
+
+    <div class="h-14 border-b border-border flex items-center justify-between px-6 bg-zinc-900 shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-md bg-white/5 flex items-center justify-center">
+                <i class="fa-solid fa-chart-line text-base text-emerald-400"></i>
+            </div>
+            <div>
+                <h2 class="font-bold text-foreground tracking-wide">Empire Simulator</h2>
+                <p class="text-sm text-muted-foreground">Forward simulation of one empire — race, build targets, research plan, day by day</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2">
+                <label class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Days</label>
+                <input type="number" id="es-days" value="60" min="1" max="365" class="w-16 h-8 rounded-md border border-input bg-transparent px-2 text-sm font-mono text-center shadow-sm focus:outline-none focus:border-emerald-500">
+            </div>
+            <button id="es-run" class="h-8 px-4 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors">
+                <i class="fa-solid fa-play mr-1"></i> RUN
+            </button>
+            <button id="close-empire-sim-btn" class="w-8 h-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
+                <i class="fa-solid fa-xmark text-base"></i>
+            </button>
+        </div>
+    </div>
+
+    <div class="flex-1 overflow-auto bg-black p-4 md:p-6">
+        <div class="flex flex-col gap-6">
+
+            <!-- Mechanics reference / assumption notice -->
+            <div class="bg-zinc-900 border border-border rounded-lg px-4 py-3">
+                <div class="flex items-start gap-3">
+                    <i class="fa-solid fa-circle-info text-sky-400 mt-0.5"></i>
+                    <div class="text-[11px] text-muted-foreground leading-relaxed">
+                        Growth/PP/science rates are cross-checked against <code>docs/game-rules.md</code>. The one unverified formula
+                        is culture/hour (cybernets × bonus) — planet-count output is indicative until confirmed in game. This is not
+                        an optimiser: it does not search race picks, it forward-simulates the inputs you give it.
+                    </div>
+                </div>
+            </div>
+
+            <!-- INPUTS: race + targets -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-zinc-900 border border-border rounded-lg overflow-hidden">
+                    <div class="px-4 py-3 border-b border-border bg-zinc-950 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+                        <span>Race picks</span>
+                        <span id="es-race-sum" class="font-mono">sum 0</span>
+                    </div>
+                    <div class="p-4 grid grid-cols-4 gap-2">
+                        <div><label class="block text-[9px] text-muted-foreground uppercase font-semibold mb-1">Growth</label><input type="number" id="es-race-growth" value="0" min="-4" max="4" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                        <div><label class="block text-[9px] text-muted-foreground uppercase font-semibold mb-1">Science</label><input type="number" id="es-race-science" value="0" min="-4" max="4" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                        <div><label class="block text-[9px] text-muted-foreground uppercase font-semibold mb-1">Culture</label><input type="number" id="es-race-culture" value="0" min="-4" max="4" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                        <div><label class="block text-[9px] text-muted-foreground uppercase font-semibold mb-1">Prod</label><input type="number" id="es-race-production" value="0" min="-4" max="4" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                        <div><label class="block text-[9px] text-muted-foreground uppercase font-semibold mb-1">Speed</label><input type="number" id="es-race-speed" value="0" min="-4" max="4" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                        <div><label class="block text-[9px] text-muted-foreground uppercase font-semibold mb-1">Attack</label><input type="number" id="es-race-attack" value="0" min="-4" max="4" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                        <div><label class="block text-[9px] text-muted-foreground uppercase font-semibold mb-1">Defence</label><input type="number" id="es-race-defence" value="0" min="-4" max="4" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                        <div class="flex flex-col justify-center gap-1">
+                            <label class="flex items-center gap-1 text-[10px] text-muted-foreground cursor-pointer"><input type="checkbox" id="es-race-startuplab" class="w-3.5 h-3.5"> Startup Lab</label>
+                            <label class="flex items-center gap-1 text-[10px] text-muted-foreground cursor-pointer"><input type="checkbox" id="es-race-trader" class="w-3.5 h-3.5"> Trader</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-zinc-900 border border-border rounded-lg overflow-hidden">
+                    <div class="px-4 py-3 border-b border-border bg-zinc-950 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+                        <span>Building targets (every planet)</span>
+                        <span id="es-target-cost" class="font-mono">0 PP/planet</span>
+                    </div>
+                    <div class="p-4 grid grid-cols-5 gap-2">
+                        <div><label class="block text-[9px] text-emerald-400 uppercase font-semibold mb-1">HF</label><input type="number" id="es-target-HF" value="12" min="0" max="20" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                        <div><label class="block text-[9px] text-amber-400 uppercase font-semibold mb-1">RF</label><input type="number" id="es-target-RF" value="13" min="0" max="20" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                        <div><label class="block text-[9px] text-purple-400 uppercase font-semibold mb-1">GC</label><input type="number" id="es-target-GC" value="13" min="0" max="20" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                        <div><label class="block text-[9px] text-sky-400 uppercase font-semibold mb-1">RL</label><input type="number" id="es-target-RL" value="13" min="0" max="20" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                        <div><label class="block text-[9px] text-red-400 uppercase font-semibold mb-1">SB</label><input type="number" id="es-target-SB" value="0" min="0" max="20" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                    </div>
+                    <div class="px-4 pb-4 flex flex-wrap items-center gap-2">
+                        <label class="text-[10px] text-muted-foreground uppercase font-semibold">Spend mode</label>
+                        <select id="es-build-mode" class="h-8 rounded border border-input bg-zinc-950 px-2 text-xs focus:outline-none focus:border-emerald-500">
+                            <option value="balanced">Balanced (cheapest level anywhere)</option>
+                            <option value="priority">Priority (finish order below first)</option>
+                        </select>
+                        <input type="text" id="es-build-order" value="RF,GC,HF,RL,SB" title="Priority order / tie-break, comma separated"
+                            class="flex-1 min-w-[8rem] h-8 rounded border border-input bg-zinc-950 px-2 text-xs font-mono focus:outline-none focus:border-emerald-500">
+                    </div>
+                </div>
+            </div>
+
+            <!-- INPUTS: research / colonisation / trade -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="bg-zinc-900 border border-border rounded-lg overflow-hidden flex flex-col">
+                    <div class="px-4 py-3 border-b border-border bg-zinc-950 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Research plan (in order)</div>
+                    <div class="p-4 flex flex-col gap-2">
+                        <div id="es-science-plan" class="flex flex-col gap-1.5"></div>
+                        <div class="flex items-center gap-2 mt-1">
+                            <select id="es-science-add-field" class="h-8 rounded border border-input bg-zinc-950 px-2 text-xs focus:outline-none focus:border-emerald-500">
+                                <option value="biology">biology</option>
+                                <option value="economy">economy</option>
+                                <option value="energy">energy</option>
+                                <option value="mathematics">mathematics</option>
+                                <option value="physics">physics</option>
+                                <option value="social" selected>social</option>
+                            </select>
+                            <input type="number" id="es-science-add-level" value="10" min="1" max="80" class="w-16 h-8 rounded border border-input bg-zinc-950 px-1 text-xs font-mono text-center focus:outline-none focus:border-emerald-500">
+                            <button id="es-science-add" class="h-8 px-3 rounded bg-secondary border border-border text-xs font-bold hover:bg-accent transition-colors">+ Add step</button>
+                        </div>
+                        <div class="flex items-center gap-2 mt-2">
+                            <label class="text-[10px] text-muted-foreground uppercase font-semibold">After plan, research</label>
+                            <select id="es-science-overflow" class="h-8 rounded border border-input bg-zinc-950 px-2 text-xs focus:outline-none focus:border-emerald-500">
+                                <option value="">nothing (wasted)</option>
+                                <option value="biology">biology</option>
+                                <option value="economy">economy</option>
+                                <option value="energy">energy</option>
+                                <option value="mathematics">mathematics</option>
+                                <option value="physics">physics</option>
+                                <option value="social">social</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-zinc-900 border border-border rounded-lg overflow-hidden">
+                    <div class="px-4 py-3 border-b border-border bg-zinc-950 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Colonisation</div>
+                    <div class="p-4 flex flex-col gap-3">
+                        <div class="grid grid-cols-2 gap-2">
+                            <div><label class="block text-[9px] text-muted-foreground uppercase font-semibold mb-1">Colony ships/colony</label><input type="number" id="es-colony-ships" value="1" min="1" max="10" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                            <div><label class="block text-[9px] text-muted-foreground uppercase font-semibold mb-1">Max planets (0=&infin;)</label><input type="number" id="es-max-planets" value="0" min="0" max="30" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                            <div><label class="block text-[9px] text-muted-foreground uppercase font-semibold mb-1">System distance</label><input type="number" id="es-colony-distance" value="0" min="0" max="50" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                            <div><label class="block text-[9px] text-muted-foreground uppercase font-semibold mb-1">Planet delta</label><input type="number" id="es-colony-planet-delta" value="3" min="0" max="11" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                        </div>
+                        <label class="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer"><input type="checkbox" id="es-colony-first" checked class="w-3.5 h-3.5"> Colonise before spending on buildings</label>
+                    </div>
+                </div>
+
+                <div class="bg-zinc-900 border border-border rounded-lg overflow-hidden">
+                    <div class="px-4 py-3 border-b border-border bg-zinc-950 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Trade, artifact &amp; misc</div>
+                    <div class="p-4 flex flex-col gap-3">
+                        <div class="grid grid-cols-2 gap-2">
+                            <div><label class="block text-[9px] text-muted-foreground uppercase font-semibold mb-1">Trade rate %</label><input type="number" id="es-trade-rate" value="0" min="0" max="100" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                            <div><label class="block text-[9px] text-muted-foreground uppercase font-semibold mb-1">Starting PP</label><input type="number" id="es-starting-pp" value="300" min="0" class="w-full h-8 rounded border border-input bg-transparent px-1 text-sm font-mono text-center focus:outline-none focus:border-emerald-500"></div>
+                        </div>
+                        <label class="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer"><input type="checkbox" id="es-economy-bonus" class="w-3.5 h-3.5"> +5% join-cohort economy bonus</label>
+                        <div class="flex items-center gap-2">
+                            <input type="text" id="es-artifact" list="es-artifact-list" placeholder="Artifact name (optional)" class="flex-1 h-8 rounded border border-input bg-zinc-950 px-2 text-xs focus:outline-none focus:border-emerald-500">
+                            <datalist id="es-artifact-list"></datalist>
+                            <input type="number" id="es-artifact-from-day" placeholder="from day" value="0" min="0" class="w-20 h-8 rounded border border-input bg-zinc-950 px-1 text-xs font-mono text-center focus:outline-none focus:border-emerald-500">
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <label class="text-[10px] text-muted-foreground uppercase font-semibold">Culture formula</label>
+                            <select id="es-culture-formula" class="h-8 rounded border border-input bg-zinc-950 px-2 text-xs focus:outline-none focus:border-emerald-500">
+                                <option value="gc">cybernets &times; bonus (assumed)</option>
+                                <option value="gc+1">(cybernets+1) &times; bonus</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Warnings -->
+            <div id="es-warnings" class="hidden bg-amber-950/30 border border-amber-900/60 rounded-lg px-4 py-3 text-[11px] text-amber-300 leading-relaxed flex flex-col gap-1"></div>
+
+            <!-- KPIs -->
+            <div class="bg-zinc-900 border border-border rounded-lg overflow-hidden">
+                <div class="px-4 py-3 border-b border-border bg-zinc-950 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">
+                    Final state at day <span id="es-kpi-day">60</span>
+                </div>
+                <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="bg-zinc-950 border border-border rounded-lg p-3 text-center">
+                        <div class="text-[10px] text-muted-foreground uppercase font-semibold mb-1">Planets</div>
+                        <div class="text-xl font-bold text-emerald-400 font-mono" id="es-kpi-planets">1</div>
+                    </div>
+                    <div class="bg-zinc-950 border border-border rounded-lg p-3 text-center">
+                        <div class="text-[10px] text-muted-foreground uppercase font-semibold mb-1">Population</div>
+                        <div class="text-xl font-bold text-emerald-400 font-mono" id="es-kpi-pop">1</div>
+                    </div>
+                    <div class="bg-zinc-950 border border-border rounded-lg p-3 text-center">
+                        <div class="text-[10px] text-amber-500/80 uppercase font-semibold mb-1">PP / hour</div>
+                        <div class="text-xl font-bold text-amber-400 font-mono" id="es-kpi-pp">0</div>
+                    </div>
+                    <div class="bg-zinc-950 border border-border rounded-lg p-3 text-center">
+                        <div class="text-[10px] text-sky-400/80 uppercase font-semibold mb-1">Sci / hour</div>
+                        <div class="text-xl font-bold text-sky-400 font-mono" id="es-kpi-sci">0</div>
+                    </div>
+                    <div class="bg-zinc-950 border border-border rounded-lg p-3 text-center col-span-2">
+                        <div class="text-[10px] text-muted-foreground uppercase font-semibold mb-1">First caught up</div>
+                        <div class="text-base font-bold text-foreground font-mono" id="es-kpi-caughtup">—</div>
+                    </div>
+                    <div class="bg-zinc-950 border border-border rounded-lg p-3 text-center col-span-2">
+                        <div class="text-[10px] text-muted-foreground uppercase font-semibold mb-1">Unspent PP &rarr; fleet</div>
+                        <div class="text-[11px] font-bold text-foreground font-mono" id="es-kpi-fleet">—</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Day by day -->
+            <div class="bg-zinc-900 border border-border rounded-lg overflow-hidden">
+                <div class="px-4 py-3 border-b border-border bg-zinc-950 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Day by day</div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs">
+                        <thead class="bg-zinc-950 text-muted-foreground uppercase text-[10px]">
+                            <tr>
+                                <th class="px-3 py-2 text-left">Day</th>
+                                <th class="px-3 py-2 text-right">Planets</th>
+                                <th class="px-3 py-2 text-right">Pop</th>
+                                <th class="px-3 py-2 text-right">PP/h</th>
+                                <th class="px-3 py-2 text-right">Sci/h</th>
+                                <th class="px-3 py-2 text-right">Culture</th>
+                                <th class="px-3 py-2 text-right">Unspent PP</th>
+                                <th class="px-3 py-2 text-right">PP still needed</th>
+                            </tr>
+                        </thead>
+                        <tbody id="es-daytable"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-zinc-900 border border-border rounded-lg overflow-hidden">
+                    <div class="px-4 py-3 border-b border-border bg-zinc-950 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Where the planets actually got to</div>
+                    <div id="es-buildings-reached" class="p-4 flex flex-col gap-1.5 text-xs font-mono"></div>
+                </div>
+
+                <div class="bg-zinc-900 border border-border rounded-lg overflow-hidden flex flex-col">
+                    <div class="px-4 py-3 border-b border-border bg-zinc-950 flex items-center justify-between">
+                        <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Milestones</span>
+                        <span id="es-milestone-count" class="text-[10px] text-muted-foreground font-mono">0 events</span>
+                    </div>
+                    <div id="es-milestones" class="overflow-y-auto bg-black/40 p-3 font-mono text-[11px] leading-relaxed h-64"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
