@@ -235,6 +235,15 @@ function parseTimerInput(input) {
 
 // Channels (IDs, separated by commas/spaces/newlines) where the bot refuses to run
 // commands — e.g. public/guest channels. Managed from the admin tool via the
+// Discord's "ansi" code-block highlighting — a fixed 4-bit ANSI palette (30-37), no true
+// orange. Used by !holes (issue #116) to color category text instead of icons.
+const ANSI_RED = '[31m';
+const ANSI_GREEN = '[32m';
+const ANSI_YELLOW = '[33m';
+const ANSI_BOLD_YELLOW = '[1;33m';
+const ANSI_RESET = '[0m';
+function ansi(code, text) { return `${code}${text}${ANSI_RESET}`; }
+
 // app_settings key 'discord_blocked_channels'. getSettingValue is hoisted below.
 // Idle display, preferring a real timestamp (last_activity_at, from the API's background
 // detail sweep — near-total roster coverage) over the DOM-scrape-only idle_time string
@@ -1184,18 +1193,20 @@ async function handleMessage(message) {
             if (freePlanned.length || freeUnplanned.length || neutralSlots.length || allySlots.length || enemySlots.length) {
                 systemsWithHoles++;
 
-                // Issue #116: colorize the categories. Discord embeds can't apply arbitrary
-                // text color, so a colored-square emoji stands in for it — exact colors
-                // (red/green/yellow/orange) that an ANSI code block couldn't give us anyway
-                // (Discord's ansi highlighting has no orange in its 8-color set).
+                // Issue #116: colorize the categories as actual text color, not icons — done
+                // via Discord's "ansi" code-block highlighting (the ONLY way to color text in
+                // a Discord message/embed; plain markdown has no color). Its palette is fixed
+                // 4-bit ANSI (30-37) with no true orange, so "Planned" uses bold yellow
+                // (1;33) to read as visually distinct from plain yellow "Neutral" rather than
+                // a color that doesn't exist in the palette.
                 let segments = [`${ownCount} ${tag}`];
-                if (freePlanned.length) segments.push(`🟧 Free planned - *${freePlanned.join(', ')}*`);
+                if (freePlanned.length) segments.push(ansi(ANSI_BOLD_YELLOW, `Planned - ${freePlanned.join(', ')}`));
                 if (freeUnplanned.length) segments.push(`Free unplanned - ${freeUnplanned.join(', ')}`);
-                if (neutralSlots.length) segments.push(`🟨 Neutral - ${neutralSlots.join(', ')}`);
-                if (allySlots.length) segments.push(`🟩 Ally 🤝 - ${allySlots.join(', ')}`);
-                if (enemySlots.length) segments.push(`🟥 War ⚔️ - **${enemySlots.join(', ')}**`);
+                if (neutralSlots.length) segments.push(ansi(ANSI_YELLOW, `Neutral - ${neutralSlots.join(', ')}`));
+                if (allySlots.length) segments.push(ansi(ANSI_GREEN, `Ally - ${allySlots.join(', ')}`));
+                if (enemySlots.length) segments.push(ansi(ANSI_RED, `War - ${enemySlots.join(', ')}`));
 
-                report += `**[${sysId}]** ${data.name || "Unknown System"}: ${segments.join(' | ')}\n`;
+                report += `[${sysId}] ${data.name || "Unknown System"}: ${segments.join(' | ')}\n`;
             }
         }
 
@@ -1203,15 +1214,17 @@ async function handleMessage(message) {
             return message.reply(`🟢 No vulnerabilities located. All slots in [${tag}] territory are securely held by your alliance.`);
         }
 
-        if (report.length > 4000) {
-            report = report.substring(0, 4000) + "\n\n... *(list truncated due to Discord length limits)*";
+        // The ```ansi fence itself eats into the 4096-char embed description limit.
+        const FENCE = '```ansi\n', CLOSE = '\n```';
+        if (report.length > 4000 - FENCE.length - CLOSE.length) {
+            report = report.substring(0, 4000 - FENCE.length - CLOSE.length) + "\n... (list truncated due to Discord length limits)";
         }
 
         const embed = new EmbedBuilder()
             .setTitle(`🕳️ Sector Vulnerability Matrix: [${tag}]`)
-            .setDescription(report)
+            .setDescription(FENCE + report + CLOSE)
             .setColor('#f97316')
-            .setFooter({ text: `Monitored systems: ${systemsWithHoles} | 🟧 Planned (!plan) | 🟨 Neutral | 🟩 Ally | 🟥 War-list` });
+            .setFooter({ text: `Monitored systems: ${systemsWithHoles} | Yellow = Planned (!plan/bold) or Neutral | Green = Ally | Red = War-list` });
 
         return message.reply({ embeds: [embed] });
     }
