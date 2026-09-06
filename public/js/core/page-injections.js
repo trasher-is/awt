@@ -407,6 +407,9 @@ async function getPointsTable(url) {
 // the Economy countdown live inside that cell (marked data-hub-inject), and the alias match
 // below has to keep working on the next view pass after they are there.
 function scienceNameText(cell) {
+    // Nothing injected here (every first pass, every row but Social/Economy): the exact
+    // reading the calculator always used.
+    if (!cell.querySelector('[data-hub-inject]')) return cell.innerText.trim().toLowerCase();
     let text = '';
     cell.childNodes.forEach(node => {
         if (node.nodeType === 1 && node.hasAttribute('data-hub-inject')) return;
