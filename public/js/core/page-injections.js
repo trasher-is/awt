@@ -17,6 +17,19 @@ const Tables = globalThis.AWTables;
 const { TRAIT_PCT } = globalThis.AWEmpire.constants;
 const { getTravelTime } = globalThis.AWApi;
 
+// .NET TimeSpan text as the game renders it in a progress bar's title: "[D.]HH:MM:SS",
+// e.g. "1.19:16:10" (1 day 19h16m10s) or "10:38:06" (no day prefix under 24h). Returns
+// total seconds, or null if the text doesn't match.
+function parseTimeSpanSeconds(text) {
+    const m = text.match(/^(?:(\d+)\.)?(\d{1,2}):(\d{2}):(\d{2})$/);
+    if (!m) return null;
+    const days = parseInt(m[1] || '0', 10);
+    const hours = parseInt(m[2], 10);
+    const minutes = parseInt(m[3], 10);
+    const seconds = parseInt(m[4], 10);
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds;
+}
+
 export function initPlanetPopTimers() {
     if (!window.location.pathname.toLowerCase().includes('/game/planets')) return;
 
@@ -40,12 +53,16 @@ export function initPlanetPopTimers() {
         if (barContainer.querySelector('.custom-pop-timer')) return;
 
         let durationText = durMatch[1].trim();
+        // Issue #145: "Duration" alone (e.g. "1d 19:16:10") only says how long is left, not
+        // when it lands — add the exact finish date/time too, same idea as
+        // initScienceTimers' "(Mon DD HH:MM)" badge next to its native countdown.
+        const totalSeconds = parseTimeSpanSeconds(durationText);
         durationText = durationText.replace(/^(\d+)\./, '$1d ');
 
         const timerDiv = document.createElement('div');
         timerDiv.className = 'custom-pop-timer';
-        timerDiv.innerText = durationText; 
-        
+        timerDiv.innerText = durationText;
+
         timerDiv.style.position = 'absolute';
         timerDiv.style.top = '50%';
         timerDiv.style.transform = 'translateY(-50%)';
@@ -57,7 +74,17 @@ export function initPlanetPopTimers() {
         timerDiv.style.fontWeight = 'bold';
         timerDiv.style.whiteSpace = 'nowrap';
         timerDiv.style.pointerEvents = 'none';
-        
+
+        if (totalSeconds != null) {
+            const finishDate = new Date(Date.now() + totalSeconds * 1000);
+            const dateStr = finishDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
+                finishDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+            const dateSpan = document.createElement('span');
+            dateSpan.style.cssText = 'margin-left: 6px; color: #ccc; font-size: 8pt; font-weight: normal;';
+            dateSpan.innerText = dateStr;
+            timerDiv.appendChild(dateSpan);
+        }
+
         barContainer.style.position = 'relative';
         barContainer.appendChild(timerDiv);
 
