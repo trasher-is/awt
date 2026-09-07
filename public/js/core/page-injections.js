@@ -78,9 +78,9 @@ export function initPlanetPopTimers() {
         if (totalSeconds != null) {
             const finishDate = new Date(Date.now() + totalSeconds * 1000);
             const dateStr = finishDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
-                finishDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false, timeZoneName: 'short' });
+                finishDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
             const dateSpan = document.createElement('span');
-            dateSpan.style.cssText = 'display: block; color: #ccc; font-size: 8pt; font-weight: normal;';
+            dateSpan.style.cssText = 'margin-left: 6px; color: #ccc; font-size: 8pt; font-weight: normal;';
             dateSpan.innerText = dateStr;
             timerDiv.appendChild(dateSpan);
         }
