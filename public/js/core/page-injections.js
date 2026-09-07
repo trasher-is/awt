@@ -41,6 +41,9 @@ export function initPlanetPopTimers() {
                 .custom-pop-timer {
                     font-size: 8pt !important;
                 }
+                .custom-pop-timer-date {
+                    display: none !important;
+                }
             }
         `;
         document.head.appendChild(style);
@@ -80,6 +83,7 @@ export function initPlanetPopTimers() {
             const dateStr = finishDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
                 finishDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
             const dateSpan = document.createElement('span');
+            dateSpan.className = 'custom-pop-timer-date';
             dateSpan.style.cssText = 'margin-left: 6px; color: #ccc; font-size: 8pt; font-weight: normal;';
             dateSpan.innerText = dateStr;
             timerDiv.appendChild(dateSpan);
