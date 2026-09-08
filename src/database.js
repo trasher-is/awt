@@ -517,6 +517,12 @@ function initDatabase() {
         )
     `);
 
+    // Issue #147: the alliance/own-destination halving used to be one manual checkbox for
+    // the WHOLE route, applied to every leg alike even though the game's real rule is
+    // per-flight (whoever owns THAT leg's destination). Stored per leg now, computed
+    // server-side at build time same as travel_seconds — see routes.js's buildLegs.
+    addColumn('route_legs', 'is_alliance_move', 'INTEGER DEFAULT 0');
+
     // --- INDEXES ---
     // Every query below filters on a non-primary-key column that had no index, so each
     // one was a full table scan. planet_events and player_logins are append-only history

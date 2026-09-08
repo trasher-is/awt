@@ -266,6 +266,27 @@ function getPlanetOwnerName(systemId, planetIndex) {
     return getPlanetOwnerNameStmt.get(systemId, planetIndex);
 }
 
+// Batched owner-alliance-tag lookup for a set of (system_id, planet_index) locations — used
+// by routes.js's buildLegs to auto-detect which route legs land on an own/allied planet,
+// without an N+1 query per leg. Arity varies per call (locations.length), so this is
+// prepared fresh each time, same reasoning as getSystemsByIds. SQLite's row-value IN
+// (VALUES (?,?), ...) form does the composite-key match in one query.
+function getPlanetOwnersByLocations(locations) {
+    if (!locations.length) return new Map();
+    const placeholders = locations.map(() => '(?,?)').join(',');
+    const params = locations.flatMap(l => [l.systemId, l.planetIndex]);
+    const rows = db.prepare(`
+        SELECT pn.system_id, pn.planet_index, a.tag AS alliance_tag
+        FROM planets pn
+        JOIN players pl ON pn.owner_id = pl.id
+        LEFT JOIN alliances a ON pl.alliance_id = a.id
+        WHERE (pn.system_id, pn.planet_index) IN (VALUES ${placeholders})
+    `).all(...params);
+    const map = new Map();
+    for (const r of rows) map.set(`${r.system_id}:${r.planet_index}`, r.alliance_tag || null);
+    return map;
+}
+
 // Display-name lookups for battleReports.getLastSeenPlanet's two different location
 // shapes: (system_id, planet_index) from a scraped battle report page, or a bare
 // game_planet_id from a News-page bombardment row. Either can miss (the planet may never
@@ -426,7 +447,7 @@ module.exports = {
     upsertSystemFull, setSystemInVision, deleteAllSystems, countBestGuardedAt, clearBestGuarded, insertBestGuarded,
     getSystemPlanetsWithIntel, getSystemPlanetsForBot, getPlanetsFullDb,
     getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getPlanetsByOwner, getOldPlanet, upsertPlanet,
-    getPlanetsForAllianceTag, getPlanetOwnerName, getPlanetNameByLocation, getPlanetNameByGameId, getPlanetLocationByGameId,
+    getPlanetsForAllianceTag, getPlanetOwnerName, getPlanetOwnersByLocations, getPlanetNameByLocation, getPlanetNameByGameId, getPlanetLocationByGameId,
     clearMovedPlanet, deleteAllPlanets, logPlanetEvent, getPlanetHistory, getRecentPopDrop, deleteAllPlanetEvents,
     getTakeoverBoard, upsertTakeover, deleteAllTakeovers,
 };

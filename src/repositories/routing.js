@@ -70,11 +70,12 @@ function deleteRouteLegsForRoute(routeId) {
 
 const insertRouteLegStmt = db.prepare(`
     INSERT INTO route_legs (route_id, leg_index, from_system_id, from_planet_index,
-                            to_system_id, to_planet_index, travel_seconds, distance, bio_needed)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            to_system_id, to_planet_index, travel_seconds, distance, bio_needed,
+                            is_alliance_move)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
-function insertRouteLeg(routeId, legIndex, fromSystemId, fromPlanetIndex, toSystemId, toPlanetIndex, travelSeconds, distance, bioNeeded) {
-    insertRouteLegStmt.run(routeId, legIndex, fromSystemId, fromPlanetIndex, toSystemId, toPlanetIndex, travelSeconds, distance, bioNeeded);
+function insertRouteLeg(routeId, legIndex, fromSystemId, fromPlanetIndex, toSystemId, toPlanetIndex, travelSeconds, distance, bioNeeded, isAllianceMove) {
+    insertRouteLegStmt.run(routeId, legIndex, fromSystemId, fromPlanetIndex, toSystemId, toPlanetIndex, travelSeconds, distance, bioNeeded, isAllianceMove ? 1 : 0);
 }
 
 const deleteRouteStmt = db.prepare(`DELETE FROM routes WHERE id = ?`);

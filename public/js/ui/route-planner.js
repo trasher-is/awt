@@ -303,6 +303,13 @@ function renderLeg(l) {
     const times = l.arrivesAt
         ? `<span class="text-zinc-500">${esc(fmtLocal(l.departsAt))} → ${esc(fmtLocal(l.arrivesAt))}</span>`
         : '';
+    // Issue #147: the halving is now auto-detected per leg from who currently owns the
+    // destination (own alliance or the Admin -> Alliance Relations allied list), not one
+    // manual checkbox for the whole route. autoAllianceMove distinguishes "we found this
+    // ourselves" from "forced by the checkbox below" so the label stays honest either way.
+    const allied = l.isAllianceMove
+        ? `<span class="text-emerald-400 shrink-0" title="${l.autoAllianceMove ? 'Auto-detected: destination is owned by your alliance or an ally' : 'Forced by the Alliance/own move checkbox below'}"><i class="fa-solid fa-handshake mr-1"></i>${l.autoAllianceMove ? 'allied' : 'allied (forced)'}</span>`
+        : '';
     return `
     <div class="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 text-xs border-l-2 ${l.outOfReach ? 'border-amber-500/60' : 'border-border'} pl-2 py-1">
         <span class="font-mono text-foreground font-semibold w-20 shrink-0">${esc(l.travelTime)}</span>
@@ -313,6 +320,7 @@ function renderLeg(l) {
         </span>
         <span class="text-zinc-500 shrink-0">dist ${l.distance}</span>
         ${warn}
+        ${allied}
         ${times}
     </div>`;
 }
