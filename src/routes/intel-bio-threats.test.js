@@ -15,7 +15,13 @@ delete process.env.DISCORD_TOKEN;
 
 const express = require('express');
 const db = require('../database');
+const playersRepo = require('../repositories/players');
 const intelRouter = require('./intel');
+
+const MY_BIO = 10;
+const THRESHOLD = MY_BIO + playersRepo.BIO_THREAT_MARGIN; // computed, not hardcoded, so this
+                                                            // test tracks the margin wherever
+                                                            // it's set rather than assuming it
 
 let failed = 0;
 function ok(desc, cond, detail) {
@@ -45,21 +51,21 @@ function getJson(server, urlPath) {
     });
 }
 
-// Me: biology 10 -> threshold 16.
-db.prepare(`INSERT INTO players (id, name, biology) VALUES (1, 'Caveman', 10)`).run();
+// Me: biology MY_BIO -> threshold THRESHOLD (MY_BIO + the shared margin).
+db.prepare(`INSERT INTO players (id, name, biology) VALUES (1, 'Caveman', ?)`).run(MY_BIO);
 db.prepare(`INSERT INTO alliances (id, name, tag) VALUES (50, 'Raiders', 'RAID')`).run();
 
-// Confirmed threat: real biology 16 (== threshold), has_intel = 1.
-db.prepare(`INSERT INTO players (id, name, biology, has_intel, alliance_id) VALUES (2, 'BioGiant', 16, 1, 50)`).run();
-// Not a threat: real biology 15, one below threshold.
-db.prepare(`INSERT INTO players (id, name, biology, has_intel) VALUES (3, 'JustUnder', 15, 1)`).run();
-// Suspected threat: never had biology scraped (has_intel = 0), but public science level 20 >= threshold.
-db.prepare(`INSERT INTO players (id, name, science_level, has_intel) VALUES (4, 'MysteryScientist', 20, 0)`).run();
+// Confirmed threat: real biology == threshold, has_intel = 1.
+db.prepare(`INSERT INTO players (id, name, biology, has_intel, alliance_id) VALUES (2, 'BioGiant', ?, 1, 50)`).run(THRESHOLD);
+// Not a threat: real biology one below threshold.
+db.prepare(`INSERT INTO players (id, name, biology, has_intel) VALUES (3, 'JustUnder', ?, 1)`).run(THRESHOLD - 1);
+// Suspected threat: never had biology scraped (has_intel = 0), but public science level >= threshold.
+db.prepare(`INSERT INTO players (id, name, science_level, has_intel) VALUES (4, 'MysteryScientist', ?, 0)`).run(THRESHOLD + 4);
 // Not a threat: has_intel = 0 but science level below threshold.
-db.prepare(`INSERT INTO players (id, name, science_level, has_intel) VALUES (5, 'LowScience', 10, 0)`).run();
+db.prepare(`INSERT INTO players (id, name, science_level, has_intel) VALUES (5, 'LowScience', ?, 0)`).run(THRESHOLD - 5);
 // Confirmed AND high science, but has_intel = 1 — must land in "confirmed" only, never
 // double-counted into "suspected" too (suspected is has_intel = 0 exclusively).
-db.prepare(`INSERT INTO players (id, name, biology, science_level, has_intel) VALUES (6, 'ScannedAndStrong', 16, 30, 1)`).run();
+db.prepare(`INSERT INTO players (id, name, biology, science_level, has_intel) VALUES (6, 'ScannedAndStrong', ?, ?, 1)`).run(THRESHOLD, THRESHOLD + 14);
 
 (async () => {
     const server = app.listen(0);
@@ -69,20 +75,20 @@ db.prepare(`INSERT INTO players (id, name, biology, science_level, has_intel) VA
         console.log('\n── bio-threats for a known player ' + '─'.repeat(30));
         const res = await getJson(server, '/hub-api/intel/bio-threats');
         ok('responds 200', res.status === 200, res);
-        ok('myBio resolves to the caller\'s own biology (10)', res.body && res.body.myBio === 10, res.body);
-        ok('threshold is myBio + 6 = 16', res.body && res.body.threshold === 16, res.body);
+        ok(`myBio resolves to the caller's own biology (${MY_BIO})`, res.body && res.body.myBio === MY_BIO, res.body);
+        ok(`threshold is myBio + BIO_THREAT_MARGIN (${playersRepo.BIO_THREAT_MARGIN}) = ${THRESHOLD}`, res.body && res.body.threshold === THRESHOLD, res.body);
 
         const confirmedNames = (res.body.confirmed || []).map(p => p.name).sort();
-        ok('confirmed list has exactly BioGiant and ScannedAndStrong (real bio >= 16, has_intel=1)',
+        ok('confirmed list has exactly BioGiant and ScannedAndStrong (real bio >= threshold, has_intel=1)',
             JSON.stringify(confirmedNames) === JSON.stringify(['BioGiant', 'ScannedAndStrong']), confirmedNames);
         ok('confirmedCount matches the list length (2)', res.body.confirmedCount === 2, res.body.confirmedCount);
-        ok('JustUnder (bio 15, one below threshold) is excluded', !confirmedNames.includes('JustUnder'));
+        ok('JustUnder (bio one below threshold) is excluded', !confirmedNames.includes('JustUnder'));
 
         const suspectedNames = (res.body.suspected || []).map(p => p.name);
-        ok('suspected list has exactly MysteryScientist (has_intel=0, science 20 >= 16)',
+        ok('suspected list has exactly MysteryScientist (has_intel=0, science >= threshold)',
             JSON.stringify(suspectedNames) === JSON.stringify(['MysteryScientist']), suspectedNames);
         ok('suspectedCount matches (1)', res.body.suspectedCount === 1, res.body.suspectedCount);
-        ok('LowScience (science 10, below threshold) is excluded', !suspectedNames.includes('LowScience'));
+        ok('LowScience (science below threshold) is excluded', !suspectedNames.includes('LowScience'));
         ok('ScannedAndStrong never appears in suspected despite high science (has_intel=1, so it is CONFIRMED not suspected)',
             !suspectedNames.includes('ScannedAndStrong'), suspectedNames);
 

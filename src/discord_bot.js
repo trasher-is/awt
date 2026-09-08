@@ -325,7 +325,7 @@ async function handleMessage(message) {
                 { name: '`!holes [alliance_tag]`', value: 'Scans your alliance\'s territory for a per-system breakdown: your own holdings, free unplanned, 🟧 planned (!plan), 🟨 neutral, 🟩 ally, and 🟥 war-list presence, per the Alliance Relations tags set in Admin.\n*Example: `!holes RAID`*' },
                 { name: '`!tt <sysA> <plnA> <sysB> <plnB> <speed> <nrg>`', value: 'Calculates fleet travel time between two coordinates.\n*Example: `!tt 100 1 200 4 10 5`*\n*(You can also swap speed/energy for a player name: `!tt 100 1 200 4 PlayerOne`)*' },
                 { name: '`!ghosts <sys_id> <planet_num> <alliance_tag>`', value: 'Calculates the shortest/longest hidden fleet arrival window from hostile members with radar vision over a system.\n*Example: `!ghosts 1 10 AO`*' },
-                { name: '`!bio`', value: 'Generates intelligence alerts highlighting players who possess a +6 biology or science advantage over your personal bio level.' },
+                { name: '`!bio`', value: `Generates intelligence alerts highlighting players who possess a +${playersRepo.BIO_THREAT_MARGIN} biology or science advantage over your personal bio level.` },
                 { name: '`!battle <D> <C> <B> vs <D> <C> <B>`', value: 'Simulates a battle. Flags: `--sb N` starbase (0-50), `--dp/--ap N` physics, `--dm/--am N` math, `--dra/--ara N` race atk, `--drd/--ard N` race def, `--dl/--al N` player level. Or `--def Name --atk Name` to auto-fill all stats from DB.\n*Example: `!battle 50 10 0 vs 40 8 2 --dp 5 --ap 3 --dl 12 --al 8`*' },
                 { name: '`!mortal` / `!mortalday` / `!mortalweek` `[all|<alliance_tag>]`', value: 'Shows the CV/population-killed battle leaderboards — all-time, last 24 hours, or last 7 days. Defaults to Hub tool users only; `all` lifts that; any alliance tag filters to that alliance (any alliance, not just your own).\n*Example: `!mortalweek nsa`*' },
                 { name: '`!lastseen <player_name>`', value: 'Shows up to 5 recent system/planet locations a player was involved in a battle report or News-page bombardment at, on either side, newest first.\n*Example: `!lastseen Hkiller89`*' },
@@ -527,7 +527,7 @@ async function handleMessage(message) {
         }
 
         const myBio = me.biology || 0;
-        const threatThreshold = myBio + 6;
+        const threatThreshold = myBio + playersRepo.BIO_THREAT_MARGIN;
 
         // 1. Confirmed High Biology (has_intel = 1) -> Match bio directly
         const confirmedThreats = playersRepo.getThreatPlayersByBiology(threatThreshold, me.id);
@@ -537,7 +537,7 @@ async function handleMessage(message) {
 
         const embed = new EmbedBuilder()
             .setTitle(`🧬 Biology Threat Matrix (Your Bio: ${myBio})`)
-            .setDescription(`Scanning for active entities displaying an advantage of **+6** levels or higher over your baseline radar coverage (Threshold: **${threatThreshold}+**):`)
+            .setDescription(`Scanning for active entities displaying an advantage of **+${playersRepo.BIO_THREAT_MARGIN}** levels or higher over your baseline radar coverage (Threshold: **${threatThreshold}+**):`)
             .setColor('#10b981'); // Emerald green theme for bio profile metrics
 
         let confirmedStr = "";
