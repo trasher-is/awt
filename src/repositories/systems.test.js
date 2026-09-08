@@ -91,6 +91,20 @@ systems.logPlanetEvent(1, 1, 1, null, 42);
 const history = systems.getPlanetHistory(1);
 ok('getPlanetHistory returns the logged event', history.length === 1 && history[0].new_value === 42);
 
+// getRecentPopDrop: used by /sync/news to credit a non-battle conquest's population.
+db.prepare(`
+    INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp)
+    VALUES (1, 5, 2, 20, 10, '2026-09-05 19:00:00'), (1, 5, 2, 10, 0, '2026-09-05 19:10:00')
+`).run();
+const noneYet = systems.getRecentPopDrop(1, 5, '2026-09-05T18:59:59.000Z');
+ok('getRecentPopDrop finds nothing before either drop was logged', noneYet === null, noneYet);
+const firstDrop = systems.getRecentPopDrop(1, 5, '2026-09-05T19:05:00.000Z');
+ok('getRecentPopDrop returns the closest drop AT-OR-BEFORE an ISO timestamp (compared via SQLite datetime(), not raw string equality)',
+    firstDrop && firstDrop.old_value === 20 && firstDrop.new_value === 10, firstDrop);
+const latestDrop = systems.getRecentPopDrop(1, 5, '2026-09-05T19:10:00.000Z');
+ok('getRecentPopDrop picks the LATEST matching drop when several qualify (inclusive at-or-before)',
+    latestDrop && latestDrop.old_value === 10 && latestDrop.new_value === 0, latestDrop);
+
 systems.upsertTakeover(1, 1, 'caveman', 2, null);
 const board = systems.getTakeoverBoard(1);
 ok('getTakeoverBoard shows the assigned runner', board[0].assigned_name === 'caveman');

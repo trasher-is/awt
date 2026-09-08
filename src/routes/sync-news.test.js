@@ -169,6 +169,65 @@ function postJson(server, urlPath, body) {
         const afterWatermark = db.prepare('SELECT last_news_scraped_at FROM players WHERE id = 1').get().last_news_scraped_at;
         ok('watermark advanced using the GOOD entry\'s timestamp, not the garbage one',
             afterWatermark === '2026-08-24T22:00:00.000Z', { beforeWatermark, afterWatermark });
+
+        console.log('\n── (d) battle-conquer is credited from the closest logged POP_DROP ' + '─'.repeat(10));
+        // Regression test: a non-battle conquest (undefended planet, or colonizing an
+        // Unknown planet's leftover population) carries no population number in the News
+        // text at all — /sync/system now logs a POP_DROP for it regardless of whether the
+        // owner also changed in the same tick (see sync.js), and /sync/news is expected to
+        // pick up the closest one at-or-before the conquest and credit the scraping player.
+        db.prepare(`INSERT INTO systems (id, name) VALUES (40, 'Minchir')`).run();
+        db.prepare(`
+            INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population)
+            VALUES (5008, 40, 8, NULL, 0)
+        `).run();
+        db.prepare(`
+            INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp)
+            VALUES (40, 8, 2, 51, 0, '2026-09-05 19:10:00')
+        `).run(); // POP_DROP: 51 -> 0, logged a few seconds before the conquest below
+
+        const resD = await postJson(server, '/hub-api/sync/news', {
+            entries: [{
+                message_type: 'battle-conquer',
+                occurred_at: '2026-09-05T19:10:16.000Z',
+                game_planet_id: 5008,
+                system_id: 40,
+                other_player_id: null,
+                population_delta: null,
+                direction: null,
+            }],
+        });
+        ok('responds 200', resD.status === 200, resD);
+        ok('inserted count is 1', resD.body && resD.body.inserted === 1, resD.body);
+
+        const rowD = db.prepare(`SELECT * FROM news_events WHERE player_id = 1 AND game_planet_id = 5008`).get();
+        ok('row was stored', !!rowD, rowD);
+        ok('population_delta recovered from the POP_DROP (51 -> 0 = 51)', rowD && rowD.population_delta === 51, rowD);
+        ok('credited_player_id resolved to the scraping player ("We conquered..." is always them)',
+            rowD && rowD.credited_player_id === 1, rowD);
+
+        console.log('\n── (e) battle-conquer with no matching POP_DROP stays uncredited (no fabricated data) ' + '─'.repeat(2));
+        db.prepare(`
+            INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population)
+            VALUES (5010, 40, 10, NULL, 0)
+        `).run(); // no planet_events row for this one at all
+
+        const resE = await postJson(server, '/hub-api/sync/news', {
+            entries: [{
+                message_type: 'battle-conquer',
+                occurred_at: '2026-09-06T10:00:00.000Z',
+                game_planet_id: 5010,
+                system_id: 40,
+                other_player_id: null,
+                population_delta: null,
+                direction: null,
+            }],
+        });
+        ok('responds 200', resE.status === 200, resE);
+        const rowE = db.prepare(`SELECT * FROM news_events WHERE player_id = 1 AND game_planet_id = 5010`).get();
+        ok('row was stored', !!rowE, rowE);
+        ok('population_delta stays NULL — nothing to recover, not fabricated', rowE && rowE.population_delta === null, rowE);
+        ok('credited_player_id stays NULL to match', rowE && rowE.credited_player_id === null, rowE);
     } finally {
         server.close();
     }

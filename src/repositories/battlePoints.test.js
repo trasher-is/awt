@@ -124,15 +124,25 @@ db.prepare(`
     INSERT INTO news_events (player_id, message_type, occurred_at, credited_player_id, population_delta, matched_battle_report_id)
     VALUES (11, 'battle-bombarded', '2026-08-05T00:00:00Z', 11, 999, 1)
 `).run();
-// A conquest event never contributes points regardless of credited_player_id.
+// An uncredited conquest (no matching POP_DROP found — see sync.js) contributes nothing,
+// same as any other row with a NULL population_delta.
 db.prepare(`
     INSERT INTO news_events (player_id, message_type, occurred_at, credited_player_id, population_delta, matched_battle_report_id)
     VALUES (10, 'battle-conquer', '2026-08-06T00:00:00Z', 10, NULL, NULL)
 `).run();
+// A CREDITED conquest (population recovered from the closest logged POP_DROP by
+// /sync/news) now DOES contribute — this is the actual fix: non-battle conquests used to
+// be invisible to the population-killed leaderboard entirely, since the game's own
+// conquest message states no population number.
+db.prepare(`
+    INSERT INTO news_events (player_id, message_type, occurred_at, credited_player_id, population_delta, matched_battle_report_id)
+    VALUES (10, 'battle-conquer', '2026-08-06T01:00:00Z', 10, 51, NULL)
+`).run();
 
 const boardsWithNews = battlePoints.getLeaderboards(null, 10, 'all');
 const gina = boardsWithNews.pop.find(r => r.player_name === 'Gina');
-ok('Gina gets population points from her unmatched bombardment (400)', gina && gina.raw === 400, gina);
+ok('Gina gets population points from her unmatched bombardment (400) + her credited conquest (51)',
+    gina && gina.raw === 451, gina);
 ok('Hank never appears — his bombardment is already covered by a real battle report',
     !boardsWithNews.pop.some(r => r.player_name === 'Hank'), boardsWithNews.pop);
 

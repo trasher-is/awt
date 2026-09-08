@@ -150,7 +150,10 @@ function getPopLeaderboard(sinceIso, limit, scope = 'members', allianceId = null
             END)
             LEFT JOIN alliances ca ON ca.id = cp.alliance_id
             LEFT JOIN alliances oa ON oa.id = op.alliance_id
-            WHERE ne.message_type = 'battle-bombarded'
+            -- 'battle-conquer' rows (issue: non-battle conquests were invisible here) are
+            -- credited by /sync/news from the closest logged POP_DROP, not scraped from
+            -- News text — the game's conquest message never states a population number.
+            WHERE ne.message_type IN ('battle-bombarded', 'battle-conquer')
               AND ne.matched_battle_report_id IS NULL
               AND ne.credited_player_id IS NOT NULL
               ${neWherePart}
