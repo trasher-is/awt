@@ -202,6 +202,51 @@ function postJson(server, urlPath, body) {
         ).get();
         ok('the resign is logged as a real OWNER_CHANGE history event, not silently skipped',
             event && event.old_value === 76 && event.new_value === null, event);
+
+        console.log('\n── (d) a conquest also logs the population it destroyed, not just the owner change ' + '─'.repeat(1));
+        // Regression test: population lost during a conquest (owner change in the same
+        // tick) used to be silently dropped — the POP DROP branch was an `else if` on "same
+        // owner", on the theory the OWNER_CHANGE event above already captured it. It didn't:
+        // that event only stores owner ids, never a population number. This left the
+        // !mortal population-killed leaderboard blind to every non-battle conquest
+        // (reported live: system [40] planet 8's conquest, planet 10's colonization of a
+        // 4-5 pop Unknown planet — neither showed up).
+        const conquestSeed = {
+            system_id: 400,
+            planets: [{
+                planet_index: 1,
+                owner: { id: 51, name: 'Caveman', alliance_id: null, alliance_tag: null },
+                population: 51,
+                starbase: 0,
+            }],
+            fleets: [],
+        };
+        const conquestSeedRes = await postJson(server, '/hub-api/sync/system', conquestSeed);
+        ok('the pre-conquest seed for system 400 succeeds', conquestSeedRes.status === 200, conquestSeedRes);
+
+        const conquestPayload = {
+            system_id: 400,
+            planets: [{
+                planet_index: 1,
+                owner: { id: 52, name: 'Conqueror', alliance_id: null, alliance_tag: null },
+                population: 0,
+                starbase: 0,
+            }],
+            fleets: [],
+        };
+        const conquestRes = await postJson(server, '/hub-api/sync/system', conquestPayload);
+        ok('the conquest payload succeeds', conquestRes.status === 200, conquestRes);
+
+        const ownerEvent = db.prepare(
+            'SELECT * FROM planet_events WHERE system_id = 400 AND planet_index = 1 AND event_type_id = 1'
+        ).get();
+        ok('OWNER_CHANGE is still logged as before', ownerEvent && ownerEvent.old_value === 51 && ownerEvent.new_value === 52, ownerEvent);
+
+        const popEvent = db.prepare(
+            'SELECT * FROM planet_events WHERE system_id = 400 AND planet_index = 1 AND event_type_id = 2'
+        ).get();
+        ok('POP_DROP is now ALSO logged for the same conquest tick (the actual fix)',
+            popEvent && popEvent.old_value === 51 && popEvent.new_value === 0, popEvent);
     } finally {
         server.close();
     }

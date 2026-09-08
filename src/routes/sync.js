@@ -116,8 +116,6 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 // only — a real transition TO or FROM the game's own "Unknown" owner state
                 // (is_unknown) is real history and must be logged like any other change.
                 if (oldP.owner_id !== finalOwnerId) {
-                    // OWNER CHANGE — takes precedence; a pop drop that comes with a new
-                    // owner is really just the conquest, already captured here.
                     systemsRepo.logPlanetEvent(system_id, p.planet_index, 1, oldP.owner_id, finalOwnerId); // 1 = OWNER_CHANGE (history)
                     // Announce genuine transitions to Discord, but NOT "Empty -> owner":
                     // those are low-value new colonies, and while the planets table heals
@@ -134,15 +132,28 @@ router.post('/sync/system', requireAuth, (req, res) => {
                                 : nameOf(finalOwnerId)
                         });
                     }
-                } else if (finalOwnerId != null) {
-                    // POP DROP — same owner, population fell (attack/siege). Any decrease
-                    // counts (20→19, 5→1); only fired for an owned planet so empty slots
-                    // don't generate noise.
-                    const oldPop = Number(oldP.population);
-                    const newPop = Number(finalPopulation);
-                    if (Number.isFinite(oldPop) && Number.isFinite(newPop) && newPop < oldPop) {
-                        systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, newPop); // 2 = POP_DROP
-                        if (scan_mode !== 'silent') announceEvents.push({
+                }
+
+                // POP DROP — any population decrease, owner change or not. Used to be
+                // gated on "same owner" (an `else if` here), on the theory that a drop
+                // alongside an owner change is "really just the conquest, already
+                // captured" by the OWNER_CHANGE event above — but that event only stores
+                // owner ids, never a population number, so a conquest (or colonizing an
+                // Unknown planet with leftover population — see docs/game-rules.md) left
+                // NO record anywhere of how much population was actually lost. That's what
+                // fed the !mortal population-killed leaderboard, via /sync/news crediting
+                // 'battle-conquer' news rows against the closest POP_DROP row — so those
+                // conquests were silently invisible to it (reported live: system [40]
+                // planet 8's conquest, and planet 10's colonization of a 4-5 pop Unknown,
+                // neither showed up). Logged unconditionally now; only announced to
+                // Discord in the same-owner case, since an owner-change conquest is
+                // already announced above and doesn't need a second message.
+                const oldPop = Number(oldP.population);
+                const newPop = Number(finalPopulation);
+                if (Number.isFinite(oldPop) && Number.isFinite(newPop) && newPop < oldPop) {
+                    systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, newPop); // 2 = POP_DROP
+                    if (oldP.owner_id === finalOwnerId && scan_mode !== 'silent') {
+                        announceEvents.push({
                             planet_index: p.planet_index,
                             type: 'POP_DROP',
                             old_pop: oldPop,
@@ -1122,6 +1133,7 @@ router.post('/sync/news', requireAuth, (req, res) => {
 
             let credited_player_id = null;
             let matched_battle_report_id = null;
+            let population_delta = raw.population_delta || null;
 
             if (raw.message_type === 'battle-bombarded') {
                 // Don't gate this call on otherPlayerId: direction "killed" credits the
@@ -1135,6 +1147,22 @@ router.post('/sync/news', requireAuth, (req, res) => {
                         matched_battle_report_id = battleReportsRepo.findByPlayerPairNear(
                             credit.credited_player_id, credit.otherPlayerId, raw.occurred_at, 15
                         );
+                    }
+                }
+            } else if (raw.message_type === 'battle-conquer' && raw.game_planet_id) {
+                // The News-page conquest text carries no population number (see
+                // news-battle-events.js's parseConquestRow) — recover it from the closest
+                // logged population drop for this planet, which /sync/system's system-sync
+                // now logs unconditionally rather than only on same-owner ticks. Without
+                // this, every non-battle conquest (an undefended planet, or colonizing an
+                // Unknown planet's leftover population) was invisible to the !mortal
+                // population-killed leaderboard.
+                const loc = systemsRepo.getPlanetLocationByGameId(raw.game_planet_id);
+                if (loc) {
+                    const drop = systemsRepo.getRecentPopDrop(loc.system_id, loc.planet_index, raw.occurred_at);
+                    if (drop && drop.old_value != null && drop.new_value != null && drop.old_value > drop.new_value) {
+                        population_delta = drop.old_value - drop.new_value;
+                        credited_player_id = playerId; // "We conquered..." always refers to the scraping player
                     }
                 }
             }
@@ -1151,7 +1179,7 @@ router.post('/sync/news', requireAuth, (req, res) => {
                     game_planet_id: raw.game_planet_id || null,
                     system_id: raw.system_id || null,
                     other_player_id: otherPlayerId,
-                    population_delta: raw.population_delta || null,
+                    population_delta,
                     credited_player_id,
                     matched_battle_report_id,
                 });

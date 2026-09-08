@@ -350,6 +350,25 @@ function getPlanetHistory(sysId) {
     return getPlanetHistoryStmt.all(sysId);
 }
 
+// Latest logged population drop (event_type_id=2) for a planet at or before a given moment
+// — used by /sync/news to credit a 'battle-conquer' entry with the population it actually
+// destroyed, since the conquest itself carries no population number (see sync.js's POP DROP
+// comment). `beforeIso` is compared via SQLite's own datetime() rather than string equality,
+// since planet_events.timestamp is space-separated SQLite UTC while callers pass an ISO8601
+// "...T...Z" string — the two don't compare correctly as raw strings (see the codebase-wide
+// SQLite-UTC-vs-ISO8601 rule).
+const getRecentPopDropStmt = db.prepare(`
+    SELECT old_value, new_value, timestamp
+    FROM planet_events
+    WHERE system_id = ? AND planet_index = ? AND event_type_id = 2
+      AND timestamp <= datetime(?)
+    ORDER BY timestamp DESC, id DESC
+    LIMIT 1
+`);
+function getRecentPopDrop(systemId, planetIndex, beforeIso) {
+    return getRecentPopDropStmt.get(systemId, planetIndex, beforeIso) || null;
+}
+
 const deleteAllPlanetEventsStmt = db.prepare(`DELETE FROM planet_events`);
 function deleteAllPlanetEvents() {
     deleteAllPlanetEventsStmt.run();
@@ -408,6 +427,6 @@ module.exports = {
     getSystemPlanetsWithIntel, getSystemPlanetsForBot, getPlanetsFullDb,
     getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getPlanetsByOwner, getOldPlanet, upsertPlanet,
     getPlanetsForAllianceTag, getPlanetOwnerName, getPlanetNameByLocation, getPlanetNameByGameId, getPlanetLocationByGameId,
-    clearMovedPlanet, deleteAllPlanets, logPlanetEvent, getPlanetHistory, deleteAllPlanetEvents,
+    clearMovedPlanet, deleteAllPlanets, logPlanetEvent, getPlanetHistory, getRecentPopDrop, deleteAllPlanetEvents,
     getTakeoverBoard, upsertTakeover, deleteAllTakeovers,
 };

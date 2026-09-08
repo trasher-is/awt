@@ -468,12 +468,13 @@ async function handleMessage(message) {
                     : 'nothing';
                 return `${line}\n> Remaining: **${cv.toLocaleString()} CV** — ${perType}`;
             }
-            // News-page events other than a bombardment (battle-conquer/battle-conquered)
-            // never carry credited_player_id/population_delta — no opponent link exists on
-            // those rows at all (see news-battle-events.js), and they only ever surface
-            // here for the scraping member's OWN record, so no name is needed either.
+            // battle-conquered (losing a planet) still carries no credited_player_id/
+            // population_delta — no opponent link exists on that row at all (see
+            // news-battle-events.js) — but battle-conquer now does when /sync/news found a
+            // matching POP_DROP for the planet (see sync.js), so it's shown when present.
             if (occ.message_type === 'battle-conquer') {
-                return `**${where}** — conquered this planet — ${when}`;
+                const pop = occ.population_delta != null ? ` (popkilled ${occ.population_delta.toLocaleString()})` : '';
+                return `**${where}** — conquered this planet${pop} — ${when}`;
             }
             if (occ.message_type === 'battle-conquered') {
                 return `**${where}** — lost this planet — ${when}`;
