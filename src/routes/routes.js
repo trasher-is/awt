@@ -5,6 +5,9 @@ const { calcTravelSeconds, formatTime } = require('../utils/travel-calc');
 const { postEmbed, defuseMentions } = require('../utils/discord-post');
 const systemsRepo = require('../repositories/systems');
 const routingRepo = require('../repositories/routing');
+const alliancesRepo = require('../repositories/alliances');
+const playersRepo = require('../repositories/players');
+const settingsRepo = require('../repositories/settings');
 
 const router = express.Router();
 
@@ -140,6 +143,20 @@ function bioNeededFor(distance) {
     return Math.ceil(distance);
 }
 
+// Issue #147: which alliance tags count as "friendly" for the automatic halving rule —
+// our own alliance (derived the same way the Galaxy Archive's own-tag detection works: via
+// app-linked members' current alliance) plus whatever's configured in Admin -> Alliance
+// Relations (the allied list from issue #114). A route to a planet owned by either gets the
+// alliance/own-destination travel-time halving automatically, without the member having to
+// know and manually tick a box.
+function friendlyAllianceTags() {
+    const memberIds = alliancesRepo.getAllianceMemberStatIds().map(r => r.player_id);
+    const ownTag = (playersRepo.getAllianceTagForMembers(memberIds) || {}).tag || null;
+    const tags = new Set(settingsRepo.getTagListSetting('alliance_relations_allied'));
+    if (ownTag) tags.add(String(ownTag).toUpperCase());
+    return tags;
+}
+
 function loadSystems(ids) {
     if (!ids.length) return new Map();
     const rows = systemsRepo.getSystemsByIds(ids);
@@ -169,6 +186,14 @@ function buildLegs(waypoints, { energy, raceSpeed, isAllianceMove, biology }) {
         if (sys.x == null || sys.y == null) return invalid(`waypoints[${i}].systemId`, `System #${w.systemId} has no coordinates recorded yet.`);
     }
 
+    // Issue #147: auto-detect which legs land on an own/allied planet instead of relying on
+    // one manual checkbox applied uniformly to the whole route. Batched over every
+    // DESTINATION (waypoints[1:] — a route's first stop is never a leg's target) so this is
+    // one query regardless of leg count, not one per leg.
+    const friendlyTags = friendlyAllianceTags();
+    const destinations = waypoints.slice(1).map(w => ({ systemId: w.systemId, planetIndex: w.planetIndex }));
+    const ownersByLocation = systemsRepo.getPlanetOwnersByLocations(destinations);
+
     const legs = [];
     let totalSeconds = 0;
     for (let i = 0; i < waypoints.length - 1; i++) {
@@ -178,9 +203,16 @@ function buildLegs(waypoints, { energy, raceSpeed, isAllianceMove, biology }) {
         const ap = a.planetIndex;
         const bp = b.planetIndex;
 
+        const destTag = ownersByLocation.get(`${b.systemId}:${b.planetIndex}`);
+        const autoAllianceMove = destTag != null && friendlyTags.has(String(destTag).toUpperCase());
+        // The manual checkbox still ORs in as an override — for a destination our own data
+        // doesn't know about yet (never scanned, or a future colony), the member can still
+        // force the halving by hand.
+        const legIsAllianceMove = !!isAllianceMove || autoAllianceMove;
+
         const dx = sb.x - sa.x, dy = sb.y - sa.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
-        const seconds = calcTravelSeconds(sa.x, sa.y, ap, sb.x, sb.y, bp, energy, raceSpeed, isAllianceMove);
+        const seconds = calcTravelSeconds(sa.x, sa.y, ap, sb.x, sb.y, bp, energy, raceSpeed, legIsAllianceMove);
         const bioNeeded = bioNeededFor(distance);
         // The inputs are integers in range, so this only trips on corrupt coordinates —
         // but a NaN or Infinity stored as travel_seconds would poison every list view.
@@ -194,6 +226,8 @@ function buildLegs(waypoints, { energy, raceSpeed, isAllianceMove, biology }) {
             from: { systemId: sa.id, systemName: sa.name, planetIndex: ap, x: sa.x, y: sa.y },
             to: { systemId: sb.id, systemName: sb.name, planetIndex: bp, x: sb.x, y: sb.y },
             distance: Math.round(distance * 100) / 100,
+            isAllianceMove: legIsAllianceMove,
+            autoAllianceMove, // so the UI can label it "auto-detected" vs. "forced by you"
             travelSeconds: seconds,
             travelTime: formatTime(seconds),
             bioNeeded,
@@ -250,6 +284,7 @@ function hydrate(routeRows) {
             from: { systemId: l.from_system_id, systemName: l.from_system_name, planetIndex: l.from_planet_index, x: l.from_x, y: l.from_y },
             to: { systemId: l.to_system_id, systemName: l.to_system_name, planetIndex: l.to_planet_index, x: l.to_x, y: l.to_y },
             distance: l.distance,
+            isAllianceMove: !!l.is_alliance_move,
             travelSeconds: l.travel_seconds,
             travelTime: formatTime(l.travel_seconds || 0),
             bioNeeded: l.bio_needed
@@ -355,7 +390,7 @@ function writeRoute(routeId, body, authorId) {
 
         for (const l of built.legs) {
             routingRepo.insertRouteLeg(id, l.legIndex, l.from.systemId, l.from.planetIndex,
-                    l.to.systemId, l.to.planetIndex, l.travelSeconds, l.distance, l.bioNeeded);
+                    l.to.systemId, l.to.planetIndex, l.travelSeconds, l.distance, l.bioNeeded, l.isAllianceMove);
         }
         return id;
     });
@@ -430,9 +465,14 @@ router.post('/routes/:id/announce', requireAuth, async (req, res) => {
             const from = `[${l.from.systemId}] ${defuseMentions(l.from.systemName || '?')} #${l.from.planetIndex}`;
             const to = `[${l.to.systemId}] ${defuseMentions(l.to.systemName || '?')} #${l.to.planetIndex}`;
             const eta = l.arrivesAt ? ` — arrives <t:${Math.floor(Date.parse(l.arrivesAt) / 1000)}:t>` : '';
-            return `**${l.legIndex + 1}.** ${from} → ${to}\n\`${l.travelTime}\` · dist ${l.distance} · bio ${l.bioNeeded}${eta}`;
+            const allied = l.isAllianceMove ? ' · allied' : '';
+            return `**${l.legIndex + 1}.** ${from} → ${to}\n\`${l.travelTime}\` · dist ${l.distance} · bio ${l.bioNeeded}${allied}${eta}`;
         }).join('\n');
 
+        // Issue #147: halving is now per-leg (auto-detected per destination), so a single
+        // route-wide "halved" tag on the total would be misleading for a mixed route —
+        // note it only when EVERY leg actually got it; each leg already says "allied" above.
+        const allLegsAllied = route.legs.length > 0 && route.legs.every(l => l.isAllianceMove);
         const embed = {
             title: `🗺️ ${defuseMentions(route.title || 'Planned route')}`,
             color: 0x8b5cf6,
@@ -442,7 +482,7 @@ router.post('/routes/:id/announce', requireAuth, async (req, res) => {
                 '',
                 legLines,
                 '',
-                `**Total:** \`${route.totalTime}\`${route.isAllianceMove ? ' (allied move, halved)' : ''}`,
+                `**Total:** \`${route.totalTime}\`${allLegsAllied ? ' (allied move, halved)' : ''}`,
                 route.note ? `\n${defuseMentions(route.note)}` : ''
             ].filter(Boolean).join('\n'),
             footer: { text: `Energy ${route.energy} · race speed ${route.raceSpeed >= 0 ? '+' : ''}${route.raceSpeed}` }
