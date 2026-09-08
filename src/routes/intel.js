@@ -517,6 +517,35 @@ router.get('/intel/joined-dates', requireAuth, (req, res) => {
     }
 });
 
+// BIOLOGY THREAT MATRIX (issue #153) — same rule as the !bio Discord command: players
+// whose biology (confirmed intel) or science level (proxy ceiling when biology has never
+// been scraped) sits 6+ levels above the caller's own biology. Confirmed and suspected are
+// kept separate — the Science page shows them as a red pill (real, scanned biology) and a
+// yellow one (unscanned; science level is only an UPPER BOUND on what their biology could
+// be, per docs/game-rules.md, so it's a maybe, not a confirmed threat).
+const BIO_THREAT_MARGIN = 6;
+router.get('/intel/bio-threats', requireAuth, (req, res) => {
+    try {
+        const me = playersRepo.getPlayerBiologyByName((req.session.gameName || '').toLowerCase());
+        if (!me) return res.json({ success: true, myBio: null, confirmed: [], suspected: [], confirmedCount: 0, suspectedCount: 0 });
+
+        const myBio = me.biology || 0;
+        const threshold = myBio + BIO_THREAT_MARGIN;
+        res.json({
+            success: true,
+            myBio,
+            threshold,
+            confirmed: playersRepo.getThreatPlayersByBiology(threshold, me.id),
+            suspected: playersRepo.getThreatPlayersByScience(threshold, me.id),
+            confirmedCount: playersRepo.countThreatPlayersByBiology(threshold, me.id),
+            suspectedCount: playersRepo.countThreatPlayersByScience(threshold, me.id),
+        });
+    } catch (err) {
+        console.error('[DB Error] Failed to fetch bio threat matrix:', err);
+        res.status(500).json({ error: 'Failed to retrieve bio threats' });
+    }
+});
+
 // SYSTEM CLAIMS — Galaxy Archive "Claims" layer, a negotiation record for future territory
 // (which alliance a system is earmarked for, and how a shared one splits, e.g. 6/6). Open to
 // any logged-in member, same as planet_plans — this is a shared negotiation board, not admin

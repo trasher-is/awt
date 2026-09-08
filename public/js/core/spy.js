@@ -1,4 +1,4 @@
-import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates, initColonizeLaunchWindows, initAllianceRelationIcons, initEcoBonusJoinDates, initFleetLaunchModalETA, initSocialHint, initEconomyMilestone } from './page-injections.js';
+import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates, initColonizeLaunchWindows, initAllianceRelationIcons, initEcoBonusJoinDates, initFleetLaunchModalETA, initSocialHint, initEconomyMilestone, initBioThreatPills } from './page-injections.js';
 import { initNewsIncomingTools } from '../ui/news-incoming.js';
 import { initNewsBattleEvents } from '../ui/news-battle-events.js';
 import '../utils/game-rate-limit.js';
@@ -481,6 +481,7 @@ export function initSpy() {
                 initColonizeLaunchWindows().catch(err => console.error('[Spy] colonize launch windows failed:', err.message));
                 initSocialHint().catch(err => console.error('[Spy] social hint failed:', err.message));
                 initEconomyMilestone();
+                initBioThreatPills().catch(err => console.error('[Spy] bio threat pills failed:', err.message));
             }
             if (pathLower.includes('/game/planets/planet/')) {
                 initStarbaseTimer();
