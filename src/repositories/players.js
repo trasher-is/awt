@@ -313,6 +313,12 @@ function getPlayerBiologyByName(name) {
     return getPlayerBiologyByNameStmt.get(name);
 }
 
+// Shared "significant bio advantage" margin for both !bio (discord_bot.js) and the Science
+// page's threat pills (routes/intel.js) — one constant so the two can't quietly drift apart.
+// Lowered 6 -> 5 per member feedback: earlier warning that someone can already see you
+// (or soon will) is more useful than waiting for a full +6 gap.
+const BIO_THREAT_MARGIN = 5;
+
 const getThreatPlayersByBiologyStmt = db.prepare(`
     SELECT p.id as player_id, p.name, p.biology, a.tag as ally_tag
     FROM players p
@@ -772,6 +778,7 @@ module.exports = {
     getPlayerLoginHistory, getPlayerLoginHeatmap, recordLoginSample, getPlayerLoginSamples,
     upsertPlayerBasic, getPlayerNameWithTag, getPlayerRestartCheck, playerExistsById, resetPlayerOnRestart,
     upsertPlayerFull, insertPlayerLogin, upsertAllianceMemberBasic, upsertPlayerNameOnly,
+    BIO_THREAT_MARGIN,
     getPlayerBiologyByName, getThreatPlayersByBiology, getThreatPlayersByScience,
     countThreatPlayersByBiology, countThreatPlayersByScience,
     getPlayerTravelStatsByName, countUnaffiliatedIntelPlayers, listUnaffiliatedIntelPlayers,
