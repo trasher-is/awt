@@ -314,7 +314,7 @@ function getPlayerBiologyByName(name) {
 }
 
 const getThreatPlayersByBiologyStmt = db.prepare(`
-    SELECT p.name, p.biology, a.tag as ally_tag
+    SELECT p.id as player_id, p.name, p.biology, a.tag as ally_tag
     FROM players p
     LEFT JOIN alliances a ON p.alliance_id = a.id
     WHERE p.has_intel = 1 AND p.biology >= ? AND p.id != ?
@@ -326,7 +326,7 @@ function getThreatPlayersByBiology(threshold, excludeId) {
 }
 
 const getThreatPlayersByScienceStmt = db.prepare(`
-    SELECT p.name, p.science_level, a.tag as ally_tag
+    SELECT p.id as player_id, p.name, p.science_level, a.tag as ally_tag
     FROM players p
     LEFT JOIN alliances a ON p.alliance_id = a.id
     WHERE p.has_intel = 0 AND p.science_level >= ? AND p.id != ?
@@ -335,6 +335,22 @@ const getThreatPlayersByScienceStmt = db.prepare(`
 `);
 function getThreatPlayersByScience(threshold, excludeId) {
     return getThreatPlayersByScienceStmt.all(threshold, excludeId);
+}
+
+// True counts, unbounded by the LIST queries' LIMIT 25 — issue #153's pill needs the real
+// number even when the list itself is capped for display.
+const countThreatPlayersByBiologyStmt = db.prepare(`
+    SELECT COUNT(*) as count FROM players WHERE has_intel = 1 AND biology >= ? AND id != ?
+`);
+function countThreatPlayersByBiology(threshold, excludeId) {
+    return countThreatPlayersByBiologyStmt.get(threshold, excludeId).count;
+}
+
+const countThreatPlayersByScienceStmt = db.prepare(`
+    SELECT COUNT(*) as count FROM players WHERE has_intel = 0 AND science_level >= ? AND id != ?
+`);
+function countThreatPlayersByScience(threshold, excludeId) {
+    return countThreatPlayersByScienceStmt.get(threshold, excludeId).count;
 }
 
 const getPlayerTravelStatsByNameStmt = db.prepare(`SELECT name, race_speed, energy FROM players WHERE name LIKE ?`);
@@ -757,6 +773,7 @@ module.exports = {
     upsertPlayerBasic, getPlayerNameWithTag, getPlayerRestartCheck, playerExistsById, resetPlayerOnRestart,
     upsertPlayerFull, insertPlayerLogin, upsertAllianceMemberBasic, upsertPlayerNameOnly,
     getPlayerBiologyByName, getThreatPlayersByBiology, getThreatPlayersByScience,
+    countThreatPlayersByBiology, countThreatPlayersByScience,
     getPlayerTravelStatsByName, countUnaffiliatedIntelPlayers, listUnaffiliatedIntelPlayers,
     listAllianceIntelPlayers, getPlayerFullById, getPlayerFullByName,
     getAllianceOriginPlayersBrief, getAllianceOriginPlayersDetailed, getPlayerCombatStats,

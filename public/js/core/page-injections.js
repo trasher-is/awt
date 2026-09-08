@@ -560,6 +560,108 @@ export async function initSocialHint() {
 }
 
 // ---------------------------------------------------------------
+// BIOLOGY THREAT PILLS — /Game/Science  (issue #153)
+// Next to the Biology row: a red pill counting players with CONFIRMED biology 6+ above your
+// own (real intel, has_intel=1), and a yellow pill counting players never bio-scanned whose
+// public SCIENCE LEVEL — the documented upper bound on what their biology could be — is 6+
+// above yours. Same rule and threshold as the !bio Discord command
+// (GET /hub-api/intel/bio-threats), so the two never disagree. Clicking a pill opens a
+// small modal listing the matching players, each linking to their profile.
+// ---------------------------------------------------------------
+let _bioThreats = { at: 0, promise: null };
+function getBioThreats() {
+    // One hub request per minute at most, however often the view hooks re-run.
+    if (_bioThreats.promise && Date.now() - _bioThreats.at < 60 * 1000) return _bioThreats.promise;
+    _bioThreats = {
+        at: Date.now(),
+        promise: fetch('/hub-api/intel/bio-threats').then(r => r.json()).catch(() => null),
+    };
+    return _bioThreats.promise;
+}
+
+function bioThreatModal() {
+    let modal = document.getElementById('aw-bio-threat-modal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'aw-bio-threat-modal';
+    // aw- prefixed class: spy.js's MutationObserver "OURS" filter ignores it, so opening
+    // this modal never triggers another view-hook pass on itself.
+    modal.className = 'aw-bio-threat-modal';
+    modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;';
+    modal.innerHTML = `
+        <div style="background:#1a1a1a;border:1px solid #444;border-radius:8px;max-width:420px;width:90%;max-height:70vh;overflow-y:auto;padding:16px;color:#eee;font-family:inherit;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:12px;">
+                <strong class="aw-bio-threat-title" style="font-size:14px;"></strong>
+                <span class="aw-bio-threat-close" style="cursor:pointer;font-size:20px;line-height:1;padding:0 4px;">&times;</span>
+            </div>
+            <div class="aw-bio-threat-list" style="font-size:13px;display:flex;flex-direction:column;gap:2px;"></div>
+        </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal || e.target.classList.contains('aw-bio-threat-close')) modal.style.display = 'none';
+    });
+    return modal;
+}
+
+function showBioThreatModal(title, players, levelKey, color) {
+    const modal = bioThreatModal();
+    modal.querySelector('.aw-bio-threat-title').textContent = title;
+    const list = modal.querySelector('.aw-bio-threat-list');
+    list.innerHTML = players.length
+        ? players.map(p => {
+            const tag = p.ally_tag ? `[${esc(p.ally_tag)}] ` : '';
+            return `<a href="/Game/Players/Profile/${p.player_id}" style="color:${color};text-decoration:none;display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #333;">
+                <span>${tag}${esc(p.name)}</span><span style="font-weight:bold;">${p[levelKey]}</span>
+            </a>`;
+        }).join('')
+        : '<div style="color:#888;">None on record right now.</div>';
+    modal.style.display = 'flex';
+}
+
+export async function initBioThreatPills() {
+    if (!window.location.pathname.toLowerCase().includes('/game/science')) return;
+    const sci = SCIENCES.find(s => s.name === 'Biology');
+    if (!findScienceRow(sci)) return;
+
+    const data = await getBioThreats();
+    // The row may have been re-rendered while the request was in flight (same guard as
+    // initSocialHint above).
+    const liveRow = findScienceRow(sci);
+    if (!liveRow) return;
+    const nameCell = liveRow.cells[0];
+
+    let pillBox = nameCell.querySelector('[data-hub-inject="bio-threat-pills"]');
+    if (!data || !data.success || data.myBio == null || (!data.confirmedCount && !data.suspectedCount)) {
+        if (pillBox) pillBox.remove();
+        return;
+    }
+    if (!pillBox) {
+        pillBox = document.createElement('span');
+        pillBox.setAttribute('data-hub-inject', 'bio-threat-pills');
+        pillBox.style.cssText = 'margin-left:6px;';
+        nameCell.appendChild(pillBox);
+    }
+
+    let html = '';
+    if (data.confirmedCount > 0) {
+        html += `<span class="aw-bio-pill-red" style="cursor:pointer;background:#dc2626;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:bold;margin-right:4px;" title="Confirmed: biology ${data.threshold}+ (yours is ${data.myBio})">${data.confirmedCount}</span>`;
+    }
+    if (data.suspectedCount > 0) {
+        html += `<span class="aw-bio-pill-yellow" style="cursor:pointer;background:#eab308;color:#1a1a1a;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:bold;" title="Unscanned: science level ${data.threshold}+ (yours is ${data.myBio}) — biology could be up to that, not confirmed">${data.suspectedCount}</span>`;
+    }
+    pillBox.innerHTML = html;
+
+    pillBox.querySelector('.aw-bio-pill-red')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showBioThreatModal(`Confirmed biology ${data.threshold}+ over you`, data.confirmed, 'biology', '#f87171');
+    });
+    pillBox.querySelector('.aw-bio-pill-yellow')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showBioThreatModal(`Unscanned — science ${data.threshold}+ over your biology`, data.suspected, 'science_level', '#facc15');
+    });
+}
+
+// ---------------------------------------------------------------
 // ECONOMY PRICE-DROP COUNTDOWN — /Game/Science  (issue #139)
 // Economy lowers ship prices only at the published breakpoints (0, 4, 7, 10, 14, …); the
 // levels in between cost research and change nothing. Under the Economy row's name: the
