@@ -41,13 +41,21 @@ function localInputToIso(value) {
     return isNaN(ms) ? null : new Date(ms).toISOString();
 }
 
+// Issue #159: every clock in the planner is the viewer's LOCAL time on a 24-hour dial.
+// hourCycle 'h23' pins the dial regardless of the browser locale — without it an en-US
+// browser renders "03:45 PM" next to the 24-hour "13:45Z" UTC stamp, the exact AM/PM vs
+// 24h mix the report was about. (hour12: false is NOT equivalent: some engines map it to
+// 'h24' and print midnight as "24:05".) The <input type="datetime-local"> picker itself
+// follows the OS/browser locale and cannot be forced from script.
 function fmtLocal(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
     if (isNaN(d.getTime())) return '—';
-    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 }
 
+// UTC stamp, kept ONLY for a hover tooltip: the visible text is local time alone (#159),
+// but an alliance spread across zones still needs one shared reference when coordinating.
 function fmtUtc(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
@@ -279,7 +287,7 @@ async function preview() {
         $('rp-total').textContent = d.totalTime;
         $('rp-legs').innerHTML = d.legs.map(renderLeg).join('');
         $('rp-arrival').innerHTML = d.arrivesAt
-            ? `Arrives <span class="text-foreground">${esc(fmtLocal(d.arrivesAt))}</span> local · <span class="font-mono">${esc(fmtUtc(d.arrivesAt))}</span>`
+            ? `Arrives <span class="text-foreground" title="${esc(fmtUtc(d.arrivesAt))} UTC">${esc(fmtLocal(d.arrivesAt))}</span> your local time`
             : 'Set a planned start to get arrival times.';
     } catch (err) {
         if (!previewSeq.isCurrent(token)) return;
@@ -407,7 +415,7 @@ async function loadShared() {
             const hops = r.legs.map(l => `${esc(l.to.systemName || '?')} #${l.to.planetIndex}`).join(' → ');
             const origin = r.legs.length ? `${esc(r.legs[0].from.systemName || '?')} #${r.legs[0].from.planetIndex}` : '?';
             const start = r.plannedStartAt
-                ? `${esc(fmtLocal(r.plannedStartAt))} local · ${esc(fmtUtc(r.plannedStartAt))}`
+                ? `starts <span title="${esc(fmtUtc(r.plannedStartAt))} UTC">${esc(fmtLocal(r.plannedStartAt))}</span>`
                 : 'no planned start';
             const arrival = r.legs.length && r.legs[r.legs.length - 1].arrivesAt
                 ? ` · arrives ${esc(fmtLocal(r.legs[r.legs.length - 1].arrivesAt))}`
