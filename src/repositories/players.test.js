@@ -373,6 +373,19 @@ ok('getJoinedDates excludes a player with a null joined date',
 ok('getJoinedDates includes a player whose "N/A" was overwritten by a real joined date',
     joinedById.get(803) === '2026-09-01T09:00:00.0000000+02:00', joinedById.get(803));
 
+// --- getCombatCeilings: the TPx "toughest enemy" reference (issue #154) ---
+// Values far above anything the rows seeded earlier in this file carry, so the maxima are
+// unambiguous whatever else is in the table.
+db.prepare(`INSERT INTO players (id, name, level, science_level, physics, has_intel) VALUES (901, 'CeilLvl', 931, 12, 0, 0)`).run();
+db.prepare(`INSERT INTO players (id, name, level, science_level, physics, has_intel) VALUES (902, 'CeilPhys', 9, 26, 922, 1)`).run();
+db.prepare(`INSERT INTO players (id, name, level, science_level, physics, has_intel) VALUES (903, 'Unscouted', 5, 940, 939, 0)`).run();
+const ceilings = players.getCombatCeilings();
+ok('getCombatCeilings: max_level is the highest level of any player', ceilings.max_level === 931, ceilings);
+ok('getCombatCeilings: max_physics only counts scouted rows (939 on an unscouted row is a placeholder, not a fact)',
+    ceilings.max_physics === 922, ceilings);
+ok('getCombatCeilings: max_science_level is the public ceiling over everyone (the fallback when nobody is scouted)',
+    ceilings.max_science_level === 940, ceilings);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

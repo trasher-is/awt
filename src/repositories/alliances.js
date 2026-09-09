@@ -198,6 +198,7 @@ const getAllianceStatsForArchiveStmt = db.prepare(`
            p.race_defense AS pl_race_defense, p.race_trader AS pl_race_trader, p.race_sul AS pl_race_sul,
            p.eco_bonus AS pl_eco_bonus, p.number_of_battles AS pl_number_of_battles, p.battle_luckiness AS pl_battle_luckiness,
            p.last_activity_at AS pl_last_activity_at, p.has_intel AS pl_has_intel,
+           p.physics AS pl_physics, p.mathematics AS pl_mathematics,
            p.stats_scraped_at AS pl_stats_scraped_at, p.intel_updated_at AS pl_intel_updated_at,
            (SELECT COUNT(*) FROM planets WHERE owner_id = s.player_id) AS pl_planet_count
     FROM alliance_member_stats s

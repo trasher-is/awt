@@ -10,6 +10,7 @@ const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
 const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
 const { previousNames, findByFormerName } = require('../utils/round-archive');
+const { truePowerForAllianceRow } = require('../utils/true-power');
 const settingsRepo = require('../repositories/settings');
 const systemClaimsRepo = require('../repositories/systemClaims');
 const router = express.Router();
@@ -443,8 +444,15 @@ router.get('/intel/trade-analysis', requireAuth, (req, res) => {
 // --- ALLIANCE STATS FETCH FOR THE ARCHIVE PANEL ---
 router.get('/intel/alliance-stats', requireAuth, (req, res) => {
     try {
-        const stats = alliancesRepo.getAllianceStatsForArchive();
-        res.json({ success: true, stats });
+        // True Power (issue #154) is computed here, once per row, rather than in the browser:
+        // the "toughest enemy" reference needs the highest level/physics in the WHOLE
+        // players table, which the member rows themselves do not carry.
+        const ceilings = playersRepo.getCombatCeilings();
+        const stats = alliancesRepo.getAllianceStatsForArchive().map(r => {
+            const { tp, tpx } = truePowerForAllianceRow(r, ceilings);
+            return { ...r, pl_tp: tp, pl_tpx: tpx };
+        });
+        res.json({ success: true, stats, ceilings });
     } catch (err) {
         res.status(500).json({ error: 'Failed to retrieve alliance metrics' });
     }

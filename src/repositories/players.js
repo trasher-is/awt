@@ -772,6 +772,22 @@ function suggestPlayersTopByPoints(limit) {
     return suggestPlayersTopByPointsStmt.all(limit);
 }
 
+// --- players: read (true-power.js, via routes/intel.js) ---
+
+// The "toughest enemy" reference for the TPx rating (issue #154): the highest player level
+// and the highest scouted physics anywhere in the players table. max_physics only counts
+// rows with intel (an unscanned row's physics is a 0 placeholder, not a fact); when nobody
+// has been scouted yet, max_science_level — the public per-science ceiling — stands in.
+const getCombatCeilingsStmt = db.prepare(`
+    SELECT MAX(level) AS max_level,
+           MAX(CASE WHEN has_intel = 1 THEN physics END) AS max_physics,
+           MAX(science_level) AS max_science_level
+    FROM players
+`);
+function getCombatCeilings() {
+    return getCombatCeilingsStmt.get() || { max_level: null, max_physics: null, max_science_level: null };
+}
+
 module.exports = {
     getWarRoomPlayers, getAllianceIntelPlayerIds, countPlayers, listPlayerIds, getFullPlayersDb, getJoinedDates,
     getAllianceTagForMembers, getVisionObservers, getPlayerWithPlanetCount,
@@ -793,4 +809,5 @@ module.exports = {
     getStalePlayerIdsForApiScan, markPlayersApiScanned, getPlayerApiScanStats,
     getPendingNewPlayerAnnouncements, markNewPlayerAnnounced,
     getPlayerLaunchOrigin,
+    getCombatCeilings,
 };
