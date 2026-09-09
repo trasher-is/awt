@@ -65,8 +65,14 @@
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div class="flex flex-col gap-1">
-                        <label class="text-xs text-muted-foreground">Planned start (your local time)</label>
-                        <input type="datetime-local" id="rp-start" class="rp-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500">
+                        <label for="rp-schedule-mode" class="text-xs text-muted-foreground">Plan by</label>
+                        <select id="rp-schedule-mode" class="h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500">
+                            <option value="start">Planned start</option>
+                            <option value="arrival">Target arrival</option>
+                        </select>
+                        <label for="rp-start" id="rp-schedule-label" class="text-xs text-muted-foreground">Planned start (your local time)</label>
+                        <input type="datetime-local" id="rp-start" step="1" class="h-9 w-full min-w-0 rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500">
+                        <p class="text-xs text-muted-foreground">Optional. Leave empty to calculate travel time only.</p>
                     </div>
                     <div class="flex flex-col gap-1">
                         <label class="text-xs text-muted-foreground">Title</label>
@@ -84,7 +90,9 @@
                 </div>
                 <div id="rp-legs" class="flex flex-col gap-2"></div>
                 <div id="rp-error" class="hidden text-xs text-red-400"></div>
+                <div id="rp-departure" class="text-sm font-semibold text-foreground" aria-live="polite"></div>
                 <div id="rp-arrival" class="text-xs text-muted-foreground"></div>
+                <div id="rp-start-warning" class="hidden text-xs text-amber-400" role="status"></div>
             </div>
 
             <!-- SAVE / SHARE -->

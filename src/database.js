@@ -818,6 +818,10 @@ function initDatabase() {
     // science timestamp, so leave them NULL until the next full member-sheet sync.
     addColumn('alliance_member_stats', 'sciences_updated_at', 'DATETIME');
 
+    // The selected arrival anchor must survive reopening a route. Old plans remain
+    // departure-based: no inferred target or travel-time recalculation during migration.
+    addColumn('routes', 'target_arrival_at', 'DATETIME');
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {
