@@ -95,8 +95,9 @@ you want to estimate a specific fight before committing.
 ### Trade agreements, alliances, and NAPs
 
 **Trade agreements** boost your economy-related bonuses and cost 20,000 A$ to both send and
-accept. You can have at most 5 at once, and new agreements are only actually accepted at four
-fixed times a day (00:00/06:00/12:00/18:00 CET) rather than instantly. See
+accept (**RZ:** 120,000 A$ per side — see [RedZone rounds](#redzone-rounds)). You can have at
+most 5 at once, and new agreements are only actually accepted at four fixed times a day
+(00:00/06:00/12:00/18:00 CET) rather than instantly. See
 [Trade agreements](game-rules.md#trade-agreements).
 
 **Alliances** pool players together for score, defense, and trade agreement partners. There's
@@ -115,18 +116,41 @@ Attack/Fire" and "Friendly Siege" tactics some players use even while at peace.
 Your score comes from population levels above 10, your player level, and science levels
 above 20 — see [Score](game-rules.md#score) for the exact formula. A player wins a round by
 holding 400+ points for 5 straight days; an alliance wins by averaging 300+ points across its
-top members for 3 straight days, with at least 3 members counted. See
+top members for 3 straight days, with at least 3 members counted (**RZ:** the alliance
+target was 750 points for 3 days in round 7 — see [RedZone rounds](#redzone-rounds)). See
 [Win conditions](game-rules.md#win-conditions).
 
 ### RedZone rounds
 
 Some rounds run on the separate RedZone server (`redzone.astrowars.games`) at **×10 pace** —
 the round simply moves about ten times faster than a standard one, so plan in hours where
-you'd normally plan in days. A few numbers change too: a **trade agreement costs
-120,000 A$ there instead of 20,000 A$**. The full list of RedZone differences hasn't been
-written down yet — it's being collected in issue #53 — so on a RedZone round, treat the
-numbers in this guide and in [game-rules.md](game-rules.md) as standard-round values until
-someone has confirmed them there.
+you'd normally plan in days. Rounds there have lasted 12–21 days. Several numbers differ from
+the standard server, and a newcomer reading this guide mid-RedZone-round would otherwise be
+misled exactly where it is trying to help.
+
+**How this guide marks them (issue #53):** one document, with an **`RZ:`** callout right next
+to every standard-round value that is known to differ. A separate RedZone file was
+considered and rejected — two documents drift apart, and the reader picks the wrong one.
+A value with no `RZ:` callout is *believed* to be the same on both servers, not confirmed.
+
+Known differences, and how sure we are of each:
+
+| Topic | Standard round | RedZone | Source / status |
+|---|---|---|---|
+| Round pace | 1 game hour = 1 real hour | **×10** — hourly growth, production and science rates run ten times faster in real time | RedZone server description; which timers scale (travel, research, the 6-hourly trade-agreement cycle) still needs checking mechanic by mechanic |
+| Trade agreement | 20,000 A$ per side | **120,000 A$ per side** (the Trader pick still waives only the *accept* fee) | confirmed in game, round 7 (July 2026) |
+| Energy science | each level = 91% of the previous flight time (`0.91^lvl`) | **95% per level** (`0.95^lvl`) | RedZone changelog 5.2–5.3 — verify in game |
+| Flight time | full | **halved** base flight time; a flight to an allied planet at **75%** instead of 50% | RedZone changelog 4.1 / 5.x — verify in game |
+| Player-level combat bonus | uncapped in the model | **capped at 15%** | RedZone changelog 5.2–5.3 — verify in game |
+| Alliance win | 300 average points for 3 days | **750 points for 3 days** (round 7) | round 7 win screen; may change per round |
+| Starbases | vision / defence | additionally give **vision, night-time safety and trade** | RedZone changelog 5.2–5.3 — verify in game |
+
+Anything marked *verify* was recorded from the RedZone changelog for round 7 (beta 5.3,
+July 2026) and has not been re-checked in a later round — RedZone rules change between
+rounds more often than the standard server's do. If you play RedZone and know a value on
+this page is wrong or missing, fix the `RZ:` callout in place and extend this table.
+
+The same callouts appear in [game-rules.md](game-rules.md) next to the affected sections.
 
 ## Strategy
 

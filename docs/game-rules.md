@@ -12,6 +12,14 @@ make code agree — fix the code, or re-check the table in game.
 Levels not listed in a table are levels the game does not show; where a table skips numbers
 (the economy table lists 0, 4, 7, 10 …) those are the only breakpoints that change anything.
 
+**Round types.** Everything below is the **standard** server unless a line says otherwise.
+The separate RedZone server (`redzone.astrowars.games`) runs at ×10 pace and changes a
+handful of values; those are marked inline with an **`RZ:`** callout right next to the
+standard number (issue #53 — one document, no separate RedZone file to drift). A section
+without an `RZ:` note is *believed* to hold on both servers, not confirmed. The consolidated
+list, with how sure we are of each value, is in
+[player-guide.md → RedZone rounds](player-guide.md#redzone-rounds).
+
 ## Contents
 
 - [Race picks](#race-picks)
@@ -125,6 +133,11 @@ race, trade agreements and artifacts.
 Worked example from the info page: a planet with 10 hydroponic farms has a base of 11.0
 growth points; with a +93% growth bonus that is `11 × 1.93 = 21.23` points per hour. At
 population level 20 the next level needs 3,783 points, so `3,783 / 21.23 = 7d 10h:11m:28s`.
+
+> **RZ:** the per-hour rates in this section, in [Production](#production), [Science](#science)
+> and [Culture](#culture-and-planet-slots) are *game* hours; RedZone runs at ×10 pace, so the
+> same 21.23 points per game hour arrive in about six real minutes and that 7d 10h example is
+> under 18 real hours. The point tables themselves are not known to differ.
 
 | Level | Growth Points | Aggregated |
 |---|---|---|
@@ -645,6 +658,10 @@ Each of the six science fields does something different besides its raw growth r
   benefit until they land and launch again. Landing on a planet you or an ally controls
   **always halves** the flight time. (Matches `public/js/utils/travel-model.js` exactly —
   `ENERGY_BASE = 0.91`, alliance/own-destination ×0.5.)
+  **RZ:** per the RedZone changelog (5.2–5.3, round 7): Energy is **95% per level**
+  (`0.95^energy`), the base flight time is **halved**, and a flight to an allied planet runs
+  at **75%** rather than 50%. Not yet re-verified in game; the travel model in this repo is
+  the standard server's.
 - **Mathematics** — reduces combat losses (more survivors). **Level 12** lets you manually
   choose any energy level from 1 up to your max at launch, instead of always launching at
   max energy. **Level 15** is required to build Cruisers.
@@ -895,16 +912,18 @@ other. It can be terminated **with prior warning** (honorable) or **without warn
 ## Trade agreements
 
 - Cost **20,000 A$**, paid by **both** sides — to send and to accept.
-- **Maximum 5** trade agreements per player.
+  **RZ: 120,000 A$ per side** (confirmed in game, round 7, July 2026) — the trade-agreement
+  planner at `/ta` is RedZone-only and uses that price.
+- **Maximum 5** trade agreements per player (same on RedZone).
 - The **trader race** pick can accept for free, but pays for it with **-6 race points**.
+  **RZ:** still waives only the *accept* fee, so two agreements the Trader initiates still
+  cost 240,000 A$.
 - New trade agreements are only **accepted at four fixed times a day: 00:00, 06:00, 12:00,
-  18:00 CET/CEST** — not immediately on request.
+  18:00 CET/CEST** — not immediately on request. **RZ:** whether this cycle scales with the
+  ×10 pace has not been checked.
 - An unaccepted trade agreement offer **expires after 2 days**.
 - The **trade rate (TR%) bonus recalculates every 5 minutes**, independent of the 6-hourly
   acceptance cycle.
-
-> The redzone server uses a different price (**120,000**) — see the trade-agreement planner
-> at `/ta`, which is redzone-only.
 
 ### Economy bonus
 
@@ -1029,6 +1048,12 @@ and caps on its buildings — though the exact numbers aren't published.
   time plus the 20min/45min floor on top — matches
   `public/js/utils/travel-model.js` exactly (`SAME_SYSTEM_MIN=1200s` + `SAME_SYSTEM_PLANET=
   14400s`, `DEEP_SPACE_MIN=2700s` + `DEEP_SPACE_DIST=36000s`).
+  **RZ:** the RedZone changelog halves base flight times and moves allied flights to 75%
+  (see Energy under [Science fields](#science-fields--effects)); whether the fixed floors
+  scale too is unverified.
+- **RZ: the player-level combat bonus is capped at 15%** on RedZone (changelog 5.2–5.3,
+  round 7) — the battle model in this repo was harvested from the standard calculator and
+  has no such cap. Not yet re-verified in game.
 
 ## Score
 
@@ -1063,6 +1088,9 @@ also start further behind on everything else.
 - A **player** wins by reaching or exceeding **400 points for a total of 5 days**.
 - An **alliance** wins by reaching or exceeding **300 average alliance points for a total of
   3 days**, with a minimum of **3 members**.
+  **RZ:** round 7 (July 2026) required **750 alliance points for 3 days**; the RedZone
+  targets are set per round, so check the round's own win screen. The RedZone player target
+  has not been recorded.
 
 ## Alliance ranking and points
 
