@@ -224,12 +224,16 @@ function postJson(server, urlPath, body) {
         const conquestSeedRes = await postJson(server, '/hub-api/sync/system', conquestSeed);
         ok('the pre-conquest seed for system 400 succeeds', conquestSeedRes.status === 200, conquestSeedRes);
 
+        // Issue #156: by the time a scan catches the conquest the NEW owner may already have
+        // grown some population of their own (2 here). That number is theirs and has
+        // nothing to do with the 51 the previous owner lost — the drop is 51 -> 0, wiped in
+        // full, not "51 -> 2, dropped 49".
         const conquestPayload = {
             system_id: 400,
             planets: [{
                 planet_index: 1,
                 owner: { id: 52, name: 'Conqueror', alliance_id: null, alliance_tag: null },
-                population: 0,
+                population: 2,
                 starbase: 0,
             }],
             fleets: [],
@@ -245,8 +249,60 @@ function postJson(server, urlPath, body) {
         const popEvent = db.prepare(
             'SELECT * FROM planet_events WHERE system_id = 400 AND planet_index = 1 AND event_type_id = 2'
         ).get();
-        ok('POP_DROP is now ALSO logged for the same conquest tick (the actual fix)',
+        ok('POP_DROP is logged for the conquest tick as the OLD owner\'s full population wiped: 51 -> 0, not 51 -> 2 (#156)',
             popEvent && popEvent.old_value === 51 && popEvent.new_value === 0, popEvent);
+        const planetAfter = db.prepare('SELECT owner_id, population FROM planets WHERE system_id = 400 AND planet_index = 1').get();
+        ok('the planet row itself carries the new owner\'s own population (2) — the event math does not touch it',
+            planetAfter && planetAfter.owner_id === 52 && planetAfter.population === 2, planetAfter);
+
+        console.log('\n── (e) a same-owner drop is still logged as old -> new (bombardment) ' + '─'.repeat(6));
+        const bombardRes = await postJson(server, '/hub-api/sync/system', {
+            system_id: 400,
+            planets: [{ planet_index: 1, owner: { id: 52, name: 'Conqueror', alliance_id: null, alliance_tag: null }, population: 1, starbase: 0 }],
+            fleets: [],
+        });
+        ok('the same-owner drop payload succeeds', bombardRes.status === 200, bombardRes);
+        const popEvents = db.prepare(
+            'SELECT old_value, new_value FROM planet_events WHERE system_id = 400 AND planet_index = 1 AND event_type_id = 2 ORDER BY id ASC'
+        ).all();
+        ok('the second POP_DROP is the genuine 2 -> 1 loss under the same owner (that branch is unchanged)',
+            popEvents.length === 2 && popEvents[1].old_value === 2 && popEvents[1].new_value === 1, popEvents);
+
+        console.log('\n── (f) colonizing an Unknown planet with leftover population wipes that population ' + '─'.repeat(0));
+        // An Unknown planet (no owner) still holding 4 population from a resigned player…
+        const unknownSeed = await postJson(server, '/hub-api/sync/system', {
+            system_id: 400,
+            planets: [{ planet_index: 2, owner: null, is_unknown: true, population: 4, starbase: 0 }],
+            fleets: [],
+        });
+        ok('the Unknown-planet seed succeeds', unknownSeed.status === 200, unknownSeed);
+        // …colonized by a new owner, who shows 1 population of their own by the time we look.
+        const colonizeRes = await postJson(server, '/hub-api/sync/system', {
+            system_id: 400,
+            planets: [{ planet_index: 2, owner: { id: 53, name: 'Settler', alliance_id: null, alliance_tag: null }, population: 1, starbase: 0 }],
+            fleets: [],
+        });
+        ok('the colonization payload succeeds', colonizeRes.status === 200, colonizeRes);
+        const colonizePop = db.prepare(
+            'SELECT old_value, new_value FROM planet_events WHERE system_id = 400 AND planet_index = 2 AND event_type_id = 2'
+        ).all();
+        ok('the leftover 4 population is logged as 4 -> 0 (wiped), not 4 -> 1',
+            colonizePop.length === 1 && colonizePop[0].old_value === 4 && colonizePop[0].new_value === 0, colonizePop);
+
+        console.log('\n── (g) an owner change with no previous population is not a population event ' + '─'.repeat(2));
+        await postJson(server, '/hub-api/sync/system', {
+            system_id: 400,
+            planets: [{ planet_index: 3, owner: null, population: 0, starbase: 0 }],
+            fleets: [],
+        });
+        await postJson(server, '/hub-api/sync/system', {
+            system_id: 400,
+            planets: [{ planet_index: 3, owner: { id: 53, name: 'Settler', alliance_id: null, alliance_tag: null }, population: 1, starbase: 0 }],
+            fleets: [],
+        });
+        ok('colonizing a free (0 pop) planet logs an OWNER_CHANGE but no POP_DROP',
+            db.prepare('SELECT COUNT(*) AS n FROM planet_events WHERE system_id = 400 AND planet_index = 3 AND event_type_id = 1').get().n === 1
+            && db.prepare('SELECT COUNT(*) AS n FROM planet_events WHERE system_id = 400 AND planet_index = 3 AND event_type_id = 2').get().n === 0);
     } finally {
         server.close();
     }

@@ -13,7 +13,14 @@ const newsEventsRepo = require('../repositories/newsEvents');
 const { resolveBombardmentCredit } = require('../utils/news-battle-matching');
 const battlePointsRepo = require('../repositories/battlePoints');
 const { postEmbed, postBattleEmbed, defuseMentions, settingValue } = require('../utils/discord-post');
+const { ownerChangeKind } = require('../utils/system-change-lines');
 const router = express.Router();
+
+// A same-owner population drop is a bombardment; the attacker is borrowed from a battle
+// report at that planet no older than this. Wide on purpose, like getBattleReportsFeed's
+// POP_DROP_MATCH_WINDOW_MINUTES: planet_events.timestamp is when OUR scan noticed the
+// drop, not when the battle happened.
+const POP_DROP_ATTACKER_WINDOW_MINUTES = 180;
 
 // --- MAP SCRAPER DATA RECEIVER ---
 router.post('/sync/system', requireAuth, (req, res) => {
@@ -115,50 +122,83 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 // Skip all event creation on genuinely uncertain (out-of-vision/stale) scans
                 // only — a real transition TO or FROM the game's own "Unknown" owner state
                 // (is_unknown) is real history and must be logged like any other change.
-                if (oldP.owner_id !== finalOwnerId) {
+                const ownerChanged = oldP.owner_id !== finalOwnerId;
+                const oldPop = Number(oldP.population);
+                const newPop = Number(finalPopulation);
+                const oldOwnerLabel = nameOf(oldP.owner_id);
+                const newOwnerLabel = p.owner
+                    ? (p.owner.alliance_tag ? `[${p.owner.alliance_tag}] ${p.owner.name}` : p.owner.name)
+                    : nameOf(finalOwnerId);
+
+                if (ownerChanged) {
                     systemsRepo.logPlanetEvent(system_id, p.planet_index, 1, oldP.owner_id, finalOwnerId); // 1 = OWNER_CHANGE (history)
-                    // Announce genuine transitions to Discord, but NOT "Empty -> owner":
-                    // those are low-value new colonies, and while the planets table heals
-                    // from the old null-purge corruption every re-detected owner would look
-                    // like one and flood the channel. Conquests (X->Y) and losses (X->Empty)
-                    // still announce; the history event above is recorded regardless.
-                    if (oldP.owner_id != null && scan_mode !== 'silent') {
+                    // Issue #156: every owner change is announced WITH attribution — who
+                    // conquered it from whom, that it was lost to Empty/Unknown, or that a
+                    // free planet / an Unknown planet's leftover population was colonized,
+                    // and by whom (the wording is in src/utils/system-change-lines.js).
+                    // "Empty -> owner" used to be skipped as low-value and as a flood risk
+                    // while the planets table healed from the old null-purge corruption;
+                    // the maintainer now asks for every colonization, so it announces too.
+                    // 'silent' bulk seeds still stay quiet; the history event is logged
+                    // regardless.
+                    if (scan_mode !== 'silent') {
                         announceEvents.push({
                             planet_index: p.planet_index,
                             type: 'OWNER_CHANGE',
-                            old_owner: nameOf(oldP.owner_id),
-                            new_owner: p.owner
-                                ? (p.owner.alliance_tag ? `[${p.owner.alliance_tag}] ${p.owner.name}` : p.owner.name)
-                                : nameOf(finalOwnerId)
+                            kind: ownerChangeKind({ oldOwnerId: oldP.owner_id, newOwnerId: finalOwnerId, isUnknown: !!p.is_unknown, oldPop }),
+                            old_owner: oldOwnerLabel,
+                            new_owner: newOwnerLabel,
+                            old_pop: Number.isFinite(oldPop) ? oldPop : null
                         });
                     }
                 }
 
-                // POP DROP — any population decrease, owner change or not. Used to be
-                // gated on "same owner" (an `else if` here), on the theory that a drop
-                // alongside an owner change is "really just the conquest, already
-                // captured" by the OWNER_CHANGE event above — but that event only stores
-                // owner ids, never a population number, so a conquest (or colonizing an
-                // Unknown planet with leftover population — see docs/game-rules.md) left
-                // NO record anywhere of how much population was actually lost. That's what
-                // fed the !mortal population-killed leaderboard, via /sync/news crediting
-                // 'battle-conquer' news rows against the closest POP_DROP row — so those
-                // conquests were silently invisible to it (reported live: system [40]
-                // planet 8's conquest, and planet 10's colonization of a 4-5 pop Unknown,
-                // neither showed up). Logged unconditionally now; only announced to
-                // Discord in the same-owner case, since an owner-change conquest is
-                // already announced above and doesn't need a second message.
-                const oldPop = Number(oldP.population);
-                const newPop = Number(finalPopulation);
-                if (Number.isFinite(oldPop) && Number.isFinite(newPop) && newPop < oldPop) {
-                    systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, newPop); // 2 = POP_DROP
-                    if (oldP.owner_id === finalOwnerId && scan_mode !== 'silent') {
-                        announceEvents.push({
-                            planet_index: p.planet_index,
-                            type: 'POP_DROP',
-                            old_pop: oldPop,
-                            new_pop: newPop
-                        });
+                // POP DROP — logged on every population loss, owner change or not (it feeds
+                // the !mortal population-killed leaderboard via /sync/news, which credits a
+                // 'battle-conquer' news row against the closest POP_DROP row for the planet).
+                //
+                // Issue #156 — the math differs by case:
+                //   • OWNER CHANGED: the previous owner's population is wiped to 0 the moment
+                //     the planet is taken (conquest, or colonizing an Unknown planet's
+                //     leftover people). Whatever population the NEW owner shows by the time
+                //     this scan catches it is their own growth since, and must not be diffed
+                //     against the old owner's number — "3 -> 2, dropped 1" was wrong; the
+                //     truth is "3 -> 0, wiped 3". Logged as oldPop -> 0, credited to the new
+                //     owner. An owner change with 0 previous population (a free planet) is
+                //     not a population event at all.
+                //   • SAME OWNER: a genuine drop (bombardment). A system scan cannot see the
+                //     attacker, so the announcement borrows it from a recent battle report at
+                //     this planet when one has been synced, and otherwise says so.
+                if (Number.isFinite(oldPop) && Number.isFinite(newPop)) {
+                    if (ownerChanged && oldPop > 0) {
+                        systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, 0); // 2 = POP_DROP
+                        if (scan_mode !== 'silent') {
+                            announceEvents.push({
+                                planet_index: p.planet_index,
+                                type: 'POP_DROP',
+                                kind: oldP.owner_id != null ? 'conquest' : 'colonization',
+                                old_pop: oldPop,
+                                new_pop: 0,
+                                victim: oldOwnerLabel,
+                                by: newOwnerLabel
+                            });
+                        }
+                    } else if (!ownerChanged && newPop < oldPop) {
+                        systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, newPop); // 2 = POP_DROP
+                        if (scan_mode !== 'silent') {
+                            const battle = battleReportsRepo.findRecentAttackerAtPlanet(system_id, p.planet_index, POP_DROP_ATTACKER_WINDOW_MINUTES);
+                            announceEvents.push({
+                                planet_index: p.planet_index,
+                                type: 'POP_DROP',
+                                kind: 'bombardment',
+                                old_pop: oldPop,
+                                new_pop: newPop,
+                                owner: oldOwnerLabel,
+                                attacker: battle && battle.att_player_name
+                                    ? (battle.att_alliance_tag ? `[${battle.att_alliance_tag}] ${battle.att_player_name}` : battle.att_player_name)
+                                    : null
+                            });
+                        }
                     }
                 }
             }

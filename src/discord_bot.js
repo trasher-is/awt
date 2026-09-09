@@ -8,6 +8,7 @@ const alliancesRepo = require('./repositories/alliances');
 const usersRepo = require('./repositories/users');
 const discordTimersRepo = require('./repositories/discordTimers');
 const incomingRepo = require('./repositories/incoming');
+const { buildSystemChangeLines } = require('./utils/system-change-lines');
 const settingsRepo = require('./repositories/settings');
 const battlePointsRepo = require('./repositories/battlePoints');
 const battleReportsRepo = require('./repositories/battleReports');
@@ -1767,13 +1768,9 @@ async function announceSystemChanges(system, events) {
 
     const sysLabel = `${system.name ? system.name + ' ' : ''}#${system.id}${(system.x != null && system.y != null) ? ` (${system.x}/${system.y})` : ''}`;
 
-    const ownerLines = events
-        .filter(e => e.type === 'OWNER_CHANGE')
-        .map(e => `🪐 **Planet ${e.planet_index}**: ${e.old_owner || 'Empty'} → **${e.new_owner || 'Empty'}**`);
-
-    const popLines = events
-        .filter(e => e.type === 'POP_DROP')
-        .map(e => `📉 **Planet ${e.planet_index}**: population ${e.old_pop} → ${e.new_pop}`);
+    // Wording lives in src/utils/system-change-lines.js (issue #156: every change names who
+    // did what to whom) so it can be tested without a Discord client.
+    const { ownerLines, popLines } = buildSystemChangeLines(events);
 
     await Promise.all([
         sendSystemEmbed(getAnnounceChannelId(), `🛰️ System Change: ${sysLabel}`, ownerLines, '#f59e0b'),

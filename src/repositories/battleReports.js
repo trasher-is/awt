@@ -189,6 +189,24 @@ function findByPlayerPairNear(playerA, playerB, occurredAtIso, windowMinutes) {
     return row ? row.id : null;
 }
 
+// The most recent battle fought AT a planet within the last `windowMinutes` — who bombarded
+// it. Used by /sync/system to attribute a same-owner population drop (issue #156): a system
+// scan sees that population fell, never who did it; a battle report at the same location
+// does. datetime(started_at) normalizes the API's raw ISO8601 (with offset) against
+// SQLite's own clock — see unmatchedPopDropsStmt below for why the raw column must not be
+// compared directly. Returns null when no report has been synced for that planet yet.
+const findRecentAttackerAtPlanetStmt = db.prepare(`
+    SELECT id, att_player_id, att_player_name, att_alliance_tag, def_player_name, started_at
+    FROM battle_reports
+    WHERE system_id = ? AND planet_index = ?
+      AND datetime(started_at) >= datetime('now', '-' || ? || ' minutes')
+    ORDER BY datetime(started_at) DESC
+    LIMIT 1
+`);
+function findRecentAttackerAtPlanet(systemId, planetIndex, windowMinutes) {
+    return findRecentAttackerAtPlanetStmt.get(systemId, planetIndex, Math.max(1, Math.round(Number(windowMinutes) || 0))) || null;
+}
+
 // --- Battle Reports page: a unified, alliance-wide "what happened" feed ---
 // Two very different signal sources merged into one chronological list:
 //   1. battle_reports rows — a real combat encounter the game reported. Always "linked":
@@ -289,6 +307,7 @@ module.exports = {
     markLocationBackfillAttempted,
     updateShipDetail,
     findByPlayerPairNear,
+    findRecentAttackerAtPlanet,
     getRecentPlanets,
     hasAnyBattleHistory,
     getBattleReportsFeed,
