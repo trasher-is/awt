@@ -327,24 +327,40 @@ ok('a battle report\'s occurred_at is normalized to SQLite\'s space-separated sh
 ok('the normalized battle row still sorts newest-first against a real CURRENT_TIMESTAMP pop-drop row',
     formatFeed[0].battle_report_id === 9600, formatFeed);
 
-// --- findRecentAttackerAtPlanet: who bombarded a planet (issue #156 attribution) ---
+// --- findRecentAttackerAtPlanet: victim and scan interval are required evidence ---
 db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (801, 'Bombard System', 3, 3)`).run();
 const minutesAgo = m => new Date(Date.now() - m * 60000).toISOString();
+const bombardContext = { defenderId: 77, observedAfter: minutesAgo(180), observedLoss: 1 };
 db.prepare(`INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_name, att_alliance_tag) VALUES (9700, ?, 801, 1, 'OldRaider', 'OLD')`).run(minutesAgo(10 * 60));
 db.prepare(`INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_name, att_alliance_tag) VALUES (9701, ?, 801, 1, 'Raider', 'ATK')`).run(minutesAgo(40));
 db.prepare(`INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_name) VALUES (9702, ?, 801, 2, 'OtherPlanetRaider')`).run(minutesAgo(5));
-const recent = battleReports.findRecentAttackerAtPlanet(801, 1, 180);
-ok('findRecentAttackerAtPlanet returns the newest report at THAT planet inside the window',
+// These synthetic reports explicitly confirm population kills against player 77.
+db.prepare("UPDATE battle_reports SET att_player_id=78, def_player_id=77, killed_population=2, winner='Attacker' WHERE id BETWEEN 9700 AND 9702").run();
+const recent = battleReports.findRecentAttackerAtPlanet(801, 1, 180, bombardContext);
+ok('findRecentAttackerAtPlanet returns confirmed kills at that planet against the observed owner',
     recent && recent.id === 9701 && recent.att_player_name === 'Raider' && recent.att_alliance_tag === 'ATK', recent);
 ok('a report older than the window is not returned (10 h old vs a 3 h window, nothing newer)',
-    battleReports.findRecentAttackerAtPlanet(801, 1, 30) === null);
+    battleReports.findRecentAttackerAtPlanet(801, 1, 30, bombardContext) === null);
 ok('a planet with no synced report yields null — the caller must not guess an attacker',
-    battleReports.findRecentAttackerAtPlanet(801, 3, 180) === null);
+    battleReports.findRecentAttackerAtPlanet(801, 3, 180, bombardContext) === null);
 // The API stores started_at with an offset ("...+02:00"); the window compares real instants.
 db.prepare(`INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_name) VALUES (9703, ?, 801, 4, 'OffsetRaider')`)
     .run(new Date(Date.now() - 20 * 60000 + 2 * 3600000).toISOString().replace('Z', '+02:00'));
+db.prepare("UPDATE battle_reports SET att_player_id=79, def_player_id=77, killed_population=1, winner='Attacker' WHERE id=9703").run();
 ok('an offset-stamped report 20 min ago is found by a 30 min window (offset normalized, not compared as text)',
-    (battleReports.findRecentAttackerAtPlanet(801, 4, 30) || {}).id === 9703);
+    (battleReports.findRecentAttackerAtPlanet(801, 4, 30, bombardContext) || {}).id === 9703);
+
+ok('a report cannot be attributed without the previous scan and known victim',
+    battleReports.findRecentAttackerAtPlanet(801, 1, 180) === null
+    && battleReports.findRecentAttackerAtPlanet(801, 1, 180, { ...bombardContext, defenderId: null }) === null
+    && battleReports.findRecentAttackerAtPlanet(801, 1, 180, { ...bombardContext, observedAfter: null }) === null);
+ok('missing or invalid observed loss cannot establish complete population attribution',
+    [undefined, null, 0, -1, NaN, Infinity].every(observedLoss =>
+        battleReports.findRecentAttackerAtPlanet(801, 1, 180, { ...bombardContext, observedLoss }) === null));
+ok('an invalid previous scan timestamp leaves attribution unknown',
+    battleReports.findRecentAttackerAtPlanet(801, 1, 180, { ...bombardContext, observedAfter: 'invalid' }) === null);
+ok('a recent report is excluded if the planet has been synced since that battle',
+    battleReports.findRecentAttackerAtPlanet(801, 1, 180, { ...bombardContext, observedAfter: minutesAgo(20) }) === null);
 
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 

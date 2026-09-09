@@ -813,6 +813,11 @@ function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_player_login_samples_player ON player_login_samples(player_id, observed_at);
     `);
 
+    // Science freshness must not follow updated_at: Trade inventory refreshes that
+    // timestamp without observing any sciences. Legacy rows have no trustworthy
+    // science timestamp, so leave them NULL until the next full member-sheet sync.
+    addColumn('alliance_member_stats', 'sciences_updated_at', 'DATETIME');
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

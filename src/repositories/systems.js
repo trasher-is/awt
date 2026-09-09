@@ -234,7 +234,7 @@ function getPlanetsByOwner(playerId) {
 // starbase/has_fleet/is_sieged are selected because the fog-of-war guard in sync.js
 // restores them: reading them off a row that never carried them bound `undefined`
 // (-> NULL) and quietly erased the very values the guard exists to preserve.
-const getOldPlanetStmt = db.prepare(`SELECT owner_id, population, starbase, has_fleet, is_sieged FROM planets WHERE system_id = ? AND planet_index = ?`);
+const getOldPlanetStmt = db.prepare(`SELECT owner_id, population, starbase, has_fleet, is_sieged, updated_at FROM planets WHERE system_id = ? AND planet_index = ?`);
 function getOldPlanet(systemId, planetIndex) {
     return getOldPlanetStmt.get(systemId, planetIndex);
 }

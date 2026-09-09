@@ -43,6 +43,8 @@ const warRoom = alliances.getWarRoomAlliances();
 ok('getWarRoomAlliances counts active members per alliance', warRoom.find(a => a.id === 1).active_members_count === 1);
 
 alliances.upsertHoardedAu(2, 5000);
+ok('AU-only insert does not claim a science observation',
+    db.prepare('SELECT sciences_updated_at FROM alliance_member_stats WHERE player_id = 2').get().sciences_updated_at === null);
 const traders = alliances.getTraders();
 ok('getTraders finds the race_trader player', traders.length === 1 && traders[0].name === 'trader1');
 
@@ -53,6 +55,18 @@ const canonical = alliances.getCanonicalNameFromStats('TRADER1');
 ok('getCanonicalNameFromStats is case-insensitive', canonical && canonical.name === 'trader1');
 
 alliances.upsertAllianceMemberStats(1, '[]', null, '10', '5', '20', '1000', '500', 'None', 'Lvl 5', '100K', 1, 2, 3, 4, 50);
+const sheetStamp = db.prepare('SELECT sciences_updated_at FROM alliance_member_stats WHERE player_id = 1').get().sciences_updated_at;
+ok('a full member-sheet observation stamps science freshness in SQLite UTC', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(sheetStamp));
+db.prepare("UPDATE alliance_member_stats SET sciences_updated_at = '2026-01-01 00:00:00' WHERE player_id = 1").run();
+alliances.upsertHoardedAu(1, 8000);
+ok('AU-only updates leave the actual science observation timestamp untouched',
+    db.prepare('SELECT sciences_updated_at FROM alliance_member_stats WHERE player_id = 1').get().sciences_updated_at === '2026-01-01 00:00:00');
+alliances.upsertAllianceMemberStats(1, '[]', null, '10', '5', '20', '1000', '500', 'None', 'Lvl 5', '100K', 1, 2, null, -1, 50);
+ok('a sheet without valid combat sciences does not acquire a science timestamp',
+    db.prepare('SELECT sciences_updated_at FROM alliance_member_stats WHERE player_id = 1').get().sciences_updated_at === null);
+alliances.upsertAllianceMemberStats(1, '[]', null, '10', '5', '20', '1000', '500', 'None', 'Lvl 5', '100K', 1, 2, null, 4, 50);
+ok('valid physics is an observation even with missing mathematics',
+    db.prepare('SELECT sciences_updated_at FROM alliance_member_stats WHERE player_id = 1').get().sciences_updated_at != null);
 const statIds = alliances.getAllianceMemberStatIds();
 ok('getAllianceMemberStatIds now includes both players', statIds.length === 2);
 

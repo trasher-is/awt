@@ -408,7 +408,7 @@ const ceilings = players.getCombatCeilings();
 ok('getCombatCeilings: max_level is the highest level of any player', ceilings.max_level === 931, ceilings);
 ok('getCombatCeilings: max_physics only counts scouted rows (939 on an unscouted row is a placeholder, not a fact)',
     ceilings.max_physics === 922, ceilings);
-ok('getCombatCeilings: max_science_level is the public ceiling over everyone (the fallback when nobody is scouted)',
+ok('getCombatCeilings: max_science_level remains public metadata over everyone, separate from observed physics',
     ceilings.max_science_level === 940, ceilings);
 
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
