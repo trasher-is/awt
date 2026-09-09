@@ -62,7 +62,7 @@ for (const col of intelColumns) {
 }
 
 // The reset MUST still clear the volatile public stats (otherwise it does nothing useful),
-// and origin_system in particular must reset so the originChanged signal re-arms.
+// and a genuine login-counter reset must discard the previous account's stale origin.
 for (const col of ['level', 'points', 'ranking', 'origin_system', 'total_planets', 'cv_limit']) {
     ok(`reset still clears public stat: ${col}`,
         new RegExp(`\\b${col}\\s*=`).test(resetUpdate), col);
