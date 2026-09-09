@@ -46,21 +46,21 @@ function getRouteOwnership(id) {
 
 const updateRouteStmt = db.prepare(`
     UPDATE routes SET title=?, note=?, planned_start_at=?, energy=?, race_speed=?,
-                      is_alliance_move=?, biology=?, visibility=?, expires_at=?,
+                      is_alliance_move=?, biology=?, visibility=?, expires_at=?, target_arrival_at=?,
                       updated_at=CURRENT_TIMESTAMP
     WHERE id=?
 `);
-function updateRoute(id, title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt) {
-    updateRouteStmt.run(title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt, id);
+function updateRoute(id, title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt, targetArrivalAt = null) {
+    updateRouteStmt.run(title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt, targetArrivalAt, id);
 }
 
 const insertRouteStmt = db.prepare(`
     INSERT INTO routes (author_id, title, note, planned_start_at, energy, race_speed,
-                        is_alliance_move, biology, visibility, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        is_alliance_move, biology, visibility, expires_at, target_arrival_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
-function insertRoute(authorId, title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt) {
-    return insertRouteStmt.run(authorId, title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt).lastInsertRowid;
+function insertRoute(authorId, title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt, targetArrivalAt = null) {
+    return insertRouteStmt.run(authorId, title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt, targetArrivalAt).lastInsertRowid;
 }
 
 const deleteRouteLegsForRouteStmt = db.prepare(`DELETE FROM route_legs WHERE route_id = ?`);

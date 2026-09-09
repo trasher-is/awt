@@ -12,8 +12,12 @@ const settingsRepo = require('../repositories/settings');
 const router = express.Router();
 
 const MAX_LEGS = 6;             // start -> jump -> ... -> target; more than this is a campaign, not a route
-const DEFAULT_TTL_DAYS = 7;     // a route with no planned start expires after this
-const KEEP_AFTER_ARRIVAL_H = 24; // ...one with a planned start lingers this long past arrival
+const DEFAULT_TTL_DAYS = 7;     // an unscheduled route expires after this
+const KEEP_AFTER_ARRIVAL_H = 24; // a scheduled route lingers this long past arrival
+// SQLite timestamps and datetime-local use four-digit years. Reject overflow before
+// converting the expiry to its sortable SQLite representation.
+const MIN_SCHEDULE_MS = Date.parse('0000-01-01T00:00:00.000Z');
+const MAX_SCHEDULE_MS = Date.parse('9999-12-31T23:59:59.999Z');
 
 // ─── INPUT VALIDATION ─────────────────────────────────────────────────────────
 // One validation step for preview, create and update, run BEFORE any calculation or
@@ -41,6 +45,20 @@ function strictInt(value) {
 
 const isBlank = v => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 
+// A new arrival anchor always identifies an instant, independent of the hub's TZ.
+// Preserve the older plannedStartAt parser for existing API clients. Date.parse alone
+// accepts local timestamps and silently rolls February 30 into March.
+function isArrivalTimestamp(value) {
+    if (typeof value !== 'string') return false;
+    const parts = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/.exec(value);
+    if (!parts) return false;
+    const [year, month, day, hour, minute, second] = parts.slice(1).map(part => Number(part || 0));
+    // A 400-year shift avoids Date.UTC's special interpretation of years 0..99.
+    const daysInMonth = new Date(Date.UTC(2000 + year % 400, month, 0)).getUTCDate();
+    return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth
+        && hour <= 23 && minute <= 59 && second <= 59;
+}
+
 function invalid(field, message) {
     return { error: message, field };
 }
@@ -48,7 +66,7 @@ function invalid(field, message) {
 /**
  * Validate and normalise a preview/create/update body. Returns either
  *   { error, field }                      — answer 400 with exactly this object, or
- *   { value: { waypoints, energy, raceSpeed, biology, isAllianceMove, plannedStartAt,
+ *   { value: { waypoints, energy, raceSpeed, biology, isAllianceMove, plannedStartAt, targetArrivalAt,
  *              visibility, title, note } } — safe to calculate with and to store.
  */
 function validateRouteInput(body) {
@@ -103,12 +121,18 @@ function validateRouteInput(body) {
         }
     }
 
-    let plannedStartAt = null;
-    if (!isBlank(b.plannedStartAt)) {
-        if (typeof b.plannedStartAt !== 'string' || !Number.isFinite(Date.parse(b.plannedStartAt))) {
-            return invalid('plannedStartAt', 'Planned start is not a date.');
+    if (!isBlank(b.plannedStartAt) && !isBlank(b.targetArrivalAt)) {
+        return invalid('targetArrivalAt', 'Choose either a planned start or a target arrival, not both.');
+    }
+    const anchors = { plannedStartAt: null, targetArrivalAt: null };
+    for (const [field, label] of [['plannedStartAt', 'Planned start'], ['targetArrivalAt', 'Target arrival']]) {
+        if (isBlank(b[field])) continue;
+        const ms = typeof b[field] === 'string' ? Date.parse(b[field]) : NaN;
+        if ((field === 'targetArrivalAt' && !isArrivalTimestamp(b[field]))
+            || !Number.isFinite(ms) || ms < MIN_SCHEDULE_MS || ms > MAX_SCHEDULE_MS) {
+            return invalid(field, `${label} is not a supported date.`);
         }
-        plannedStartAt = b.plannedStartAt;
+        anchors[field] = new Date(ms).toISOString();
     }
 
     let visibility = 'alliance';
@@ -128,7 +152,7 @@ function validateRouteInput(body) {
             waypoints: cleanWaypoints,
             energy, raceSpeed, biology,
             isAllianceMove: !!b.isAllianceMove,
-            plannedStartAt,
+            ...anchors,
             visibility,
             title: String(b.title || '').slice(0, 120) || null,
             note: String(b.note || '').slice(0, 1000) || null,
@@ -261,6 +285,33 @@ function expiryFor(plannedStartAt, totalSeconds) {
         .toISOString().replace('T', ' ').slice(0, 19);
 }
 
+// Use the already-rounded per-leg durations, including each destination's alliance
+// modifier. Working back from the final arrival then walking forward keeps every hop
+// continuous, with no extra rounding or implicit waiting between legs.
+function routeSchedule(legs, plannedStartAt, targetArrivalAt) {
+    if (!plannedStartAt && !targetArrivalAt) {
+        return { legs: withSchedule(legs, null), departsAt: null, arrivesAt: null,
+            expiresAt: expiryFor(null, 0) };
+    }
+    const totalSeconds = legs.reduce((total, leg) => total + leg.travelSeconds, 0);
+    const field = targetArrivalAt ? 'targetArrivalAt' : 'plannedStartAt';
+    const startMs = targetArrivalAt ? Date.parse(targetArrivalAt) - totalSeconds * 1000 : Date.parse(plannedStartAt);
+    const arrivalMs = startMs + totalSeconds * 1000;
+    const expiryMs = arrivalMs + KEEP_AFTER_ARRIVAL_H * 3600 * 1000;
+    if (!Number.isSafeInteger(totalSeconds) || totalSeconds < 0
+        || !Number.isFinite(startMs) || startMs < MIN_SCHEDULE_MS
+        || !Number.isFinite(expiryMs) || expiryMs > MAX_SCHEDULE_MS) {
+        return invalid(field, 'The route schedule is outside the supported date range.');
+    }
+    const departsAt = new Date(startMs).toISOString();
+    return {
+        legs: withSchedule(legs, departsAt),
+        departsAt,
+        arrivesAt: new Date(arrivalMs).toISOString(),
+        expiresAt: expiryFor(departsAt, totalSeconds)
+    };
+}
+
 // Routes rot fast — a plan for last Tuesday is noise. Sweep on read so the list is always
 // current without needing a scheduler.
 function purgeExpired() {
@@ -299,6 +350,8 @@ function hydrate(routeRows) {
             outOfReach: (r.biology || 0) > 0 && l.bioNeeded > r.biology
         }));
         const total = rl.reduce((s, l) => s + (l.travelSeconds || 0), 0);
+        const schedule = routeSchedule(rl, r.planned_start_at, r.target_arrival_at);
+        if (schedule.error) throw new Error(schedule.error);
         return {
             id: r.id,
             title: r.title,
@@ -306,6 +359,9 @@ function hydrate(routeRows) {
             author: r.author_name || 'Unknown',
             authorId: r.author_id,
             plannedStartAt: r.planned_start_at,
+            targetArrivalAt: r.target_arrival_at || null,
+            departsAt: schedule.departsAt,
+            arrivesAt: schedule.arrivesAt,
             energy: r.energy,
             raceSpeed: r.race_speed,
             isAllianceMove: !!r.is_alliance_move,
@@ -316,7 +372,7 @@ function hydrate(routeRows) {
             updatedAt: r.updated_at,
             totalSeconds: total,
             totalTime: formatTime(total),
-            legs: withSchedule(rl, r.planned_start_at)
+            legs: schedule.legs
         };
     });
 }
@@ -325,18 +381,22 @@ function hydrate(routeRows) {
 router.post('/routes/preview', requireAuth, (req, res) => {
     const checked = validateRouteInput(req.body);
     if (checked.error) return res.status(400).json({ error: checked.error, field: checked.field });
-    const { waypoints, energy, raceSpeed, isAllianceMove, biology, plannedStartAt } = checked.value;
+    const { waypoints, energy, raceSpeed, isAllianceMove, biology, plannedStartAt, targetArrivalAt } = checked.value;
 
     const built = buildLegs(waypoints, { energy, raceSpeed, isAllianceMove, biology });
     if (built.error) return res.status(400).json({ error: built.error, field: built.field });
 
-    const legs = withSchedule(built.legs, plannedStartAt);
+    const schedule = routeSchedule(built.legs, plannedStartAt, targetArrivalAt);
+    if (schedule.error) return res.status(400).json({ error: schedule.error, field: schedule.field });
     res.json({
         success: true,
-        legs,
+        plannedStartAt,
+        targetArrivalAt,
+        legs: schedule.legs,
         totalSeconds: built.totalSeconds,
         totalTime: formatTime(built.totalSeconds),
-        arrivesAt: legs.length ? legs[legs.length - 1].arrivesAt : null
+        departsAt: schedule.departsAt,
+        arrivesAt: schedule.arrivesAt
     });
 });
 
@@ -345,7 +405,13 @@ router.get('/routes', requireAuth, (req, res) => {
     try {
         purgeExpired();
         const rows = routingRepo.getRoutesForUser(req.session.userId);
-        res.json({ success: true, routes: hydrate(rows) });
+        // Arrival-based plans have no planned_start_at. Sort after hydration so both
+        // modes use the same computed departure and the saved duration snapshot.
+        const routes = hydrate(rows).sort((a, b) => {
+            const when = r => Date.parse(r.departsAt || `${r.createdAt.replace(' ', 'T')}Z`);
+            return when(a) - when(b) || a.id - b.id;
+        });
+        res.json({ success: true, routes });
     } catch (err) {
         console.error('[DB Error] Failed to list routes:', err);
         res.status(500).json({ error: 'Failed to list routes' });
@@ -371,21 +437,23 @@ router.get('/routes/:id', requireAuth, (req, res) => {
 function writeRoute(routeId, body, authorId) {
     const checked = validateRouteInput(body);
     if (checked.error) return { error: checked.error, field: checked.field };
-    const { waypoints, energy, raceSpeed, biology, plannedStartAt, visibility, title, note } = checked.value;
+    const { waypoints, energy, raceSpeed, biology, plannedStartAt, targetArrivalAt, visibility, title, note } = checked.value;
     const isAllianceMove = checked.value.isAllianceMove ? 1 : 0;
 
     const built = buildLegs(waypoints, { energy, raceSpeed, isAllianceMove: !!isAllianceMove, biology });
     if (built.error) return { error: built.error, field: built.field };
 
-    const expiresAt = expiryFor(plannedStartAt, built.totalSeconds);
+    const schedule = routeSchedule(built.legs, plannedStartAt, targetArrivalAt);
+    if (schedule.error) return { error: schedule.error, field: schedule.field };
+    const expiresAt = schedule.expiresAt;
 
     const tx = db.transaction(() => {
         let id = routeId;
         if (id) {
-            routingRepo.updateRoute(id, title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt);
+            routingRepo.updateRoute(id, title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt, targetArrivalAt);
             routingRepo.deleteRouteLegsForRoute(id);
         } else {
-            id = routingRepo.insertRoute(authorId, title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt);
+            id = routingRepo.insertRoute(authorId, title, note, plannedStartAt, energy, raceSpeed, isAllianceMove, biology, visibility, expiresAt, targetArrivalAt);
         }
 
         for (const l of built.legs) {
@@ -457,14 +525,17 @@ router.post('/routes/:id/announce', requireAuth, async (req, res) => {
         }
 
         const route = hydrate([row])[0];
-        const startLine = route.plannedStartAt
-            ? `Departs <t:${Math.floor(Date.parse(route.plannedStartAt) / 1000)}:F> (<t:${Math.floor(Date.parse(route.plannedStartAt) / 1000)}:R>)`
+        const startLine = route.departsAt
+            ? `Departs <t:${Math.floor(Date.parse(route.departsAt) / 1000)}:D> <t:${Math.floor(Date.parse(route.departsAt) / 1000)}:T> (<t:${Math.floor(Date.parse(route.departsAt) / 1000)}:R>)`
             : 'No planned start time';
+        const targetLine = route.targetArrivalAt
+            ? `Target arrival <t:${Math.floor(Date.parse(route.targetArrivalAt) / 1000)}:D> <t:${Math.floor(Date.parse(route.targetArrivalAt) / 1000)}:T>`
+            : '';
 
         const legLines = route.legs.map(l => {
             const from = `[${l.from.systemId}] ${defuseMentions(l.from.systemName || '?')} #${l.from.planetIndex}`;
             const to = `[${l.to.systemId}] ${defuseMentions(l.to.systemName || '?')} #${l.to.planetIndex}`;
-            const eta = l.arrivesAt ? ` — arrives <t:${Math.floor(Date.parse(l.arrivesAt) / 1000)}:t>` : '';
+            const eta = l.arrivesAt ? ` — arrives <t:${Math.floor(Date.parse(l.arrivesAt) / 1000)}:T>` : '';
             const allied = l.isAllianceMove ? ' · allied' : '';
             return `**${l.legIndex + 1}.** ${from} → ${to}\n\`${l.travelTime}\` · dist ${l.distance} · bio ${l.bioNeeded}${allied}${eta}`;
         }).join('\n');
@@ -479,6 +550,7 @@ router.post('/routes/:id/announce', requireAuth, async (req, res) => {
             description: [
                 `by **${defuseMentions(route.author)}**`,
                 startLine,
+                targetLine,
                 '',
                 legLines,
                 '',

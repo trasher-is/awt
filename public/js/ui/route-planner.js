@@ -8,9 +8,12 @@
 import { esc } from '../utils/escape.js';
 import '../utils/request-sequence.js'; // side-effect import: "only the latest request renders"
 import '../utils/fresh-cache.js';      // side-effect import: reference data with a lifetime
+import '../utils/route-schedule-input.js'; // preserves saved instants through local input
 
 const { createSequencer } = globalThis.AWRequestSeq;
 const { createFreshCache } = globalThis.AWFreshCache;
+const { createScheduleInput } = globalThis.AWRouteScheduleInput;
+const scheduleInput = createScheduleInput();
 
 const MAX_STOPS = 7;   // start + up to 6 legs, matching the server's MAX_LEGS
 let editingId = null;
@@ -33,14 +36,6 @@ const playersCache = createFreshCache();
 
 const $ = id => document.getElementById(id);
 
-// <input type="datetime-local"> gives local wall-clock with no zone. Interpret it as
-// local (which is what the user meant) and hand the server an explicit UTC instant.
-function localInputToIso(value) {
-    if (!value) return null;
-    const ms = Date.parse(value);          // no zone suffix -> parsed as local time
-    return isNaN(ms) ? null : new Date(ms).toISOString();
-}
-
 // Issue #159: every clock in the planner is the viewer's LOCAL time on a 24-hour dial.
 // hourCycle 'h23' pins the dial regardless of the browser locale — without it an en-US
 // browser renders "03:45 PM" next to the 24-hour "13:45Z" UTC stamp, the exact AM/PM vs
@@ -51,7 +46,7 @@ function fmtLocal(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
     if (isNaN(d.getTime())) return '—';
-    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
 }
 
 // UTC stamp, kept ONLY for a hover tooltip: the visible text is local time alone (#159),
@@ -60,7 +55,7 @@ function fmtUtc(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
     if (isNaN(d.getTime())) return '—';
-    return d.toISOString().slice(5, 16).replace('T', ' ') + 'Z';
+    return d.toISOString().slice(5, 19).replace('T', ' ') + 'Z';
 }
 
 async function getJson(url, options) {
@@ -236,13 +231,15 @@ function wireWaypointRow(row) {
 // ─── PREVIEW ──────────────────────────────────────────────────────────────────
 
 function currentPayload() {
+    const dateInput = $('rp-start');
+    if (!dateInput.validity.valid) throw new Error('Enter a valid local date and time, including seconds.');
     return {
         waypoints: collectWaypoints().map(w => ({ systemId: w.systemId, planetIndex: w.planetIndex })),
         energy: parseInt($('rp-energy').value, 10) || 0,
         raceSpeed: parseInt($('rp-speed').value, 10) || 0,
         biology: parseInt($('rp-biology').value, 10) || 0,
         isAllianceMove: $('rp-alliance').checked,
-        plannedStartAt: localInputToIso($('rp-start').value),
+        ...scheduleInput.fields(dateInput.value),
         title: $('rp-title').value,
         note: $('rp-note').value,
         visibility: $('rp-shared').checked ? 'alliance' : 'private'
@@ -251,7 +248,22 @@ function currentPayload() {
 
 function schedulePreview() {
     clearTimeout(previewTimer);
+    // Invalidate at the edit itself, including the debounce window before the next
+    // request. An invalid new date must never let an older successful ETA repaint.
+    previewSeq.cancel();
+    clearSchedule();
     previewTimer = setTimeout(preview, 250);
+}
+
+function updateScheduleLabel() {
+    $('rp-schedule-label').textContent = `${scheduleInput.mode === 'arrival' ? 'Target arrival' : 'Planned start'} (your local time)`;
+}
+
+function clearSchedule() {
+    $('rp-departure').textContent = '';
+    $('rp-arrival').textContent = '';
+    $('rp-start-warning').textContent = '';
+    $('rp-start-warning').classList.add('hidden');
 }
 
 function showError(msg) {
@@ -266,12 +278,20 @@ async function preview() {
     // Every preview — including the "incomplete" placeholder — takes the token, so a
     // response for inputs the member has since changed can never paint the pane.
     const token = previewSeq.next();
-    const payload = currentPayload();
+    let payload;
+    try { payload = currentPayload(); }
+    catch (err) {
+        $('rp-total').textContent = '--:--:--';
+        $('rp-legs').innerHTML = '';
+        clearSchedule();
+        showError(err.message);
+        return;
+    }
     const incomplete = payload.waypoints.some(w => !w.systemId);
     if (incomplete) {
         $('rp-total').textContent = '--:--:--';
         $('rp-legs').innerHTML = '<div class="text-xs text-muted-foreground">Pick a system for every stop.</div>';
-        $('rp-arrival').textContent = '';
+        clearSchedule();
         showError('');
         return;
     }
@@ -283,18 +303,30 @@ async function preview() {
             body: JSON.stringify(payload)
         });
         if (!previewSeq.isCurrent(token)) return;
-        showError('');
-        $('rp-total').textContent = d.totalTime;
-        $('rp-legs').innerHTML = d.legs.map(renderLeg).join('');
-        $('rp-arrival').innerHTML = d.arrivesAt
-            ? `Arrives <span class="text-foreground" title="${esc(fmtUtc(d.arrivesAt))} UTC">${esc(fmtLocal(d.arrivesAt))}</span> your local time`
-            : 'Set a planned start to get arrival times.';
+        renderPreview(d, !!payload.targetArrivalAt);
     } catch (err) {
         if (!previewSeq.isCurrent(token)) return;
         $('rp-total').textContent = '--:--:--';
         $('rp-legs').innerHTML = '';
-        $('rp-arrival').textContent = '';
+        clearSchedule();
         showError(err.message);
+    }
+}
+
+function renderPreview(d, arrivalMode) {
+    showError('');
+    $('rp-total').textContent = d.totalTime;
+    $('rp-legs').innerHTML = d.legs.map(renderLeg).join('');
+    clearSchedule();
+    $('rp-departure').innerHTML = d.departsAt
+        ? `${arrivalMode ? 'Required start' : 'Starts'} <span title="${esc(fmtUtc(d.departsAt))} UTC">${esc(fmtLocal(d.departsAt))}</span> your local time`
+        : '';
+    $('rp-arrival').innerHTML = d.arrivesAt
+        ? `Arrives <span class="text-foreground" title="${esc(fmtUtc(d.arrivesAt))} UTC">${esc(fmtLocal(d.arrivesAt))}</span> your local time`
+        : 'Set a planned start or target arrival to get a schedule.';
+    if (d.departsAt && Date.parse(d.departsAt) < Date.now()) {
+        $('rp-start-warning').textContent = 'The required start is in the past. This fleet would already need to have departed.';
+        $('rp-start-warning').classList.remove('hidden');
     }
 }
 
@@ -309,14 +341,18 @@ function renderLeg(l) {
         ? `<span class="text-amber-400" title="Needs biology ${l.bioNeeded}"><i class="fa-solid fa-triangle-exclamation"></i> bio ${l.bioNeeded}</span>`
         : `<span class="text-zinc-500">bio ${l.bioNeeded}</span>`;
     const times = l.arrivesAt
-        ? `<span class="text-zinc-500">${esc(fmtLocal(l.departsAt))} → ${esc(fmtLocal(l.arrivesAt))}</span>`
+        ? `<span class="text-zinc-500"><span title="${esc(fmtUtc(l.departsAt))} UTC">${esc(fmtLocal(l.departsAt))}</span> → <span title="${esc(fmtUtc(l.arrivesAt))} UTC">${esc(fmtLocal(l.arrivesAt))}</span></span>`
         : '';
     // Issue #147: the halving is now auto-detected per leg from who currently owns the
     // destination (own alliance or the Admin -> Alliance Relations allied list), not one
     // manual checkbox for the whole route. autoAllianceMove distinguishes "we found this
     // ourselves" from "forced by the checkbox below" so the label stays honest either way.
+    // Saved legs preserve the modifier, but not its detection provenance.
+    const alliedTitle = l.autoAllianceMove == null ? 'Saved alliance/own-destination travel modifier'
+        : l.autoAllianceMove ? 'Auto-detected: destination is owned by your alliance or an ally'
+            : 'Forced by the Alliance/own move checkbox below';
     const allied = l.isAllianceMove
-        ? `<span class="text-emerald-400 shrink-0" title="${l.autoAllianceMove ? 'Auto-detected: destination is owned by your alliance or an ally' : 'Forced by the Alliance/own move checkbox below'}"><i class="fa-solid fa-handshake mr-1"></i>${l.autoAllianceMove ? 'allied' : 'allied (forced)'}</span>`
+        ? `<span class="text-emerald-400 shrink-0" title="${alliedTitle}"><i class="fa-solid fa-handshake mr-1"></i>${l.autoAllianceMove === false ? 'allied (forced)' : 'allied'}</span>`
         : '';
     return `
     <div class="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 text-xs border-l-2 ${l.outOfReach ? 'border-amber-500/60' : 'border-border'} pl-2 py-1">
@@ -336,12 +372,12 @@ function renderLeg(l) {
 // ─── SAVE / LOAD ──────────────────────────────────────────────────────────────
 
 async function save() {
-    const payload = currentPayload();
     const msg = $('rp-save-msg');
     const btn = $('rp-save');
     btn.disabled = true;
     msg.textContent = 'Saving…';
     try {
+        const payload = currentPayload();
         const url = editingId ? `/hub-api/routes/${editingId}` : '/hub-api/routes';
         const d = await getJson(url, {
             method: editingId ? 'PUT' : 'POST',
@@ -351,7 +387,17 @@ async function save() {
         editingId = d.id;
         msg.textContent = 'Saved.';
         if (typeof window.showToast === 'function') window.showToast('Route saved');
-        await loadShared();
+        const routes = await loadShared();
+        const saved = routes?.find(route => route.id === d.id);
+        let unchanged = false;
+        try { unchanged = JSON.stringify(currentPayload()) === JSON.stringify(payload); }
+        catch { /* The member may be midway through editing the next date. */ }
+        if (saved && editingId === d.id && unchanged) {
+            // Saving recalculates durations. Show the snapshot actually written, even
+            // if ownership changed since the preview, but never replace newer edits.
+            cancelPendingWork();
+            renderPreview(saved, !!saved.targetArrivalAt);
+        }
     } catch (err) {
         msg.textContent = err.message;
     } finally {
@@ -365,6 +411,9 @@ function resetForm() {
     $('rp-title').value = '';
     $('rp-note').value = '';
     $('rp-start').value = '';
+    $('rp-schedule-mode').value = 'start';
+    scheduleInput.setMode('start');
+    updateScheduleLabel();
     $('rp-shared').checked = true;
     renderWaypoints([{ systemId: null, planetIndex: 1, label: '' }, { systemId: null, planetIndex: 1, label: '' }]);
     $('rp-save-msg').textContent = '';
@@ -372,6 +421,7 @@ function resetForm() {
 }
 
 function loadIntoForm(route) {
+    cancelPendingWork();
     editingId = route.id;
     $('rp-title').value = route.title || '';
     $('rp-note').value = route.note || '';
@@ -380,14 +430,10 @@ function loadIntoForm(route) {
     $('rp-biology').value = route.biology || 0;
     $('rp-alliance').checked = !!route.isAllianceMove;
     $('rp-shared').checked = route.visibility !== 'private';
-    if (route.plannedStartAt) {
-        const d = new Date(route.plannedStartAt);
-        // back to a local wall-clock string the input understands
-        const pad = n => String(n).padStart(2, '0');
-        $('rp-start').value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    } else {
-        $('rp-start').value = '';
-    }
+    const schedule = scheduleInput.load(route);
+    $('rp-schedule-mode').value = schedule.mode;
+    $('rp-start').value = schedule.value;
+    updateScheduleLabel();
 
     const stops = [];
     route.legs.forEach((l, i) => {
@@ -395,7 +441,10 @@ function loadIntoForm(route) {
         stops.push({ systemId: l.to.systemId, planetIndex: l.to.planetIndex, label: `${l.to.systemName || 'Sys'} #${l.to.systemId}` });
     });
     renderWaypoints(stops.length >= 2 ? stops : undefined);
-    preview();
+    // A saved route is a duration snapshot. Opening it must show the same launch as
+    // its shared card/announcement even if ownership or the travel model changed.
+    // The first input edit requests a fresh calculation with the saved anchor intact.
+    renderPreview(route, !!route.targetArrivalAt);
     $('rp-save-msg').textContent = `Editing "${route.title || 'untitled route'}" — Save to overwrite, New to start fresh.`;
     $('route-planner-panel')?.querySelector('.flex-1')?.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -407,18 +456,18 @@ async function loadShared() {
         const d = await getJson('/hub-api/routes');
         if (!d.routes.length) {
             box.innerHTML = '<div class="text-xs text-muted-foreground">No routes shared yet.</div>';
-            return;
+            return [];
         }
         box.innerHTML = d.routes.map(r => {
             const mine = me.id != null && r.authorId === me.id;
             const canEdit = mine || me.role === 'admin' || r.authorId == null;
             const hops = r.legs.map(l => `${esc(l.to.systemName || '?')} #${l.to.planetIndex}`).join(' → ');
             const origin = r.legs.length ? `${esc(r.legs[0].from.systemName || '?')} #${r.legs[0].from.planetIndex}` : '?';
-            const start = r.plannedStartAt
-                ? `starts <span title="${esc(fmtUtc(r.plannedStartAt))} UTC">${esc(fmtLocal(r.plannedStartAt))}</span>`
-                : 'no planned start';
-            const arrival = r.legs.length && r.legs[r.legs.length - 1].arrivesAt
-                ? ` · arrives ${esc(fmtLocal(r.legs[r.legs.length - 1].arrivesAt))}`
+            const start = r.departsAt
+                ? `starts <span title="${esc(fmtUtc(r.departsAt))} UTC">${esc(fmtLocal(r.departsAt))}</span>`
+                : 'no schedule';
+            const arrival = r.arrivesAt
+                ? ` · ${r.targetArrivalAt ? 'target arrival' : 'arrives'} <span title="${esc(fmtUtc(r.arrivesAt))} UTC">${esc(fmtLocal(r.arrivesAt))}</span>`
                 : '';
             return `
             <div class="bg-zinc-950 border border-border rounded p-2 flex flex-col gap-1" data-route="${r.id}">
@@ -468,6 +517,7 @@ async function loadShared() {
                 }
             });
         });
+        return d.routes;
     } catch (err) {
         box.innerHTML = `<div class="text-xs text-red-400">${esc(err.message)}</div>`;
     }
@@ -557,6 +607,19 @@ export async function initRoutePlanner() {
         el.addEventListener('input', schedulePreview);
         el.addEventListener('change', schedulePreview);
     });
+
+    $('rp-schedule-mode')?.addEventListener('change', () => {
+        scheduleInput.setMode($('rp-schedule-mode').value);
+        $('rp-start').value = '';
+        updateScheduleLabel();
+        schedulePreview();
+    });
+    const onDateEdit = () => {
+        scheduleInput.edit();
+        schedulePreview();
+    };
+    $('rp-start')?.addEventListener('input', onDateEdit);
+    $('rp-start')?.addEventListener('change', onDateEdit);
 
     $('rp-save')?.addEventListener('click', save);
     $('rp-reset')?.addEventListener('click', resetForm);
