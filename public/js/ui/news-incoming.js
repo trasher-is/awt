@@ -273,15 +273,18 @@ function renderCovering(el, names) {
 
 // Claim (or retract) defence of this incoming. Toggles the logged-in user in the covering
 // roster server-side, which also re-renders the Discord alert's "Covering:" line.
-async function coverThis(info, coverEl, btn) {
+async function coverThis(info, arrivalUnix, coverEl, btn) {
     btn.disabled = true;
     const old = btn.textContent;
     btn.textContent = '⏳';
     try {
+        // arrivalUnix is part of the incoming's identity since #143 (same attacker, same
+        // planet, different arrival = a different incoming) — without it the claim would
+        // land on the wrong alert whenever the attacker has more than one wave in the air.
         const resp = await fetch('/hub-api/incoming/cover', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ attacker: info.attacker, target: info.target })
+            body: JSON.stringify({ attacker: info.attacker, target: info.target, arrivalUnix: arrivalUnix || 0 })
         });
         const data = await resp.json();
         if (data.success) {
@@ -389,7 +392,7 @@ export function initNewsIncomingTools() {
         const coverBtn = makeBtn('🛡️ Cover', 'I cover this — tell everyone defence is on the way (click again to retract)');
         refreshBtn.addEventListener('click', () => refreshAttacker(info, span, arrivalUnix, defBox, refreshBtn, coverEl));
         discordBtn.addEventListener('click', () => announce(info, arrivalUnix, discordBtn));
-        coverBtn.addEventListener('click', () => coverThis(info, coverEl, coverBtn));
+        coverBtn.addEventListener('click', () => coverThis(info, arrivalUnix, coverEl, coverBtn));
         bar.appendChild(refreshBtn);
         bar.appendChild(discordBtn);
         bar.appendChild(coverBtn);

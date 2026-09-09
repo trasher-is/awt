@@ -13,8 +13,10 @@
 //      limit), leaving the rest of that allowance for a member's own deliberate lookups
 //      elsewhere in the hub. A re-entrancy flag (`sweeping`) keeps a slow tick from
 //      overlapping the next scheduled one; the staleness query itself also floors out once
-//      every player was scanned within the last 6 hours, so a fully-caught-up roster lets
-//      the sweep go idle instead of burning calls re-scanning fields that haven't changed.
+//      every player was scanned recently (6 hours; 1 hour for a player who was active
+//      around their last scan — issue #155, see players.js's API_SCAN_STALE_SQL), so a
+//      fully-caught-up roster lets the sweep go idle instead of burning calls re-scanning
+//      fields that haven't changed.
 //
 // Cross-tab dedup follows battle-sync.js's localStorage-lock pattern exactly.
 

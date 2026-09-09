@@ -39,9 +39,36 @@ function updateLastOntime(alertKey, lastOntime) {
     updateLastOntimeStmt.run(lastOntime, alertKey);
 }
 
-// alert_key is system:planet:attacker — an identity that only means anything against the
-// current round's map, so a round reset must clear it or the next round's first genuinely
-// new incoming at the same coordinates would be treated as an edit of a stale message.
+// Every stored incoming sharing one base identity (system:planet:attacker) — the rows the
+// resolver in src/utils/incoming-identity.js chooses between when deciding whether a fresh
+// report is the same fleet (edit) or a new wave (new key). Legacy rows written before
+// base_key existed are matched by alert_key = base instead. Issue #143.
+const findIncomingByBaseKeyStmt = db.prepare(`
+    SELECT alert_key, arrival_unix, updated_at
+    FROM incoming_msgs
+    WHERE base_key = ? OR alert_key = ?
+`);
+function findIncomingByBaseKey(baseKey) {
+    return findIncomingByBaseKeyStmt.all(baseKey, baseKey);
+}
+
+// Record which base identity and arrival an alert key stands for. Creates the row when it
+// is the first thing that touches a brand-new incoming (a "cover" click can land before the
+// alert is ever sent), and never downgrades a known arrival back to unknown (0/null).
+const ensureIncomingIdentityStmt = db.prepare(`
+    INSERT INTO incoming_msgs (alert_key, base_key, arrival_unix) VALUES (?, ?, ?)
+    ON CONFLICT(alert_key) DO UPDATE SET
+        base_key = COALESCE(excluded.base_key, base_key),
+        arrival_unix = CASE WHEN excluded.arrival_unix > 0 THEN excluded.arrival_unix ELSE arrival_unix END
+`);
+function ensureIncomingIdentity(alertKey, baseKey, arrivalUnix) {
+    ensureIncomingIdentityStmt.run(alertKey, baseKey, arrivalUnix > 0 ? arrivalUnix : null);
+}
+
+// alert_key is system:planet:attacker (plus ":arrival" for every wave after the first, see
+// above) — an identity that only means anything against the current round's map, so a round
+// reset must clear it or the next round's first genuinely new incoming at the same
+// coordinates would be treated as an edit of a stale message.
 const deleteAllIncomingMsgsStmt = db.prepare(`DELETE FROM incoming_msgs`);
 function deleteAllIncomingMsgs() {
     deleteAllIncomingMsgsStmt.run();
@@ -59,5 +86,6 @@ function deleteAllIncomingAlerts() {
 module.exports = {
     getCoveringRow, upsertCovering, upsertMessageRef, getMessageRef,
     getLastOntimeRow, updateLastOntime,
+    findIncomingByBaseKey, ensureIncomingIdentity,
     deleteAllIncomingMsgs, deleteAllIncomingAlerts,
 };

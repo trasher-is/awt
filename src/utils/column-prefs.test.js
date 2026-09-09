@@ -93,7 +93,8 @@ async function loadEsm(rel, tmp) {
         biology: 7, economy: 10, energy: 12, mathematics: 3, physics: 4, social: 6, artefact: 'CD 3', intel_updated_at: '2026-09-05 12:00:00',
         number_of_battles: 9, battle_luckiness: 1.2345, country: 'PL', joined: '2026-08-01', logins: 40, last_activity_at: null, idle_time: '2h 5m',
         player_name: 'Elfen<lied>', player_id: 5, planets_text: '6 (7)', next_culture_at: null, level_text: 'Lvl 12', cv_limit_text: '300', population: 40, hoarded_au: 5000, updated_at: '2026-09-05 12:00:00',
-        pl_points: 12345, pl_race_speed: 1, pl_race_production: 4, pl_race_attack: -2, pl_trade_revenue: 50, pl_biology: 7, pl_total_farms: 30, pl_last_activity_at: null };
+        pl_points: 12345, pl_race_speed: 1, pl_race_production: 4, pl_race_attack: -2, pl_trade_revenue: 50, pl_biology: 7, pl_total_farms: 30, pl_last_activity_at: null,
+        pl_tp: 61.5, pl_tpx: 12.3 };
     const noIntelRow = { id: 6, name: 'Ghost', has_intel: 0, pl_has_intel: 0, level: 3, points: 10, player_name: 'Ghost', player_id: 6, population: 1 };
 
     for (const [tableKey, table] of Object.entries(tables)) {
@@ -167,7 +168,14 @@ async function loadEsm(rel, tmp) {
 
     const alliancesSql = read('src/repositories/alliances.js');
     const allySql = alliancesSql.slice(alliancesSql.indexOf('const getAllianceStatsForArchiveStmt'), alliancesSql.indexOf('function getAllianceStatsForArchive('));
-    const computedAlly = { pl_cv: ['pl_cv_used', 'pl_cv_limit'], pl_active: ['pl_last_activity_at'] };
+    // pl_tp / pl_tpx (issue #154) are computed in the /intel/alliance-stats route from these
+    // aliases plus the players-table ceilings — they are not columns of their own.
+    const computedAlly = {
+        pl_cv: ['pl_cv_used', 'pl_cv_limit'],
+        pl_active: ['pl_last_activity_at'],
+        pl_tp: ['pl_has_intel', 'pl_race_attack', 'pl_physics', 'pl_mathematics', 'pl_level', 'pl_science_level', 'pl_intel_updated_at'],
+        pl_tpx: ['pl_has_intel', 'pl_race_attack', 'pl_physics', 'pl_mathematics', 'pl_level', 'pl_science_level', 'pl_intel_updated_at'],
+    };
     const missingAlly = tables.allyStats.columns.map(c => c.key).filter(k => k.startsWith('pl_'))
         .flatMap(k => computedAlly[k] || [k]).filter(alias => !new RegExp(`AS ${alias}\\b`).test(allySql));
     ok('alliance stats: every pl_ column is an explicit alias in getAllianceStatsForArchive', missingAlly.length === 0, missingAlly);

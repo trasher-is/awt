@@ -231,6 +231,31 @@ ok('a player scanned more than 6 hours ago re-enters the stale queue',
 ok('a player scanned less than 6 hours ago still stays excluded',
     !staleAfterBackdate.includes(703), staleAfterBackdate);
 
+// Issue #155: a player who was ACTIVE around their last scan is re-scanned after 1 hour, not
+// 6 — their last_activity_at is the only thing that moves the idle display, and a 6-hour-old
+// snapshot showed actively-playing members as idle. Long-idle players keep the 6-hour floor.
+const isoAgo = h => new Date(Date.now() - h * 3600000).toISOString().replace(/\.\d{3}Z$/, '.0000000+00:00'); // the API's own shape
+players.upsertPlayerBasic(704, 'InPlay', null);
+players.upsertPlayerBasic(705, 'LongIdle', null);
+players.upsertPlayerBasic(706, 'InPlayFresh', null);
+players.upsertPlayerBasic(707, 'InPlayOffset', null);
+// 704: scanned 2 h ago, was active 3 h ago (1 h before the scan) -> in play -> stale after 1 h
+db.prepare(`UPDATE players SET last_api_scan_at = datetime('now', '-2 hours'), last_activity_at = ? WHERE id = 704`).run(isoAgo(3));
+// 705: scanned 2 h ago, last active 3 days ago -> long idle -> keeps the 6 h floor -> fresh
+db.prepare(`UPDATE players SET last_api_scan_at = datetime('now', '-2 hours'), last_activity_at = ? WHERE id = 705`).run(isoAgo(72));
+// 706: scanned 30 min ago, active 1 h ago -> in play but inside the 1 h floor -> fresh
+db.prepare(`UPDATE players SET last_api_scan_at = datetime('now', '-30 minutes'), last_activity_at = ? WHERE id = 706`).run(isoAgo(1));
+// 707: like 704 but the activity stamp carries a +02:00 offset (what the API really sends)
+db.prepare(`UPDATE players SET last_api_scan_at = datetime('now', '-2 hours'), last_activity_at = ? WHERE id = 707`)
+    .run(new Date(Date.now() - 3 * 3600000 + 2 * 3600000).toISOString().replace(/\.\d{3}Z$/, '.1083087+02:00'));
+const tiered = players.getStalePlayerIdsForApiScan(100000);
+ok('an in-play player scanned 2 h ago IS stale (1 h tier)', tiered.includes(704), tiered);
+ok('a long-idle player scanned 2 h ago is NOT stale (6 h floor unchanged)', !tiered.includes(705), tiered);
+ok('an in-play player scanned 30 min ago is not stale yet (inside the 1 h tier)', !tiered.includes(706), tiered);
+ok('an offset-stamped activity time is parsed, not compared as text: the +02:00 in-play player is stale too', tiered.includes(707), tiered);
+db.prepare(`UPDATE players SET last_api_scan_at = datetime('now', '-7 hours') WHERE id = 705`).run();
+ok('the long-idle player re-enters the queue after 6 h like before', players.getStalePlayerIdsForApiScan(100000).includes(705));
+
 // --- getPlayerApiScanStats: the Deep scan button's status line ---
 // At this point: 701 has has_intel written but was never marked scanned (last_api_scan_at
 // still NULL from upsertPlayerFromApiDetail, which never touches it — only
@@ -372,6 +397,19 @@ ok('getJoinedDates excludes a player with a null joined date',
     !joinedById.has(802), joinedById.get(802));
 ok('getJoinedDates includes a player whose "N/A" was overwritten by a real joined date',
     joinedById.get(803) === '2026-09-01T09:00:00.0000000+02:00', joinedById.get(803));
+
+// --- getCombatCeilings: the TPx "toughest enemy" reference (issue #154) ---
+// Values far above anything the rows seeded earlier in this file carry, so the maxima are
+// unambiguous whatever else is in the table.
+db.prepare(`INSERT INTO players (id, name, level, science_level, physics, has_intel) VALUES (901, 'CeilLvl', 931, 12, 0, 0)`).run();
+db.prepare(`INSERT INTO players (id, name, level, science_level, physics, has_intel) VALUES (902, 'CeilPhys', 9, 26, 922, 1)`).run();
+db.prepare(`INSERT INTO players (id, name, level, science_level, physics, has_intel) VALUES (903, 'Unscouted', 5, 940, 939, 0)`).run();
+const ceilings = players.getCombatCeilings();
+ok('getCombatCeilings: max_level is the highest level of any player', ceilings.max_level === 931, ceilings);
+ok('getCombatCeilings: max_physics only counts scouted rows (939 on an unscouted row is a placeholder, not a fact)',
+    ceilings.max_physics === 922, ceilings);
+ok('getCombatCeilings: max_science_level is the public ceiling over everyone (the fallback when nobody is scouted)',
+    ceilings.max_science_level === 940, ceilings);
 
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 

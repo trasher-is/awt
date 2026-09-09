@@ -359,7 +359,8 @@ async function runDeepScanPlayers() {
 }
 
 // Status line under the Deep scan button: how many players are on record and "fresh" (by
-// the exact same 6-hour floor the claim itself uses), and when the most recent claim of
+// the exact same staleness rule the claim itself uses — 6 h, or 1 h for a player who was
+// active around their last scan, see players.js's API_SCAN_STALE_SQL), and when the most recent claim of
 // any size last touched a row — so members can see at a glance whether it's worth clicking
 // again or better left for the cooldown/a teammate.
 async function refreshDeepScanStatus() {

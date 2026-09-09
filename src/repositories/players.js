@@ -716,12 +716,34 @@ function upsertPlayerFromApiDetail(player) {
     upsertPlayerFromApiDetailStmt.run(player);
 }
 
-// Floored at 6 hours: without a WHERE clause the queue never empties even once every
-// player was scanned seconds ago, so the background sweep burns its budget forever
-// re-scanning slow-changing fields instead of yielding once the roster is genuinely fresh.
+// When is a player's Player/{id} detail stale enough to re-scan? ONE predicate, shared by
+// the claim query and the status-line count below so the two can never disagree.
+//
+// Floored at 6 hours: without a floor the queue never empties even once every player was
+// scanned seconds ago, so the background sweep burns its budget forever re-scanning
+// slow-changing fields instead of yielding once the roster is genuinely fresh.
+//
+// Tiered since issue #155: last_activity_at is only ever refreshed by this sweep, and the
+// idle display is "now - last_activity_at" at render time. A player who logs in and plays
+// AFTER their sweep therefore reads as idle for up to 6 hours (plus queue time) while they
+// are visibly active. A player whose last known activity was within 24 h of their scan is
+// "in play" and goes stale after 1 hour instead, bounding that error to about an hour;
+// long-idle players keep the 6-hour floor. Budget: at 15 claims a minute the whole roster
+// takes ~10 minutes, so re-scanning even every active player hourly stays far inside the
+// sweep's share of the agreed API budget — the batch size and tick rate are unchanged.
+// datetime(last_activity_at) parses the API's offset-ISO stamp ("...T...+02:00") correctly;
+// an unparseable value makes the comparison NULL and the player falls back to the 6-hour
+// rule.
+const API_SCAN_STALE_SQL = `(
+    last_api_scan_at IS NULL
+    OR last_api_scan_at < datetime('now', '-6 hours')
+    OR (last_api_scan_at < datetime('now', '-1 hours')
+        AND datetime(last_activity_at) >= datetime(last_api_scan_at, '-24 hours'))
+)`;
+
 const getStalePlayerIdsForApiScanStmt = db.prepare(`
     SELECT id FROM players
-    WHERE last_api_scan_at IS NULL OR last_api_scan_at < datetime('now', '-6 hours')
+    WHERE ${API_SCAN_STALE_SQL}
     ORDER BY (last_api_scan_at IS NULL) DESC, last_api_scan_at ASC
     LIMIT ?
 `);
@@ -738,14 +760,13 @@ function markPlayersApiScanned(ids) {
 }
 
 // Feeds the "Deep scan" button's status line — total roster size, how many are still
-// stale by the SAME 6-hour floor getStalePlayerIdsForApiScan uses (so the count on screen
+// stale by the SAME predicate getStalePlayerIdsForApiScan uses (so the count on screen
 // never disagrees with what a claim would actually hand out), and when the most recent
 // claim of any size last touched a row.
 const getPlayerApiScanStatsStmt = db.prepare(`
     SELECT
         (SELECT COUNT(*) FROM players) as total,
-        (SELECT COUNT(*) FROM players
-            WHERE last_api_scan_at IS NULL OR last_api_scan_at < datetime('now', '-6 hours')) as stale,
+        (SELECT COUNT(*) FROM players WHERE ${API_SCAN_STALE_SQL}) as stale,
         (SELECT MAX(last_api_scan_at) FROM players) as last_scan_at
 `);
 function getPlayerApiScanStats() {
@@ -772,6 +793,22 @@ function suggestPlayersTopByPoints(limit) {
     return suggestPlayersTopByPointsStmt.all(limit);
 }
 
+// --- players: read (true-power.js, via routes/intel.js) ---
+
+// The "toughest enemy" reference for the TPx rating (issue #154): the highest player level
+// and the highest scouted physics anywhere in the players table. max_physics only counts
+// rows with intel (an unscanned row's physics is a 0 placeholder, not a fact); when nobody
+// has been scouted yet, max_science_level — the public per-science ceiling — stands in.
+const getCombatCeilingsStmt = db.prepare(`
+    SELECT MAX(level) AS max_level,
+           MAX(CASE WHEN has_intel = 1 THEN physics END) AS max_physics,
+           MAX(science_level) AS max_science_level
+    FROM players
+`);
+function getCombatCeilings() {
+    return getCombatCeilingsStmt.get() || { max_level: null, max_physics: null, max_science_level: null };
+}
+
 module.exports = {
     getWarRoomPlayers, getAllianceIntelPlayerIds, countPlayers, listPlayerIds, getFullPlayersDb, getJoinedDates,
     getAllianceTagForMembers, getVisionObservers, getPlayerWithPlanetCount,
@@ -793,4 +830,5 @@ module.exports = {
     getStalePlayerIdsForApiScan, markPlayersApiScanned, getPlayerApiScanStats,
     getPendingNewPlayerAnnouncements, markNewPlayerAnnounced,
     getPlayerLaunchOrigin,
+    getCombatCeilings,
 };

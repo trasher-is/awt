@@ -8,6 +8,7 @@ const alliancesRepo = require('./repositories/alliances');
 const usersRepo = require('./repositories/users');
 const discordTimersRepo = require('./repositories/discordTimers');
 const incomingRepo = require('./repositories/incoming');
+const { buildSystemChangeLines } = require('./utils/system-change-lines');
 const settingsRepo = require('./repositories/settings');
 const battlePointsRepo = require('./repositories/battlePoints');
 const battleReportsRepo = require('./repositories/battleReports');
@@ -40,7 +41,8 @@ client.on('clientReady', () => {
 
 // The "🛡️ I cover this" button attached to every incoming alert. customId carries the
 // attack identity so a click can be routed back to the right incoming (well under the
-// 100-char customId cap — alertKey is "system:planet:attacker").
+// 100-char customId cap — alertKey is "system:planet:attacker", plus ":arrival" for a
+// second wave at the same planet, see src/utils/incoming-identity.js).
 function coverButtonRow(alertKey) {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -1757,7 +1759,11 @@ async function sendSystemEmbed(channelId, title, lines, color) {
  * Announce planet events detected for a single system. Owner changes go to the
  * "System Change" channel (discord_announce_channel); population drops go to their own
  * "Population Drop" channel (discord_popdrop_channel) so they can be routed separately.
- * `events` is an array of { planet_index, type, old_owner, new_owner, old_pop, new_pop }.
+ * `events` is an array of
+ *   { planet_index, type: 'OWNER_CHANGE', kind, old_owner, new_owner, old_pop }  or
+ *   { planet_index, type: 'POP_DROP', kind, old_pop, new_pop, victim, by | owner, attacker }
+ * as built by /sync/system (issue #156 — `kind` and the who-did-what fields drive the
+ * wording in src/utils/system-change-lines.js).
  * Each channel is independent — leaving one empty disables just that stream.
  */
 async function announceSystemChanges(system, events) {
@@ -1766,13 +1772,9 @@ async function announceSystemChanges(system, events) {
 
     const sysLabel = `${system.name ? system.name + ' ' : ''}#${system.id}${(system.x != null && system.y != null) ? ` (${system.x}/${system.y})` : ''}`;
 
-    const ownerLines = events
-        .filter(e => e.type === 'OWNER_CHANGE')
-        .map(e => `🪐 **Planet ${e.planet_index}**: ${e.old_owner || 'Empty'} → **${e.new_owner || 'Empty'}**`);
-
-    const popLines = events
-        .filter(e => e.type === 'POP_DROP')
-        .map(e => `📉 **Planet ${e.planet_index}**: population ${e.old_pop} → ${e.new_pop}`);
+    // Wording lives in src/utils/system-change-lines.js (issue #156: every change names who
+    // did what to whom) so it can be tested without a Discord client.
+    const { ownerLines, popLines } = buildSystemChangeLines(events);
 
     await Promise.all([
         sendSystemEmbed(getAnnounceChannelId(), `🛰️ System Change: ${sysLabel}`, ownerLines, '#f59e0b'),
@@ -1812,10 +1814,12 @@ async function sendIncomingAlert(content) {
 
 /**
  * Send OR edit the incoming-attack alert for a given attack identity (alertKey =
- * "system:planet:attacker"). The first call posts a new message and records its id;
- * later calls — whether from the webhook auto-post or the News "announce" button —
- * edit that SAME message. Falls back to a fresh message if the original was deleted or
- * the channel changed. Returns { ok, edited, messageId, channelId }.
+ * "system:planet:attacker[:arrival]", resolved by the route via
+ * src/utils/incoming-identity.js so a second wave gets its own key — issue #143). The
+ * first call posts a new message and records its id; later calls — whether from the
+ * webhook auto-post or the News "announce" button — edit that SAME message. Falls back
+ * to a fresh message if the original was deleted or the channel changed.
+ * Returns { ok, edited, messageId, channelId }.
  */
 async function sendOrEditIncoming(alertKey, content) {
     if (!client.isReady()) return { ok: false, error: 'Discord bot not ready' };
