@@ -63,8 +63,25 @@ ok('an update 30 s off wave 2 edits wave 2, not wave 1', secondWaveUpdate.alertK
 const firstWaveUpdate = pickAlertKey('1234:5:xerxes', T1 + 10, rows2, opts);
 ok('an update 10 s off wave 1 edits wave 1', firstWaveUpdate.alertKey === rows2[0].alert_key, firstWaveUpdate);
 const untimedWithRows = pickAlertKey('1234:5:xerxes', 0, rows2, opts);
-ok('a time-less report with only timed rows stored falls back to the base key (a new row)',
-    untimedWithRows.alertKey === '1234:5:xerxes' && untimedWithRows.isNew, untimedWithRows);
+ok('a time-less report with two live waves stored attaches to the wave landing soonest, never a third message',
+    untimedWithRows.alertKey === rows2[0].alert_key && !untimedWithRows.isNew && !untimedWithRows.stampArrival, untimedWithRows);
+const untimedOneLive = pickAlertKey('1234:5:xerxes', 0, rows1, opts);
+ok('a time-less report with one live wave stored edits that wave (a reporter dropping the time cannot split the alert)',
+    untimedOneLive.alertKey === rows1[0].alert_key && !untimedOneLive.isNew, untimedOneLive);
+const landed = [{ alert_key: `1234:5:xerxes:${NOW - 600}`, arrival_unix: NOW - 600, updated_at: fresh }];
+const untimedAfterLanding = pickAlertKey('1234:5:xerxes', 0, landed, opts);
+ok('a time-less report with only a LANDED wave stored starts a base-key row (nothing live to attach to)',
+    untimedAfterLanding.alertKey === '1234:5:xerxes' && untimedAfterLanding.isNew, untimedAfterLanding);
+
+console.log('\n── An arrival in the past is no identity ' + '─'.repeat(36));
+const pastArrival = pickAlertKey('1234:5:xerxes', NOW - 30, rows1, opts);
+ok('a report whose arrival already passed is handled like an untimed one (attaches to the live wave)',
+    pastArrival.alertKey === rows1[0].alert_key && !pastArrival.stampArrival, pastArrival);
+const pastNoRows = pickAlertKey('1234:5:xerxes', NOW - 30, [], opts);
+ok('…and with nothing stored it uses the base key, not "<base>:<past time>"',
+    pastNoRows.alertKey === '1234:5:xerxes' && !pastNoRows.stampArrival, pastNoRows);
+const landedRow = pickAlertKey('1234:5:xerxes', T1, landed, opts);
+ok('a stored wave that has landed never matches a new timed report', landedRow.alertKey === `1234:5:xerxes:${T1}` && landedRow.isNew, landedRow);
 
 console.log('\n── Legacy / time-less rows ' + '─'.repeat(50));
 const legacyFresh = [{ alert_key: '1234:5:xerxes', arrival_unix: null, updated_at: fresh }];

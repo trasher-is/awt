@@ -7,12 +7,22 @@
 // time, silently overwrote the alert for the first one and nobody was pinged for it.
 //
 // The identity is now the base key PLUS the arrival time, with a tolerance:
-//   • arrival unknown (0)            -> the base key, exactly as before
 //   • a stored row's arrival is within ARRIVAL_TOLERANCE_SEC of the reported one
 //                                    -> that row's key: same fleet, re-announced (edit)
 //   • a stored row has no arrival yet and was touched recently
 //                                    -> that row's key, and the caller stamps the arrival on it
 //   • otherwise                      -> "<base>:<arrival>": a new wave, a new message
+//   • arrival unknown (0), or already in the past
+//                                    -> a fresh time-less row if there is one, else the live
+//                                       wave landing soonest, else the base key as before —
+//                                       a reporter that drops the time must not open a
+//                                       second message for a fleet already announced
+//
+// Both reporters carry the fleet's ARRIVAL: the webhook from the game's Discord message
+// (<t:unix>, or a minute-precision date), the News page from the row's timestamp cell (it
+// is passed to the interceptor maths as the impact time already). If one of them ever
+// stopped carrying it, that reporter would fall into the untimed rule above rather than
+// splitting every incoming into two messages.
 //
 // Why a tolerance and not equality: the two reporters do not agree to the second. The
 // webhook falls back to a minute-precision date ("Sep 9, 2026 13:45") when the game's
@@ -67,9 +77,23 @@ function pickAlertKey(baseKey, arrivalUnix, rows, opts = {}) {
     const nowSec = opts.nowSec != null ? opts.nowSec : Math.floor(Date.now() / 1000);
     const list = Array.isArray(rows) ? rows.filter(r => r && r.alert_key) : [];
 
-    const arrival = Number.isInteger(arrivalUnix) && arrivalUnix > 0 ? arrivalUnix : 0;
+    // An arrival at or before now has already landed: it cannot identify a LIVE incoming
+    // (a late re-post of an old alert must not open a message for a fleet that is gone), so
+    // it is treated exactly like a report that carries no time at all.
+    const arrival = Number.isInteger(arrivalUnix) && arrivalUnix > nowSec ? arrivalUnix : 0;
     if (!arrival) {
-        // No timing to tell waves apart — the pre-#143 behaviour, one message per base key.
+        // No timing to tell waves apart. A fresh time-less row (legacy key, or an earlier
+        // report without a time) is the same message as before; otherwise attach to the live
+        // wave that lands soonest — the one the News page is looking at — so a reporter that
+        // drops the time never opens a second message for a fleet already announced. Only
+        // when nothing live is stored does the plain base key start a new row (pre-#143).
+        const freshUntimed = list.filter(r => !knownArrival(r) && (nowSec - updatedAtSec(r)) <= maxUnknownAge);
+        if (freshUntimed.length) {
+            const legacy = freshUntimed.find(r => r.alert_key === baseKey) || freshUntimed[0];
+            return { alertKey: legacy.alert_key, isNew: false, stampArrival: false };
+        }
+        const live = list.filter(r => knownArrival(r) > nowSec).sort((a, b) => knownArrival(a) - knownArrival(b));
+        if (live.length) return { alertKey: live[0].alert_key, isNew: false, stampArrival: false };
         return { alertKey: baseKey, isNew: !list.some(r => r.alert_key === baseKey), stampArrival: false };
     }
 
