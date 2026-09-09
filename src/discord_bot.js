@@ -1759,7 +1759,11 @@ async function sendSystemEmbed(channelId, title, lines, color) {
  * Announce planet events detected for a single system. Owner changes go to the
  * "System Change" channel (discord_announce_channel); population drops go to their own
  * "Population Drop" channel (discord_popdrop_channel) so they can be routed separately.
- * `events` is an array of { planet_index, type, old_owner, new_owner, old_pop, new_pop }.
+ * `events` is an array of
+ *   { planet_index, type: 'OWNER_CHANGE', kind, old_owner, new_owner, old_pop }  or
+ *   { planet_index, type: 'POP_DROP', kind, old_pop, new_pop, victim, by | owner, attacker }
+ * as built by /sync/system (issue #156 — `kind` and the who-did-what fields drive the
+ * wording in src/utils/system-change-lines.js).
  * Each channel is independent — leaving one empty disables just that stream.
  */
 async function announceSystemChanges(system, events) {
