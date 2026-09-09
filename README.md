@@ -118,6 +118,13 @@ the header arrives already set, but keep `TRUST_PROXY=1` so the real client IP i
 Serving the hub over plain HTTP is supported (`COOKIE_SECURE=false`), it just means the
 session cookie is not marked `Secure`.
 
+### Deploying to a VPS
+
+The steps above are the quick local/dev path. For putting AWT on a real server for an
+alliance to use — SSH access, Node/pm2 setup, a domain with HTTPS via Nginx/Certbot, first
+login, wiring up the Discord bot, and day-to-day operation — see the full walkthrough:
+[Running AWT](https://claude.ai/code/artifact/de0752cc-dae1-409d-9736-c1b87c8eeab6).
+
 ## Backups and round resets
 
 Both databases run in WAL mode, so copying `awt.db` while the hub is up is **not** a
