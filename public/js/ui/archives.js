@@ -1098,17 +1098,41 @@ export async function openEmpireSimPanel() {
     if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
 }
 
-export async function openRoutePlannerPanel() {
+let routePlannerLoading = null;
+
+export async function openRoutePlannerPanel(options = {}) {
+    const { draft, showSaved = false } = options;
     let panel = document.getElementById('route-planner-panel');
-    if (!panel) {
-        const res = await fetch('/hub-assets/components/route-planner.html');
-        document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
+    if (!panel || routePlannerLoading) {
+        // Both calculator links and the sidebar may open the panel while its first
+        // load is still pending. Initialize it once before handing a flight over.
+        if (!routePlannerLoading) routePlannerLoading = (async () => {
+            const res = await fetch('/hub-assets/components/route-planner.html');
+            if (!res.ok) throw new Error('Could not load the Route Planner. Try again.');
+            document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
+            try {
+                const { initRoutePlanner } = await import('./route-planner.js');
+                await initRoutePlanner();
+            } catch (error) {
+                document.getElementById('route-planner-panel')?.remove();
+                throw error;
+            }
+        })().finally(() => { routePlannerLoading = null; });
+        await routePlannerLoading;
         panel = document.getElementById('route-planner-panel');
-        const { initRoutePlanner } = await import('./route-planner.js');
-        await initRoutePlanner();
     }
-    if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
+    if (panel.classList.contains('translate-x-0') && !draft && !showSaved) {
+        return panel.classList.replace('translate-x-0', 'translate-x-full');
+    }
     closeOtherPanels('route-planner-panel');
     panel.classList.replace('translate-x-full', 'translate-x-0');
     if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
+    if (draft) {
+        const { loadRouteDraft } = await import('./route-planner.js');
+        await loadRouteDraft(draft);
+    }
+    if (showSaved) {
+        const { showSavedRoutes } = await import('./route-planner.js');
+        await showSavedRoutes();
+    }
 }

@@ -287,6 +287,48 @@ function getPlanetOwnersByLocations(locations) {
     return map;
 }
 
+// Route jump-point evidence is separate from the destination's travel-time modifier.
+// Keep NULL starbases unknown; COALESCE here would recommend an unobserved airport.
+// Lists may contain many saved routes, so chunk locations rather than querying per leg.
+function getRoutePlanetIntelByLocations(locations) {
+    const unique = [...new Map(locations.map(l => [`${l.systemId}:${l.planetIndex}`, l])).values()];
+    const result = new Map();
+    for (let start = 0; start < unique.length; start += 500) {
+        const chunk = unique.slice(start, start + 500);
+        const placeholders = chunk.map(() => '(?,?)').join(',');
+        const rows = db.prepare(`
+            SELECT p.system_id, p.planet_index, p.owner_id, p.starbase, p.is_sieged, p.updated_at,
+                   u.name AS owner_name, a.tag AS alliance_tag, s.is_in_vision
+            FROM planets p
+            LEFT JOIN players u ON p.owner_id = u.id
+            LEFT JOIN alliances a ON u.alliance_id = a.id
+            LEFT JOIN systems s ON p.system_id = s.id
+            WHERE (p.system_id, p.planet_index) IN (VALUES ${placeholders})
+        `).all(...chunk.flatMap(l => [l.systemId, l.planetIndex]));
+        for (const row of rows) result.set(`${row.system_id}:${row.planet_index}`, row);
+    }
+    return result;
+}
+
+function getFriendlyRouteAirports(tags) {
+    if (!tags.length) return [];
+    const placeholders = tags.map(() => '?').join(',');
+    return db.prepare(`
+        SELECT p.system_id, p.planet_index, p.owner_id, p.starbase, p.is_sieged, p.updated_at,
+               u.name AS owner_name, a.tag AS alliance_tag,
+               s.name AS system_name, s.x, s.y, s.is_in_vision
+        FROM planets p
+        JOIN systems s ON p.system_id = s.id
+        JOIN players u ON p.owner_id = u.id
+        JOIN alliances a ON u.alliance_id = a.id
+        WHERE UPPER(a.tag) IN (${placeholders}) AND p.starbase = 0
+          AND (p.is_sieged IS NULL OR p.is_sieged != 1)
+          AND p.planet_index BETWEEN 1 AND 12
+          AND s.x IS NOT NULL AND s.y IS NOT NULL
+        ORDER BY p.system_id, p.planet_index
+    `).all(...tags);
+}
+
 // Display-name lookups for battleReports.getLastSeenPlanet's two different location
 // shapes: (system_id, planet_index) from a scraped battle report page, or a bare
 // game_planet_id from a News-page bombardment row. Either can miss (the planet may never
@@ -447,7 +489,8 @@ module.exports = {
     upsertSystemFull, setSystemInVision, deleteAllSystems, countBestGuardedAt, clearBestGuarded, insertBestGuarded,
     getSystemPlanetsWithIntel, getSystemPlanetsForBot, getPlanetsFullDb,
     getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getPlanetsByOwner, getOldPlanet, upsertPlanet,
-    getPlanetsForAllianceTag, getPlanetOwnerName, getPlanetOwnersByLocations, getPlanetNameByLocation, getPlanetNameByGameId, getPlanetLocationByGameId,
+    getPlanetsForAllianceTag, getPlanetOwnerName, getPlanetOwnersByLocations, getRoutePlanetIntelByLocations,
+    getFriendlyRouteAirports, getPlanetNameByLocation, getPlanetNameByGameId, getPlanetLocationByGameId,
     clearMovedPlanet, deleteAllPlanets, logPlanetEvent, getPlanetHistory, getRecentPopDrop, deleteAllPlanetEvents,
     getTakeoverBoard, upsertTakeover, deleteAllTakeovers,
 };

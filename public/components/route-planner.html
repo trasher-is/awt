@@ -20,15 +20,22 @@
 
             <!-- WAYPOINTS -->
             <div class="bg-zinc-900 border border-border rounded-lg p-3 md:p-4 flex flex-col gap-3">
-                <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
                     <div class="flex items-center gap-2 text-violet-400 font-semibold text-sm uppercase tracking-wider">
                         <i class="fa-solid fa-diagram-project"></i> Waypoints
                     </div>
-                    <button id="rp-add-stop" class="h-7 px-3 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors">
-                        <i class="fa-solid fa-plus mr-1"></i> Add stop
-                    </button>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <button id="rp-find-airport" class="h-7 px-3 rounded border border-emerald-400/40 bg-zinc-950 text-xs text-emerald-400 hover:bg-accent transition-colors disabled:opacity-50">Find friendly airport</button>
+                        <button id="rp-add-stop" class="h-7 px-3 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors">
+                            <i class="fa-solid fa-plus mr-1"></i> Add stop
+                        </button>
+                    </div>
                 </div>
                 <div id="rp-waypoints" class="flex flex-col gap-2"></div>
+                <div id="rp-airport-results" class="hidden border border-border rounded p-2 flex flex-col gap-2" aria-live="polite">
+                    <div id="rp-airport-status" class="text-xs text-muted-foreground"></div>
+                    <div id="rp-airport-list" class="flex flex-col gap-2"></div>
+                </div>
                 <p class="text-xs text-muted-foreground">
                     The first row is where the fleet starts, the last is the target. Anything between them is a jump.
                 </p>

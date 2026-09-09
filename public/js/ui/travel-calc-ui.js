@@ -40,6 +40,12 @@ function render() {
     const speed = Math.max(-4, Math.min(4, g('tc-speed')));
     const alliance = document.getElementById('tc-alliance')?.checked;
 
+    const canPlan = origSysId != null && destSysId != null;
+    const planButton = document.getElementById('tc-plan-route');
+    if (planButton) planButton.disabled = !canPlan;
+    const routeMessage = document.getElementById('tc-route-message');
+    if (routeMessage) routeMessage.textContent = canPlan ? '' : 'Pick origin and destination systems to carry this flight into the planner.';
+
     const secs = calcTravelSeconds(sx, sy, sp, ex, ey, ep, energy, speed, alliance);
     document.getElementById('tc-time').textContent = fmt(secs);
 
@@ -131,10 +137,17 @@ async function loadPlayers() {
 function wireSystemSearch(inputId, dropId, xId, yId, onPick) {
     const input = document.getElementById(inputId), drop = document.getElementById(dropId);
     if (!input || !drop) return;
+    let sequence = 0;
     input.addEventListener('input', async () => {
+        const token = ++sequence;
+        // Editing the search text invalidates the selected system before a route can
+        // be handed off. Coordinates alone do not identify a saved system reliably.
+        if (onPick) onPick(null);
+        render();
         const q = input.value.trim().toLowerCase();
         if (!q) { drop.classList.add('hidden'); return; }
         const systems = await loadSystems();
+        if (token !== sequence) return;
         const matches = systems.filter(s =>
             (s.name && s.name.toLowerCase().includes(q)) || String(s.id).includes(q)).slice(0, 12);
         if (!matches.length) { drop.classList.add('hidden'); return; }
@@ -274,6 +287,40 @@ async function renderSystemView(sysId) {
     }
 }
 
+function travelRouteDraft() {
+    if (origSysId == null || destSysId == null) throw new Error('Pick origin and destination systems first.');
+    for (const id of ['tc-orig-p', 'tc-dest-p', 'tc-energy', 'tc-speed']) {
+        const input = document.getElementById(id);
+        if (!input.validity.valid || input.value === '') throw new Error('Enter valid planet numbers, energy and race speed first.');
+    }
+    const number = id => Number(document.getElementById(id).value);
+    return {
+        waypoints: [
+            { systemId: origSysId, planetIndex: number('tc-orig-p'), label: document.getElementById('tc-orig-sys-input').value },
+            { systemId: destSysId, planetIndex: number('tc-dest-p'), label: document.getElementById('tc-dest-sys-input').value }
+        ],
+        energy: number('tc-energy'), raceSpeed: number('tc-speed'),
+        isAllianceMove: !!document.getElementById('tc-alliance').checked
+    };
+}
+
+async function openPlannedRoute(showSaved) {
+    const button = document.getElementById(showSaved ? 'tc-saved-routes' : 'tc-plan-route');
+    const message = document.getElementById('tc-route-message');
+    button.disabled = true;
+    try {
+        const options = showSaved ? { showSaved: true } : { draft: travelRouteDraft() };
+        apiSeq++;
+        if (apiTimer) { clearTimeout(apiTimer); apiTimer = null; }
+        const { openRoutePlannerPanel } = await import('./archives.js');
+        await openRoutePlannerPanel(options);
+    } catch (error) {
+        message.textContent = error.message;
+    } finally {
+        button.disabled = !showSaved && (origSysId == null || destSysId == null);
+    }
+}
+
 export function initTravelCalc() {
     document.getElementById('close-travel-calc-btn')?.addEventListener('click', () => {
         document.getElementById('travel-calc-panel')?.classList.replace('translate-x-0', 'translate-x-full');
@@ -293,7 +340,9 @@ export function initTravelCalc() {
     wireSystemSearch('tc-orig-sys-input', 'tc-orig-sys-dropdown', 'tc-orig-x', 'tc-orig-y',
         id => { origSysId = id; });
     wireSystemSearch('tc-dest-sys-input', 'tc-dest-sys-dropdown', 'tc-dest-x', 'tc-dest-y',
-        id => { destSysId = id; renderSystemView(id); });
+        id => { destSysId = id; if (id != null) renderSystemView(id); });
+    document.getElementById('tc-plan-route')?.addEventListener('click', () => openPlannedRoute(false));
+    document.getElementById('tc-saved-routes')?.addEventListener('click', () => openPlannedRoute(true));
     wirePlayerSearch();
     render();
 }
