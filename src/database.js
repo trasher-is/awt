@@ -432,6 +432,16 @@ function initDatabase() {
     // everyone can see who has defence on the way.
     addColumn('incoming_msgs', 'covering', 'TEXT');
 
+    // Issue #143: the same attacker hitting the same planet twice, with a different arrival
+    // time, is TWO incomings — but alert_key alone (system:planet:attacker) made the second
+    // one an edit of the first message. Rows now also carry the shared base identity and
+    // the arrival they were announced for, so src/utils/incoming-identity.js can tell "same
+    // fleet, re-announced" (arrival within tolerance -> edit) from "a new wave" (different
+    // arrival -> new key, new message). Legacy rows keep base_key NULL and alert_key equal
+    // to the base identity; the resolver treats those as unknown-arrival rows.
+    addColumn('incoming_msgs', 'base_key', 'TEXT');
+    addColumn('incoming_msgs', 'arrival_unix', 'INTEGER');
+
     // Shared, login-gated planning notes for the redzone (rz.*) proxy — one note per
     // planet, visible to everyone who entered the shared password. Keyed by the game's
     // own global planet id (data-planet-id). Not per-user: it's a communal scratchpad, so

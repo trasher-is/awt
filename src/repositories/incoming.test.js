@@ -66,6 +66,36 @@ const lastOntimeAfter = incoming.getLastOntimeRow('alert-3');
 ok('updateLastOntime and getLastOntimeRow round-trip the value',
     lastOntimeAfter && lastOntimeAfter.last_ontime === 'Defender Y, Z');
 
+// Issue #143: rows carry the base identity + arrival so a second wave from the same
+// attacker at the same planet can be told apart from a re-report of the first.
+const noRows = incoming.findIncomingByBaseKey('10:2:attacker');
+ok('findIncomingByBaseKey returns [] for an unknown base key', Array.isArray(noRows) && noRows.length === 0);
+
+incoming.ensureIncomingIdentity('10:2:attacker:1800000000', '10:2:attacker', 1800000000);
+const created = incoming.findIncomingByBaseKey('10:2:attacker');
+ok('ensureIncomingIdentity creates the row with base_key and arrival_unix',
+    created.length === 1 && created[0].alert_key === '10:2:attacker:1800000000' && created[0].arrival_unix === 1800000000 && !!created[0].updated_at);
+
+incoming.upsertMessageRef('10:2:attacker:1800000000', 'chan-w1', 'msg-w1');
+const keptIdentity = incoming.findIncomingByBaseKey('10:2:attacker');
+ok('upsertMessageRef on the same key keeps base_key/arrival_unix intact',
+    keptIdentity.length === 1 && keptIdentity[0].arrival_unix === 1800000000);
+
+incoming.ensureIncomingIdentity('10:2:attacker:1800000000', '10:2:attacker', 0);
+ok('ensureIncomingIdentity never downgrades a known arrival to unknown',
+    incoming.findIncomingByBaseKey('10:2:attacker')[0].arrival_unix === 1800000000);
+
+// A legacy row (pre-#143: alert_key IS the base key, no base_key column value) is still found.
+incoming.upsertMessageRef('10:2:attacker', 'chan-legacy', 'msg-legacy');
+const withLegacy = incoming.findIncomingByBaseKey('10:2:attacker');
+ok('a legacy row keyed by the bare base identity is returned alongside the new-style rows',
+    withLegacy.length === 2 && withLegacy.some(r => r.alert_key === '10:2:attacker' && r.arrival_unix === null));
+incoming.ensureIncomingIdentity('10:2:attacker', '10:2:attacker', 1800000500);
+ok('stamping an arrival on a legacy row fills arrival_unix and base_key without touching its message ref',
+    incoming.findIncomingByBaseKey('10:2:attacker').find(r => r.alert_key === '10:2:attacker').arrival_unix === 1800000500
+    && incoming.getMessageRef('10:2:attacker').message_id === 'msg-legacy');
+ok('a different attacker on the same planet is a different base key', incoming.findIncomingByBaseKey('10:2:other').length === 0);
+
 // Regression for a real production bug (2026-08-30): incoming_msgs/incoming_alerts were
 // never cleared by the round-reset ("nuke intel") route — alert_key is system:planet:
 // attacker, an identity meaningless outside the round it was recorded in.

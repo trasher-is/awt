@@ -40,7 +40,8 @@ client.on('clientReady', () => {
 
 // The "🛡️ I cover this" button attached to every incoming alert. customId carries the
 // attack identity so a click can be routed back to the right incoming (well under the
-// 100-char customId cap — alertKey is "system:planet:attacker").
+// 100-char customId cap — alertKey is "system:planet:attacker", plus ":arrival" for a
+// second wave at the same planet, see src/utils/incoming-identity.js).
 function coverButtonRow(alertKey) {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -1812,10 +1813,12 @@ async function sendIncomingAlert(content) {
 
 /**
  * Send OR edit the incoming-attack alert for a given attack identity (alertKey =
- * "system:planet:attacker"). The first call posts a new message and records its id;
- * later calls — whether from the webhook auto-post or the News "announce" button —
- * edit that SAME message. Falls back to a fresh message if the original was deleted or
- * the channel changed. Returns { ok, edited, messageId, channelId }.
+ * "system:planet:attacker[:arrival]", resolved by the route via
+ * src/utils/incoming-identity.js so a second wave gets its own key — issue #143). The
+ * first call posts a new message and records its id; later calls — whether from the
+ * webhook auto-post or the News "announce" button — edit that SAME message. Falls back
+ * to a fresh message if the original was deleted or the channel changed.
+ * Returns { ok, edited, messageId, channelId }.
  */
 async function sendOrEditIncoming(alertKey, content) {
     if (!client.isReady()) return { ok: false, error: 'Discord bot not ready' };

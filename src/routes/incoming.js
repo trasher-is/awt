@@ -9,6 +9,7 @@ const { ONTIME_LIMIT, LATE_LIMIT, SOURCE_TAG, computeInterceptors } = require('.
 const { winChance, resolveStats } = require('../utils/battle');
 const battleModel = require('../../public/js/utils/battle-model.js');
 const { toggleCovering, getCovering, renderCoverLine } = require('../utils/covering');
+const { baseKeyFor, arrivalOf, pickAlertKey } = require('../utils/incoming-identity');
 const router = express.Router();
 
 // Build the compact attacker stat line shown both inline on the News page and in the
@@ -221,11 +222,21 @@ function buildReply(result, planetLabel, target) {
 }
 
 // Stable identity for an incoming, shared by the webhook auto-post and the News announce
-// so both edit the same Discord message: "system:planet:attacker" (attacker lowercased).
-function alertKeyFor(data) {
-    const t = data.target || {};
-    const name = (data.attacker && data.attacker.name ? data.attacker.name : '').toLowerCase().trim();
-    return `${t.systemId}:${t.planetIndex}:${name}`;
+// so both edit the same Discord message: "system:planet:attacker" (attacker lowercased) —
+// PLUS the arrival time since issue #143, because the same attacker sending a second wave
+// at the same planet is a new incoming, not an update of the first. The rule lives in
+// src/utils/incoming-identity.js; this looks up the rows sharing the base identity and,
+// when `persist` is set, records what the chosen key stands for so the next report (from
+// either reporter, seconds apart) resolves to the same key. Read-only callers (the News
+// panel's defender box) pass persist:false so a page render never creates rows.
+function resolveAlertKey(data, { persist } = { persist: true }) {
+    const base = baseKeyFor(data);
+    const arrival = arrivalOf(data);
+    const picked = pickAlertKey(base, arrival, incomingRepo.findIncomingByBaseKey(base));
+    if (persist && (picked.isNew || picked.stampArrival)) {
+        incomingRepo.ensureIncomingIdentity(picked.alertKey, base, arrival);
+    }
+    return picked.alertKey;
 }
 
 // --- ANNOUNCE / UPDATE AN INCOMING ON DISCORD ---
@@ -238,7 +249,7 @@ async function announceIncoming(data) {
         data.target.systemId == null || data.target.planetIndex == null) {
         return { ok: false, error: 'Missing attacker/target' };
     }
-    const alertKey = alertKeyFor(data);
+    const alertKey = resolveAlertKey(data);
 
     let stats = data.attacker.id ? getStatsByIds([data.attacker.id])[data.attacker.id] : null;
     if (!stats) {
@@ -292,7 +303,7 @@ router.post('/incoming/announce', requireAuth, async (req, res) => {
 });
 
 // --- DEFENDER ANALYSIS (for inline display on the News page) ---
-// POST /hub-api/incoming/defenders  Body: { target:{systemId,planetIndex}, arrivalUnix }
+// POST /hub-api/incoming/defenders  Body: { target:{systemId,planetIndex}, arrivalUnix, attacker, ships, cv }
 // Returns the on-time / late interceptor lists (no Discord mentions — page display only).
 router.post('/incoming/defenders', requireAuth, (req, res) => {
     try {
@@ -310,7 +321,7 @@ router.post('/incoming/defenders', requireAuth, (req, res) => {
             unknownTiming: !!result.unknownTiming,
             onTime: result.onTime.map(slim),
             late: (result.late || []).map(slim),
-            covering: getCovering(alertKeyFor(data))
+            covering: getCovering(resolveAlertKey(data, { persist: false }))
         });
     } catch (err) {
         console.error('[Incoming] defenders lookup failed:', err.message);
@@ -319,7 +330,7 @@ router.post('/incoming/defenders', requireAuth, (req, res) => {
 });
 
 // --- "I COVER THIS" — claim/retract defence of an incoming ---
-// POST /hub-api/incoming/cover  Body: { attacker:{name}, target:{systemId,planetIndex} }
+// POST /hub-api/incoming/cover  Body: { attacker:{name}, target:{systemId,planetIndex}, arrivalUnix }
 // Toggles the logged-in user into the covering roster and re-renders the Discord alert's
 // "Covering:" line. Returns the updated roster so the News panel can reflect it.
 router.post('/incoming/cover', requireAuth, async (req, res) => {
@@ -332,7 +343,7 @@ router.post('/incoming/cover', requireAuth, async (req, res) => {
         const name = req.session.gameName;
         if (!name) return res.status(401).json({ success: false, error: 'No session name' });
 
-        const alertKey = alertKeyFor(data);
+        const alertKey = resolveAlertKey(data);
         const { covering, added } = toggleCovering(alertKey, name);
         // Best-effort: push the new roster onto the existing Discord alert (if one exists).
         await updateIncomingCover(alertKey);
