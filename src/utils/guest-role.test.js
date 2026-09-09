@@ -71,16 +71,16 @@ ok('the refusal does not leak internals', !/role|session|middleware/i.test(expla
 
 // ─── THE SAFE-POST ALLOWLIST ──────────────────────────────────────────────────
 console.log('\n── POSTs that only compute stay open ' + '─'.repeat(39));
-for (const p of ['/login', '/logout', '/routes/preview', '/incoming/defenders']) {
+for (const p of ['/login', '/logout', '/routes/preview', '/routes/airports', '/incoming/defenders']) {
     ok(`POST ${p} passes through`, asGuest({ method: 'POST', reqPath: p }).nexted === true);
 }
-ok('the allowlist is exactly these four', mw.SAFE_POST_PATHS.size === 4, [...mw.SAFE_POST_PATHS]);
+ok('the allowlist is exactly these five', mw.SAFE_POST_PATHS.size === 5, [...mw.SAFE_POST_PATHS]);
 // The default has to be "blocked", or a new endpoint is unprotected until someone
 // remembers this file exists.
 ok('an unknown new endpoint is blocked by default',
     asGuest({ method: 'POST', reqPath: '/some/endpoint/added/next/week' }).nexted === false);
 // Near-misses must not slip through the allowlist.
-for (const p of ['/routes/preview/evil', '/login/x', '/incoming/defendersX']) {
+for (const p of ['/routes/preview/evil', '/routes/airports/evil', '/routes/airportsX', '/login/x', '/incoming/defendersX']) {
     ok(`"${p}" does not match the allowlist`, asGuest({ method: 'POST', reqPath: p }).nexted === false);
 }
 

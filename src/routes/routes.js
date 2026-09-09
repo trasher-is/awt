@@ -8,6 +8,7 @@ const routingRepo = require('../repositories/routing');
 const alliancesRepo = require('../repositories/alliances');
 const playersRepo = require('../repositories/players');
 const settingsRepo = require('../repositories/settings');
+const { parseSqliteUtc } = require('../../public/js/utils/sqlite-time');
 
 const router = express.Router();
 
@@ -187,78 +188,92 @@ function loadSystems(ids) {
     return new Map(rows.map(r => [r.id, r]));
 }
 
+function loadRouteContext(waypoints) {
+    return {
+        systems: loadSystems([...new Set(waypoints.map(w => w.systemId))]),
+        friendlyTags: friendlyAllianceTags(),
+        planetIntel: systemsRepo.getRoutePlanetIntelByLocations(waypoints.slice(1))
+    };
+}
+
+// This is last-recorded intel, not a guarantee that a planet is still safe. In particular,
+// a friendly destination gets the travel modifier even when it is unsuitable for staging.
+function jumpPointInfo(intel, friendlyTags) {
+    const starbase = intel && Number.isFinite(intel.starbase) ? intel.starbase : null;
+    const friendly = !!(intel && intel.alliance_tag && friendlyTags.has(String(intel.alliance_tag).toUpperCase()));
+    let status;
+    if (intel && intel.is_sieged === 1) status = 'sieged';
+    else if (starbase === null || starbase < 0 || !intel) status = 'unknown-intel';
+    else if (starbase > 0) status = 'starbase-present';
+    else if (!friendly) status = 'not-friendly';
+    else status = 'friendly-no-starbase';
+    return {
+        status, starbase,
+        allianceTag: intel ? intel.alliance_tag : null,
+        ownerName: intel ? intel.owner_name : null,
+        lastSeenAt: intel ? (parseSqliteUtc(intel.updated_at)?.toISOString() || null) : null,
+        isInVision: intel && intel.is_in_vision != null ? !!intel.is_in_vision : null
+    };
+}
+
+function computeRouteLeg(a, b, legIndex, options, context, isJump) {
+    const { energy, raceSpeed, isAllianceMove, biology } = options;
+    const sa = context.systems.get(a.systemId), sb = context.systems.get(b.systemId);
+    const intel = context.planetIntel.get(`${b.systemId}:${b.planetIndex}`);
+    const destTag = intel && intel.alliance_tag;
+    const autoAllianceMove = destTag != null && context.friendlyTags.has(String(destTag).toUpperCase());
+    // Halving belongs to this flight's destination. Departing an airport toward a hostile
+    // target never inherits the previous flight's friendly-destination modifier.
+    const legIsAllianceMove = !!isAllianceMove || autoAllianceMove;
+    const dx = sb.x - sa.x, dy = sb.y - sa.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const seconds = calcTravelSeconds(sa.x, sa.y, a.planetIndex, sb.x, sb.y, b.planetIndex, energy, raceSpeed, legIsAllianceMove);
+    if (!Number.isFinite(seconds) || !Number.isFinite(distance)) {
+        return invalid(`waypoints[${legIndex + 1}].systemId`, `Travel time between #${sa.id} and #${sb.id} could not be calculated.`);
+    }
+    const bioNeeded = bioNeededFor(distance);
+    return {
+        legIndex,
+        from: { systemId: sa.id, systemName: sa.name, planetIndex: a.planetIndex, x: sa.x, y: sa.y },
+        to: { systemId: sb.id, systemName: sb.name, planetIndex: b.planetIndex, x: sb.x, y: sb.y },
+        distance: Math.round(distance * 100) / 100,
+        isAllianceMove: legIsAllianceMove,
+        autoAllianceMove,
+        travelSeconds: seconds,
+        travelTime: formatTime(seconds),
+        bioNeeded,
+        outOfReach: biology > 0 && bioNeeded > biology,
+        ...(isJump ? { jumpPoint: jumpPointInfo(intel, context.friendlyTags) } : {})
+    };
+}
+
 /**
- * Turn a list of waypoints into legs with distance, travel time and biology requirement.
- * waypoints: [{ systemId, planetIndex }, ...] — at least two, already validated by
- * validateRouteInput (integers in range). Returns { legs, totalSeconds } or { error, field }.
+ * Compute legs from validated waypoints. A supplied lookup context lets airport
+ * comparisons reuse the same batched reads, regardless of candidate count.
  */
-function buildLegs(waypoints, { energy, raceSpeed, isAllianceMove, biology }) {
+function buildLegs(waypoints, options, suppliedContext) {
     if (!Array.isArray(waypoints) || waypoints.length < 2) {
         return invalid('waypoints', 'A route needs at least a start and a target.');
     }
     if (waypoints.length > MAX_LEGS + 1) {
         return invalid('waypoints', `A route can have at most ${MAX_LEGS} legs.`);
     }
-
-    const ids = [...new Set(waypoints.map(w => w.systemId))];
-    const systems = loadSystems(ids);
-
+    const context = suppliedContext || loadRouteContext(waypoints);
     for (let i = 0; i < waypoints.length; i++) {
         const w = waypoints[i];
-        const sys = systems.get(w.systemId);
+        const sys = context.systems.get(w.systemId);
         if (!sys) return invalid(`waypoints[${i}].systemId`, `System #${w.systemId} is not in the database — scan it in-game first.`);
-        if (sys.x == null || sys.y == null) return invalid(`waypoints[${i}].systemId`, `System #${w.systemId} has no coordinates recorded yet.`);
+        if (!Number.isFinite(sys.x) || !Number.isFinite(sys.y)) {
+            return invalid(`waypoints[${i}].systemId`, `System #${w.systemId} has no coordinates recorded yet.`);
+        }
     }
-
-    // Issue #147: auto-detect which legs land on an own/allied planet instead of relying on
-    // one manual checkbox applied uniformly to the whole route. Batched over every
-    // DESTINATION (waypoints[1:] — a route's first stop is never a leg's target) so this is
-    // one query regardless of leg count, not one per leg.
-    const friendlyTags = friendlyAllianceTags();
-    const destinations = waypoints.slice(1).map(w => ({ systemId: w.systemId, planetIndex: w.planetIndex }));
-    const ownersByLocation = systemsRepo.getPlanetOwnersByLocations(destinations);
-
     const legs = [];
     let totalSeconds = 0;
     for (let i = 0; i < waypoints.length - 1; i++) {
-        const a = waypoints[i], b = waypoints[i + 1];
-        const sa = systems.get(a.systemId);
-        const sb = systems.get(b.systemId);
-        const ap = a.planetIndex;
-        const bp = b.planetIndex;
-
-        const destTag = ownersByLocation.get(`${b.systemId}:${b.planetIndex}`);
-        const autoAllianceMove = destTag != null && friendlyTags.has(String(destTag).toUpperCase());
-        // The manual checkbox still ORs in as an override — for a destination our own data
-        // doesn't know about yet (never scanned, or a future colony), the member can still
-        // force the halving by hand.
-        const legIsAllianceMove = !!isAllianceMove || autoAllianceMove;
-
-        const dx = sb.x - sa.x, dy = sb.y - sa.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const seconds = calcTravelSeconds(sa.x, sa.y, ap, sb.x, sb.y, bp, energy, raceSpeed, legIsAllianceMove);
-        const bioNeeded = bioNeededFor(distance);
-        // The inputs are integers in range, so this only trips on corrupt coordinates —
-        // but a NaN or Infinity stored as travel_seconds would poison every list view.
-        if (!Number.isFinite(seconds) || !Number.isFinite(distance)) {
-            return invalid(`waypoints[${i + 1}].systemId`, `Travel time between #${sa.id} and #${sb.id} could not be calculated.`);
-        }
-
-        totalSeconds += seconds;
-        legs.push({
-            legIndex: i,
-            from: { systemId: sa.id, systemName: sa.name, planetIndex: ap, x: sa.x, y: sa.y },
-            to: { systemId: sb.id, systemName: sb.name, planetIndex: bp, x: sb.x, y: sb.y },
-            distance: Math.round(distance * 100) / 100,
-            isAllianceMove: legIsAllianceMove,
-            autoAllianceMove, // so the UI can label it "auto-detected" vs. "forced by you"
-            travelSeconds: seconds,
-            travelTime: formatTime(seconds),
-            bioNeeded,
-            // Warning, not a block: intel on your own biology can be stale, and the
-            // planner is also used to sketch routes for later.
-            outOfReach: biology > 0 && bioNeeded > biology
-        });
+        const leg = computeRouteLeg(waypoints[i], waypoints[i + 1], i, options, context, i < waypoints.length - 2);
+        if (leg.error) return leg;
+        legs.push(leg);
+        totalSeconds += leg.travelSeconds;
     }
     return { legs, totalSeconds };
 }
@@ -327,6 +342,10 @@ function hydrate(routeRows) {
     if (!routeRows.length) return [];
     const ids = routeRows.map(r => r.id);
     const legs = routingRepo.getRouteLegsForRouteIds(ids);
+    const friendlyTags = friendlyAllianceTags();
+    const planetIntel = systemsRepo.getRoutePlanetIntelByLocations(legs.map(l => ({
+        systemId: l.to_system_id, planetIndex: l.to_planet_index
+    })));
 
     const byRoute = new Map(ids.map(id => [id, []]));
     for (const l of legs) {
@@ -345,9 +364,12 @@ function hydrate(routeRows) {
     return routeRows.map(r => {
         // The reach warning is re-evaluated on read against the biology stored with the
         // route, so a shared route shows the same warning its author saw.
-        const rl = (byRoute.get(r.id) || []).map(l => ({
+        const rl = (byRoute.get(r.id) || []).map((l, index, routeLegs) => ({
             ...l,
-            outOfReach: (r.biology || 0) > 0 && l.bioNeeded > r.biology
+            outOfReach: (r.biology || 0) > 0 && l.bioNeeded > r.biology,
+            ...(index < routeLegs.length - 1 ? {
+                jumpPoint: jumpPointInfo(planetIntel.get(`${l.to.systemId}:${l.to.planetIndex}`), friendlyTags)
+            } : {})
         }));
         const total = rl.reduce((s, l) => s + (l.travelSeconds || 0), 0);
         const schedule = routeSchedule(rl, r.planned_start_at, r.target_arrival_at);
@@ -398,6 +420,72 @@ router.post('/routes/preview', requireAuth, (req, res) => {
         departsAt: schedule.departsAt,
         arrivesAt: schedule.arrivesAt
     });
+});
+
+// Airport comparisons use only recorded hub intel. One optional insertion per suggestion,
+// retaining every existing stop; selection and saving stay with the normal planner flow.
+router.post('/routes/airports', requireAuth, (req, res) => {
+    try {
+        const checked = validateRouteInput(req.body);
+        if (checked.error) return res.status(400).json({ error: checked.error, field: checked.field });
+        const options = checked.value;
+        const { waypoints, plannedStartAt, targetArrivalAt } = options;
+        const context = loadRouteContext(waypoints);
+        const built = buildLegs(waypoints, options, context);
+        if (built.error) return res.status(400).json({ error: built.error, field: built.field });
+        const currentSchedule = routeSchedule(built.legs, plannedStartAt, targetArrivalAt);
+        if (currentSchedule.error) return res.status(400).json({ error: currentSchedule.error, field: currentSchedule.field });
+        const current = {
+            totalSeconds: built.totalSeconds, totalTime: formatTime(built.totalSeconds),
+            departsAt: currentSchedule.departsAt, arrivesAt: currentSchedule.arrivesAt
+        };
+        const limitReached = built.legs.length >= MAX_LEGS;
+        if (limitReached) return res.json({ success: true, current, suggestions: [], limitReached });
+
+        const used = new Set(waypoints.map(w => `${w.systemId}:${w.planetIndex}`));
+        const airports = systemsRepo.getFriendlyRouteAirports([...context.friendlyTags]).filter(a =>
+            Number.isInteger(a.system_id) && a.system_id > 0 && Number.isFinite(a.x) && Number.isFinite(a.y)
+            && Number.isInteger(a.planet_index) && a.planet_index >= 1 && a.planet_index <= MAX_PLANET_INDEX
+            && !used.has(`${a.system_id}:${a.planet_index}`));
+        const suggestions = [];
+        for (const airport of airports) {
+            const waypoint = { systemId: airport.system_id, planetIndex: airport.planet_index, systemName: airport.system_name };
+            context.systems.set(airport.system_id, { id: airport.system_id, name: airport.system_name, x: airport.x, y: airport.y });
+            context.planetIntel.set(`${airport.system_id}:${airport.planet_index}`, airport);
+            let best = null;
+            for (let index = 0; index < built.legs.length; index++) {
+                const first = computeRouteLeg(waypoints[index], waypoint, index, options, context, true);
+                const second = computeRouteLeg(waypoint, waypoints[index + 1], index + 1, options, context, index < built.legs.length - 1);
+                if (first.error || second.error) continue;
+                const totalSeconds = built.totalSeconds - built.legs[index].travelSeconds + first.travelSeconds + second.travelSeconds;
+                if (!best || totalSeconds < best.totalSeconds) best = { index, first, second, totalSeconds };
+            }
+            if (!best) continue;
+            const variantLegs = [
+                ...built.legs.slice(0, best.index), best.first, best.second, ...built.legs.slice(best.index + 1)
+            ].map((leg, index) => ({ ...leg, legIndex: index }));
+            const schedule = routeSchedule(variantLegs, plannedStartAt, targetArrivalAt);
+            if (schedule.error) continue;
+            const intel = jumpPointInfo(airport, context.friendlyTags);
+            suggestions.push({
+                waypoint, insertAfterIndex: best.index,
+                savedSeconds: built.totalSeconds - best.totalSeconds,
+                totalSeconds: best.totalSeconds, totalTime: formatTime(best.totalSeconds),
+                departsAt: schedule.departsAt, arrivesAt: schedule.arrivesAt,
+                outOfReach: variantLegs.some(leg => leg.outOfReach),
+                bioNeeded: Math.max(...variantLegs.map(leg => leg.bioNeeded)),
+                ownerName: intel.ownerName, allianceTag: intel.allianceTag, starbase: intel.starbase,
+                lastSeenAt: intel.lastSeenAt, isInVision: intel.isInVision
+            });
+        }
+        suggestions.sort((a, b) => b.savedSeconds - a.savedSeconds
+            || a.waypoint.systemId - b.waypoint.systemId || a.waypoint.planetIndex - b.waypoint.planetIndex
+            || a.insertAfterIndex - b.insertAfterIndex);
+        res.json({ success: true, current, suggestions: suggestions.slice(0, 5), limitReached: false });
+    } catch (err) {
+        console.error('[Routes] Airport comparison failed:', err);
+        res.status(500).json({ error: 'Failed to compare friendly airports' });
+    }
 });
 
 // --- LIST: own routes plus everything shared with the alliance ---
@@ -537,7 +625,15 @@ router.post('/routes/:id/announce', requireAuth, async (req, res) => {
             const to = `[${l.to.systemId}] ${defuseMentions(l.to.systemName || '?')} #${l.to.planetIndex}`;
             const eta = l.arrivesAt ? ` — arrives <t:${Math.floor(Date.parse(l.arrivesAt) / 1000)}:T>` : '';
             const allied = l.isAllianceMove ? ' · allied' : '';
-            return `**${l.legIndex + 1}.** ${from} → ${to}\n\`${l.travelTime}\` · dist ${l.distance} · bio ${l.bioNeeded}${allied}${eta}`;
+            const jumpLabels = {
+                'friendly-no-starbase': 'friendly airport, SB 0',
+                'starbase-present': '⚠ jump point has a starbase',
+                'not-friendly': '⚠ jump point is not known friendly',
+                'unknown-intel': '⚠ jump point eligibility unknown',
+                'sieged': '⚠ jump point is under siege'
+            };
+            const jump = l.jumpPoint ? `\n${jumpLabels[l.jumpPoint.status]} (last recorded intel)` : '';
+            return `**${l.legIndex + 1}.** ${from} → ${to}\n\`${l.travelTime}\` · dist ${l.distance} · bio ${l.bioNeeded}${allied}${eta}${jump}`;
         }).join('\n');
 
         // Issue #147: halving is now per-leg (auto-detected per destination), so a single

@@ -33,6 +33,7 @@ const SAFE_POST_PATHS = new Set([
     '/login',              // no session yet; the login handler does its own checking
     '/logout',             // ending your own session is never a privileged act
     '/routes/preview',     // computes travel legs, stores nothing
+    '/routes/airports',    // compares recorded friendly jump points, stores nothing
     '/incoming/defenders', // computes who could intercept, stores nothing
 ]);
 

@@ -23,6 +23,8 @@ let me = { id: null, role: null };
 // The preview pane belongs to the most recent set of inputs. A slower response for the
 // previous inputs must not paint its ETA over the current ones (issue #129).
 const previewSeq = createSequencer();
+const airportSeq = createSequencer();
+const playerSeq = createSequencer();
 
 // Systems and players used to be cached in module variables forever: opened against an
 // empty database, the planner cached [] and never asked again, so a sync a minute later
@@ -194,7 +196,8 @@ function wireWaypointRow(row) {
     input.addEventListener('input', async () => {
         const q = input.value.trim().toLowerCase();
         hidden.value = '';                       // typing invalidates the previous pick
-        if (!q) { rowSeq.cancel(); drop.classList.add('hidden'); schedulePreview(); return; }
+        schedulePreview();                       // invalidate suggestions before async lookup
+        if (!q) { rowSeq.cancel(); drop.classList.add('hidden'); return; }
         const token = rowSeq.next();
         const systems = await loadSystems();
         if (!rowSeq.isCurrent(token)) return;
@@ -248,6 +251,7 @@ function currentPayload() {
 
 function schedulePreview() {
     clearTimeout(previewTimer);
+    clearAirports();
     // Invalidate at the edit itself, including the debounce window before the next
     // request. An invalid new date must never let an older successful ETA repaint.
     previewSeq.cancel();
@@ -334,6 +338,142 @@ function renderPreview(d, arrivalMode) {
 function cancelPendingWork() {
     clearTimeout(previewTimer);
     previewSeq.cancel();
+    playerSeq.cancel();
+    clearAirports();
+}
+
+// ─── FRIENDLY AIRPORTS ────────────────────────────────────────────────────────
+
+function clearAirports() {
+    airportSeq.cancel();
+    $('rp-airport-results')?.classList.add('hidden');
+    if ($('rp-airport-status')) $('rp-airport-status').textContent = '';
+    if ($('rp-airport-list')) $('rp-airport-list').innerHTML = '';
+    if ($('rp-find-airport')) {
+        $('rp-find-airport').disabled = false;
+        $('rp-find-airport').textContent = 'Find friendly airport';
+    }
+}
+
+function payloadMatches(signature) {
+    try { return JSON.stringify(currentPayload()) === signature; }
+    catch { return false; }
+}
+
+function durationDifference(seconds) {
+    const n = Math.abs(seconds);
+    const pad = value => String(value).padStart(2, '0');
+    return `${pad(Math.floor(n / 3600))}:${pad(Math.floor(n / 60) % 60)}:${pad(n % 60)}`;
+}
+
+function recordedIntel(meta) {
+    const owner = `${esc(meta.ownerName || 'Unknown owner')}${meta.allianceTag ? ` [${esc(meta.allianceTag)}]` : ''}`;
+    const synced = meta.lastSeenAt
+        ? `Last synced <span title="${esc(fmtUtc(meta.lastSeenAt))} UTC">${esc(fmtLocal(meta.lastSeenAt))}</span>`
+        : 'Sync time unknown';
+    const vision = meta.isInVision === true ? 'Within recorded vision'
+        : meta.isInVision === false ? 'Outside recorded vision' : 'Vision unknown';
+    return `${owner} · ${synced} · ${vision}`;
+}
+
+async function findAirports() {
+    clearAirports();
+    const token = airportSeq.next();
+    const status = $('rp-airport-status');
+    const button = $('rp-find-airport');
+    $('rp-airport-results').classList.remove('hidden');
+    let payload;
+    try { payload = currentPayload(); }
+    catch (err) { status.textContent = err.message; return; }
+    if (payload.waypoints.some(w => !w.systemId)) {
+        status.textContent = 'Pick a system for every stop before finding an airport.';
+        return;
+    }
+    if (payload.waypoints.length >= MAX_STOPS) {
+        status.textContent = `This route already has ${MAX_STOPS - 1} legs. Remove a stop before adding an airport.`;
+        return;
+    }
+    const signature = JSON.stringify(payload);
+    status.textContent = 'Comparing friendly airports using recorded intel…';
+    button.disabled = true;
+    button.textContent = 'Finding airports…';
+    try {
+        const d = await getJson('/hub-api/routes/airports', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: signature
+        });
+        if (!airportSeq.isCurrent(token)) return;
+        if (!payloadMatches(signature)) { clearAirports(); return; }
+        if (d.limitReached) {
+            status.textContent = `This route already has ${MAX_STOPS - 1} legs. Remove a stop before adding an airport.`;
+            return;
+        }
+        if (!d.suggestions.length) {
+            status.textContent = 'No friendly airports with recorded SB 0 were found for this route. You can still add a stop manually.';
+            return;
+        }
+        status.textContent = `Current route: ${d.current.totalTime}. Comparing up to five options with recorded friendly ownership and SB 0. Conditions may change before arrival.`;
+        $('rp-airport-list').innerHTML = d.suggestions.map((candidate, index) => {
+            const comparison = candidate.savedSeconds > 0 ? `Saves ${durationDifference(candidate.savedSeconds)} vs current route`
+                : candidate.savedSeconds < 0 ? `${durationDifference(candidate.savedSeconds)} slower than current route`
+                    : 'Same travel time as current route';
+            const departure = payload.targetArrivalAt && candidate.departsAt
+                ? `<div>Required start <span title="${esc(fmtUtc(candidate.departsAt))} UTC">${esc(fmtLocal(candidate.departsAt))}</span> your local time</div>`
+                : '';
+            return `<div class="border border-border rounded bg-zinc-950 p-2 flex flex-col gap-1 text-xs">
+                <div class="flex items-start justify-between gap-2">
+                    <span class="text-foreground font-semibold">${esc(candidate.waypoint.systemName || 'Sys')} #${candidate.waypoint.systemId}, planet ${candidate.waypoint.planetIndex}</span>
+                    <button type="button" class="rp-use-airport shrink-0 text-emerald-400 hover:underline" data-airport-index="${index}">Use airport</button>
+                </div>
+                <div class="text-emerald-400">Friendly airport (SB ${candidate.starbase}) · Insert after ${candidate.insertAfterIndex === 0 ? 'Start' : `Jump ${candidate.insertAfterIndex}`}</div>
+                <div class="text-muted-foreground">${recordedIntel(candidate)}</div>
+                <div class="text-foreground">Total travel time ${esc(candidate.totalTime)} · <span class="${candidate.savedSeconds > 0 ? 'text-emerald-400' : candidate.savedSeconds < 0 ? 'text-amber-400' : 'text-muted-foreground'}">${comparison}</span></div>
+                ${candidate.outOfReach ? `<div class="text-amber-400">Needs biology ${esc(candidate.bioNeeded)}</div>` : ''}
+                ${departure}
+            </div>`;
+        }).join('');
+        $('rp-airport-list').querySelectorAll('.rp-use-airport').forEach(btn => {
+            const candidate = d.suggestions[Number(btn.dataset.airportIndex)];
+            btn.addEventListener('click', () => useAirport(candidate, token, signature));
+        });
+    } catch (err) {
+        if (airportSeq.isCurrent(token)) status.textContent = err.message;
+    } finally {
+        if (airportSeq.isCurrent(token)) {
+            button.disabled = false;
+            button.textContent = 'Find friendly airport';
+        }
+    }
+}
+
+function useAirport(candidate, token, signature) {
+    if (!airportSeq.isCurrent(token)) return;
+    if (!payloadMatches(signature)) { clearAirports(); return; }
+    const stops = collectWaypoints();
+    if (stops.length >= MAX_STOPS || !Number.isInteger(candidate.insertAfterIndex)
+        || candidate.insertAfterIndex < 0 || candidate.insertAfterIndex >= stops.length - 1) {
+        clearAirports();
+        return;
+    }
+    const w = candidate.waypoint;
+    stops.splice(candidate.insertAfterIndex + 1, 0, {
+        systemId: w.systemId, planetIndex: w.planetIndex, label: `${w.systemName || 'Sys'} #${w.systemId}`
+    });
+    renderWaypoints(stops);
+    schedulePreview();
+}
+
+function renderJumpPoint(point) {
+    if (!point) return '';
+    const friendly = point.status === 'friendly-no-starbase';
+    const label = friendly ? 'Friendly airport (SB 0)'
+        : point.status === 'starbase-present' ? `Caution: starbase present (SB ${point.starbase})`
+            : point.status === 'not-friendly' ? 'Caution: jump point is not known friendly'
+                : point.status === 'sieged' ? 'Caution: jump point is under siege'
+                    : 'Caution: airport eligibility is unknown';
+    return `<div class="rp-jump-point text-xs mt-1 ${friendly ? 'text-emerald-400' : 'text-amber-400'}">
+        <div>${esc(label)}</div>
+        <div class="text-muted-foreground">${recordedIntel(point)}. Based on recorded intel; check conditions before onward departure.</div>
+    </div>`;
 }
 
 function renderLeg(l) {
@@ -355,7 +495,8 @@ function renderLeg(l) {
         ? `<span class="text-emerald-400 shrink-0" title="${alliedTitle}"><i class="fa-solid fa-handshake mr-1"></i>${l.autoAllianceMove === false ? 'allied (forced)' : 'allied'}</span>`
         : '';
     return `
-    <div class="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 text-xs border-l-2 ${l.outOfReach ? 'border-amber-500/60' : 'border-border'} pl-2 py-1">
+    <div class="text-xs border-l-2 ${l.outOfReach ? 'border-amber-500/60' : 'border-border'} pl-2 py-1">
+      <div class="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
         <span class="font-mono text-foreground font-semibold w-20 shrink-0">${esc(l.travelTime)}</span>
         <span class="text-muted-foreground truncate flex-1 min-w-0">
             ${esc(l.from.systemName || '?')} #${l.from.planetIndex}
@@ -366,6 +507,8 @@ function renderLeg(l) {
         ${warn}
         ${allied}
         ${times}
+      </div>
+      ${renderJumpPoint(l.jumpPoint)}
     </div>`;
 }
 
@@ -407,6 +550,7 @@ async function save() {
 }
 
 function resetForm() {
+    cancelPendingWork();
     editingId = null;
     $('rp-title').value = '';
     $('rp-note').value = '';
@@ -418,6 +562,30 @@ function resetForm() {
     renderWaypoints([{ systemId: null, planetIndex: 1, label: '' }, { systemId: null, planetIndex: 1, label: '' }]);
     $('rp-save-msg').textContent = '';
     preview();
+}
+
+// Explicit Travel Calculator handoff: create a new plan from this flight, without
+// overwriting a saved route or carrying over its date, biology or player selection.
+export function loadRouteDraft(draft) {
+    cancelPendingWork();
+    editingId = null;
+    $('rp-title').value = '';
+    $('rp-note').value = '';
+    $('rp-start').value = '';
+    $('rp-schedule-mode').value = 'start';
+    scheduleInput.setMode('start');
+    updateScheduleLabel();
+    $('rp-energy').value = draft.energy ?? 0;
+    $('rp-speed').value = draft.raceSpeed ?? 0;
+    $('rp-biology').value = 0;
+    $('rp-alliance').checked = !!draft.isAllianceMove;
+    $('rp-shared').checked = true;
+    $('rp-player-input').value = '';
+    $('rp-player-dropdown').innerHTML = '';
+    $('rp-player-dropdown').classList.add('hidden');
+    $('rp-save-msg').textContent = '';
+    renderWaypoints(draft.waypoints);
+    return preview();
 }
 
 function loadIntoForm(route) {
@@ -447,6 +615,11 @@ function loadIntoForm(route) {
     renderPreview(route, !!route.targetArrivalAt);
     $('rp-save-msg').textContent = `Editing "${route.title || 'untitled route'}" — Save to overwrite, New to start fresh.`;
     $('route-planner-panel')?.querySelector('.flex-1')?.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+export async function showSavedRoutes() {
+    await loadShared();
+    $('rp-shared-list')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
 async function loadShared() {
@@ -526,8 +699,8 @@ async function loadShared() {
 function wirePlayerSearch() {
     const input = $('rp-player-input'), drop = $('rp-player-dropdown');
     if (!input || !drop) return;
-    const playerSeq = createSequencer();
     input.addEventListener('input', async () => {
+        clearAirports();
         const q = input.value.trim().toLowerCase();
         if (!q) { playerSeq.cancel(); drop.classList.add('hidden'); return; }
         const token = playerSeq.next();
@@ -579,6 +752,7 @@ export async function initRoutePlanner() {
     }
 
     $('rp-data-refresh')?.addEventListener('click', async (e) => {
+        clearAirports();
         const btn = e.currentTarget;
         btn.disabled = true;
         try { await refreshReferenceData({ force: true }); } finally { btn.disabled = false; }
@@ -601,6 +775,11 @@ export async function initRoutePlanner() {
         values.splice(values.length - 1, 0, { systemId: null, planetIndex: 1, label: '' });
         renderWaypoints(values);
         schedulePreview();
+    });
+    $('rp-find-airport')?.addEventListener('click', findAirports);
+    ['rp-note', 'rp-shared'].forEach(id => {
+        $(id)?.addEventListener('input', clearAirports);
+        $(id)?.addEventListener('change', clearAirports);
     });
 
     document.querySelectorAll('#route-planner-panel .rp-in').forEach(el => {
