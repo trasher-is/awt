@@ -254,8 +254,9 @@ const upsertAllianceMemberStatsStmt = db.prepare(`
     INSERT INTO alliance_member_stats (
         player_id, planets_text, next_culture_at, science_rate, culture_rate, production_rate,
         astro_dollars, production_points, artefact, level_text, cv_limit_text,
-        economy, energy, mathematics, physics, population, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        economy, energy, mathematics, physics, population, updated_at, sciences_updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP,
+              CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END)
     ON CONFLICT(player_id) DO UPDATE SET
         planets_text=excluded.planets_text,
         next_culture_at=excluded.next_culture_at,
@@ -272,13 +273,17 @@ const upsertAllianceMemberStatsStmt = db.prepare(`
         mathematics=excluded.mathematics,
         physics=excluded.physics,
         population=excluded.population,
+        sciences_updated_at=excluded.sciences_updated_at,
         updated_at=CURRENT_TIMESTAMP
 `);
 function upsertAllianceMemberStats(playerId, planetsText, nextCultureAt, scienceRate, cultureRate, productionRate, astroDollars, productionPoints, artefact, levelText, cvLimitText, economy, energy, mathematics, physics, population) {
+    // Partial/malformed sheets are not science observations. Fields remain independent:
+    // a valid physics value can be used even if mathematics was absent, and vice versa.
+    const hasSciences = [mathematics, physics].some(v => v != null && v !== '' && Number.isInteger(Number(v)) && Number(v) >= 0);
     upsertAllianceMemberStatsStmt.run(
         playerId, planetsText, nextCultureAt, scienceRate, cultureRate, productionRate,
         astroDollars, productionPoints, artefact, levelText, cvLimitText,
-        economy, energy, mathematics, physics, population
+        economy, energy, mathematics, physics, population, Number(hasSciences)
     );
 }
 

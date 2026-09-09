@@ -58,6 +58,8 @@ function popLine(e) {
             return `${planet}: ${bold(e.by || 'Unknown')} wiped ${killed} population of ${e.victim || 'Unknown'} (conquest)`;
         case 'colonization':
             return `${planet}: ${bold(e.by || 'Unknown')} wiped ${killed} leftover population of an Unknown planet (colonization)`;
+        case 'population_loss':
+            return `${planet}: ${e.owner || 'Unknown'} lost ${killed} population (${oldPop} → ${newPop}) — cause not visible from a system scan`;
         case 'bombardment': {
             const who = e.attacker
                 ? `bombarded by ${bold(e.attacker)}`

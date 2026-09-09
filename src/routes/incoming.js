@@ -228,12 +228,13 @@ function buildReply(result, planetLabel, target) {
 // src/utils/incoming-identity.js; this looks up the rows sharing the base identity and,
 // when `persist` is set, records what the chosen key stands for so the next report (from
 // either reporter, seconds apart) resolves to the same key. Read-only callers (the News
-// panel's defender box) pass persist:false so a page render never creates rows.
+// panel's defender box) pass persist:false so a page render never creates rows. An
+// expired report with no recorded match returns null instead of claiming another wave.
 function resolveAlertKey(data, { persist } = { persist: true }) {
     const base = baseKeyFor(data);
     const arrival = arrivalOf(data);
     const picked = pickAlertKey(base, arrival, incomingRepo.findIncomingByBaseKey(base));
-    if (persist && (picked.isNew || picked.stampArrival)) {
+    if (persist && picked.alertKey !== null && (picked.isNew || picked.stampArrival)) {
         incomingRepo.ensureIncomingIdentity(picked.alertKey, base, arrival);
     }
     return picked.alertKey;
@@ -249,7 +250,16 @@ async function announceIncoming(data) {
         data.target.systemId == null || data.target.planetIndex == null) {
         return { ok: false, error: 'Missing attacker/target' };
     }
+    // News buttons and delayed webhooks can outlive an incoming. Reject before resolving
+    // or sending: even a known old key could create a fresh alert if its Discord message
+    // was deleted or the configured channel changed (sendOrEditIncoming's fallback).
+    const arrival = arrivalOf(data);
+    if (arrival > 0 && arrival <= Math.floor(Date.now() / 1000)) {
+        return { ok: false, status: 410, error: 'Incoming has already arrived' };
+    }
     const alertKey = resolveAlertKey(data);
+    // The clock can cross arrival between the guard above and identity resolution.
+    if (alertKey === null) return { ok: false, status: 410, error: 'Incoming has already arrived' };
 
     let stats = data.attacker.id ? getStatsByIds([data.attacker.id])[data.attacker.id] : null;
     if (!stats) {
@@ -261,6 +271,11 @@ async function announceIncoming(data) {
     const defenders = computeDefenders(data);
     const message = buildAnnounce(data, stats, defenders, alertKey);
 
+    // A known row remains resolvable after landing for Cover/history. If arrival passed
+    // during resolution or defender analysis, it still must not reach the Discord sender.
+    if (arrival > 0 && arrival <= Math.floor(Date.now() / 1000)) {
+        return { ok: false, status: 410, error: 'Incoming has already arrived' };
+    }
     const sent = await sendOrEditIncoming(alertKey, message);
     if (!sent.ok) return { ok: false, error: sent.error };
 
@@ -294,7 +309,7 @@ async function announceIncoming(data) {
 router.post('/incoming/announce', requireAuth, async (req, res) => {
     try {
         const r = await announceIncoming(req.body || {});
-        if (!r.ok) return res.status(r.error && r.error.startsWith('Missing') ? 400 : 502).json({ success: false, error: r.error });
+        if (!r.ok) return res.status(r.status || (r.error && r.error.startsWith('Missing') ? 400 : 502)).json({ success: false, error: r.error });
         res.json({ success: true, edited: r.edited, replied: r.replied });
     } catch (err) {
         console.error('[Incoming] announce failed:', err.message);
@@ -315,13 +330,14 @@ router.post('/incoming/defenders', requireAuth, (req, res) => {
             ownerId: a.ownerId, originSys: a.originSys, originIdx: a.originIdx, fleetId: a.fleetId,
             win: a.win, winBand: a.winBand, winUnknown: a.winUnknown
         });
+        const alertKey = resolveAlertKey(data, { persist: false });
         res.json({
             success: true,
             mapped: true,
             unknownTiming: !!result.unknownTiming,
             onTime: result.onTime.map(slim),
             late: (result.late || []).map(slim),
-            covering: getCovering(resolveAlertKey(data, { persist: false }))
+            covering: alertKey === null ? [] : getCovering(alertKey)
         });
     } catch (err) {
         console.error('[Incoming] defenders lookup failed:', err.message);
@@ -344,6 +360,9 @@ router.post('/incoming/cover', requireAuth, async (req, res) => {
         if (!name) return res.status(401).json({ success: false, error: 'No session name' });
 
         const alertKey = resolveAlertKey(data);
+        if (alertKey === null) {
+            return res.status(410).json({ success: false, error: 'No recorded incoming for this expired arrival' });
+        }
         const { covering, added } = toggleCovering(alertKey, name);
         // Best-effort: push the new roster onto the existing Discord alert (if one exists).
         await updateIncomingCover(alertKey);

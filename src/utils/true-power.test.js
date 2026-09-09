@@ -50,15 +50,16 @@ ok('a 6+ physics gap to the ceiling trips the model\'s bracket penalty (visibly 
     bracket.tpx < truePower(scouted(4, { physics: 20 }), ceilings).tpx - 3, { gap6: bracket.tpx, gap5: truePower(scouted(4, { physics: 20 }), ceilings).tpx });
 ok('player level does not move a pure-destroyer duel (the model gates it on all three ship types)',
     truePower(scouted(4, { level: 1 }), ceilings).tpx === truePower(scouted(4, { level: 30 }), ceilings).tpx);
-const noPhysCeiling = truePower(scouted(4, { physics: 27 }), { max_level: 30, max_physics: null, max_science_level: 27 });
-ok('with no scouted physics anywhere, the public science-level ceiling stands in', noPhysCeiling.tpx === 50, noPhysCeiling);
+const noPhysCeiling = truePower(scouted(4, { physics: 10 }), { max_level: 30, max_physics: null, max_science_level: 27 });
+ok('a missing reference uses the member\'s observed physics, never an unobserved public science ceiling', noPhysCeiling.tpx === 50, noPhysCeiling);
 
 console.log('\n── No intel -> no rating ' + '─'.repeat(52));
 ok('a never-scouted player yields null for both', JSON.stringify(truePower({ has_intel: 0, level: 5, science_level: 8 }, ceilings)) === '{"tp":null,"tpx":null}');
 ok('a missing row yields null for both', JSON.stringify(truePower(null, ceilings)) === '{"tp":null,"tpx":null}');
 const staleIntel = truePower(scouted(4, { intel_updated_at: '2026-01-01T00:00:00Z', physics: 25, science_level: 10 }), ceilings);
-const staleExpected = truePower(scouted(4, { physics: 10, science_level: 10 }), ceilings);
-ok('stale intel (>24h) falls back to science_level for physics, like every other model caller', staleIntel.tpx === staleExpected.tpx, { staleIntel, staleExpected });
+const staleExpected = truePower(scouted(4, { physics: 25, science_level: 10 }), ceilings);
+ok('stale intel (>24h) keeps its observed physics, like the reference ceiling', staleIntel.tpx === staleExpected.tpx, { staleIntel, staleExpected });
+ok('invalid physics is unknown, not a numeric rating', truePower(scouted(4, { physics: -1 }), ceilings).tpx === null);
 
 console.log('\n── Alliance rows use the pl_ aliases ' + '─'.repeat(41));
 const viaAlias = truePowerForAllianceRow({ pl_has_intel: 1, pl_race_attack: 4, pl_race_defense: 0, pl_physics: 10, pl_mathematics: 8, pl_level: 12, pl_science_level: 10, pl_intel_updated_at: fresh }, ceilings);

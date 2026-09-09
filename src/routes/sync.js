@@ -16,10 +16,9 @@ const { postEmbed, postBattleEmbed, defuseMentions, settingValue } = require('..
 const { ownerChangeKind } = require('../utils/system-change-lines');
 const router = express.Router();
 
-// A same-owner population drop is a bombardment; the attacker is borrowed from a battle
-// report at that planet no older than this. Wide on purpose, like getBattleReportsFeed's
-// POP_DROP_MATCH_WINDOW_MINUTES: planet_events.timestamp is when OUR scan noticed the
-// drop, not when the battle happened.
+// Attribution uses reports after the previous planet sync, capped at three hours.
+// A scan only observes a population loss; the repository requires positive evidence
+// for the same victim and one unambiguous attacker before naming anyone.
 const POP_DROP_ATTACKER_WINDOW_MINUTES = 180;
 
 // --- MAP SCRAPER DATA RECEIVER ---
@@ -158,7 +157,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 // 'battle-conquer' news row against the closest POP_DROP row for the planet).
                 //
                 // Issue #156 — the math differs by case:
-                //   • OWNER CHANGED: the previous owner's population is wiped to 0 the moment
+                //   • TAKEN BY A NEW OWNER: the previous owner's population is wiped to 0 the moment
                 //     the planet is taken (conquest, or colonizing an Unknown planet's
                 //     leftover people). Whatever population the NEW owner shows by the time
                 //     this scan catches it is their own growth since, and must not be diffed
@@ -166,11 +165,12 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 //     truth is "3 -> 0, wiped 3". Logged as oldPop -> 0, credited to the new
                 //     owner. An owner change with 0 previous population (a free planet) is
                 //     not a population event at all.
-                //   • SAME OWNER: a genuine drop (bombardment). A system scan cannot see the
-                //     attacker, so the announcement borrows it from a recent battle report at
-                //     this planet when one has been synced, and otherwise says so.
+                //   • OWNER CLEARED / SAME OWNER: only an observed decrease is a loss. A
+                //     resignation can leave all inhabitants alive on an Unknown planet.
+                //     A same-owner loss can be attributed when synced battle reports give
+                //     reliable, unambiguous evidence; ownership clearing alone proves no attack.
                 if (Number.isFinite(oldPop) && Number.isFinite(newPop)) {
-                    if (ownerChanged && oldPop > 0) {
+                    if (ownerChanged && finalOwnerId != null && oldPop > 0) {
                         systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, 0); // 2 = POP_DROP
                         if (scan_mode !== 'silent') {
                             announceEvents.push({
@@ -183,14 +183,20 @@ router.post('/sync/system', requireAuth, (req, res) => {
                                 by: newOwnerLabel
                             });
                         }
-                    } else if (!ownerChanged && newPop < oldPop) {
+                    } else if (newPop < oldPop) {
                         systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, newPop); // 2 = POP_DROP
                         if (scan_mode !== 'silent') {
-                            const battle = battleReportsRepo.findRecentAttackerAtPlanet(system_id, p.planet_index, POP_DROP_ATTACKER_WINDOW_MINUTES);
+                            // updated_at also advances on uncertain/fog syncs. It is a
+                            // conservative lower bound, not proof of a fresh observation:
+                            // if it excludes a real battle, leave attribution unknown.
+                            const battle = !ownerChanged && battleReportsRepo.findRecentAttackerAtPlanet(
+                                system_id, p.planet_index, POP_DROP_ATTACKER_WINDOW_MINUTES,
+                                { defenderId: oldP.owner_id, observedAfter: oldP.updated_at, observedLoss: oldPop - newPop }
+                            );
                             announceEvents.push({
                                 planet_index: p.planet_index,
                                 type: 'POP_DROP',
-                                kind: 'bombardment',
+                                kind: ownerChanged ? 'population_loss' : 'bombardment',
                                 old_pop: oldPop,
                                 new_pop: newPop,
                                 owner: oldOwnerLabel,

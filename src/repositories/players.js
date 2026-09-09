@@ -795,18 +795,26 @@ function suggestPlayersTopByPoints(limit) {
 
 // --- players: read (true-power.js, via routes/intel.js) ---
 
-// The "toughest enemy" reference for the TPx rating (issue #154): the highest player level
-// and the highest scouted physics anywhere in the players table. max_physics only counts
-// rows with intel (an unscanned row's physics is a 0 placeholder, not a fact); when nobody
-// has been scouted yet, max_science_level — the public per-science ceiling — stands in.
+// Use the exact same observed-science selector as the member's TPx calculation (#161).
+// A newer member sheet can raise the reference even before Player/{id} is scanned again;
+// unscouted player placeholders and undated legacy sheets are not observations.
+const { observedCombatSciences } = require('../utils/true-power');
 const getCombatCeilingsStmt = db.prepare(`
-    SELECT MAX(level) AS max_level,
-           MAX(CASE WHEN has_intel = 1 THEN physics END) AS max_physics,
-           MAX(science_level) AS max_science_level
-    FROM players
+    SELECT p.level, p.science_level, p.has_intel, p.physics, p.mathematics, p.intel_updated_at,
+           s.physics AS sheet_physics, s.mathematics AS sheet_mathematics,
+           s.sciences_updated_at AS sheet_sciences_updated_at
+    FROM players p
+    LEFT JOIN alliance_member_stats s ON s.player_id = p.id
 `);
 function getCombatCeilings() {
-    return getCombatCeilingsStmt.get() || { max_level: null, max_physics: null, max_science_level: null };
+    const ceilings = { max_level: null, max_physics: null, max_science_level: null };
+    for (const row of getCombatCeilingsStmt.all()) {
+        const { physics } = observedCombatSciences(row);
+        for (const [key, value] of [['max_level', row.level], ['max_physics', physics], ['max_science_level', row.science_level]]) {
+            if (value != null) ceilings[key] = ceilings[key] == null ? value : Math.max(ceilings[key], value);
+        }
+    }
+    return ceilings;
 }
 
 module.exports = {

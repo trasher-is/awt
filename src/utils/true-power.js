@@ -25,14 +25,47 @@ const battleModel = require('../../public/js/utils/battle-model.js');
 const REFERENCE_FLEET = [100, 0, 0];   // 100 destroyers, nothing else
 const TOUGHEST_RACE_ATTACK = 4;
 
-// Turn a stats row into the model's side shape, or null when the race is not scouted.
-// Uses the shared resolveStats so a stale intel row falls back to science_level exactly
-// the way the incoming-alert and !battle callers do.
+// TPx rates observed physics, never the public science ceiling used as an enemy-risk
+// estimate by other battle-model callers. Aging an observation must not improve a
+// member's rating while the reference enemy keeps its recorded physics (#161).
+function scienceValue(value) {
+    if (value == null || value === '') return null;
+    const n = Number(value);
+    return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+function observationTime(value) {
+    if (typeof value !== 'string') return null;
+    // SQLite timestamps are UTC despite having no zone; ISO timestamps retain theirs.
+    const sqlite = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value);
+    const zoned = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value);
+    if (!sqlite && !zoned) return null;
+    const ms = Date.parse(sqlite ? value.replace(' ', 'T') + 'Z' : value);
+    return Number.isFinite(ms) ? ms : null;
+}
+
+// Shared by member rating and the database-wide reference. The dedicated sheet stamp
+// is written only alongside sciences: updated_at can instead mean an AU-only refresh.
+// A legacy sheet with no science stamp cannot displace a recorded intel observation.
+function observedCombatSciences(row) {
+    const intelTime = observationTime(row.intel_updated_at);
+    const sheetTime = observationTime(row.sheet_sciences_updated_at);
+    const observed = field => {
+        const intel = row.has_intel ? scienceValue(row[field]) : null;
+        const sheet = scienceValue(row[`sheet_${field}`]);
+        if (sheet != null && sheetTime != null && (intel == null || intelTime == null || sheetTime > intelTime)) return sheet;
+        return intel;
+    };
+    return { physics: observed('physics'), mathematics: observed('mathematics') };
+}
+
+// Turn a stats row into the model's side shape, or null without observed race/physics.
 function ownSide(row) {
     if (!row || !row.has_intel) return null;
-    const s = battleModel.resolveStats(row);
-    if (!s || s.unknown) return null;
-    return { ra: s.ra, rd: s.rd, phys: s.phys, math: s.math, lvl: s.lvl };
+    const sciences = observedCombatSciences(row);
+    if (sciences.physics == null) return null;
+    return { ra: row.race_attack || 0, rd: row.race_defense || 0,
+        phys: sciences.physics, math: sciences.mathematics || 0, lvl: row.level || 0 };
 }
 
 function pct(win) {
@@ -42,8 +75,8 @@ function pct(win) {
 /**
  * truePower(row, ceilings) -> { tp, tpx }   (percent 0-100, one decimal; null without intel)
  *   row       { has_intel, race_attack, race_defense, physics, mathematics, level,
- *               science_level, intel_updated_at }
- *   ceilings  { max_level, max_physics, max_science_level } from playersRepo.getCombatCeilings
+ *               intel_updated_at, sheet_physics, sheet_mathematics, sheet_sciences_updated_at }
+ *   ceilings  { max_level, max_physics } from playersRepo.getCombatCeilings
  */
 function truePower(row, ceilings = {}) {
     const me = ownSide(row);
@@ -52,11 +85,9 @@ function truePower(row, ceilings = {}) {
     const equal = { ra: 0, rd: 0, phys: me.phys, math: me.math, lvl: me.lvl };
     const tp = battleModel.winChance(REFERENCE_FLEET, me, REFERENCE_FLEET, equal);
 
-    const maxPhys = ceilings.max_physics != null ? Number(ceilings.max_physics)
-        : ceilings.max_science_level != null ? Number(ceilings.max_science_level)
-        : me.phys;
+    const maxPhys = scienceValue(ceilings.max_physics) ?? me.phys;
     const maxLvl = ceilings.max_level != null ? Number(ceilings.max_level) : me.lvl;
-    const toughest = { ra: TOUGHEST_RACE_ATTACK, rd: 0, phys: Math.max(maxPhys, 0), math: me.math, lvl: Math.max(maxLvl, 0) };
+    const toughest = { ra: TOUGHEST_RACE_ATTACK, rd: 0, phys: Math.max(maxPhys, me.phys), math: me.math, lvl: Math.max(maxLvl, 0) };
     const tpx = battleModel.winChance(REFERENCE_FLEET, me, REFERENCE_FLEET, toughest);
 
     return { tp: pct(tp), tpx: pct(tpx) };
@@ -73,7 +104,10 @@ function truePowerForAllianceRow(r, ceilings) {
         level: r.pl_level,
         science_level: r.pl_science_level,
         intel_updated_at: r.pl_intel_updated_at,
+        sheet_physics: r.physics,
+        sheet_mathematics: r.mathematics,
+        sheet_sciences_updated_at: r.sciences_updated_at,
     }, ceilings);
 }
 
-module.exports = { REFERENCE_FLEET, TOUGHEST_RACE_ATTACK, truePower, truePowerForAllianceRow };
+module.exports = { REFERENCE_FLEET, TOUGHEST_RACE_ATTACK, observedCombatSciences, truePower, truePowerForAllianceRow };

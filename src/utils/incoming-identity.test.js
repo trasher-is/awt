@@ -73,18 +73,37 @@ const untimedAfterLanding = pickAlertKey('1234:5:xerxes', 0, landed, opts);
 ok('a time-less report with only a LANDED wave stored starts a base-key row (nothing live to attach to)',
     untimedAfterLanding.alertKey === '1234:5:xerxes' && untimedAfterLanding.isNew, untimedAfterLanding);
 
-console.log('\n── An arrival in the past is no identity ' + '─'.repeat(36));
+console.log('\n── Expired reports keep their own identity ' + '─'.repeat(32));
 const pastArrival = pickAlertKey('1234:5:xerxes', NOW - 30, rows1, opts);
-ok('a report whose arrival already passed is handled like an untimed one (attaches to the live wave)',
-    pastArrival.alertKey === rows1[0].alert_key && !pastArrival.stampArrival, pastArrival);
+ok('an unmatched expired report cannot attach to a different live wave',
+    pastArrival.alertKey === null && !pastArrival.isNew && !pastArrival.stampArrival, pastArrival);
 const pastNoRows = pickAlertKey('1234:5:xerxes', NOW - 30, [], opts);
-ok('…and with nothing stored it uses the base key, not "<base>:<past time>"',
-    pastNoRows.alertKey === '1234:5:xerxes' && !pastNoRows.stampArrival, pastNoRows);
+ok('an unmatched expired report cannot start a base-key alert',
+    pastNoRows.alertKey === null && !pastNoRows.isNew && !pastNoRows.stampArrival, pastNoRows);
+const nearLive = [{ alert_key: `1234:5:xerxes:${NOW + 60}`, arrival_unix: NOW + 60, updated_at: fresh }];
+const pastNearLive = pickAlertKey('1234:5:xerxes', NOW - 30, nearLive, opts);
+ok('arrival tolerance cannot attach an unmatched expired report to a nearby live wave',
+    pastNearLive.alertKey === null && !pastNearLive.isNew && !pastNearLive.stampArrival, pastNearLive);
+const afterFirstLanding = { nowSec: T1 + 1 };
+const replayAlone = pickAlertKey('1234:5:xerxes', T1, rows1, afterFirstLanding);
+ok('replaying a known expired wave without other waves retains its stored key',
+    replayAlone.alertKey === rows1[0].alert_key && !replayAlone.isNew && !replayAlone.stampArrival, replayAlone);
+const replayWithNextWave = pickAlertKey('1234:5:xerxes', T1, rows2, afterFirstLanding);
+ok('replaying a known expired wave with another live wave retains the expired key',
+    replayWithNextWave.alertKey === rows1[0].alert_key && !replayWithNextWave.isNew, replayWithNextWave);
+const replayRounded = pickAlertKey('1234:5:xerxes', T1 - 45, rows2, afterFirstLanding);
+ok('the two reporters still resolve a rounded expired arrival to the original wave',
+    replayRounded.alertKey === rows1[0].alert_key && !replayRounded.isNew, replayRounded);
+const atLanding = pickAlertKey('1234:5:xerxes', T1, rows2, { nowSec: T1 });
+ok('the exact arrival second does not change a known identity', atLanding.alertKey === rows1[0].alert_key, atLanding);
 const landedRow = pickAlertKey('1234:5:xerxes', T1, landed, opts);
-ok('a stored wave that has landed never matches a new timed report', landedRow.alertKey === `1234:5:xerxes:${T1}` && landedRow.isNew, landedRow);
+ok('a new timed wave outside tolerance is distinct from a landed wave', landedRow.alertKey === `1234:5:xerxes:${T1}` && landedRow.isNew, landedRow);
 
 console.log('\n── Legacy / time-less rows ' + '─'.repeat(50));
 const legacyFresh = [{ alert_key: '1234:5:xerxes', arrival_unix: null, updated_at: fresh }];
+const expiredWithLegacy = pickAlertKey('1234:5:xerxes', NOW - 30, legacyFresh, opts);
+ok('an unmatched expired report cannot adopt and stamp a time-less legacy row',
+    expiredWithLegacy.alertKey === null && !expiredWithLegacy.stampArrival, expiredWithLegacy);
 const adopt = pickAlertKey('1234:5:xerxes', T1, legacyFresh, opts);
 ok('a fresh legacy row (base key, no arrival) is adopted and gets the arrival stamped',
     adopt.alertKey === '1234:5:xerxes' && !adopt.isNew && adopt.stampArrival, adopt);

@@ -189,22 +189,49 @@ function findByPlayerPairNear(playerA, playerB, occurredAtIso, windowMinutes) {
     return row ? row.id : null;
 }
 
-// The most recent battle fought AT a planet within the last `windowMinutes` — who bombarded
-// it. Used by /sync/system to attribute a same-owner population drop (issue #156): a system
-// scan sees that population fell, never who did it; a battle report at the same location
-// does. datetime(started_at) normalizes the API's raw ISO8601 (with offset) against
-// SQLite's own clock — see unmatchedPopDropsStmt below for why the raw column must not be
-// compared directly. Returns null when no report has been synced for that planet yet.
+// A population drop may span several battles. Name an attacker only when every
+// plausible report identifies that same player and confirms population kills against
+// the observed owner. Zero-kill/failed combat cannot explain a loss; missing kill counts
+// or identities remain possible competing evidence, so they prevent attribution.
+// The interval starts strictly after the previous sync (same-second ordering is unknown)
+// and ends now, with an absolute three-hour cap. julianday normalizes API ISO offsets
+// and the planet row's SQLite UTC timestamp without accepting future reports.
 const findRecentAttackerAtPlanetStmt = db.prepare(`
-    SELECT id, att_player_id, att_player_name, att_alliance_tag, def_player_name, started_at
+    SELECT id, att_player_id, att_player_name, att_alliance_tag, def_player_id,
+           killed_population, started_at
     FROM battle_reports
-    WHERE system_id = ? AND planet_index = ?
-      AND datetime(started_at) >= datetime('now', '-' || ? || ' minutes')
-    ORDER BY datetime(started_at) DESC
-    LIMIT 1
+    WHERE system_id = @systemId AND planet_index = @planetIndex
+      AND (def_player_id = @defenderId OR def_player_id IS NULL)
+      AND datetime(started_at) > datetime(@observedAfter)
+      AND julianday(started_at) >= julianday('now', '-' || @windowMinutes || ' minutes')
+      AND julianday(started_at) <= julianday('now')
+      AND (killed_population IS NULL OR killed_population > 0)
+      AND (winner IS NULL OR lower(winner) != 'defender')
+      AND (att_has_won IS NULL OR att_has_won != 0)
+      AND (def_has_won IS NULL OR def_has_won != 1)
+    ORDER BY julianday(started_at) DESC, id DESC
 `);
-function findRecentAttackerAtPlanet(systemId, planetIndex, windowMinutes) {
-    return findRecentAttackerAtPlanetStmt.get(systemId, planetIndex, Math.max(1, Math.round(Number(windowMinutes) || 0))) || null;
+function findRecentAttackerAtPlanet(systemId, planetIndex, windowMinutes, { defenderId, observedAfter, observedLoss } = {}) {
+    // An Unknown owner or missing previous timestamp gives no reliable victim/interval.
+    if (!Number.isInteger(defenderId) || defenderId <= 0
+        || typeof observedAfter !== 'string' || !observedAfter.trim()
+        || !Number.isFinite(observedLoss) || observedLoss <= 0) return null;
+    const reports = findRecentAttackerAtPlanetStmt.all({
+        systemId, planetIndex, defenderId, observedAfter,
+        windowMinutes: Math.min(180, Math.max(1, Math.round(Number(windowMinutes) || 0))),
+    });
+    if (!reports.length) return null;
+    const attackerId = reports[0].att_player_id;
+    if (!Number.isInteger(attackerId) || attackerId <= 0) return null;
+    if (reports.some(report => report.def_player_id !== defenderId
+        || !(report.killed_population > 0)
+        || report.att_player_id !== attackerId
+        || !report.att_player_name || !report.att_player_name.trim())) return null;
+    // More observed deaths than the reports account for leave another cause/attacker
+    // unresolved. The converse is valid: growth between scans can mask some kills.
+    const confirmedKills = reports.reduce((total, report) => total + report.killed_population, 0);
+    if (confirmedKills < observedLoss) return null;
+    return reports[0];
 }
 
 // --- Battle Reports page: a unified, alliance-wide "what happened" feed ---

@@ -9,10 +9,11 @@
 // The identity is now the base key PLUS the arrival time, with a tolerance:
 //   • a stored row's arrival is within ARRIVAL_TOLERANCE_SEC of the reported one
 //                                    -> that row's key: same fleet, re-announced (edit)
+//   • an unmatched arrival in the past -> no identity; never adopt another wave
 //   • a stored row has no arrival yet and was touched recently
 //                                    -> that row's key, and the caller stamps the arrival on it
 //   • otherwise                      -> "<base>:<arrival>": a new wave, a new message
-//   • arrival unknown (0), or already in the past
+//   • arrival unknown (0)
 //                                    -> a fresh time-less row if there is one, else the live
 //                                       wave landing soonest, else the base key as before —
 //                                       a reporter that drops the time must not open a
@@ -67,6 +68,7 @@ function updatedAtSec(row) {
  * Pick the alert key for a report.
  *   rows: [{ alert_key, arrival_unix, updated_at }] — every stored incoming with this base key
  * Returns { alertKey, isNew, stampArrival }:
+ *   alertKey     — the stored/new key, or null for an unmatched expired report
  *   isNew        — no stored row carries this key yet
  *   stampArrival — the caller should record the reported arrival against the key
  *                  (a fresh key, or an existing row that had no arrival yet)
@@ -77,10 +79,9 @@ function pickAlertKey(baseKey, arrivalUnix, rows, opts = {}) {
     const nowSec = opts.nowSec != null ? opts.nowSec : Math.floor(Date.now() / 1000);
     const list = Array.isArray(rows) ? rows.filter(r => r && r.alert_key) : [];
 
-    // An arrival at or before now has already landed: it cannot identify a LIVE incoming
-    // (a late re-post of an old alert must not open a message for a fleet that is gone), so
-    // it is treated exactly like a report that carries no time at all.
-    const arrival = Number.isInteger(arrivalUnix) && arrivalUnix > nowSec ? arrivalUnix : 0;
+    // Passing the arrival time does not erase a known wave's identity: historical Cover
+    // and defender lookups must still select that wave, never the next live incoming.
+    const arrival = Number.isInteger(arrivalUnix) && arrivalUnix > 0 ? arrivalUnix : 0;
     if (!arrival) {
         // No timing to tell waves apart. A fresh time-less row (legacy key, or an earlier
         // report without a time) is the same message as before; otherwise attach to the live
@@ -102,10 +103,17 @@ function pickAlertKey(baseKey, arrivalUnix, rows, opts = {}) {
     for (const r of list) {
         const a = knownArrival(r);
         if (!a) continue;
+        // A rounded expired report must not borrow a still-live wave's cover roster.
+        // Across the arrival boundary, prefer an unknown identity to uncertain defence.
+        if (arrival <= nowSec && a > nowSec) continue;
         const diff = Math.abs(a - arrival);
         if (diff <= tolerance && diff < bestDiff) { best = r; bestDiff = diff; }
     }
     if (best) return { alertKey: best.alert_key, isNew: false, stampArrival: false };
+
+    // An expired report with no known timed match cannot safely claim an untimed row or
+    // create a new alert. Actual time-less reports retain the legacy fallback above.
+    if (arrival <= nowSec) return { alertKey: null, isNew: false, stampArrival: false };
 
     // 2. A row announced without a time (legacy key, or an unparseable report) that is still
     //    fresh: adopt it and let the caller stamp the arrival, so the next report matches

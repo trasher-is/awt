@@ -446,7 +446,9 @@ router.get('/intel/alliance-stats', requireAuth, (req, res) => {
     try {
         // True Power (issue #154) is computed here, once per row, rather than in the browser:
         // the "toughest enemy" reference needs the highest level/physics in the WHOLE
-        // players table, which the member rows themselves do not carry.
+        // players table and the latest observed member-sheet sciences. Both sides use
+        // the same observation-selection policy; a public science ceiling is no estimate
+        // of either side's physics here.
         const ceilings = playersRepo.getCombatCeilings();
         const stats = alliancesRepo.getAllianceStatsForArchive().map(r => {
             const { tp, tpx } = truePowerForAllianceRow(r, ceilings);
