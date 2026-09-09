@@ -81,14 +81,19 @@ export function extractPlayerData(playerId, doc = document, report = new ScrapeR
         p.country = countryImg.getAttribute('alt') || countryImg.getAttribute('title');
     }
 
-    // Origin is read from the link, not the label's neighbouring text — the system id is
-    // in the href, which no translation can change.
+    // Only the labelled Origin cell is evidence of origin. A missing/redacted row must
+    // not fall back to another planet link elsewhere in the profile.
     const originHit = labelledValue(doc, LABELS.origin, { exact: true });
     report.label(!!originHit.found, 'origin');
     const originLink = (originHit.cell && originHit.cell.querySelector)
         ? originHit.cell.querySelector('a[href^="/Game/Map/SolarSystem/"]')
-        : doc.querySelector('table tbody tr a[href^="/Game/Map/SolarSystem/"]');
-    if (originLink) p.origin_system = parseInt(originLink.getAttribute('href').split('/').pop(), 10);
+        : null;
+    if (originLink) {
+        // The id follows SolarSystem; a trailing planet slot is not the system id.
+        const match = originLink.getAttribute('href').match(/^\/Game\/Map\/SolarSystem\/(\d+)(?:\/|[?#]|$)/);
+        const systemId = match ? Number(match[1]) : NaN;
+        if (Number.isSafeInteger(systemId) && systemId > 0) p.origin_system = systemId;
+    }
 
     const lvlStr = getRowVal('player level', LABELS.playerLevel);
     if (lvlStr) p.level = parseLocaleInt(lvlStr.split('-')[0]);

@@ -183,8 +183,9 @@ function playerExistsById(id) {
 // solely by the `has_intel` CASE guard in the upsert: hard-won intel must never
 // be destroyed by a guess. A genuinely restarted player keeps stale intel (with
 // its old intel_updated_at) until the next scan with vision overwrites it —
-// cosmetic staleness beats irreversible data loss. origin_system IS reset here so
-// the originChanged signal can re-arm on the next move.
+// cosmetic staleness beats irreversible data loss. A restart supported by a login-counter
+// reset must discard the old origin when the new origin is not yet available; ordinary
+// partial scans preserve it in sync.js instead of clearing it on a differing origin alone.
 const resetPlayerOnRestartStmt = db.prepare(`
     UPDATE players SET
         level=0, points=0, ranking=NULL, science_level=0, culture_level=0,
@@ -415,25 +416,29 @@ function getPlayerFullByName(name) {
     return getPlayerFullByNameStmt.get(name);
 }
 
+// Roster queries must retain members with missing origins and unmapped systems. Callers
+// classify these as unknown rather than letting a JOIN quietly shrink the alliance.
 const getAllianceOriginPlayersBriefStmt = db.prepare(`
-    SELECT p.name, p.biology, p.science_level, s.x, s.y
+    SELECT p.id, p.name, p.biology, p.science_level, p.origin_system,
+           s.id AS mapped_origin_system, s.x, s.y
     FROM players p
     JOIN alliances a ON p.alliance_id = a.id
-    JOIN systems s ON p.origin_system = s.id
+    LEFT JOIN systems s ON p.origin_system = s.id
     WHERE a.tag = ?
-    AND p.origin_system IS NOT NULL
-    AND p.origin_system > 0
+    ORDER BY p.name COLLATE NOCASE, p.id
 `);
 function getAllianceOriginPlayersBrief(tag) {
     return getAllianceOriginPlayersBriefStmt.all(tag);
 }
 
 const getAllianceOriginPlayersDetailedStmt = db.prepare(`
-    SELECT p.id, p.name, p.biology, p.science_level, p.energy, p.race_speed, s.id as orig_sys_id, s.x as orig_x, s.y as orig_y
+    SELECT p.id, p.name, p.biology, p.science_level, p.energy, p.race_speed, p.origin_system,
+           s.id as orig_sys_id, s.x as orig_x, s.y as orig_y
     FROM players p
     JOIN alliances a ON p.alliance_id = a.id
-    JOIN systems s ON p.origin_system = s.id
+    LEFT JOIN systems s ON p.origin_system = s.id
     WHERE a.tag = ?
+    ORDER BY p.name COLLATE NOCASE, p.id
 `);
 function getAllianceOriginPlayersDetailed(tag) {
     return getAllianceOriginPlayersDetailedStmt.all(tag);

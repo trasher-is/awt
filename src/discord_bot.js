@@ -17,6 +17,7 @@ const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require
 // The battle model — the same physical file the dashboard calculator imports, so
 // !battle and the web calculator cannot drift apart again. See docs/battle-model.md.
 const battleModel = require('../public/js/utils/battle-model.js');
+const visionModel = require('../public/js/utils/vision-model.js');
 const { buildCommands, suggestPlayers, suggestSystems, isEphemeral } = require('./discord-commands');
 
 const client = new Client({
@@ -284,6 +285,63 @@ function garble() {
     const pick = a => a[Math.floor(Math.random() * a.length)];
     const sym = n => Array.from({ length: n }, () => pick(glitch)).join('');
     return `🛰️ ${pick(bursts)}— ${sym(3)} ${pick(techno)} ${sym(3)} …${pick(bursts)}… ${pick(bursts)}`;
+}
+
+const knownCoordinate = value => (typeof value === 'number' || typeof value === 'string' && value.trim() !== '')
+    && visionModel.isCoordinate(value);
+const positiveRadarStat = value => (typeof value === 'number' || typeof value === 'string' && value.trim() !== '')
+    && Number.isFinite(Number(value)) && Number(value) > 0;
+
+// Missing origins and placeholder coordinates are gaps in the roster's intel, never a
+// member at (0, 0). Keep the shared model's science-ceiling estimate when it is known,
+// but do not invent a radius for a member with neither biology nor science recorded.
+function radarStatus(player, target) {
+    if (!knownCoordinate(target.x) || !knownCoordinate(target.y)) return { unknown: 'target coordinates not recorded' };
+    if (!Number.isInteger(player.origin_system) || player.origin_system <= 0) {
+        return { unknown: 'no valid origin system scanned' };
+    }
+    if (!player.mapped_origin_system) return { unknown: `origin system #${player.origin_system} not mapped` };
+    if (!knownCoordinate(player.x) || !knownCoordinate(player.y)) return { unknown: 'origin coordinates not recorded' };
+    if (!positiveRadarStat(player.biology) && !positiveRadarStat(player.science_level)) {
+        return { unknown: 'biology and science level not scanned' };
+    }
+    const required = visionModel.bioNeededFor(visionModel.systemDistance(Number(player.x), Number(player.y), Number(target.x), Number(target.y)));
+    const radius = visionModel.visionRadius(player);
+    return { required, radius, inVision: radius >= required, estimated: !visionModel.radiusIsMeasured(player) };
+}
+
+// Discord fields stop at 1024 characters and an entire message's embeds at 6000. Page
+// fields at line boundaries instead of truncating the very members this command lists.
+function radarFields(name, lines) {
+    const chunks = [];
+    let chunk = '';
+    for (const line of lines.length ? lines : ['None']) {
+        if (chunk && chunk.length + line.length + 1 > 1024) { chunks.push(chunk); chunk = ''; }
+        let rest = line;
+        while (rest.length > 1024) { chunks.push(rest.slice(0, 1024)); rest = rest.slice(1024); }
+        chunk += `${chunk ? '\n' : ''}${rest}`;
+    }
+    if (chunk) chunks.push(chunk);
+    return chunks.map((value, index) => ({ name: `${name} (${lines.length})${index ? ' · continued' : ''}`, value }));
+}
+
+function buildRadarPages(title, description, groups) {
+    const pages = [];
+    let fields = [], length = 0;
+    for (const group of groups) {
+        for (const field of radarFields(group.name, group.lines)) {
+            const size = field.name.length + field.value.length;
+            if (fields.length && (length + size > 4800 || fields.length === 25)) {
+                pages.push(fields); fields = []; length = 0;
+            }
+            fields.push(field); length += size;
+        }
+    }
+    if (fields.length) pages.push(fields);
+    return pages.map((page, index) => new EmbedBuilder()
+        .setTitle(`${title.slice(0, 220)}${pages.length > 1 ? ` · ${index + 1}/${pages.length}` : ''}`)
+        .setColor('#00ffff').setDescription(description).addFields(page)
+        .setFooter({ text: `Page ${index + 1}/${pages.length} · Recorded alliance roster; missing intel is listed as Unknown.` }));
 }
 
 // Extracted from the client.on('messageCreate') callback so the slash-command layer can
@@ -1106,43 +1164,27 @@ async function handleMessage(message) {
         const players = playersRepo.getAllianceOriginPlayersBrief(tag);
 
         if (!players || players.length === 0) {
-            return message.reply(`❌ No players found for alliance [${tag}] with a recorded Origin System.`);
+            return message.reply(`❌ No players found for alliance [${tag}].`);
         }
 
         const inVision = [];
         const outOfVision = [];
-        const tx = targetSys.x;
-        const ty = targetSys.y;
+        const unknown = [];
 
         players.forEach(p => {
-            const distance = Math.sqrt(Math.pow(p.x - tx, 2) + Math.pow(p.y - ty, 2));
-            const requiredBio = Math.ceil(distance);
-            const visionRadius = (p.biology && p.biology > 0) ? p.biology : (p.science_level || 1);
-
-            if (visionRadius >= requiredBio) {
-                // Displays their current vision ceiling alongside what was actually required
-                inVision.push(`${p.name} (Has: **${visionRadius}** / Needs: **${requiredBio}**)`);
-            } else {
-                // Displays exactly how short they are of getting vision
-                outOfVision.push(`${p.name} (Has: **${visionRadius}** / Needs: **${requiredBio}**)`);
-            }
+            const radar = radarStatus(p, targetSys);
+            const name = p.name || `Player #${p.id}`;
+            if (radar.unknown) { unknown.push(`${name} — ${radar.unknown}`); return; }
+            const line = `${name} (Has: **${radar.radius}** / Needs: **${radar.required}**)${radar.estimated ? ' · estimated from science level' : ''}`;
+            (radar.inVision ? inVision : outOfVision).push(line);
         });
-
-        let inVisionStr = inVision.length > 0 ? inVision.join('\n') : "None";
-        let outOfVisionStr = outOfVision.length > 0 ? outOfVision.join('\n') : "None";
-
-        if (inVisionStr.length > 1024) inVisionStr = inVisionStr.substring(0, 1020) + "...";
-        if (outOfVisionStr.length > 1024) outOfVisionStr = outOfVisionStr.substring(0, 1020) + "...";
-
-        const embed = new EmbedBuilder()
-            .setTitle(`📡 Bio-Scan Radar: ${targetSys.name || 'Unknown'} [${targetSysId}]`)
-            .setColor('#00ffff')
-            .addFields(
-                { name: '✅ In Vision', value: inVisionStr },
-                { name: '❌ Out of Range', value: outOfVisionStr }
-            );
-
-        return message.reply({ embeds: [embed] });
+        const pages = buildRadarPages(
+            `📡 Bio-Scan Radar: ${targetSys.name || 'Unknown'} [${targetSysId}]`,
+            `Alliance [${tag}] · Members: **${players.length}** · In Vision: **${inVision.length}** · Out of Range: **${outOfVision.length}** · Unknown: **${unknown.length}**${!knownCoordinate(targetSys.x) || !knownCoordinate(targetSys.y) ? '\nTarget coordinates are not recorded; radar cannot be assessed.' : ''}`,
+            [{ name: '✅ In Vision', lines: inVision }, { name: '❌ Out of Range', lines: outOfVision }, { name: '❓ Unknown', lines: unknown }]
+        );
+        for (const embed of pages) await message.reply({ embeds: [embed], allowedMentions: { parse: [], repliedUser: false } });
+        return;
     }
 
     // ----------------------------------------------------
@@ -1287,26 +1329,29 @@ async function handleMessage(message) {
 
         const targetSys = systemsRepo.getSystemCoords(sysId);
         if (!targetSys) return message.reply(`❌ System **[${sysId}]** not found in the database.`);
+        if (!knownCoordinate(targetSys.x) || !knownCoordinate(targetSys.y)) {
+            return message.reply(`⚠️ Cannot assess ghost arrivals for system #${sysId}: target coordinates are not recorded.`);
+        }
 
-        // Find all players in that alliance with an origin system recorded
+        // Keep the complete roster so unknown radar cannot become a false safe-sector claim.
         const alliancePlayers = playersRepo.getAllianceOriginPlayersDetailed(tag);
 
         if (!alliancePlayers || alliancePlayers.length === 0) {
-            return message.reply(`❌ No tracked players found for alliance [${tag}] with known origin systems.`);
+            return message.reply(`❌ No tracked players found for alliance [${tag}].`);
         }
 
         const tx = targetSys.x;
         const ty = targetSys.y;
         const ghostLines = [];
+        const unknownRadar = [];
 
         alliancePlayers.forEach(p => {
             // 1. Radar Vision Check (using their origin system as radar baseline)
-            const distanceToTarget = Math.sqrt(Math.pow(p.orig_x - tx, 2) + Math.pow(p.orig_y - ty, 2));
-            const requiredBio = Math.ceil(distanceToTarget);
-            const visionRadius = (p.biology && p.biology > 0) ? p.biology : (p.science_level || 1);
+            const radar = radarStatus({ ...p, mapped_origin_system: p.orig_sys_id, x: p.orig_x, y: p.orig_y }, targetSys);
+            if (radar.unknown) { unknownRadar.push(`${p.name || `Player #${p.id}`} — ${radar.unknown}`); return; }
 
             // If they didn't have vision over the system, they couldn't see to react/launch
-            if (visionRadius < requiredBio) return;
+            if (!radar.inVision) return;
 
             // 2. Gather all possible launch points (Scraped planets + Origin system baseline)
             const launchPoints = [];
@@ -1315,6 +1360,7 @@ async function handleMessage(message) {
             const scrapedPlanets = systemsRepo.getPlanetCoordsForPlayer(p.id);
 
             scrapedPlanets.forEach(sp => {
+                if (!knownCoordinate(sp.x) || !knownCoordinate(sp.y)) return;
                 if (!launchPoints.some(lp => lp.x === sp.x && lp.y === sp.y && lp.planet_index === sp.planet_index)) {
                     launchPoints.push({ x: sp.x, y: sp.y, planet_index: sp.planet_index });
                 }
@@ -1341,24 +1387,21 @@ async function handleMessage(message) {
         });
 
         if (ghostLines.length === 0) {
+            if (unknownRadar.length) return message.reply(`⚠️ Incomplete ghost forecast: radar is unknown for ${unknownRadar.length} of ${alliancePlayers.length} members of [${tag}]. No threats could be calculated from the known data. Use \`!vision ${sysId} ${tag}\` for the full roster and missing intel.`);
             return message.reply(`🟢 Safe sector check: No members of [${tag}] hold active radar vision over system #${sysId}. No ghosts possible.`);
         }
 
         // Sort dynamically by closest potential threat arrivals first
         ghostLines.sort((a, b) => a.minVal - b.minVal);
 
-        let reportStr = "";
-        ghostLines.forEach((g, idx) => {
-            reportStr += `**${idx + 1}. ${g.name}**: shortest \`${g.minStr}\`, longest \`${g.maxStr}\`\n`;
-        });
-
-        const embed = new EmbedBuilder()
-            .setTitle(`👻 Stealth Ghost Trajectory Matrix: [${tag}]`)
-            .setDescription(`Possible pre-capture incoming tracking windows for **Planet #${planetNum}** in system **${targetSys.name || 'Unknown'} [${sysId}]**:\n\n${reportStr}`)
-            .setColor('#4b5563') // Tactical slate-gray
-            .setFooter({ text: 'Calculated using server vector configurations.' });
-
-        return message.reply({ embeds: [embed] });
+        const reportLines = ghostLines.map((g, idx) => `**${idx + 1}. ${g.name}**: shortest \`${g.minStr}\`, longest \`${g.maxStr}\``);
+        const pages = buildRadarPages(
+            `👻 Stealth Ghost Trajectory Matrix: [${tag}]`,
+            `Possible pre-capture incoming tracking windows for **Planet #${planetNum}** in system **${String(targetSys.name || 'Unknown').slice(0, 160)} [${sysId}]**.${unknownRadar.length ? `\n⚠️ Radar unknown for ${unknownRadar.length} of ${alliancePlayers.length} members. Use \`!vision ${sysId} ${tag}\` for the full roster.` : ''}`,
+            [{ name: '👻 Possible arrivals', lines: reportLines }, { name: '❓ Unknown radar', lines: unknownRadar }]
+        );
+        for (const embed of pages) await message.reply({ embeds: [embed.setColor('#4b5563')], allowedMentions: { parse: [], repliedUser: false } });
+        return;
     }
 
     // ----------------------------------------------------
@@ -1928,6 +1971,6 @@ module.exports = {
     replyToIncoming, updateIncomingCover,
     // Exported for the tests: these are the pieces with real logic in them, and they run
     // without a Discord connection.
-    handleTimer, checkDueTimers, handleLink, parseTimerInput, slashToPrefix, registerSlashCommands,
+    handleTimer, checkDueTimers, handleLink, parseTimerInput, slashToPrefix, registerSlashCommands, handleMessage, interactionAsMessage,
     SYSTEM_OPTION_NAMES,
 };

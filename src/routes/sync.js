@@ -268,6 +268,13 @@ router.post('/sync/player', requireAuth, (req, res) => {
 
     console.log(`\n[API] Incoming profile sync for Player ID: ${p.id} (${p.name}) [Has Intel: ${p.has_intel || 0}]`);
 
+    // A hidden/missing Origin is no observation. Keep the last recorded system below,
+    // unless a login-counter reset establishes that the old origin belongs to an old
+    // account. Do not coerce booleans, partial numbers or fractions into system ids.
+    const originValue = typeof p.origin_system === 'string' && /^\s*\d+\s*$/.test(p.origin_system)
+        ? Number(p.origin_system) : p.origin_system;
+    const observedOrigin = Number.isSafeInteger(originValue) && originValue > 0 ? originValue : null;
+
     const safePlayer = {
         id: p.id,
         name: p.name || null,
@@ -276,7 +283,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
         country: p.country || null,
         local_time: p.local_time || null,
         idle_time: p.idle_time || null,
-        origin_system: p.origin_system || null,
+        origin_system: observedOrigin,
         level: p.level || 0,
         ranking: p.ranking || null,
         points: p.points || 0,
@@ -330,14 +337,10 @@ router.post('/sync/player', requireAuth, (req, res) => {
         // profile heuristic was what corrupted 1200+ rows and spammed Discord. This block
         // only resets a genuinely-restarted player's own stale profile stats.
         //
-        // Two signals mark a real restart, matching how the game actually behaves:
-        //   • Origin moved between two VISIBLE coordinates. A restart relocates the home
-        //     system, but a fog-of-war scan that just can't see Origin leaves it null — so
-        //     require BOTH old and new origin to be real systems (>0) and different. Never
-        //     N/A -> value or value -> N/A (those are visibility changes, not restarts).
-        //   • Logins collapsed. The login counter only ever climbs, so a large drop (e.g.
-        //     500 -> 2) can only be a fresh account. Require a big relative fall from a
-        //     meaningful base, so ordinary parser jitter (500 -> 498) never counts.
+        // A changed origin alone is not enough evidence to delete fleet intel: a single
+        // incorrect profile link used to trigger this destructive path (issue #164).
+        // Retain the independent login-counter signal: require a large relative fall
+        // from a meaningful base, so ordinary jitter (500 -> 498) never counts.
         // Points are deliberately NOT a signal: players lose points normally when their
         // planets get pop-killed, so a points crash does not imply a restart.
         const originChanged = oldPlayer
@@ -348,11 +351,18 @@ router.post('/sync/player', requireAuth, (req, res) => {
             && oldPlayer.logins >= 10 && player.logins > 0
             && player.logins < oldPlayer.logins * 0.5;
 
-        if (originChanged || loginsReset) {
-            console.log(`[SYSTEM] Player ${player.id} restart detected (${originChanged ? 'origin moved' : 'logins reset'}); resetting stale profile stats.`);
+        if (loginsReset) {
+            console.log(`[SYSTEM] Player ${player.id} restart detected (logins reset${originChanged ? ', origin moved' : ''}); resetting stale profile stats.`);
 
             fleetsRepo.deleteFleetsByOwner(player.id);
             playersRepo.resetPlayerOnRestart(player.id);
+        } else {
+            if (player.origin_system === null && oldPlayer && Number.isSafeInteger(oldPlayer.origin_system) && oldPlayer.origin_system > 0) {
+                player.origin_system = oldPlayer.origin_system;
+            }
+            if (originChanged) {
+                console.log(`[SYSTEM] Player ${player.id} origin changed ${oldPlayer.origin_system} -> ${player.origin_system} without a login reset; keeping recorded fleet intel.`);
+            }
         }
 
         if (player.alliance_id) {
