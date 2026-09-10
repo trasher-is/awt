@@ -42,36 +42,43 @@ game session cookie, attached by the proxy; the client adds no auth of its own.
 
 ## The rate budget — stated precisely
 
-The `/api/v1` stream is capped **globally** at `GAME_API_MAX_PER_SECOND` (default 5):
-every member, every feature, one shared bucket. `apiGate` is a `gameTrafficGate` instance
-whose key collapses everyone into a single bucket and which counts every `/api/v1`
-request, marker or not. The browser-side gate in `AWGameRate.gameFetch` is the first line;
-the server gate is the floor.
+The `/api/v1` stream is capped **per account** on two dimensions: `GAME_API_MAX_PER_SECOND`
+(default 5) and `GAME_API_MAX_PER_5MIN` (default 200), each measured against the
+individual member whose game session the request carries — not pooled across the hub.
+(An earlier version of this document, and of the code, described the per-second figure as
+one global bucket shared by everyone combined. That was a mistake, corrected once —
+`apiGate` now keys per-account, the same as the pre-existing scraper gate `gameGate`.)
+`apiGate` counts every `/api/v1` request toward the per-second figure, marker or not; a
+second middleware, `apiAccountWindowCeiling`, separately tracks the 5-minute figure using
+the same fixed-window limiter `proxyCeiling` uses below it in the chain. The browser-side
+gate in `AWGameRate.gameFetch` is the first line; the server gates are the floor.
 
-Be precise about what that does **not** say: it is *not* "the hub never sends the game
-more than 5 requests per second overall". The pre-existing scraper gate (`gameGate`) is
-per-member and counts only marker-tagged requests, so scraped traffic, API traffic and
-plain page loads combined can exceed 5/s once two or more members are active. That
-behaviour predates the API work and is outside its scope. Do not restate this budget as a
-stronger guarantee than the code enforces.
+Because both ceilings are per-account, two members active at once each get their own
+budget — the hub's aggregate capacity scales with how many members are online, it is not
+capped at one shared 5/s regardless of headcount.
 
-The default of 5 is an agreement with the game's administrator, not a tuning knob. Raising
-`GAME_API_MAX_PER_SECOND` requires their renewed consent — the env var exists for
-deployment, not for code review.
+The defaults are an agreement with the game's administrator, not a tuning knob. Raising
+either `GAME_API_MAX_PER_SECOND` or `GAME_API_MAX_PER_5MIN` requires their renewed
+consent — the env vars exist for deployment, not for code review.
 
 ## Environment variables
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `GAME_API_MAX_PER_SECOND` | `5` | Global `/api/v1` budget for the whole hub combined; `0` disables the gate |
-| `GAME_API_MAX_WAIT_MS` | `8000` | How long a queued request may wait at the limit before it answers 429 |
+| `GAME_API_MAX_PER_SECOND` | `5` | Per-account `/api/v1` requests/second; `0` disables the gate |
+| `GAME_API_MAX_WAIT_MS` | `8000` | How long a queued request may wait at the per-second limit before it answers 429 |
+| `GAME_API_MAX_PER_5MIN` | `200` | Per-account `/api/v1` requests per 5-minute window; `0` disables the gate. Fails closed (429) immediately, no queue |
 
-Both are documented in [.env.example](../.env.example) next to the older per-member pair
+All three are documented in [.env.example](../.env.example) next to the older per-member pair
 (`GAME_MAX_PER_SECOND`, `GAME_MAX_WAIT_MS`) and the loose per-member ceiling `PROXY_MAX` —
-three limiters, three different jobs.
+four limiters now, four different jobs.
 
-Admins can watch the gate live: `GET /hub-api/admin/api-traffic` returns `apiGate`'s
-snapshot, the sibling of `/hub-api/admin/game-traffic` for the scraper gate.
+Admins can watch the per-second gate live: `GET /hub-api/admin/api-traffic` returns
+`apiGate`'s snapshot, the sibling of `/hub-api/admin/game-traffic` for the scraper gate.
+`apiAccountWindowCeiling` (the 5-minute figure) has no equivalent snapshot endpoint yet —
+it's built on the same plain `rateLimit()` helper `proxyCeiling` uses, which doesn't
+expose one. A 429 from it is visible in the response itself and in access logs, just not
+in a live admin dashboard.
 
 ## The client
 

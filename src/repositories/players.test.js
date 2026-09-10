@@ -216,58 +216,62 @@ ok('getStalePlayerIdsForApiScan returns players never scanned, in some order',
     stale.includes(701) && stale.includes(702) && stale.includes(703), stale);
 
 players.markPlayersApiScanned([702, 703]);
-// Finding 5b: the staleness floor means a player scanned within the last 6 hours is
-// EXCLUDED from the queue entirely now, not merely ordered after — the sweep should go
-// idle once everyone is fresh instead of burning budget re-scanning them forever.
-const staleAfterMark = players.getStalePlayerIdsForApiScan(10);
-ok('a player scanned less than 6 hours ago is excluded from the stale queue',
-    !staleAfterMark.includes(702) && !staleAfterMark.includes(703), staleAfterMark);
-ok('a never-scanned player is still included', staleAfterMark.includes(701), staleAfterMark);
+// No staleness floor any more (see the function's own comment in players.js): a claim
+// hands out the whole roster continuously, oldest scan first, with nothing EXCLUDED just
+// because it was already scanned recently.
+const staleAfterMark = players.getStalePlayerIdsForApiScan(10000);
+ok('a player scanned moments ago is still included in the queue, not excluded',
+    staleAfterMark.includes(702) && staleAfterMark.includes(703), staleAfterMark);
+const idxOf = id => staleAfterMark.indexOf(id);
+ok('a never-scanned player sorts before ones that have been scanned',
+    idxOf(701) < idxOf(702) && idxOf(701) < idxOf(703), staleAfterMark);
 
 db.prepare(`UPDATE players SET last_api_scan_at = datetime('now', '-7 hours') WHERE id = 702`).run();
-const staleAfterBackdate = players.getStalePlayerIdsForApiScan(10);
-ok('a player scanned more than 6 hours ago re-enters the stale queue',
-    staleAfterBackdate.includes(702), staleAfterBackdate);
-ok('a player scanned less than 6 hours ago still stays excluded',
-    !staleAfterBackdate.includes(703), staleAfterBackdate);
+const afterBackdate = players.getStalePlayerIdsForApiScan(10000);
+ok('the player scanned longest ago (702, backdated) now sorts ahead of the one scanned moments ago (703)',
+    afterBackdate.indexOf(702) < afterBackdate.indexOf(703), afterBackdate);
 
-// Issue #155: a player who was ACTIVE around their last scan is re-scanned after 1 hour, not
-// 6 — their last_activity_at is the only thing that moves the idle display, and a 6-hour-old
-// snapshot showed actively-playing members as idle. Long-idle players keep the 6-hour floor.
+// Issue #155's activity-aware staleness tiering still exists — it now only feeds the
+// "fresh/stale" status line (getPlayerApiScanStats), not queue membership, since the
+// queue itself no longer excludes anyone. A player who was ACTIVE around their last scan
+// counts as stale again after 1 hour, not 6 — their last_activity_at is the only thing
+// that moves the idle display, and a 6-hour-old snapshot showed actively-playing members
+// as idle. Long-idle players keep the 6-hour floor.
 const isoAgo = h => new Date(Date.now() - h * 3600000).toISOString().replace(/\.\d{3}Z$/, '.0000000+00:00'); // the API's own shape
 players.upsertPlayerBasic(704, 'InPlay', null);
 players.upsertPlayerBasic(705, 'LongIdle', null);
 players.upsertPlayerBasic(706, 'InPlayFresh', null);
 players.upsertPlayerBasic(707, 'InPlayOffset', null);
+// A freshly-inserted row's last_api_scan_at is NULL, which the predicate already counts
+// as stale — mark all four scanned right now first so each "before" snapshot below starts
+// from a genuine not-stale baseline, and only the deliberate backdate below flips it.
+players.markPlayersApiScanned([704, 705, 706, 707]);
+const staleCountNow = () => players.getPlayerApiScanStats().stale;
 // 704: scanned 2 h ago, was active 3 h ago (1 h before the scan) -> in play -> stale after 1 h
+const before704 = staleCountNow();
 db.prepare(`UPDATE players SET last_api_scan_at = datetime('now', '-2 hours'), last_activity_at = ? WHERE id = 704`).run(isoAgo(3));
+ok('an in-play player scanned 2 h ago IS stale (1 h tier)', staleCountNow() === before704 + 1, staleCountNow());
 // 705: scanned 2 h ago, last active 3 days ago -> long idle -> keeps the 6 h floor -> fresh
+const before705 = staleCountNow();
 db.prepare(`UPDATE players SET last_api_scan_at = datetime('now', '-2 hours'), last_activity_at = ? WHERE id = 705`).run(isoAgo(72));
+ok('a long-idle player scanned 2 h ago is NOT stale (6 h floor unchanged)', staleCountNow() === before705, staleCountNow());
 // 706: scanned 30 min ago, active 1 h ago -> in play but inside the 1 h floor -> fresh
+const before706 = staleCountNow();
 db.prepare(`UPDATE players SET last_api_scan_at = datetime('now', '-30 minutes'), last_activity_at = ? WHERE id = 706`).run(isoAgo(1));
+ok('an in-play player scanned 30 min ago is not stale yet (inside the 1 h tier)', staleCountNow() === before706, staleCountNow());
 // 707: like 704 but the activity stamp carries a +02:00 offset (what the API really sends)
+const before707 = staleCountNow();
 db.prepare(`UPDATE players SET last_api_scan_at = datetime('now', '-2 hours'), last_activity_at = ? WHERE id = 707`)
     .run(new Date(Date.now() - 3 * 3600000 + 2 * 3600000).toISOString().replace(/\.\d{3}Z$/, '.1083087+02:00'));
-const tiered = players.getStalePlayerIdsForApiScan(100000);
-ok('an in-play player scanned 2 h ago IS stale (1 h tier)', tiered.includes(704), tiered);
-ok('a long-idle player scanned 2 h ago is NOT stale (6 h floor unchanged)', !tiered.includes(705), tiered);
-ok('an in-play player scanned 30 min ago is not stale yet (inside the 1 h tier)', !tiered.includes(706), tiered);
-ok('an offset-stamped activity time is parsed, not compared as text: the +02:00 in-play player is stale too', tiered.includes(707), tiered);
+ok('an offset-stamped activity time is parsed, not compared as text: the +02:00 in-play player is stale too', staleCountNow() === before707 + 1, staleCountNow());
+const before705Redo = staleCountNow();
 db.prepare(`UPDATE players SET last_api_scan_at = datetime('now', '-7 hours') WHERE id = 705`).run();
-ok('the long-idle player re-enters the queue after 6 h like before', players.getStalePlayerIdsForApiScan(100000).includes(705));
+ok('the long-idle player counts as stale again after 6 h like before', staleCountNow() === before705Redo + 1, staleCountNow());
 
 // --- getPlayerApiScanStats: the Deep scan button's status line ---
-// At this point: 701 has has_intel written but was never marked scanned (last_api_scan_at
-// still NULL from upsertPlayerFromApiDetail, which never touches it — only
-// markPlayersApiScanned does) -> stale. 702 was backdated to 7h ago -> stale again. 703 is
-// still within the 6h fresh window -> not stale. Every OTHER player row created earlier in
-// this suite also counts toward total, so this only asserts the stale count and the shape,
-// not an exact total.
 const scanStats = players.getPlayerApiScanStats();
 ok('getPlayerApiScanStats returns a total at least as large as the rows just created',
     scanStats.total >= 3, scanStats);
-ok('getPlayerApiScanStats stale count agrees with getStalePlayerIdsForApiScan for a large limit',
-    scanStats.stale === players.getStalePlayerIdsForApiScan(100000).length, scanStats);
 ok('getPlayerApiScanStats last_scan_at reflects the most recent markPlayersApiScanned call',
     scanStats.last_scan_at != null, scanStats);
 

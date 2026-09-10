@@ -116,3 +116,53 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
 
     return { ok: true, systemsIndexed: indexPayload.length, alliancesIndexed: alliancePayload.length, systemsProcessed, planetsProcessed };
 }
+
+// Automatic background seeding — same pattern as player-api-sync.js: a localStorage lock
+// for cross-tab dedup, a plain setInterval, silent (no onProgress consumer). Previously
+// this whole function only ran from a manual button click, so "how fresh is the galaxy"
+// depended entirely on someone remembering to press it. This makes that the default
+// instead of the exception, using the same spare game-API headroom the player sweep does
+// (ONE Map/sectors call per run — everything after that is POSTs to this hub's own
+// server, not the game, so it costs nothing against the agreed budget).
+//
+// IMPORTANT — what this does NOT fix: the game's own Map/sectors response only reports
+// live data for systems currently isInVision (see the isInVision/vision_uncertain
+// handling above and capture-freshness.js). Running this every few minutes instead of
+// once a day makes IN-VISION systems as current as possible; it cannot pull fresh data
+// for systems nobody has vision on right now — no amount of re-asking changes what the
+// game is willing to say about them. Getting THOSE current still needs either real vision
+// (scouting/holding territory) or a member's browser physically visiting that system's
+// page (spy.js's live DOM scrape, see issue #168 for the fuller writeup).
+const AUTO_SEED_LOCK_KEY = 'awt.galaxyAutoSeed.lock.v1';
+const AUTO_SEED_LOCK_TTL_MS = 4 * 60 * 1000; // shorter than AUTO_SEED_INTERVAL_MS
+const AUTO_SEED_INTERVAL_MS = 5 * 60 * 1000;
+
+function claimAutoSeedLock() {
+    try {
+        const raw = localStorage.getItem(AUTO_SEED_LOCK_KEY);
+        const now = Date.now();
+        if (raw && now - parseInt(raw, 10) < AUTO_SEED_LOCK_TTL_MS) return false;
+        localStorage.setItem(AUTO_SEED_LOCK_KEY, String(now));
+        return true;
+    } catch (err) {
+        return true; // no localStorage — degrade to "always run", same as player-api-sync.js
+    }
+}
+
+async function runAutoSeedTick() {
+    if (!claimAutoSeedLock()) return;
+    try {
+        const result = await seedGalaxyFromApi();
+        if (!result.ok) console.warn('[GalaxyAutoSeed] tick failed:', result.error);
+    } catch (err) {
+        console.warn('[GalaxyAutoSeed] tick failed:', err.message);
+    }
+}
+
+let started = false;
+export function startAutoGalaxySeed() {
+    if (started) return;
+    started = true;
+    runAutoSeedTick();
+    setInterval(runAutoSeedTick, AUTO_SEED_INTERVAL_MS);
+}

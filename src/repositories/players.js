@@ -732,13 +732,11 @@ function upsertPlayerFromApiDetail(player) {
 // idle display is "now - last_activity_at" at render time. A player who logs in and plays
 // AFTER their sweep therefore reads as idle for up to 6 hours (plus queue time) while they
 // are visibly active. A player whose last known activity was within 24 h of their scan is
-// "in play" and goes stale after 1 hour instead, bounding that error to about an hour;
-// long-idle players keep the 6-hour floor. Budget: at 15 claims a minute the whole roster
-// takes ~10 minutes, so re-scanning even every active player hourly stays far inside the
-// sweep's share of the agreed API budget — the batch size and tick rate are unchanged.
+// "in play" and goes stale after 1 hour instead; long-idle players keep the 6-hour floor.
 // datetime(last_activity_at) parses the API's offset-ISO stamp ("...T...+02:00") correctly;
 // an unparseable value makes the comparison NULL and the player falls back to the 6-hour
-// rule.
+// rule. Used only for the "fresh/stale" status line now (see below) — the claim query
+// itself no longer filters on this, see getStalePlayerIdsForApiScanStmt's own comment.
 const API_SCAN_STALE_SQL = `(
     last_api_scan_at IS NULL
     OR last_api_scan_at < datetime('now', '-6 hours')
@@ -746,9 +744,17 @@ const API_SCAN_STALE_SQL = `(
         AND datetime(last_activity_at) >= datetime(last_api_scan_at, '-24 hours'))
 )`;
 
+// No staleness floor: every claim just hands out the LEAST recently scanned players,
+// oldest (or never-scanned) first, forever — a continuous round-robin over the whole
+// roster rather than "skip anyone already fresh enough." There used to be a 6h/1h cutoff
+// here that stopped the sweep once everyone had been touched recently, on the theory that
+// re-scanning unchanged data wasted the agreed game API budget. In practice, one browser's
+// sweep is bounded by its OWN account's budget (5 req/s and 200 calls/5min, PER ACCOUNT —
+// see docs/game-api.md), and the sweep's own pace (player-api-sync.js's SWEEP_BATCH_SIZE)
+// already stays well inside that, so the right lever for "don't overspend the budget" is
+// that batch size, not an extra gate here that mostly just left the roster stale for hours.
 const getStalePlayerIdsForApiScanStmt = db.prepare(`
     SELECT id FROM players
-    WHERE ${API_SCAN_STALE_SQL}
     ORDER BY (last_api_scan_at IS NULL) DESC, last_api_scan_at ASC
     LIMIT ?
 `);
@@ -764,10 +770,10 @@ function markPlayersApiScanned(ids) {
     db.prepare(`UPDATE players SET last_api_scan_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`).run(...ids);
 }
 
-// Feeds the "Deep scan" button's status line — total roster size, how many are still
-// stale by the SAME predicate getStalePlayerIdsForApiScan uses (so the count on screen
-// never disagrees with what a claim would actually hand out), and when the most recent
-// claim of any size last touched a row.
+// Feeds the "Deep scan" button's status line — total roster size, how many haven't been
+// scanned within API_SCAN_STALE_SQL's window (informational now — a claim will happily
+// hand out a "fresh" id too, see getStalePlayerIdsForApiScanStmt above), and when the
+// most recent claim of any size last touched a row.
 const getPlayerApiScanStatsStmt = db.prepare(`
     SELECT
         (SELECT COUNT(*) FROM players) as total,
