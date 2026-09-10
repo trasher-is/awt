@@ -73,12 +73,15 @@ All three are documented in [.env.example](../.env.example) next to the older pe
 (`GAME_MAX_PER_SECOND`, `GAME_MAX_WAIT_MS`) and the loose per-member ceiling `PROXY_MAX` —
 four limiters now, four different jobs.
 
-Admins can watch the per-second gate live: `GET /hub-api/admin/api-traffic` returns
-`apiGate`'s snapshot, the sibling of `/hub-api/admin/game-traffic` for the scraper gate.
-`apiAccountWindowCeiling` (the 5-minute figure) has no equivalent snapshot endpoint yet —
-it's built on the same plain `rateLimit()` helper `proxyCeiling` uses, which doesn't
-expose one. A 429 from it is visible in the response itself and in access logs, just not
-in a live admin dashboard.
+Admins can watch both halves live at the same endpoint: `GET /hub-api/admin/api-traffic`
+returns `{ gate: apiGate.snapshot(), accountWindow: apiAccountWindowCeiling.snapshot() }`
+— `rate-limit.js`'s `rateLimit()` helper (also used by `proxyCeiling`) now exposes a
+`snapshot()` in the same `{admitted, rejected, limit, buckets}` shape `gameTrafficGate`
+does, so either kind of limiter can be read the same way. A rejection from
+`apiAccountWindowCeiling` also logs a `[GameAPI] ... hit the 5-minute per-account budget`
+line via `console.warn` — this used to be silent, which is exactly what made the first
+real occurrence (some Deep Scan calls failing with no visible cause) a guess instead of a
+diagnosis.
 
 ## The client
 
