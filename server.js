@@ -269,6 +269,12 @@ const apiAccountWindowCeiling = rateLimit({
     max: process.env.GAME_API_MAX_PER_5MIN === undefined ? 200 : Number(process.env.GAME_API_MAX_PER_5MIN),
     message: 'This account has used its share of the game API budget for the last few minutes. Try again shortly.',
     keyOf: req => (req.session && req.session.userId ? `u${req.session.userId}` : null),
+    // Unlike login/webhook/proxyCeiling's routine 429s, a rejection HERE means one
+    // account's own combined automatic-plus-manual traffic tripped the agreed per-account
+    // budget — worth a line in the logs so "why did some of my deep scan fail?" has an
+    // answer instead of a guess (this went unlogged and unexplained the first time it
+    // happened in production).
+    onReject: (key) => console.warn(`[GameAPI] ${key} hit the 5-minute per-account budget (${process.env.GAME_API_MAX_PER_5MIN === undefined ? 200 : Number(process.env.GAME_API_MAX_PER_5MIN)}/5min) — request rejected`),
 });
 
 // Read-only view of what the gate has been doing — for the admin panel, and for the day
@@ -279,10 +285,12 @@ app.get('/hub-api/admin/game-traffic', (req, res) => {
     res.json({ success: true, gate: gameGate.snapshot() });
 });
 
-// Sibling read-only view for the global API budget above — same reason, same audience.
+// Sibling read-only view for the per-account API budget above — same reason, same
+// audience. Both halves of the promise (5/s and 200/5min) share this one endpoint since
+// they're two views of the same agreement, not two unrelated things.
 app.get('/hub-api/admin/api-traffic', (req, res) => {
     if (!req.session || req.session.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-    res.json({ success: true, gate: apiGate.snapshot() });
+    res.json({ success: true, gate: apiGate.snapshot(), accountWindow: apiAccountWindowCeiling.snapshot() });
 });
 
 app.use('/hub-api', apiRoutes);

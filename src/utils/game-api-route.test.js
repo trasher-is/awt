@@ -139,13 +139,21 @@ function runWindow(limiter, { userId, ip = '10.0.0.1' } = {}) {
     console.log('\n── server.js: apiAccountWindowCeiling enforces the 5-minute figure, per account ' + '─'.repeat(3));
     const winIdx = server.indexOf('const apiAccountWindowCeiling = rateLimit(');
     ok('apiAccountWindowCeiling exists', winIdx !== -1);
-    const winBlock = server.slice(winIdx, winIdx + 500);
+    const winBlock = server.slice(winIdx, winIdx + 1100);
     ok('it uses a 5-minute window', /windowMs:\s*5\s*\*\s*60\s*\*\s*1000/.test(winBlock), winBlock);
     ok('GAME_API_MAX_PER_5MIN uses the === undefined idiom with default 200',
         winBlock.includes(`process.env.GAME_API_MAX_PER_5MIN === undefined ? 200 : Number(process.env.GAME_API_MAX_PER_5MIN)`),
         winBlock);
     ok('it keys per account (session userId), not globally',
         /keyOf:\s*req\s*=>\s*\(req\.session/.test(winBlock), winBlock);
+    // A rejection here used to be completely silent (no log anywhere) — the incident that
+    // prompted adding this: some Deep Scan calls failed in production with no visible
+    // cause. onReject closes that gap for THIS limiter specifically (unlike login/webhook/
+    // proxyCeiling's routine, unlogged 429s).
+    ok('a rejection here is logged (onReject wired), unlike the routine limiters',
+        /onReject:[\s\S]{0,300}console\.warn/.test(winBlock), winBlock);
+    ok('the log line identifies the account and the 5-minute budget',
+        /GameAPI[\s\S]{0,150}5-minute per-account budget/.test(winBlock), winBlock);
 
     // The number is a promise to a person. The comment must say so — this one assertion
     // reads the RAW file, because readCode strips the very thing it checks.
@@ -157,11 +165,13 @@ function runWindow(limiter, { userId, ip = '10.0.0.1' } = {}) {
     ok('and names the number it promises', /(five|5)\s+requests? per second/i.test(preamble), preamble.slice(-300));
     ok('and names the 5-minute figure too', /200/.test(preamble) && /5.minute/i.test(preamble), preamble.slice(-500));
 
-    console.log('\n── server.js: the admin can see what the per-second gate is doing ' + '─'.repeat(9));
+    console.log('\n── server.js: the admin can see BOTH halves of the budget ' + '─'.repeat(15));
     ok('there is a dedicated api-traffic snapshot endpoint',
         /app\.get\('\/hub-api\/admin\/api-traffic'/.test(server));
-    ok('it answers with apiGate.snapshot()',
+    ok('it answers with apiGate.snapshot() (the per-second half)',
         /api-traffic'[\s\S]{0,300}apiGate\.snapshot\(\)/.test(server));
+    ok('and apiAccountWindowCeiling.snapshot() (the 5-minute half), same endpoint',
+        /api-traffic'[\s\S]{0,400}apiAccountWindowCeiling\.snapshot\(\)/.test(server));
     ok('the existing game-traffic endpoint is untouched',
         /app\.get\('\/hub-api\/admin\/game-traffic'/.test(server)
         && /game-traffic'[\s\S]{0,300}gameGate\.snapshot\(\)/.test(server));

@@ -13,8 +13,15 @@
 // because several alliance members behind one home connection share an address and must
 // not throttle each other, while one member with four tabs open is still one member.
 
-function rateLimit({ windowMs, max, message = 'Too many requests. Please slow down.', keyOf = null }) {
+// `onReject(key, req)` is an optional hook fired every time a request is actually turned
+// away (not on every admitted request) — for a limiter whose 429s are routine and expected
+// (login, webhook, the loose proxy ceiling), leave it unset; wiring one up is how a
+// specific limiter earns a line in the logs instead of failing silently like every
+// rateLimit instance did before (a real gap: apiAccountWindowCeiling's 429s were
+// previously invisible anywhere — see AGENTS.md/docs/game-api.md's per-account budget).
+function rateLimit({ windowMs, max, message = 'Too many requests. Please slow down.', keyOf = null, onReject = null }) {
     const buckets = new Map(); // key -> { count, resetAt }
+    const counters = { admitted: 0, rejected: 0 };
 
     // Drop expired buckets so the map cannot grow unbounded from one-off IPs.
     // unref() keeps this timer from holding the process open during shutdown.
@@ -25,7 +32,7 @@ function rateLimit({ windowMs, max, message = 'Too many requests. Please slow do
         }
     }, windowMs).unref();
 
-    return function rateLimitMiddleware(req, res, next) {
+    const middleware = function rateLimitMiddleware(req, res, next) {
         if (!(max > 0)) return next(); // max=0 disables the limiter via config
 
         const key = (keyOf ? keyOf(req) : req.ip) || req.socket.remoteAddress || 'unknown';
@@ -40,13 +47,22 @@ function rateLimit({ windowMs, max, message = 'Too many requests. Please slow do
         bucket.count += 1;
 
         if (bucket.count > max) {
+            counters.rejected++;
+            if (onReject) onReject(key, req);
             const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
             res.setHeader('Retry-After', String(retryAfter));
             return res.status(429).json({ error: message, retryAfter });
         }
 
+        counters.admitted++;
         return next();
     };
+
+    // Same shape as gameTrafficGate's snapshot() (limit/buckets/admitted/rejected) so an
+    // admin endpoint can show either kind of limiter without special-casing which it is.
+    middleware.snapshot = () => ({ ...counters, limit: max, buckets: buckets.size });
+
+    return middleware;
 }
 
 module.exports = { rateLimit };
