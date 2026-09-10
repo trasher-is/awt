@@ -1060,12 +1060,24 @@ export async function initProfilePLGrowth() {
     }
 }
 
+// A .race-summary/.ir-summary table can also appear embedded inside a pinned Player
+// Note's expanded body (a member pasting an old intel snapshot into a note, e.g. one
+// titled "IR") — confirmed live on player 144's profile: a note by an alliance member
+// contained a real <table class="table ir-summary mb-0">, so a document-wide selector
+// wrongly concluded the game was showing this player's CURRENT intel and suppressed our
+// fallback card entirely, even though the actual top-of-page layout had none. Note bodies
+// render inside a `.overflow-auto` scroll container that the game's live top-of-page
+// intel tables are never part of, so exclude matches found there.
+function isGenuineLiveIntelTable(el) {
+    return !el.closest('.overflow-auto');
+}
+
 // Hub-tracked additions to a player's profile page: an always-shown login-time heatmap
 // ("Activity Log" — Hub-tracked, independent of intel), and, only when the game itself is
-// NOT currently showing live intel (no .race-summary/.ir-summary table on the page — either
-// never scanned or the scan has expired), a "last known" fallback built from whatever the
-// Hub last captured. When the game IS showing live intel, that block is skipped entirely —
-// duplicating what the player can already see would just be clutter.
+// NOT currently showing live intel (no genuine .race-summary/.ir-summary table on the
+// page — either never scanned or the scan has expired), a "last known" fallback built
+// from whatever the Hub last captured. When the game IS showing live intel, that block is
+// skipped entirely — duplicating what the player can already see would just be clutter.
 //
 // Also hides the "Astro Wars Supporter" promo rows unconditionally (unrelated to intel).
 export async function initProfileHubIntel() {
@@ -1096,7 +1108,8 @@ export async function initProfileHubIntel() {
     if (!data || !data.success || !data.player) return;
     const p = data.player;
 
-    const hasLiveIntel = !!document.querySelector('.race-summary, .ir-summary');
+    const hasLiveIntel = [...document.querySelectorAll('.race-summary, .ir-summary')]
+        .some(isGenuineLiveIntelTable);
 
     const wrap = document.createElement('div');
     wrap.className = 'col-12';
