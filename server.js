@@ -240,18 +240,35 @@ const proxyCeiling = rateLimit({
 
 // --- GAME API BUDGET ---
 // The game's administration has agreed to programmatic use of the production REST API
-// (the /api/v1 paths) under a hard ceiling of FIVE requests per second for the whole hub
-// combined — every member, every feature, one shared budget. That is why keyOf collapses
-// everyone into a single bucket and isAutomated counts every request, marker or not
-// (gameGate above is per-member and marker-only; this is a different promise). The
-// ceiling is deploy-configurable, but its default stays 5 and raising
-// GAME_API_MAX_PER_SECOND requires the game administrator's renewed consent — it is an
-// agreement with a person, not a tuning knob.
+// (the /api/v1 paths) under a PER-ACCOUNT ceiling: five requests per second, AND no more
+// than 200 requests in any 5-minute window, each measured against the individual member
+// whose game session is being used — not pooled across the hub. (An earlier draft of this
+// code treated the 5/s figure as one global bucket for everyone combined; that was wrong,
+// corrected here to match gameGate below, which was already per-member. The 200/5min
+// figure was never enforced anywhere before this either — see apiAccountWindowCeiling.)
+// isAutomated counts every request, marker or not, unlike gameGate's marker-only scrape
+// gate — different promise, same reasoning: the party bound by the agreement is the
+// member's account, and nothing here should be gameable by skipping a marker.
+// Both ceilings are deploy-configurable, but their defaults (5/s, 200/5min) stay put —
+// raising either requires the game administrator's renewed consent, not a tuning knob.
 const apiGate = gameTrafficGate({
-    keyOf: () => 'global',
     isAutomated: () => true,
     maxPerSecond: process.env.GAME_API_MAX_PER_SECOND === undefined ? 5 : Number(process.env.GAME_API_MAX_PER_SECOND),
     maxWaitMs: process.env.GAME_API_MAX_WAIT_MS === undefined ? 8000 : Number(process.env.GAME_API_MAX_WAIT_MS),
+});
+
+// The second, longer-window half of the same per-account promise: even spread out slowly
+// enough to never trip the 5/s gate above, a single account still must not exceed 200
+// calls in 5 minutes. A fixed window (not sliding) is fine here — rate-limit.js already
+// implements exactly this shape for proxyCeiling below, so reuse it rather than teaching
+// gameTrafficGate a second window size. Unlike apiGate this one actually fails closed
+// (429) rather than queuing: an account already over its 5-minute budget has nothing to
+// gain by waiting a few seconds, so there's no point holding the connection open.
+const apiAccountWindowCeiling = rateLimit({
+    windowMs: 5 * 60 * 1000,
+    max: process.env.GAME_API_MAX_PER_5MIN === undefined ? 200 : Number(process.env.GAME_API_MAX_PER_5MIN),
+    message: 'This account has used its share of the game API budget for the last few minutes. Try again shortly.',
+    keyOf: req => (req.session && req.session.userId ? `u${req.session.userId}` : null),
 });
 
 // Read-only view of what the gate has been doing — for the admin panel, and for the day
@@ -305,8 +322,9 @@ app.use((req, res, next) => {
     if (!isGameApiPath(req)) return next();
     requireAuth(req, res, () =>
         proxyCeiling(req, res, () =>
-            apiGate(req, res, () =>
-                proxyMiddleware(req, res, next))));
+            apiAccountWindowCeiling(req, res, () =>
+                apiGate(req, res, () =>
+                    proxyMiddleware(req, res, next)))));
 });
 
 // External game-notification webhook (no session auth — called by the in-game forwarder).

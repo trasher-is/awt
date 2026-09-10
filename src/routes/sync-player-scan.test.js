@@ -1,11 +1,14 @@
 // Route-level coverage for the player API-scan claim/status pair added alongside the
-// "Deep scan" button (2026-08-30): /sync/player-scan-claim hands out stale player ids and
-// bumps last_api_scan_at (an optimistic claim, not a reservation — see that route's own
-// comment), and /sync/player-scan-status is its read-only counterpart that feeds the
-// button's status line. This test exists mainly to confirm the two never disagree: the
-// stale count status reports must always match what a claim of the same size would
-// actually hand out, since a status line that lied about "how many left" would be worse
-// than no status line at all.
+// "Deep scan" button (2026-08-30): /sync/player-scan-claim hands out player ids,
+// least-recently-scanned first, and bumps last_api_scan_at (an optimistic claim, not a
+// reservation — see that route's own comment); /sync/player-scan-status is its read-only
+// counterpart that feeds the button's status line. The claim used to exclude anyone
+// already "fresh" (scanned inside a 6h/1h floor); it no longer does — every claim just
+// hands out the whole roster in least-recently-scanned order, forever, so freshness is
+// bounded by the sweep's own pace, not a floor that leaves it idle for hours. Status still
+// reports a genuine "how many haven't been scanned recently" count for the UI, from the
+// same underlying predicate — but the two are independent now, not a matched pair: a
+// claim can (and, once the roster is small, will) hand out ids status doesn't call stale.
 //
 // Run with: node src/routes/sync-player-scan.test.js
 
@@ -80,19 +83,21 @@ function request(server, method, urlPath) {
 
         const statusAfter = await request(server, 'GET', '/hub-api/sync/player-scan-status');
         ok('status total unchanged by a claim', statusAfter.body.total === 3, statusAfter.body);
-        ok('status stale count dropped by exactly the number claimed — status and claim never disagree',
+        ok('status stale count drops by the number just scanned (a fresh scan is never stale)',
             statusAfter.body.stale === 3 - claimRes.body.ids.length, statusAfter.body);
         ok('status now reports a non-null last_scan_at (the claim just bumped one)',
             statusAfter.body.last_scan_at != null, statusAfter.body);
 
-        console.log('\n── a second claim picks up the remaining stale id, not the just-claimed ones ' + '─'.repeat(2));
+        console.log('\n── a second claim re-includes the just-claimed ids too — no staleness floor any more ' + '─'.repeat(2));
+        const neverScannedId = [801, 802, 803].find(id => !claimRes.body.ids.includes(id));
         const claimRes2 = await request(server, 'POST', '/hub-api/sync/player-scan-claim?limit=10');
-        ok('second claim only gets the 1 still-stale id, not all 3 again', claimRes2.body.ids.length === 1, claimRes2.body);
-        ok('the still-stale id is the one NOT in the first claim',
-            !claimRes.body.ids.includes(claimRes2.body.ids[0]), { first: claimRes.body.ids, second: claimRes2.body.ids });
+        ok('a second claim hands out all 3 ids again, not just the still-stale one — nothing is excluded for being fresh',
+            claimRes2.body.ids.length === 3, claimRes2.body);
+        ok('the never-scanned id still sorts first (least-recently-scanned first ordering)',
+            claimRes2.body.ids[0] === neverScannedId, { expected: neverScannedId, got: claimRes2.body.ids });
 
         const statusFinal = await request(server, 'GET', '/hub-api/sync/player-scan-status');
-        ok('status stale count reaches 0 once every player has been claimed', statusFinal.body.stale === 0, statusFinal.body);
+        ok('status stale count reaches 0 once every player has a recent scan timestamp', statusFinal.body.stale === 0, statusFinal.body);
     } finally {
         server.close();
     }

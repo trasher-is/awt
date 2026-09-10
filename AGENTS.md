@@ -69,14 +69,16 @@ Programmatic use of production **has been agreed** with the game's administratio
 resolves what issue #24 was blocking on — under conditions that bind exactly like the rate
 limit above:
 
-- **One global budget for the whole hub combined.** Every member, every feature, one
-  bucket: `GAME_API_MAX_PER_SECOND`, default 5, enforced by `apiGate` in `server.js`. The
-  env var exists for deployment, not for tuning — raising it requires the administrator's
-  **renewed consent, not a code review**. Be precise about what this caps: the `/api/v1`
-  stream, globally. It is *not* a promise that the hub overall never exceeds 5 req/s — the
-  scraper gate is per-member and marker-only, so scraped traffic, API traffic and page
-  loads combined can pass 5/s with several active members. That is pre-existing behaviour,
-  unchanged by the agreement.
+- **A per-account budget, on two dimensions.** Every member's own game session gets its
+  own allowance, not a bucket shared across the hub: `GAME_API_MAX_PER_SECOND` (default 5)
+  enforced by `apiGate`, and `GAME_API_MAX_PER_5MIN` (default 200) enforced separately by
+  `apiAccountWindowCeiling`, both in `server.js`. The env vars exist for deployment, not
+  for tuning — raising either requires the administrator's **renewed consent, not a code
+  review**. (`apiGate` originally keyed everyone into one global bucket instead of
+  per-account, and the 5-minute figure went unenforced entirely — both fixed together;
+  see docs/game-api.md for the full history.) Two members active at once each draw from
+  their own budget, so the hub's real aggregate capacity scales with how many members are
+  online.
 - **A member's own session through the proxy is the only sanctioned path.** Requests are
   same-origin `/api/v1/...` from a logged-in member's browser; the proxy forwards their
   own game session and counts the request against the budget on the way. The server never

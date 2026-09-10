@@ -103,8 +103,9 @@ window.addEventListener('DOMContentLoaded', () => {
         .then(({ initBattleSync }) => initBattleSync())
         .catch(err => console.warn('[BattleSync] failed to start:', err));
 
-    // Background player API sync (ListPlayer roster refresh + staleness-ordered Player/{id}
-    // detail sweep). Same on-demand-load pattern as battle-sync above.
+    // Background player API sync (ListPlayer roster refresh + continuous, least-recently-
+    // scanned-first Player/{id} detail sweep — no staleness floor any more). Same
+    // on-demand-load pattern as battle-sync above.
     import('./player-api-sync.js')
         .then(({ initPlayerApiSync }) => initPlayerApiSync())
         .catch(err => console.warn('[PlayerApiSync] failed to start:', err));
@@ -114,6 +115,13 @@ window.addEventListener('DOMContentLoaded', () => {
     import('./battle-report-detail-sync.js')
         .then(({ initBattleReportDetailSync }) => initBattleReportDetailSync())
         .catch(err => console.warn('[BattleReportDetailSync] failed to start:', err));
+
+    // Background galaxy/system seed (was manual-button-only — see api-galaxy-seed.js's
+    // startAutoGalaxySeed for what this does and does not fix). Same on-demand-load
+    // pattern as the other background sync modules above.
+    import('../scrapers/api-galaxy-seed.js')
+        .then(({ startAutoGalaxySeed }) => startAutoGalaxySeed())
+        .catch(err => console.warn('[GalaxyAutoSeed] failed to start:', err));
 });
 
 // --- CORE UI CONTROLS ---

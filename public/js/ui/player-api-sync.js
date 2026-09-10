@@ -4,19 +4,25 @@
 //   1. ListPlayer pull: the full active-roster list, cheap (one API call), kept fresh.
 //      Cadence decays with round age — frequent early (most members join in the first two
 //      weeks, not day one, waiting for a better starting location), relaxed later.
-//   2. Player/{id} sweep: a slow, staleness-ordered background scan filling in the
-//      activity/status fields ListPlayer doesn't have. Claims a batch via
+//   2. Player/{id} sweep: a continuous, least-recently-scanned-first background scan
+//      filling in the activity/status fields ListPlayer doesn't have. Claims a batch via
 //      /hub-api/sync/player-scan-claim (see that route's comment for what "claim" means
-//      here), then calls Player/{id} once per claimed id. There is no rolling per-account
-//      budget constant — SWEEP_BATCH_SIZE simply caps how many ids a single tick claims
-//      (15 calls, once a minute, well under the game admin's 200-calls-per-5-minutes
-//      limit), leaving the rest of that allowance for a member's own deliberate lookups
-//      elsewhere in the hub. A re-entrancy flag (`sweeping`) keeps a slow tick from
-//      overlapping the next scheduled one; the staleness query itself also floors out once
-//      every player was scanned recently (6 hours; 1 hour for a player who was active
-//      around their last scan — issue #155, see players.js's API_SCAN_STALE_SQL), so a
-//      fully-caught-up roster lets the sweep go idle instead of burning calls re-scanning
-//      fields that haven't changed.
+//      here), then calls Player/{id} once per claimed id. There is no per-round staleness
+//      floor any more (removed alongside players.js's getStalePlayerIdsForApiScanStmt) —
+//      the sweep just keeps cycling the whole roster forever, oldest scan first, so
+//      "freshest possible, all the time" is the actual goal rather than "good enough, then
+//      go idle." SWEEP_BATCH_SIZE is what actually bounds real traffic. The agreed ceiling
+//      is PER ACCOUNT, not pooled across the hub (see docs/game-api.md and AGENTS.md's
+//      "Production game API: agreed, with boundaries") — 5 req/s AND 200 requests/5min,
+//      each measured against the one member whose session this browser is using. At
+//      20/min this sweep alone spends 100 of that account's 200-per-5min budget, leaving
+//      the other half free for that same member's own deliberate lookups (search, travel
+//      calc, a manual deep scan) happening in the same window — going higher would start
+//      eating into that headroom rather than spending slack that was sitting unused,
+//      since the two draw from the SAME per-account pool, not separate ones. Neither
+//      ceiling is a tuning knob — raising either needs the game admin's renewed consent,
+//      not a code change. A re-entrancy flag (`sweeping`) keeps a slow tick from
+//      overlapping the next scheduled one.
 //
 // Cross-tab dedup follows battle-sync.js's localStorage-lock pattern exactly.
 
@@ -35,8 +41,8 @@ const SWEEP_LOCK_KEY = 'awt.playerSweepSync.lock.v1';
 const SWEEP_LOCK_TTL_MS = 50 * 1000; // shorter than the 60s sweep interval
 const SWEEP_INTERVAL_MS = 60 * 1000;
 // Hardcoded for this landing — see this plan's Global Constraints re: not wiring this to
-// app_settings yet. Tune here directly if the 150-of-200 split needs adjusting.
-const SWEEP_BATCH_SIZE = 15; // 15 calls/minute ≈ well under the 150-of-200-per-5-min reserve
+// app_settings yet. Tune here directly if the real budget usage needs adjusting.
+const SWEEP_BATCH_SIZE = 20; // 20 calls/minute — see the per-account budget math in the file header above
 
 function claimLock(key, ttlMs) {
     try {
