@@ -10,6 +10,7 @@ const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
 const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
 const { previousNames, findByFormerName } = require('../utils/round-archive');
+const { friendlyAllianceTags } = require('../utils/friendly-alliance-tags');
 const { truePowerForAllianceRow } = require('../utils/true-power');
 const settingsRepo = require('../repositories/settings');
 const systemClaimsRepo = require('../repositories/systemClaims');
@@ -299,11 +300,25 @@ router.get('/intel/fleets_db', requireAuth, (req, res) => {
     }
 });
 
-// --- GET ACTIVE ALLIANCE MEMBERS (From app_users) ---
+// --- GET ACTIVE ALLIANCE MEMBERS (From app_users), plus friendly alliance tags ---
+// `members` (hub-registered game names) is what it always was — spy.js's fallback for
+// resolving a name when no alliance tag is visible in the DOM (e.g. an "Allied Transit"
+// row with no [TAG] link next to it). `allied_tags` is new: the SAME own-alliance +
+// admin-configured-allies definition routes.js's travel halving already uses (see
+// friendly-alliance-tags.js). Real alliance members never register a hub account at all
+// (confirmed live, 2026-09-11: BaldWithABeard, a RAID member with full game-synced intel
+// but no app_users row) — `members` alone silently excludes them from every "is this
+// player my ally" check, which is exactly what made spy.js's "Allied Siege by X" pill fall
+// back to a bare "Ally" for a real ally it could plainly see. Tag-based matching, when the
+// DOM row has a tag link to check, doesn't have that gap: every alliance member shares it.
 router.get('/intel/members', requireAuth, (req, res) => {
     try {
         const members = usersRepo.getActiveMemberNames();
-        res.json({ success: true, members: members.map(m => m.game_name) });
+        res.json({
+            success: true,
+            members: members.map(m => m.game_name),
+            allied_tags: [...friendlyAllianceTags()],
+        });
     } catch (err) {
         console.error("[DB Error] Failed to fetch members:", err);
         res.status(500).json({ error: 'Failed to fetch members' });

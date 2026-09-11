@@ -11,7 +11,11 @@ export function initSpy() {
     let knownSysIdsCache = null;
     let alliedSysIdsCache = null;
     let alliedPlayerNamesCache = new Set();
-    let isFetchingSystems = false;
+    // Own-alliance + admin-configured-allied tags (see friendly-alliance-tags.js server
+    // side) — matching by tag catches every real alliance member, unlike
+    // alliedPlayerNamesCache's hub-registered-accounts-only list. Populated alongside it.
+    let alliedTagsCache = new Set();
+    let systemsReadyPromise = null;
     let simulatedSystemId = null;
     let lastScrapedUrl = null;
 
@@ -83,9 +87,25 @@ export function initSpy() {
         return null;
     }
 
-    async function injectMapIndicators() {
-        if (knownSysIdsCache === null && !isFetchingSystems) {
-            isFetchingSystems = true;
+    // Real bug, confirmed live (2026-09-11): the OWNER of alliedPlayerNamesCache is this
+    // fetch, running in the game iframe's own realm; the "Allied Siege by X" name
+    // resolution below runs from a SEPARATE, independently-timed data flow (the
+    // INJECT_TACTICAL_OVERLAYS handler, fed by the wrapper realm's own fetch in
+    // ui/system-intel.js). Nothing ever ordered the two — whichever finished first won —
+    // so on a slow run the overlay handler read alliedPlayerNamesCache while it was still
+    // the empty Set the module starts with, every isAlly check failed, and the pill fell
+    // back to the generic "Ally"/"Enemy" placeholder instead of the real name. The old
+    // `isFetchingSystems === null && !isFetchingSystems` guard made this worse: a second
+    // caller arriving WHILE the first fetch was still in flight fell through to `return`
+    // immediately (isFetchingSystems was already true) rather than actually waiting for
+    // it. This promise is the fix: every caller — the original runViewHooks() pass AND
+    // the tactical-overlay handler — awaits the exact same in-flight (or already-settled)
+    // fetch, so alliedPlayerNamesCache is always populated before anything reads it,
+    // regardless of which caller happened to run first.
+    function ensureSystemsAndAlliesLoaded() {
+        if (knownSysIdsCache !== null) return Promise.resolve();
+        if (systemsReadyPromise) return systemsReadyPromise;
+        systemsReadyPromise = (async () => {
             try {
                 const [sysRes, plnRes, fltRes, memRes] = await Promise.all([
                     fetch('/hub-api/intel/systems_db'),
@@ -101,6 +121,7 @@ export function initSpy() {
 
                 if (memData.success) {
                     alliedPlayerNamesCache = new Set(memData.members.map(m => m.toLowerCase()));
+                    alliedTagsCache = new Set((memData.allied_tags || []).map(t => t.toUpperCase()));
                 }
 
                 if (sysData.success) {
@@ -135,9 +156,12 @@ export function initSpy() {
                 knownSysIdsCache = new Set();
                 alliedSysIdsCache = new Set();
             }
-            isFetchingSystems = false;
-        }
+        })();
+        return systemsReadyPromise;
+    }
 
+    async function injectMapIndicators() {
+        await ensureSystemsAndAlliesLoaded();
         if (!knownSysIdsCache) return;
 
         // --- MAP NODE ASSET INDICATOR INJECTION BLOCK ---
@@ -558,13 +582,21 @@ export function initSpy() {
     // First pass for the view we loaded into.
     runViewHooks();
 
-    window.addEventListener('message', (event) => {
+    window.addEventListener('message', async (event) => {
         if (event.origin !== window.location.origin) return;
         const data = event.data;
 
         if (data.type === 'INJECT_TACTICAL_OVERLAYS') {
-            const { plans, planets: apiPlanets } = data.payload; 
-            
+            // Fed by a completely separate, independently-timed fetch (the wrapper
+            // realm's ui/system-intel.js) than the one that populates
+            // alliedPlayerNamesCache (this realm's own injectMapIndicators). Without
+            // this, a fast overlay payload could arrive before that fetch resolves and
+            // every isAlly check below would silently fail — see
+            // ensureSystemsAndAlliesLoaded's comment for the live incident this fixed.
+            await ensureSystemsAndAlliesLoaded();
+
+            const { plans, planets: apiPlanets } = data.payload;
+
             // Clear out indicators and legacy components cleanly to avoid duplication
             document.querySelectorAll('.aw-hub-indicator, .awt-persistent-pill').forEach(el => el.remove());
             document.querySelectorAll('#solarSystem tr').forEach(row => { row.style.borderLeft = ''; });
@@ -590,9 +622,12 @@ export function initSpy() {
                 const planetIndex = parseInt(firstCell.innerText.trim(), 10);
                 if (isNaN(planetIndex)) return;
 
-                const ownerLink = row.querySelectorAll('td')[3]?.querySelector('a[href^="/Game/Players/Profile/"]');
+                const ownerCell = row.querySelectorAll('td')[3];
+                const ownerLink = ownerCell?.querySelector('a[href^="/Game/Players/Profile/"]');
                 const rowPlayerName = ownerLink ? ownerLink.innerText.trim().toLowerCase() : null;
-                const isAlliedPlanet = rowPlayerName && alliedPlayerNamesCache.has(rowPlayerName);
+                const ownerTagLink = ownerCell?.querySelector('a[href^="/Game/Alliance/Profile/"]');
+                const isAlliedPlanet = !!(ownerTagLink && alliedTagsCache.has(ownerTagLink.innerText.trim().toUpperCase()))
+                    || !!(rowPlayerName && alliedPlayerNamesCache.has(rowPlayerName));
 
                 const isSieged = row.classList.contains('siege');
                 const isFriendlySiege = row.classList.contains('friendly-siege');
@@ -662,7 +697,15 @@ export function initSpy() {
                         const pLink = r.querySelector('a[href^="/Game/Players/Profile/"]');
                         if (pLink) {
                             const parsedName = pLink.innerText.trim();
-                            const isAlly = alliedPlayerNamesCache.has(parsedName.toLowerCase());
+                            // Tag match first: it catches every real alliance member (the
+                            // row's own [TAG] link, right next to the name), not just the
+                            // ones who happen to have a hub account — see
+                            // alliedTagsCache's own comment for the live gap this closed.
+                            // Name match stays as a fallback for a row with no tag link at
+                            // all (e.g. some Incoming/Transit rows render bare names).
+                            const allyTagLink = r.querySelector('a[href^="/Game/Alliance/Profile/"]');
+                            const isAllyByTag = !!allyTagLink && alliedTagsCache.has(allyTagLink.innerText.trim().toUpperCase());
+                            const isAlly = isAllyByTag || alliedPlayerNamesCache.has(parsedName.toLowerCase());
 
                             if (r.classList.contains('siege')) {
                                 if (isAlly) actualSiegerName = parsedName;

@@ -5,9 +5,7 @@ const { calcTravelSeconds, formatTime } = require('../utils/travel-calc');
 const { postEmbed, defuseMentions } = require('../utils/discord-post');
 const systemsRepo = require('../repositories/systems');
 const routingRepo = require('../repositories/routing');
-const alliancesRepo = require('../repositories/alliances');
-const playersRepo = require('../repositories/players');
-const settingsRepo = require('../repositories/settings');
+const { friendlyAllianceTags } = require('../utils/friendly-alliance-tags');
 const { parseSqliteUtc } = require('../../public/js/utils/sqlite-time');
 
 const router = express.Router();
@@ -168,19 +166,11 @@ function bioNeededFor(distance) {
     return Math.ceil(distance);
 }
 
-// Issue #147: which alliance tags count as "friendly" for the automatic halving rule —
-// our own alliance (derived the same way the Galaxy Archive's own-tag detection works: via
-// app-linked members' current alliance) plus whatever's configured in Admin -> Alliance
-// Relations (the allied list from issue #114). A route to a planet owned by either gets the
-// alliance/own-destination travel-time halving automatically, without the member having to
-// know and manually tick a box.
-function friendlyAllianceTags() {
-    const memberIds = alliancesRepo.getAllianceMemberStatIds().map(r => r.player_id);
-    const ownTag = (playersRepo.getAllianceTagForMembers(memberIds) || {}).tag || null;
-    const tags = new Set(settingsRepo.getTagListSetting('alliance_relations_allied'));
-    if (ownTag) tags.add(String(ownTag).toUpperCase());
-    return tags;
-}
+// Issue #147: friendlyAllianceTags (which alliance tags count as "friendly" for the
+// automatic halving rule) now lives in src/utils/friendly-alliance-tags.js, shared with
+// intel.js's ally-name resolution — see that file's own comment for why. A route to a
+// planet owned by either gets the alliance/own-destination travel-time halving
+// automatically, without the member having to know and manually tick a box.
 
 function loadSystems(ids) {
     if (!ids.length) return new Map();
