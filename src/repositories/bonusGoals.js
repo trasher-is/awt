@@ -1,14 +1,22 @@
 // Generic "extra points" engine feeding battlePoints.js's !glory leaderboard — see
 // database.js's bonus_goals/bonus_goal_awards/ranking_snapshot_rows comment for the
 // secrecy reasoning (generic code + DB-only config, since the repo is public but the
-// database is not). Two goal `type`s implemented so far:
-//   'ranking_match' — award tiered points when a member's battle lands on a planet
-//                     currently placed in some in-game ranking page (which page, which
-//                     tiers, is purely config, never named here).
-//   'random_target' — pick a random planet somewhere in the galaxy on an irregular
+// database is not). Goal `type`s implemented so far:
+//   'ranking_match'  — award tiered points when a member's battle lands on a planet
+//                      currently placed in some in-game ranking page (which page, which
+//                      tiers, is purely config, never named here).
+//   'random_target'  — pick a random planet somewhere in the galaxy on an irregular
 //                      schedule; first real hit on it (by anyone in scope) wins a flat
 //                      point award. No client scrape needed — the target comes from data
 //                      the hub already has, so scheduling and picking both run server-side.
+//   'stat_milestone' — first player anywhere to reach a configured science/economy stat
+//                      threshold wins a flat point award for that specific milestone —
+//                      "first past the post" enforced the exact same way as
+//                      random_target's claim (an UNIQUE(goal_id, source_key) row), just
+//                      keyed by stat+threshold instead of a planet. No new table at all:
+//                      it rides the existing player-detail sync (which already refreshes
+//                      these stats continuously — see player-api-sync.js's background
+//                      sweep), evaluated every time a sync delivers validated intel.
 // Later phases add more types under this same table without touching this file's shape.
 
 const crypto = require('crypto');
@@ -221,6 +229,49 @@ function evaluateBattleReportForGoals(reportId) {
     return awarded;
 }
 
+// --- stat_milestone: first player anywhere to cross a configured threshold ---
+
+const STAT_MILESTONE_FIELDS = new Set(['biology', 'economy', 'energy', 'mathematics', 'physics', 'social']);
+const playerStatsForMilestonesStmt = db.prepare(`
+    SELECT id, name, biology, economy, energy, mathematics, physics, social FROM players WHERE id = ?
+`);
+
+// Called whenever a player-detail sync delivers validated intel for these fields (see
+// sync.js's /sync/player-detail — only when has_intel resolves to 1, since that's the only
+// time these columns are guaranteed fresh this sync, not just whatever they already were).
+// No "old value < threshold <= new value" transition check is needed: source_key alone
+// (goal_id + stat + threshold, no player in it) is what makes a milestone one-time — once
+// insertAwardStmt's UNIQUE constraint has a row for it, every later check for that exact
+// milestone is simply ignored, first past the post, regardless of whose sync triggers it.
+function evaluatePlayerStatsForGoals(playerId) {
+    const player = playerStatsForMilestonesStmt.get(playerId);
+    if (!player) return [];
+
+    const awarded = [];
+    for (const goal of listEnabledGoalsByType('stat_milestone')) {
+        const milestones = Array.isArray(goal.config.milestones) ? goal.config.milestones : [];
+        for (const m of milestones) {
+            if (!m || !STAT_MILESTONE_FIELDS.has(m.stat)) continue;
+            const threshold = Number(m.threshold);
+            const points = Number(m.points);
+            if (!Number.isFinite(threshold) || !(points > 0)) continue;
+            const value = Number(player[m.stat]);
+            if (!Number.isFinite(value) || value < threshold) continue;
+
+            const result = insertAwardStmt.run({
+                goal_id: goal.id,
+                player_id: player.id,
+                player_name: player.name,
+                points,
+                source_key: `milestone:${m.stat}:${threshold}`,
+                detail: JSON.stringify({ stat: m.stat, threshold, value }),
+            });
+            if (result.changes > 0) awarded.push({ goal_id: goal.id, points, stat: m.stat, threshold });
+        }
+    }
+    return awarded;
+}
+
 // --- random_target: scheduling + picking ---
 
 function dateKeyFor(date) {
@@ -392,4 +443,5 @@ module.exports = {
     listRecentAwards, getAwardedPointsByPlayer,
     pickRandomTargetPlanet, getActiveTarget, getActiveTargetsForDisplay,
     ensureTodayRolled, maybeActivateRandomTarget,
+    evaluatePlayerStatsForGoals,
 };

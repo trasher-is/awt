@@ -263,6 +263,44 @@ const day2Activation = bonusGoals.maybeActivateRandomTarget(targetGoal.id, targe
 ok('day 2 rolls a fresh target — the only eligible planet (HostilePlanet) can be re-picked',
     day2Activation && day2Activation.system_id === 800 && day2Activation.planet_index === 3, day2Activation);
 
+console.log('\n── evaluatePlayerStatsForGoals: first past the post on a stat threshold ' + '─'.repeat(2));
+const milestoneGoal = bonusGoals.createGoal({
+    type: 'stat_milestone', name: 'milestone test',
+    config: {
+        milestones: [
+            { stat: 'energy', threshold: 40, points: 30 },
+            { stat: 'energy', threshold: 45, points: 50 },
+            { stat: 'biology', threshold: 25, points: 10 },
+        ],
+    },
+    enabled: true,
+});
+
+db.prepare(`INSERT INTO players (id, name, energy, biology) VALUES (950, 'Scientist', 42, 20)`).run();
+const firstEval = bonusGoals.evaluatePlayerStatsForGoals(950);
+ok('energy 42 crosses the 40 threshold but not 45 — one award, not two',
+    firstEval.length === 1 && firstEval[0].points === 30 && firstEval[0].threshold === 40, firstEval);
+ok('biology 20 does not reach its 25 threshold — no award for that milestone', !firstEval.some(a => a.stat === 'biology'), firstEval);
+
+const reEval = bonusGoals.evaluatePlayerStatsForGoals(950);
+ok('re-evaluating the SAME player again awards nothing new (already claimed)', reEval.length === 0, reEval);
+
+db.prepare(`INSERT INTO players (id, name, energy, biology) VALUES (951, 'LateArrival', 46, 20)`).run();
+const secondPlayerEval = bonusGoals.evaluatePlayerStatsForGoals(951);
+ok('a second player who ALSO already qualifies for the 40 milestone gets nothing — first past the post already claimed it',
+    !secondPlayerEval.some(a => a.threshold === 40), secondPlayerEval);
+ok('but the SAME second player still wins the 45 milestone nobody has reached yet',
+    secondPlayerEval.some(a => a.threshold === 45 && a.points === 50), secondPlayerEval);
+
+const milestoneAwards = bonusGoals.getAwardedPointsByPlayer(null, 'all');
+ok('Scientist (950) is credited 30 pts total from the milestone goal',
+    milestoneAwards.get(950)?.bonus_points === 30, milestoneAwards);
+ok('LateArrival (951) is credited 50 pts total from the milestone goal',
+    milestoneAwards.get(951)?.bonus_points === 50, milestoneAwards);
+
+const nonexistentPlayerEval = bonusGoals.evaluatePlayerStatsForGoals(999999);
+ok('evaluating a nonexistent player id is a no-op, not a crash', Array.isArray(nonexistentPlayerEval) && nonexistentPlayerEval.length === 0);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

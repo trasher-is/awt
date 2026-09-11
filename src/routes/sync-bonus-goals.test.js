@@ -138,6 +138,39 @@ function request(server, method, urlPath, body) {
         db.prepare(`UPDATE bonus_goal_active_targets SET claimed_award_id = ? WHERE goal_id = ?`).run(award.id, targetGoal.id);
         const afterClaim = await request(server, 'GET', '/hub-api/sync/bonus-goals/active-target');
         ok('a claimed target no longer appears', !afterClaim.body.targets.some(t => t.system_id === 700 && t.planet_index === 1), afterClaim.body);
+
+        console.log('\n── player-detail sync triggers stat_milestone evaluation once validated intel arrives ' + '─'.repeat(2));
+        const milestoneGoal = bonusGoalsRepo.createGoal({
+            type: 'stat_milestone', name: 'route milestone test',
+            config: { milestones: [{ stat: 'energy', threshold: 40, points: 30 }] },
+            enabled: true,
+        });
+
+        // A COMPLETE intel payload — every field hasCompleteIntel checks must be a real
+        // number (including every race_* one) for has_intel to actually resolve to 1;
+        // otherwise the sync would silently demote it to 0 and never touch the stat
+        // columns at all, so the milestone check would have nothing fresh to evaluate.
+        const detailPayload = {
+            player: {
+                id: 850, name: 'Scientist850', alliance_id: null, level: 5, points: 100,
+                ranking: null, country: null, is_active_player: 1, joined: null,
+                logins: null, last_activity_at: null, last_login_at: null, resigned_at: null,
+                number_of_battles: null, battle_luckiness: null, multi_status: null,
+                is_top_permanent_ranker: 0, has_supporter_badge: 0, supporter_type: null,
+                has_intel: 1,
+                biology: 10, economy: 10, energy: 42, mathematics: 10, physics: 10,
+                social: 10, trade_revenue: 10, artefact: null,
+                race_growth: 5, race_science: 5, race_culture: 5, race_production: 5,
+                race_speed: 5, race_attack: 5, race_defense: 5, race_trader: 5, race_sul: 5,
+            },
+        };
+        const detailRes = await request(server, 'POST', '/hub-api/sync/player-detail', detailPayload);
+        ok('player-detail sync itself still succeeds', detailRes.status === 200 && detailRes.body.success, detailRes.body);
+
+        const milestoneAward = db.prepare(`SELECT * FROM bonus_goal_awards WHERE goal_id = ? AND source_key = ?`)
+            .get(milestoneGoal.id, 'milestone:energy:40');
+        ok('the player-detail sync triggered milestone evaluation and credited the threshold (30 pts)',
+            milestoneAward && milestoneAward.player_id === 850 && milestoneAward.points === 30, milestoneAward);
     } finally {
         server.close();
     }
