@@ -343,6 +343,27 @@ db.prepare(`INSERT INTO players (id, name) VALUES (900, 'DropOwner900')`).run();
 db.prepare(`INSERT INTO planets (system_id, planet_index, owner_id) VALUES (900, 9, 900)`).run();
 db.prepare(`INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp) VALUES (900, 9, 2, 8, 1, '2026-09-01T09:00:00Z')`).run();
 
+// 9800: attacker won, brought 150 CV and lost 100 of it (att_lost_cv above) -> 50 left.
+db.prepare(`UPDATE battle_reports SET att_has_won = 1, att_combat_value = 150, att_survived_cv = 50, def_combat_value = 30, def_survived_cv = 10 WHERE id = 9800`).run();
+// 9801: defender won, brought 40 CV and lost 2 of it -> 38 left.
+db.prepare(`UPDATE battle_reports SET def_has_won = 1, def_combat_value = 40, def_survived_cv = 38, att_combat_value = 10, att_survived_cv = 7 WHERE id = 9801`).run();
+// 9802: neither side flagged as winner (has_won left NULL on both) — genuinely undecided.
+
+const byId = (rows, id) => rows.find(r => r.battle_report_id === id);
+const withWinners = battleReports.searchBattleReportsFeed({ limit: 200 }).rows.filter(r => r.system_id === 900);
+ok('an attacker win reports winner_side "att"', byId(withWinners, 9800).winner_side === 'att', byId(withWinners, 9800));
+ok('the winning attacker\'s committed/survived CV are both exposed',
+    byId(withWinners, 9800).attacker_combat_value === 150 && byId(withWinners, 9800).attacker_survived_cv === 50, byId(withWinners, 9800));
+ok('the losing defender\'s own committed/survived CV are still exposed (not hidden just for losing)',
+    byId(withWinners, 9800).defender_combat_value === 30 && byId(withWinners, 9800).defender_survived_cv === 10, byId(withWinners, 9800));
+ok('a defender win reports winner_side "def"', byId(withWinners, 9801).winner_side === 'def', byId(withWinners, 9801));
+ok('a report with neither side flagged as won has winner_side null (genuinely undecided)',
+    byId(withWinners, 9802).winner_side === null, byId(withWinners, 9802));
+ok('a bare pop-drop row has winner_side null and no per-side CV at all',
+    withWinners.find(r => r.battle_report_id === null).winner_side === null
+    && withWinners.find(r => r.battle_report_id === null).attacker_combat_value === null,
+    withWinners.find(r => r.battle_report_id === null));
+
 const byCvDesc = battleReports.searchBattleReportsFeed({ sort: 'cv', dir: 'desc', limit: 200 }).rows.filter(r => r.system_id === 900);
 ok('sort by CV desc: the 100+20 CV battle leads', byCvDesc[0].battle_report_id === 9800 && byCvDesc[0].total_cv_lost === 120, byCvDesc);
 ok('the 3+2 CV battle is second', byCvDesc[1].battle_report_id === 9801 && byCvDesc[1].total_cv_lost === 5, byCvDesc);

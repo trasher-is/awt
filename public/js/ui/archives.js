@@ -436,6 +436,22 @@ function updateSortArrows() {
     });
 }
 
+// One side's cell: name (bold if this side won the battle) plus its own committed CV —
+// shown as "committed → left" for the winner specifically (how much of what they brought
+// is still standing), or just the committed amount for the loser/an undecided report. A
+// bare population-drop row has no side data at all (combatValue is null), so the CV line
+// is omitted entirely rather than showing a misleading "— CV".
+function battleSideCell(name, tag, combatValue, survivedCv, isWinner) {
+    if (!name) return '<span class="text-muted-foreground">—</span>';
+    const label = `${tag ? `[${esc(tag)}] ` : ''}${esc(name)}`;
+    const nameHtml = isWinner ? `<strong>${label}</strong>` : label;
+    if (combatValue == null) return nameHtml;
+    const cvLine = isWinner && survivedCv != null
+        ? `${combatValue.toLocaleString()} → ${survivedCv.toLocaleString()} left`
+        : `${combatValue.toLocaleString()} CV`;
+    return `${nameHtml}<div class="text-xs text-muted-foreground font-mono">${cvLine}</div>`;
+}
+
 function renderBattleReportsTable(feed, total) {
     const body = document.getElementById('battle-reports-table-body');
     const countEl = document.getElementById('battle-reports-result-count');
@@ -452,12 +468,10 @@ function renderBattleReportsTable(feed, total) {
     body.innerHTML = feed.map(row => {
         const when = formatSqliteUtc(row.occurred_at, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         const systemLabel = row.system_name ? `${esc(row.system_name)} [${row.system_id}] #${row.planet_index}` : `#${row.system_id}/${row.planet_index}`;
-        const attacker = row.attacker_name
-            ? `${row.attacker_alliance_tag ? `[${esc(row.attacker_alliance_tag)}] ` : ''}${esc(row.attacker_name)}`
-            : '<span class="text-muted-foreground">—</span>';
-        const defender = row.defender_name
-            ? `${row.defender_alliance_tag ? `[${esc(row.defender_alliance_tag)}] ` : ''}${esc(row.defender_name)}`
-            : '<span class="text-muted-foreground">—</span>';
+        const attacker = battleSideCell(row.attacker_name, row.attacker_alliance_tag,
+            row.attacker_combat_value, row.attacker_survived_cv, row.winner_side === 'att');
+        const defender = battleSideCell(row.defender_name, row.defender_alliance_tag,
+            row.defender_combat_value, row.defender_survived_cv, row.winner_side === 'def');
         // 0 is a real value (a battle where nothing was actually lost, or a bare pop-drop
         // row with no CV at all) — shown as-is rather than masked as "no data".
         const cv = row.total_cv_lost != null ? row.total_cv_lost.toLocaleString() : '<span class="text-muted-foreground">—</span>';

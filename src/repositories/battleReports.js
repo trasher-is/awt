@@ -344,8 +344,10 @@ const SEARCH_FETCH_CAP = 5000;
 const battleReportsSearchStmt = db.prepare(`
     SELECT br.id AS battle_report_id, datetime(br.started_at) AS occurred_at,
            br.system_id, br.planet_index, s.name AS system_name,
-           br.att_player_name, br.att_alliance_tag,
-           br.def_player_name, br.def_alliance_tag,
+           br.att_player_name, br.att_alliance_tag, br.att_has_won,
+           br.att_combat_value, br.att_survived_cv,
+           br.def_player_name, br.def_alliance_tag, br.def_has_won,
+           br.def_combat_value, br.def_survived_cv,
            br.killed_population, br.winner,
            (COALESCE(br.att_lost_cv, 0) + COALESCE(br.def_lost_cv, 0)) AS total_cv_lost
     FROM battle_reports br
@@ -391,7 +393,14 @@ function searchBattleReportsFeed({ q = '', sort = 'occurred_at', dir = 'desc', l
         battle_report_id: row.battle_report_id,
         system_id: row.system_id, planet_index: row.planet_index, system_name: row.system_name,
         attacker_name: row.att_player_name, attacker_alliance_tag: row.att_alliance_tag,
+        attacker_combat_value: row.att_combat_value, attacker_survived_cv: row.att_survived_cv,
         defender_name: row.def_player_name, defender_alliance_tag: row.def_alliance_tag,
+        defender_combat_value: row.def_combat_value, defender_survived_cv: row.def_survived_cv,
+        // Same precedence formatBattleEmbed uses: att_has_won/def_has_won are the real
+        // signal when the API sent one; `winner` (a free-text name) is a fallback for a
+        // report that never resolved a boolean side, and isn't itself trustworthy enough
+        // to bold a specific column — a battle with neither is genuinely undecided.
+        winner_side: row.att_has_won === 1 ? 'att' : row.def_has_won === 1 ? 'def' : null,
         killed_population: row.killed_population, winner: row.winner,
         total_cv_lost: row.total_cv_lost,
         old_population: null, new_population: null,
@@ -406,7 +415,10 @@ function searchBattleReportsFeed({ q = '', sort = 'occurred_at', dir = 'desc', l
             battle_report_id: null,
             system_id: row.system_id, planet_index: row.planet_index, system_name: row.system_name,
             attacker_name: null, attacker_alliance_tag: null,
+            attacker_combat_value: null, attacker_survived_cv: null,
             defender_name: row.owner_name, defender_alliance_tag: null,
+            defender_combat_value: null, defender_survived_cv: null,
+            winner_side: null,
             killed_population: (row.old_population != null && row.new_population != null)
                 ? row.old_population - row.new_population : null,
             winner: null,
