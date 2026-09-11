@@ -1135,6 +1135,19 @@ router.post('/sync/bonus-goals/ranking-snapshot', requireAuth, (req, res) => {
     }
 });
 
+// --- BONUS GOALS: active random_target (feeds the map marker / in-system highlight) ---
+// Unlike everything else about a goal's config, the active target's LOCATION is meant to
+// be visible to every member — the whole point is a race to find it first — so this is a
+// plain requireAuth route, not behind the admin token gate (see secretOps.js).
+router.get('/sync/bonus-goals/active-target', requireAuth, (req, res) => {
+    try {
+        res.json({ success: true, targets: bonusGoalsRepo.getActiveTargetsForDisplay() });
+    } catch (err) {
+        console.error('[DB Error] Failed to fetch active bonus-goal targets:', err.message);
+        res.status(500).json({ error: 'Failed to fetch active targets' });
+    }
+});
+
 // --- STARBASE ORDER AUDIT RECEIVER ---
 // One row per starbase-order geometry PUT the member's browser confirmed against the
 // game API (the hub never sends that PUT itself). The actor comes from the session, not

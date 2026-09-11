@@ -105,6 +105,7 @@ const ADMIN_PAGE_HTML = `<!doctype html>
   <label>Type</label>
   <select id="goal-type">
     <option value="ranking_match">ranking_match — tiered points for hitting a planet in some in-game ranking page</option>
+    <option value="random_target">random_target — a random planet, an irregular schedule, first real hit wins flat points</option>
   </select>
   <label>Config (JSON)</label>
   <textarea id="goal-config"></textarea>
@@ -136,13 +137,22 @@ const ADMIN_PAGE_HTML = `<!doctype html>
 
 <script>
 const base = location.pathname.replace(/\\/$/, '');
+// Deliberately generic placeholder VALUES, not real ones — this file is committed to git
+// (see this file's own header comment) and these are just form scaffolding, filled in by
+// hand once the page is actually open behind the token gate.
 const configTemplates = {
   ranking_match: {
-    ranking_path: '/Ranking/BestPlanets',
+    ranking_path: '/Ranking/SomePage',
     tier_size: 5,
-    tier_start_points: 100,
-    tier_step: -5,
-    max_rank: 50,
+    tier_start_points: 10,
+    tier_step: -1,
+    max_rank: 25,
+  },
+  random_target: {
+    points: 10,
+    daily_probability: 0.5,
+    active_hour_start: 7,
+    active_hour_end: 22,
   },
 };
 
