@@ -375,6 +375,8 @@ async function handleMessage(message) {
             .setColor('#10b981') // Green color
             .addFields(
                 { name: '`!link <code>`', value: 'Links your Discord account to your Hub account so you get @pinged on incoming alerts you can defend. Get the one-time code from **Link Discord** in the Hub sidebar first (`!link` with no code explains how). Codes expire after 10 minutes.\n*Example: `!link A1B2C3`*' },
+                { name: '`!getid`', value: 'Shows the ID of the current channel — useful for config that asks for a channel ID.' },
+                { name: '`!timer <duration>`', value: 'Sets a personal reminder that pings you back here. Survives a bot restart; checked once a minute.\n*Example: `!timer 1 hour 8 mins`*' },
                 { name: '`!intels`', value: 'Opens an interactive text menu to browse tracked intelligence profiles.' },
                 { name: '`!sys <system_id>`', value: 'Displays intel for a specific solar system (Planets, Fleets, Plans).\n*Example: `!sys 123`*' },
                 { name: '`!intel <player_name>`', value: 'Displays detailed intelligence and stats for a specific player.\n*Example: `!intel PlayerOne`*' },
