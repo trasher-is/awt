@@ -106,6 +106,7 @@ const ADMIN_PAGE_HTML = `<!doctype html>
   <select id="goal-type">
     <option value="ranking_match">ranking_match — tiered points for hitting a planet in some in-game ranking page</option>
     <option value="random_target">random_target — a random planet, an irregular schedule, first real hit wins flat points</option>
+    <option value="stat_milestone">stat_milestone — first player anywhere to reach a science/economy threshold wins flat points</option>
   </select>
   <label>Config (JSON)</label>
   <textarea id="goal-config"></textarea>
@@ -153,6 +154,12 @@ const configTemplates = {
     daily_probability: 0.5,
     active_hour_start: 7,
     active_hour_end: 22,
+  },
+  stat_milestone: {
+    milestones: [
+      { stat: 'energy', threshold: 10, points: 5 },
+      { stat: 'biology', threshold: 10, points: 5 },
+    ],
   },
 };
 

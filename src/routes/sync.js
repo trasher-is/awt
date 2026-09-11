@@ -570,6 +570,15 @@ router.post('/sync/player-detail', requireAuth, (req, res) => {
         if (Number.isInteger(observedLogins) && observedLogins > 0) {
             playersRepo.recordLoginSample(p.id, observedLogins);
         }
+        // Only when this sync actually delivered validated intel (see hasCompleteIntel
+        // above) — otherwise the stat columns weren't touched by this write at all, and
+        // re-checking them would just be re-deriving the same answer for no reason. Never
+        // let a bonus-goal bug fail the player-detail sync itself.
+        if (detail.has_intel === 1) {
+            try { bonusGoalsRepo.evaluatePlayerStatsForGoals(p.id); } catch (err) {
+                console.error(`[DB Error] Bonus-goal stat-milestone evaluation failed for player ${p.id}:`, err.message);
+            }
+        }
         res.json({ success: true });
     } catch (err) {
         console.error(`[DB Error] Failed to sync player detail ${p.id}:`, err);
