@@ -231,6 +231,20 @@ const afterBackdate = players.getStalePlayerIdsForApiScan(10000);
 ok('the player scanned longest ago (702, backdated) now sorts ahead of the one scanned moments ago (703)',
     afterBackdate.indexOf(702) < afterBackdate.indexOf(703), afterBackdate);
 
+// A resigned player (joined='N/A', the game's own signal — confirmed live 2026-09-11:
+// Player/{id} answers "Unable to find player" for these, every time) must never be
+// claimed by the API detail sweep: with no staleness floor any more, they would otherwise
+// burn one guaranteed-to-fail call out of the account's 200/5min budget every cycle,
+// forever, for no benefit.
+players.upsertPlayerBasic(708, 'Resigned', null);
+db.prepare(`UPDATE players SET joined = 'N/A' WHERE id = 708`).run();
+const withResigned = players.getStalePlayerIdsForApiScan(10000);
+ok('a resigned player (joined=N/A) is never claimed by the API detail sweep',
+    !withResigned.includes(708), withResigned);
+db.prepare(`UPDATE players SET joined = '2026-09-01T00:00:00Z' WHERE id = 708`).run();
+ok('once they rejoin (a real joined date arrives via the ListPlayer sync), they re-enter the queue',
+    players.getStalePlayerIdsForApiScan(10000).includes(708));
+
 // Issue #155's activity-aware staleness tiering still exists — it now only feeds the
 // "fresh/stale" status line (getPlayerApiScanStats), not queue membership, since the
 // queue itself no longer excludes anyone. A player who was ACTIVE around their last scan

@@ -83,6 +83,13 @@ line via `console.warn` — this used to be silent, which is exactly what made t
 real occurrence (some Deep Scan calls failing with no visible cause) a guess instead of a
 diagnosis.
 
+`apiGate.snapshot()` (and `gameGate.snapshot()`, and any `rateLimit()` instance) also
+includes `byPath`: a count of admitted requests per endpoint, with numeric path segments
+collapsed to `:id` (e.g. `/api/v1/Player/419` and `/api/v1/Player/420` both count toward
+`/api/v1/Player/:id`) so the map stays small regardless of how many distinct ids get
+scanned. Added after a real "is X calling the game once per system?" question that source
+reading alone couldn't settle as convincingly as just looking at what actually went out.
+
 ## The client
 
 One file: **`public/js/utils/aw-api.js`** — the dual-runtime module publishing

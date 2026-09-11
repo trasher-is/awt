@@ -753,8 +753,18 @@ const API_SCAN_STALE_SQL = `(
 // see docs/game-api.md), and the sweep's own pace (player-api-sync.js's SWEEP_BATCH_SIZE)
 // already stays well inside that, so the right lever for "don't overspend the budget" is
 // that batch size, not an extra gate here that mostly just left the roster stale for hours.
+// joined='N/A' is the game's OWN signal for "this account has resigned" (see the comment
+// on getJoinedDates/queueNewPlayers above) — confirmed live (2026-09-11): Player/{id}
+// answers "Unable to find player with id: ..." for these, every single time, forever,
+// until the game itself starts sending a real joinedAt again on a rejoin (which already
+// flows through the ListPlayer sync independently of this sweep). With no staleness floor
+// any more, excluding them here is the difference between a resigned account quietly
+// costing nothing and it burning one guaranteed-to-fail call out of the account's 200/5min
+// budget on every single cycle, forever, right alongside real players who actually benefit
+// from being re-scanned.
 const getStalePlayerIdsForApiScanStmt = db.prepare(`
     SELECT id FROM players
+    WHERE joined IS NULL OR joined != 'N/A'
     ORDER BY (last_api_scan_at IS NULL) DESC, last_api_scan_at ASC
     LIMIT ?
 `);

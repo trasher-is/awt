@@ -32,7 +32,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // Enough of express's req/res for the middleware. Returns the response object straight
 // away so a test can close it mid-wait, and a promise that settles with 'admitted' when
 // the gate calls next() or with the status when it answers instead.
-function start(gate, { automated = true, userId = 1, dest = 'empty', ip = '10.0.0.1' } = {}) {
+function start(gate, { automated = true, userId = 1, dest = 'empty', ip = '10.0.0.1', path } = {}) {
     const listeners = {};
     const headers = {};
     if (automated) headers['x-awt-automated'] = '1';
@@ -41,7 +41,7 @@ function start(gate, { automated = true, userId = 1, dest = 'empty', ip = '10.0.
     let settle;
     const done = new Promise(resolve => { settle = resolve; });
 
-    const req = { headers, ip, session: { userId }, on: () => {} };
+    const req = { headers, ip, path, session: { userId }, on: () => {} };
     const res = {
         headersSent: {},
         statusCode: 200,
@@ -207,6 +207,23 @@ const run = (gate, opts) => start(gate, opts).done;
         collector.readSpeed({ intelligenceReport: { race: { speedBonus: 2 } } }) === 2
         && collector.readSpeed({ intelligenceReport: { race: { speedPick: -1 } } }) === -1
         && collector.readSpeed({ id: 1 }) === null);
+
+    console.log('\n── snapshot().byPath: which endpoint is actually spending the budget ' + '─'.repeat(8));
+    // Added after a real incident: a member suspected the automatic galaxy seed called
+    // the game once per system. This is how that gets settled by looking, not by reading
+    // source and trusting a comment.
+    gate = gameTrafficGate({ maxPerSecond: 5, maxWaitMs: 10000 });
+    await run(gate, { path: '/api/v1/Map/sectors' });
+    await run(gate, { path: '/api/v1/Player/419' });
+    await run(gate, { path: '/api/v1/Player/420' });
+    await run(gate, { path: '/api/v1/Player/421' });
+    const byPath = gate.snapshot().byPath;
+    ok('one call to Map/sectors is counted once', byPath['/api/v1/Map/sectors'] === 1, byPath);
+    ok('three different player ids collapse into ONE :id-normalized bucket, not three',
+        byPath['/api/v1/Player/:id'] === 3 && !('/api/v1/Player/419' in byPath), byPath);
+    ok('so a burst of Player/{id} calls is visibly distinct from a single Map/sectors call',
+        byPath['/api/v1/Player/:id'] > byPath['/api/v1/Map/sectors'], byPath);
+    ok('reset() clears the path breakdown too', (() => { gate.reset(); return Object.keys(gate.snapshot().byPath).length === 0; })());
 
     console.log('\n' + '─'.repeat(75));
     console.log(`${pass} passed, ${fail} failed`);
