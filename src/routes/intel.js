@@ -475,6 +475,28 @@ router.get('/intel/battle-reports-feed', requireAuth, (req, res) => {
     }
 });
 
+// --- BATTLE REPORTS PAGE SEARCH ---
+// Search + sort variant of the feed above, for the panel's search box and sortable
+// columns. `q` matches attacker/defender name or alliance tag, or the system name; empty
+// `q` returns the same rows the plain feed would (see searchBattleReportsFeed's own
+// comment). `sort` is one of occurred_at (default)/cv/pop; a row with no CV or population
+// figure (a bare, unlinked population drop for a CV sort) always sorts last regardless of
+// `dir`. `total` is the full match count before pagination, for "Showing X of Y".
+router.get('/intel/battle-reports-search', requireAuth, (req, res) => {
+    try {
+        const q = typeof req.query.q === 'string' ? req.query.q.slice(0, 200) : '';
+        const sort = ['occurred_at', 'cv', 'pop'].includes(req.query.sort) ? req.query.sort : 'occurred_at';
+        const dir = req.query.dir === 'asc' ? 'asc' : 'desc';
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+        const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+        const { total, rows } = battleReportsRepo.searchBattleReportsFeed({ q, sort, dir, limit, offset });
+        res.json({ success: true, total, feed: rows });
+    } catch (err) {
+        console.error('[DB Error] Failed to search battle reports:', err);
+        res.status(500).json({ error: 'Failed to search battle reports' });
+    }
+});
+
 // --- COLONIZE LAUNCH WINDOWS (Science page: "when to launch to land after the next
 // culture slot opens") ---
 // Everything the client needs in one call: the caller's own launch origin (v1 — always

@@ -323,6 +323,113 @@ function getBattleReportsFeed(limit = 50) {
     return merged.slice(0, limit);
 }
 
+// Search + sort variant of the feed above, for the Battle Reports panel's search box and
+// sortable columns. Both underlying queries gain the same `q` LIKE filter (attacker/
+// defender name+tag, or the affected owner's name for a bare pop-drop row, plus system
+// name either way); with q='%' every row matches, so an empty search box reproduces the
+// plain feed exactly. total_cv_lost is a real battle's att_lost_cv+def_lost_cv (COALESCEd
+// to 0 so a NULL lost_cv doesn't poison the sum) — the "how big was this battle" figure
+// the CV sort uses. A bare population-drop row has no CV at all (there was no report), so
+// it always sorts last regardless of direction — same treatment as a null population on a
+// pop sort.
+//
+// Fetches a generous cap from EACH source before merging (SEARCH_FETCH_CAP) and sorts the
+// merged array in JS, same as the plain feed already does for its own chronological
+// merge — correct at this hub's actual scale (low thousands of rows per round) without a
+// UNION across two differently-shaped tables. If a round's battle history ever grows past
+// the cap, a search could miss older matches — the same class of accepted tradeoff as
+// battle-sync.js's TAKE cap on the game API pull itself.
+const SEARCH_FETCH_CAP = 5000;
+
+const battleReportsSearchStmt = db.prepare(`
+    SELECT br.id AS battle_report_id, datetime(br.started_at) AS occurred_at,
+           br.system_id, br.planet_index, s.name AS system_name,
+           br.att_player_name, br.att_alliance_tag,
+           br.def_player_name, br.def_alliance_tag,
+           br.killed_population, br.winner,
+           (COALESCE(br.att_lost_cv, 0) + COALESCE(br.def_lost_cv, 0)) AS total_cv_lost
+    FROM battle_reports br
+    LEFT JOIN systems s ON s.id = br.system_id
+    WHERE br.system_id IS NOT NULL
+      AND (
+          br.att_player_name LIKE @q OR br.def_player_name LIKE @q
+          OR br.att_alliance_tag LIKE @q OR br.def_alliance_tag LIKE @q
+          OR s.name LIKE @q
+      )
+    ORDER BY br.started_at DESC
+    LIMIT @limit
+`);
+
+const unmatchedPopDropsSearchStmt = db.prepare(`
+    SELECT pe.timestamp AS occurred_at, pe.system_id, pe.planet_index, s.name AS system_name,
+           pe.old_value AS old_population, pe.new_value AS new_population,
+           p.name AS owner_name
+    FROM planet_events pe
+    LEFT JOIN systems s ON s.id = pe.system_id
+    LEFT JOIN planets pl ON pl.system_id = pe.system_id AND pl.planet_index = pe.planet_index
+    LEFT JOIN players p ON p.id = pl.owner_id
+    WHERE pe.event_type_id = 2
+      AND (p.name LIKE @q OR s.name LIKE @q)
+      AND NOT EXISTS (
+          SELECT 1 FROM battle_reports br
+          WHERE br.system_id = pe.system_id AND br.planet_index = pe.planet_index
+            AND datetime(br.started_at) BETWEEN datetime(pe.timestamp, '-' || @window || ' minutes')
+                                             AND datetime(pe.timestamp, '+' || @window || ' minutes')
+      )
+    ORDER BY pe.timestamp DESC
+    LIMIT @limit
+`);
+
+const SORT_KEYS = { occurred_at: 'occurred_at', cv: 'total_cv_lost', pop: 'killed_population' };
+
+function searchBattleReportsFeed({ q = '', sort = 'occurred_at', dir = 'desc', limit = 50, offset = 0 } = {}) {
+    const trimmed = (q || '').trim();
+    const likeTerm = trimmed ? `%${trimmed}%` : '%';
+
+    const battles = battleReportsSearchStmt.all({ q: likeTerm, limit: SEARCH_FETCH_CAP }).map(row => ({
+        occurred_at: row.occurred_at,
+        battle_report_id: row.battle_report_id,
+        system_id: row.system_id, planet_index: row.planet_index, system_name: row.system_name,
+        attacker_name: row.att_player_name, attacker_alliance_tag: row.att_alliance_tag,
+        defender_name: row.def_player_name, defender_alliance_tag: row.def_alliance_tag,
+        killed_population: row.killed_population, winner: row.winner,
+        total_cv_lost: row.total_cv_lost,
+        old_population: null, new_population: null,
+    }));
+    // A bare population-drop row has no attacker/defender name of its own to match
+    // against — skip the query entirely (same shape as the plain feed's unfiltered pull)
+    // when there's nothing to search for, since @q would just be the neutral '%' anyway.
+    const dropRows = (trimmed ? unmatchedPopDropsSearchStmt : unmatchedPopDropsStmt)
+        .all({ q: likeTerm, window: POP_DROP_MATCH_WINDOW_MINUTES, limit: SEARCH_FETCH_CAP })
+        .map(row => ({
+            occurred_at: row.occurred_at,
+            battle_report_id: null,
+            system_id: row.system_id, planet_index: row.planet_index, system_name: row.system_name,
+            attacker_name: null, attacker_alliance_tag: null,
+            defender_name: row.owner_name, defender_alliance_tag: null,
+            killed_population: (row.old_population != null && row.new_population != null)
+                ? row.old_population - row.new_population : null,
+            winner: null,
+            total_cv_lost: 0,
+            old_population: row.old_population, new_population: row.new_population,
+        }));
+
+    const merged = [...battles, ...dropRows];
+    const key = SORT_KEYS[sort] || 'occurred_at';
+    const direction = dir === 'asc' ? 1 : -1;
+    merged.sort((a, b) => {
+        const av = a[key], bv = b[key];
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;  // nulls (no CV / no population figure) always sort last
+        if (bv == null) return -1;
+        if (av < bv) return -1 * direction;
+        if (av > bv) return 1 * direction;
+        return 0;
+    });
+
+    return { total: merged.length, rows: merged.slice(offset, offset + limit) };
+}
+
 module.exports = {
     deleteAllBattleReports,
     getPendingAnnouncements,
@@ -338,4 +445,5 @@ module.exports = {
     getRecentPlanets,
     hasAnyBattleHistory,
     getBattleReportsFeed,
+    searchBattleReportsFeed,
 };
