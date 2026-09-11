@@ -436,17 +436,21 @@ function updateSortArrows() {
     });
 }
 
-// One side's cell: name (bold if this side won the battle) plus its own committed CV —
-// shown as "committed → left" for the winner specifically (how much of what they brought
-// is still standing), or just the committed amount for the loser/an undecided report. A
-// bare population-drop row has no side data at all (combatValue is null), so the CV line
-// is omitted entirely rather than showing a misleading "— CV".
+// One side's cell: name (bold + green if this side won the battle) plus its own committed
+// CV, shown as "committed → left" whenever survivedCv is known — for BOTH sides, not just
+// the winner. Originally only the winner's survived CV was shown (the loser's cell just
+// said "N CV"), which made the CV Lost column's total impossible to verify by eye: the
+// loser's own lost amount (committed − survived) was never displayed anywhere, so the two
+// numbers never visibly "added up". Both sides carry survived_cv in the source data (see
+// battleReports.js), so there's no reason to withhold it from the loser's cell too. A bare
+// population-drop row has no side data at all (combatValue is null), so the CV line is
+// omitted entirely rather than showing a misleading "— CV".
 function battleSideCell(name, tag, combatValue, survivedCv, isWinner) {
     if (!name) return '<span class="text-muted-foreground">—</span>';
     const label = `${tag ? `[${esc(tag)}] ` : ''}${esc(name)}`;
-    const nameHtml = isWinner ? `<strong>${label}</strong>` : label;
+    const nameHtml = isWinner ? `<strong class="text-emerald-400">${label}</strong>` : label;
     if (combatValue == null) return nameHtml;
-    const cvLine = isWinner && survivedCv != null
+    const cvLine = survivedCv != null
         ? `${combatValue.toLocaleString()} → ${survivedCv.toLocaleString()} left`
         : `${combatValue.toLocaleString()} CV`;
     return `${nameHtml}<div class="text-xs text-muted-foreground font-mono">${cvLine}</div>`;
