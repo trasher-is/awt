@@ -1,16 +1,21 @@
 // Generic "extra points" engine feeding battlePoints.js's !glory leaderboard — see
 // database.js's bonus_goals/bonus_goal_awards/ranking_snapshot_rows comment for the
 // secrecy reasoning (generic code + DB-only config, since the repo is public but the
-// database is not). One goal `type` is implemented so far: 'ranking_match' (award tiered
-// points when a member's battle lands on a planet currently placed in some in-game
-// ranking page — e.g. a "top planets by development" list, though which page and which
-// tiers is purely config, never named here). Later phases add other types under this same
-// table without touching this file's shape.
+// database is not). Two goal `type`s implemented so far:
+//   'ranking_match' — award tiered points when a member's battle lands on a planet
+//                     currently placed in some in-game ranking page (which page, which
+//                     tiers, is purely config, never named here).
+//   'random_target' — pick a random planet somewhere in the galaxy on an irregular
+//                      schedule; first real hit on it (by anyone in scope) wins a flat
+//                      point award. No client scrape needed — the target comes from data
+//                      the hub already has, so scheduling and picking both run server-side.
+// Later phases add more types under this same table without touching this file's shape.
 
 const crypto = require('crypto');
 const db = require('../database');
 const settingsRepo = require('./settings');
 const systemsRepo = require('./systems');
+const { friendlyAllianceTags } = require('../utils/friendly-alliance-tags');
 
 const ACCESS_TOKEN_SETTING_KEY = 'bonus_goals_access_token';
 
@@ -189,7 +194,145 @@ function evaluateBattleReportForGoals(reportId) {
         });
         if (result.changes > 0) awarded.push({ goal_id: goal.id, points });
     }
+
+    for (const goal of listEnabledGoalsByType('random_target')) {
+        const active = getActiveTarget(goal.id);
+        if (!active || active.system_id !== report.system_id || active.planet_index !== report.planet_index) continue;
+        const points = Number(goal.config.points) || 0;
+        if (points <= 0) continue;
+        const result = insertAwardStmt.run({
+            goal_id: goal.id,
+            player_id: report.att_player_id,
+            player_name: report.att_player_name,
+            points,
+            source_key: `br:${reportId}`,
+            detail: JSON.stringify({ battle_report_id: reportId, target_id: active.id }),
+        });
+        // A second report matching the SAME still-active target in the same evaluation
+        // pass can't happen (this loop runs once per report, synchronously — better-sqlite3
+        // has no concurrent writers), but a second CALL to evaluateBattleReportForGoals for
+        // a DIFFERENT report after this one already claimed it correctly sees no active
+        // target on the next getActiveTarget() call, once claimActiveTargetStmt below runs.
+        if (result.changes > 0) {
+            claimActiveTargetStmt.run(result.lastInsertRowid, active.id);
+            awarded.push({ goal_id: goal.id, points });
+        }
+    }
     return awarded;
+}
+
+// --- random_target: scheduling + picking ---
+
+function dateKeyFor(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+// Any populated planet, anywhere — except our own alliance and its NAP partners (see
+// friendly-alliance-tags.js, the same definition the route-planner/intel work already
+// uses). Filtered in JS rather than a dynamic SQL IN-clause: the candidate set is small at
+// this hub's scale and this only runs a few times a week, not a hot path.
+const pickTargetCandidatesStmt = db.prepare(`
+    SELECT p.system_id, p.planet_index, a.tag AS owner_tag
+    FROM planets p
+    JOIN players pl ON pl.id = p.owner_id
+    LEFT JOIN alliances a ON a.id = pl.alliance_id
+    WHERE p.population > 0
+    ORDER BY RANDOM()
+`);
+function pickRandomTargetPlanet() {
+    const excludeTags = friendlyAllianceTags();
+    const eligible = pickTargetCandidatesStmt.all()
+        .find(r => !r.owner_tag || !excludeTags.has(String(r.owner_tag).toUpperCase()));
+    return eligible ? { system_id: eligible.system_id, planet_index: eligible.planet_index } : null;
+}
+
+const insertActiveTargetStmt = db.prepare(`
+    INSERT INTO bonus_goal_active_targets (goal_id, system_id, planet_index) VALUES (?, ?, ?)
+`);
+const activeTargetStmt = db.prepare(`
+    SELECT * FROM bonus_goal_active_targets WHERE goal_id = ? AND claimed_award_id IS NULL
+    ORDER BY activated_at DESC LIMIT 1
+`);
+function getActiveTarget(goalId) {
+    return activeTargetStmt.get(goalId) || null;
+}
+const claimActiveTargetStmt = db.prepare(`UPDATE bonus_goal_active_targets SET claimed_award_id = ? WHERE id = ?`);
+
+const todayRollStmt = db.prepare(`SELECT * FROM bonus_goal_daily_rolls WHERE goal_id = ? AND roll_date = ?`);
+const insertRollStmt = db.prepare(`
+    INSERT INTO bonus_goal_daily_rolls (goal_id, roll_date, scheduled_at) VALUES (@goal_id, @roll_date, @scheduled_at)
+`);
+const markRollActivatedStmt = db.prepare(`UPDATE bonus_goal_daily_rolls SET activated_at = ? WHERE goal_id = ? AND roll_date = ?`);
+
+// Decides, ONCE per goal per calendar day, whether today has an event at all and — if so
+// — a random time later that day it should go live. Persisted rather than recomputed on
+// every check so the decision is stable across restarts and doesn't get re-rolled by
+// every scheduler tick. `now` is injectable for tests.
+function ensureTodayRolled(goalId, config, now) {
+    const rollDate = dateKeyFor(now);
+    const existing = todayRollStmt.get(goalId, rollDate);
+    if (existing) return existing;
+
+    const probability = Number(config.daily_probability);
+    const p = Number.isFinite(probability) ? Math.min(1, Math.max(0, probability)) : 0.5;
+    const startHour = Number.isFinite(Number(config.active_hour_start)) ? Number(config.active_hour_start) : 7;
+    const endHourRaw = Number.isFinite(Number(config.active_hour_end)) ? Number(config.active_hour_end) : 22;
+    const endHour = Math.max(startHour + 1, endHourRaw);
+
+    let scheduledAt = null;
+    if (Math.random() < p) {
+        const start = new Date(now); start.setHours(startHour, 0, 0, 0);
+        const end = new Date(now); end.setHours(endHour, 0, 0, 0);
+        scheduledAt = new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime())).toISOString();
+    }
+    insertRollStmt.run({ goal_id: goalId, roll_date: rollDate, scheduled_at: scheduledAt });
+    return todayRollStmt.get(goalId, rollDate);
+}
+
+// Called periodically for every enabled random_target goal (see
+// src/utils/bonus-goals-scheduler.js) — idempotent and cheap to call as often as you like.
+// It only ever does something on the exact check where a scheduled roll's time has
+// arrived AND nothing is currently active; an unclaimed target simply stays put (no
+// timeout) until someone finds it, at which point the NEXT day's roll can produce a new
+// one. `now` is injectable for tests.
+function maybeActivateRandomTarget(goalId, config, now = new Date()) {
+    const roll = ensureTodayRolled(goalId, config, now);
+    if (!roll.scheduled_at || roll.activated_at) return null;
+    if (new Date(roll.scheduled_at).getTime() > now.getTime()) return null;
+    if (getActiveTarget(goalId)) return null;
+
+    const planet = pickRandomTargetPlanet();
+    if (!planet) return null; // nothing eligible yet (e.g. very early in the round) — try again on the next roll
+
+    const info = insertActiveTargetStmt.run(goalId, planet.system_id, planet.planet_index);
+    markRollActivatedStmt.run(now.toISOString(), goalId, dateKeyFor(now));
+    return { id: info.lastInsertRowid, system_id: planet.system_id, planet_index: planet.planet_index };
+}
+
+// For the client marker/highlight (public/js/core/spy.js) — any logged-in member needs
+// this, not just an admin, since the whole point is a race to find it first. Only what's
+// needed to draw it: location, names for display, and the point value.
+const activeTargetsForDisplayStmt = db.prepare(`
+    SELECT t.system_id, t.planet_index, g.config, s.name AS system_name, p.name AS planet_name
+    FROM bonus_goal_active_targets t
+    JOIN bonus_goals g ON g.id = t.goal_id AND g.type = 'random_target' AND g.enabled = 1
+    LEFT JOIN systems s ON s.id = t.system_id
+    LEFT JOIN planets p ON p.system_id = t.system_id AND p.planet_index = t.planet_index
+    WHERE t.claimed_award_id IS NULL
+`);
+function getActiveTargetsForDisplay() {
+    return activeTargetsForDisplayStmt.all().map(r => {
+        let config;
+        try { config = JSON.parse(r.config); } catch (err) { config = {}; }
+        return {
+            system_id: r.system_id, planet_index: r.planet_index,
+            system_name: r.system_name, planet_name: r.planet_name,
+            points: Number(config.points) || 0,
+        };
+    });
 }
 
 // --- reading awards back ---
@@ -243,8 +386,10 @@ function getAwardedPointsByPlayer(sinceIso = null, scope = 'members', allianceId
 
 module.exports = {
     getOrCreateAccessToken,
-    listGoals, getGoal, createGoal, updateGoal, deleteGoal,
+    listGoals, getGoal, createGoal, updateGoal, deleteGoal, listEnabledGoalsByType,
     replaceRankingSnapshot, getStaleRankingGoals,
     computeRankPoints, evaluateBattleReportForGoals,
     listRecentAwards, getAwardedPointsByPlayer,
+    pickRandomTargetPlanet, getActiveTarget, getActiveTargetsForDisplay,
+    ensureTodayRolled, maybeActivateRandomTarget,
 };

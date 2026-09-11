@@ -19,6 +19,21 @@ export function initSpy() {
     let simulatedSystemId = null;
     let lastScrapedUrl = null;
 
+    // Active 'random_target' bonus-goal locations (see bonusGoals.js) — a race to find and
+    // hit them first, so unlike knownSysIdsCache/alliedTagsCache above this needs to stay
+    // fresh DURING a session, not just be correct at page load: a periodic refetch, not the
+    // one-time ensureSystemsAndAlliesLoaded cache. Usually empty (no admin-configured goal
+    // active right now), in which case every check below is a no-op.
+    let activeTargetsCache = [];
+    function refreshActiveTargets() {
+        fetch('/hub-api/sync/bonus-goals/active-target')
+            .then(res => (res.ok ? res.json() : null))
+            .then(data => { if (data && data.success) activeTargetsCache = data.targets || []; })
+            .catch(() => {});
+    }
+    refreshActiveTargets();
+    setInterval(refreshActiveTargets, 2 * 60 * 1000);
+
     // Counters, so "is this actually cheaper?" has an answer instead of an opinion.
     // Readable from the console as window.__awtSpyStats.
     const spyStats = {
@@ -215,6 +230,18 @@ export function initSpy() {
                 span.style.fontWeight = 'normal';
                 span.style.fontSize = '';
                 span.style.textShadow = '';
+            }
+
+            // A random bonus-goal target currently sits somewhere in this system (see
+            // activeTargetsCache above) — mark the system node itself; which PLANET gets
+            // the rainbow highlight once you're actually inside it (below).
+            if (activeTargetsCache.some(t => String(t.system_id) === sysId)) {
+                node.style.position = node.style.position || 'relative';
+                const marker = document.createElement('span');
+                marker.textContent = '🍾';
+                marker.title = 'A bonus-goal target is somewhere in this system';
+                marker.style.cssText = 'position:absolute; top:-10px; right:-10px; font-size:16px; z-index:50; pointer-events:none; filter:drop-shadow(0 0 3px #fff) drop-shadow(0 0 3px #fff);';
+                node.appendChild(marker);
             }
         });
     }
@@ -599,13 +626,29 @@ export function initSpy() {
 
             // Clear out indicators and legacy components cleanly to avoid duplication
             document.querySelectorAll('.aw-hub-indicator, .awt-persistent-pill').forEach(el => el.remove());
-            document.querySelectorAll('#solarSystem tr').forEach(row => { row.style.borderLeft = ''; });
+            document.querySelectorAll('#solarSystem tr').forEach(row => { row.style.borderLeft = ''; row.classList.remove('awt-bottle-target-row'); });
 
             if (!document.querySelector('link[href*="font-awesome"]')) {
                 const faLink = document.createElement('link');
                 faLink.rel = 'stylesheet';
                 faLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';
                 document.head.appendChild(faLink);
+            }
+
+            // One-time style for the bottle-target row highlight below — a shifting
+            // rainbow gradient, unmistakable against every other indicator on this page.
+            if (!document.getElementById('awt-bottle-target-style')) {
+                const style = document.createElement('style');
+                style.id = 'awt-bottle-target-style';
+                style.textContent = `
+                    @keyframes awt-rainbow-shift { to { background-position: 400% 0; } }
+                    .awt-bottle-target-row > td {
+                        background: linear-gradient(90deg, #ff3b3b, #ff9d3b, #ffe93b, #3bff6e, #3bd0ff, #7a3bff, #ff3bd0, #ff3b3b) !important;
+                        background-size: 400% 100% !important;
+                        animation: awt-rainbow-shift 3s linear infinite;
+                    }
+                `;
+                document.head.appendChild(style);
             }
 
             const pathLower = (window.location.pathname + window.location.search).toLowerCase();
@@ -621,6 +664,13 @@ export function initSpy() {
                 const planetId = row.getAttribute('data-planet-id');
                 const planetIndex = parseInt(firstCell.innerText.trim(), 10);
                 if (isNaN(planetIndex)) return;
+
+                // This exact planet is the current active random bonus-goal target — see
+                // activeTargetsCache above. Rainbow the whole row so it's unmissable, and
+                // still add a badge (title/indicator) for anyone with reduced-motion
+                // settings or just scanning quickly.
+                const bottleTarget = activeTargetsCache.find(t => t.system_id === systemIdInt && t.planet_index === planetIndex);
+                if (bottleTarget) row.classList.add('awt-bottle-target-row');
 
                 const ownerCell = row.querySelectorAll('td')[3];
                 const ownerLink = ownerCell?.querySelector('a[href^="/Game/Players/Profile/"]');
@@ -759,6 +809,11 @@ export function initSpy() {
                     indicatorHTML += `<span class="badge ms-2 text-nowrap" style="background-color: #e0e0e0 !important; color: #07832c !important; font-weight: bold; border: 1px solid #07832c !important; font-size: 0.7em; padding: 2px 6px; vertical-align: middle;"><i class="fa-solid fa-person-walking-arrow-right me-1"></i>${transitLabel}</span>`;
                     if (!borderColor) borderColor = '#ffc107';
                     titleParts.push(`Allied Transit: ${movingAllyName || 'Ally'}`);
+                }
+
+                if (bottleTarget) {
+                    indicatorHTML += `<span class="badge ms-2 text-nowrap" style="background-color: #1a1a1a !important; color: #fff !important; font-weight: bold; border: 1px solid #fff !important; font-size: 0.7em; padding: 2px 6px; vertical-align: middle;">🍾 ${bottleTarget.points} pts</span>`;
+                    titleParts.push(`Bonus target! First real hit here wins ${bottleTarget.points} pts`);
                 }
 
                 // Bug: this used to be gated on `!indicatorHTML`, so a Plan pill silently

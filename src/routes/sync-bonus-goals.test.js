@@ -118,6 +118,26 @@ function request(server, method, urlPath, body) {
         const award = db.prepare(`SELECT * FROM bonus_goal_awards WHERE goal_id = ? AND source_key = ?`).get(goal.id, 'br:77001');
         ok('the ship-detail sync triggered goal evaluation and credited the rank-1 tier (100 pts)',
             award && award.player_id === 800 && award.points === 100, award);
+
+        console.log('\n── active-target: what the client marker/highlight reads ' + '─'.repeat(10));
+        const emptyActive = await request(server, 'GET', '/hub-api/sync/bonus-goals/active-target');
+        ok('succeeds (200) with no random_target goal at all', emptyActive.status === 200 && emptyActive.body.targets.length === 0, emptyActive.body);
+
+        const targetGoal = bonusGoalsRepo.createGoal({
+            type: 'random_target', name: 'route active-target test',
+            config: { points: 25 },
+            enabled: true,
+        });
+        db.prepare(`INSERT INTO bonus_goal_active_targets (goal_id, system_id, planet_index) VALUES (?, ?, ?)`)
+            .run(targetGoal.id, 700, 1);
+
+        const withActive = await request(server, 'GET', '/hub-api/sync/bonus-goals/active-target');
+        ok('an active unclaimed target shows up with its point value',
+            withActive.body.targets.some(t => t.system_id === 700 && t.planet_index === 1 && t.points === 25), withActive.body);
+
+        db.prepare(`UPDATE bonus_goal_active_targets SET claimed_award_id = ? WHERE goal_id = ?`).run(award.id, targetGoal.id);
+        const afterClaim = await request(server, 'GET', '/hub-api/sync/bonus-goals/active-target');
+        ok('a claimed target no longer appears', !afterClaim.body.targets.some(t => t.system_id === 700 && t.planet_index === 1), afterClaim.body);
     } finally {
         server.close();
     }

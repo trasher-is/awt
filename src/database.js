@@ -881,6 +881,42 @@ function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_ranking_snapshot_rows_goal ON ranking_snapshot_rows(goal_id, captured_at);
     `);
 
+    // A second bonus_goals type: 'random_target' (see bonusGoals.js's own comment for the
+    // full design). No client scrape is needed here — the target is picked from data the
+    // hub already has, so the "is today an event day, and if so when" decision and the
+    // actual pick both happen server-side.
+    db.exec(`
+        -- One row per (goal, calendar day): whether that day rolled an event at all and,
+        -- if so, the random time later that day it should actually go live. Exists so the
+        -- day/time decision is made exactly once and stays stable across restarts, rather
+        -- than being re-rolled every time the scheduler checks in.
+        CREATE TABLE IF NOT EXISTS bonus_goal_daily_rolls (
+            goal_id INTEGER NOT NULL,
+            roll_date TEXT NOT NULL,
+            scheduled_at DATETIME,
+            activated_at DATETIME,
+            PRIMARY KEY (goal_id, roll_date),
+            FOREIGN KEY(goal_id) REFERENCES bonus_goals(id) ON DELETE CASCADE
+        );
+
+        -- The current (or most recent) random target for a goal. claimed_award_id is set
+        -- the moment someone lands the first real hit — see evaluateBattleReportForGoals —
+        -- at which point it stops being "active" (getActiveTarget only returns unclaimed
+        -- rows) and the next scheduled roll picks a fresh one.
+        CREATE TABLE IF NOT EXISTS bonus_goal_active_targets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            goal_id INTEGER NOT NULL,
+            system_id INTEGER NOT NULL,
+            planet_index INTEGER NOT NULL,
+            activated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            claimed_award_id INTEGER,
+            FOREIGN KEY(goal_id) REFERENCES bonus_goals(id) ON DELETE CASCADE,
+            FOREIGN KEY(claimed_award_id) REFERENCES bonus_goal_awards(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_bonus_goal_active_targets_goal ON bonus_goal_active_targets(goal_id, claimed_award_id);
+        CREATE INDEX IF NOT EXISTS idx_bonus_goal_active_targets_location ON bonus_goal_active_targets(system_id, planet_index, claimed_award_id);
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

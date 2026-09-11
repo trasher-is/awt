@@ -391,6 +391,11 @@ const server = app.listen(PORT, () => {
 
 initDiscordBot(process.env.DISCORD_TOKEN);
 
+// Keeps 'random_target' bonus goals moving — see src/utils/bonus-goals-scheduler.js and
+// bonusGoals.js's own header. Needs no game session (unlike everything else scraped in
+// this hub), so it runs here rather than in a member's browser.
+require('./src/utils/bonus-goals-scheduler').startBonusGoalsScheduler();
+
 // pm2 sends SIGINT/SIGTERM on restart and deploy. Stop accepting connections and close
 // the database handle so a WAL write is not cut off mid-transaction.
 let shuttingDown = false;

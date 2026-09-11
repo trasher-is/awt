@@ -155,6 +155,114 @@ ok('once linked to a hub account, Raider700 IS included under scope=members',
 const byPlayerSinceFuture = bonusGoals.getAwardedPointsByPlayer('2099-01-01T00:00:00Z', 'all');
 ok('a future "since" window excludes an award that already happened', !byPlayerSinceFuture.has(700), byPlayerSinceFuture);
 
+console.log('\n── pickRandomTargetPlanet: any populated planet except own alliance + NAP ' + '─'.repeat(2));
+// Own alliance (RAID, via a member with an alliance_member_stats row — see
+// friendly-alliance-tags.test.js for this exact setup) and an admin-configured NAP tag
+// (ALLYTAG) are both ineligible; a hostile tag (HOSTILE) is eligible; population=0 is
+// ineligible regardless of tag.
+db.prepare(`INSERT INTO alliances (id, name, tag) VALUES (300, 'Our Alliance', 'RAID')`).run();
+db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (900, 'OwnMember', 300)`).run();
+db.prepare(`INSERT INTO alliance_member_stats (player_id) VALUES (900)`).run();
+settingsRepo.setSetting('alliance_relations_allied', 'ALLYTAG');
+
+db.prepare(`INSERT INTO alliances (id, name, tag) VALUES (301, 'Nap Partner', 'ALLYTAG'), (302, 'Hostile Alliance', 'HOSTILE')`).run();
+db.prepare(`
+    INSERT INTO players (id, name, alliance_id) VALUES
+        (901, 'OwnOwner', 300), (902, 'NapOwner', 301), (903, 'HostileOwner', 302), (904, 'EmptyPlanetOwner', 302)
+`).run();
+db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (800, 'Target Test System', 3, 3)`).run();
+db.prepare(`
+    INSERT INTO planets (system_id, planet_index, owner_id, population, name) VALUES
+        (800, 1, 901, 20, 'OwnPlanet'),
+        (800, 2, 902, 20, 'NapPlanet'),
+        (800, 3, 903, 20, 'HostilePlanet'),
+        (800, 4, 904, 0, 'EmptyHostilePlanet')
+`).run();
+
+const picked = bonusGoals.pickRandomTargetPlanet();
+ok('the only eligible planet (hostile-owned, population > 0) is the one picked',
+    picked && picked.system_id === 800 && picked.planet_index === 3, picked);
+
+console.log('\n── ensureTodayRolled / maybeActivateRandomTarget: the daily schedule ' + '─'.repeat(6));
+const targetGoal = bonusGoals.createGoal({
+    type: 'random_target', name: 'target test',
+    config: { points: 50, daily_probability: 1, active_hour_start: 0, active_hour_end: 24 },
+    enabled: true,
+});
+
+const day1 = new Date('2026-09-15T23:59:00');
+const roll1 = bonusGoals.ensureTodayRolled(targetGoal.id, targetGoal.config, day1);
+ok('probability=1 always schedules a time for today', roll1.scheduled_at != null, roll1);
+const roll1Again = bonusGoals.ensureTodayRolled(targetGoal.id, targetGoal.config, day1);
+ok('calling again the same day returns the SAME decision, not a fresh roll',
+    roll1Again.scheduled_at === roll1.scheduled_at, { roll1, roll1Again });
+
+const zeroProbGoal = bonusGoals.createGoal({
+    type: 'random_target', name: 'never rolls',
+    config: { points: 50, daily_probability: 0 },
+    enabled: true,
+});
+const zeroRoll = bonusGoals.ensureTodayRolled(zeroProbGoal.id, zeroProbGoal.config, day1);
+ok('probability=0 never schedules an event today', zeroRoll.scheduled_at === null, zeroRoll);
+
+// day1 is 23:59, so the random scheduled_at (somewhere in 00:00-24:00) is guaranteed <= now
+const activation = bonusGoals.maybeActivateRandomTarget(targetGoal.id, targetGoal.config, day1);
+ok('activation creates a target once the scheduled time has passed',
+    activation && activation.system_id === 800 && activation.planet_index === 3, activation);
+
+const activeAfter = bonusGoals.getActiveTarget(targetGoal.id);
+ok('getActiveTarget now returns the freshly-activated target', activeAfter && activeAfter.id === activation.id, activeAfter);
+
+const secondCheckSameDay = bonusGoals.maybeActivateRandomTarget(targetGoal.id, targetGoal.config, day1);
+ok('a second check the same day, with one already active, does nothing (null)', secondCheckSameDay === null, secondCheckSameDay);
+
+console.log('\n── getActiveTargetsForDisplay: what the client marker/highlight reads ' + '─'.repeat(4));
+const display = bonusGoals.getActiveTargetsForDisplay();
+const displayed = display.find(t => t.system_id === 800 && t.planet_index === 3);
+ok('the active target is exposed with its point value and names for display',
+    displayed && displayed.points === 50 && displayed.system_name === 'Target Test System' && displayed.planet_name === 'HostilePlanet',
+    displayed);
+
+console.log('\n── evaluateBattleReportForGoals: claiming the random target ' + '─'.repeat(12));
+db.prepare(`INSERT INTO players (id, name) VALUES (905, 'BottleFinder')`).run();
+db.prepare(`
+    INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_id, att_player_name, def_lost_cv, killed_population)
+    VALUES (91001, '2026-09-15T20:00:00Z', 800, 9, 905, 'BottleFinder', 100, 3)
+`).run();
+const wrongPlanetEval = bonusGoals.evaluateBattleReportForGoals(91001);
+ok('a real hit on a DIFFERENT planet in the same system claims nothing', wrongPlanetEval.length === 0, wrongPlanetEval);
+
+db.prepare(`
+    INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_id, att_player_name, def_lost_cv, killed_population)
+    VALUES (91002, '2026-09-15T21:00:00Z', 800, 3, 905, 'BottleFinder', 500, 5)
+`).run();
+const bottleEval = bonusGoals.evaluateBattleReportForGoals(91002);
+ok('a real hit on the ACTUAL target planet claims it for the flat point value (50)',
+    bottleEval.some(a => a.goal_id === targetGoal.id && a.points === 50), bottleEval);
+
+ok('the target is now claimed — getActiveTarget returns null', bonusGoals.getActiveTarget(targetGoal.id) === null);
+
+const displayAfterClaim = bonusGoals.getActiveTargetsForDisplay();
+ok('a claimed target no longer shows up for the client', !displayAfterClaim.some(t => t.system_id === 800 && t.planet_index === 3), displayAfterClaim);
+
+// A later report on the same planet, after it's already claimed, must not award again —
+// there is no longer an active target there for evaluateBattleReportForGoals to match.
+db.prepare(`
+    INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_id, att_player_name, def_lost_cv, killed_population)
+    VALUES (91003, '2026-09-15T22:00:00Z', 800, 3, 905, 'BottleFinder', 10, 1)
+`).run();
+const afterClaimEval = bonusGoals.evaluateBattleReportForGoals(91003);
+ok('hitting the same planet again after it was already claimed awards nothing new', afterClaimEval.length === 0, afterClaimEval);
+
+// The next day, with the old target claimed, a fresh roll picks again from the SAME
+// eligibility pool (planets.population/owner tag — claiming a target doesn't remove the
+// planet itself from future rolls, only that one bonus_goal_active_targets row): the only
+// eligible candidate here is still HostilePlanet, so it's picked again.
+const day2 = new Date('2026-09-16T23:59:00');
+const day2Activation = bonusGoals.maybeActivateRandomTarget(targetGoal.id, targetGoal.config, day2);
+ok('day 2 rolls a fresh target — the only eligible planet (HostilePlanet) can be re-picked',
+    day2Activation && day2Activation.system_id === 800 && day2Activation.planet_index === 3, day2Activation);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {
