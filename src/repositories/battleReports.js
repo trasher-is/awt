@@ -382,7 +382,12 @@ const unmatchedPopDropsSearchStmt = db.prepare(`
     LIMIT @limit
 `);
 
-const SORT_KEYS = { occurred_at: 'occurred_at', cv: 'total_cv_lost', pop: 'killed_population' };
+const SORT_KEYS = {
+    occurred_at: 'occurred_at', cv: 'total_cv_lost', pop: 'killed_population',
+    // "Largest fleet" sorts — a side's own committed CV, not what it lost. Lets a member
+    // find the biggest attacking/defending fleets in the round regardless of outcome.
+    att_cv: 'attacker_combat_value', def_cv: 'defender_combat_value',
+};
 
 function searchBattleReportsFeed({ q = '', sort = 'occurred_at', dir = 'desc', limit = 50, offset = 0 } = {}) {
     const trimmed = (q || '').trim();

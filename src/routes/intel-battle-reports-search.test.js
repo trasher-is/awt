@@ -43,6 +43,11 @@ db.prepare(`
         (9900, '2026-09-01T10:00:00Z', 950, 1, 'RouteAttacker', 'RTA', 'RouteDefenderSmall', 5, 3, 1),
         (9901, '2026-09-01T11:00:00Z', 950, 2, 'RouteAttacker2', 'RTB', 'RouteDefenderBig', 200, 50, 90)
 `).run();
+// 9900's attacker brought the bigger committed fleet (500); 9901's defender brought the
+// bigger one (300) — deliberately the opposite ranking from att_lost_cv/def_lost_cv above,
+// so an att_cv/def_cv sort test can't accidentally pass by reusing the cv-sort ordering.
+db.prepare(`UPDATE battle_reports SET att_combat_value = 500, def_combat_value = 20 WHERE id = 9900`).run();
+db.prepare(`UPDATE battle_reports SET att_combat_value = 40, def_combat_value = 300 WHERE id = 9901`).run();
 
 (async () => {
     const server = app.listen(0);
@@ -66,6 +71,14 @@ db.prepare(`
 
         const byPop = await request(server, '/hub-api/intel/battle-reports-search?sort=pop&dir=desc');
         ok('sort=pop puts the 90-population battle first', byPop.body.feed[0].battle_report_id === 9901, byPop.body.feed.slice(0, 2));
+
+        const byAttCv = await request(server, '/hub-api/intel/battle-reports-search?sort=att_cv&dir=desc');
+        ok('sort=att_cv puts the 500-CV attacker (9900) first, opposite of the cv-sort order',
+            byAttCv.body.feed[0].battle_report_id === 9900, byAttCv.body.feed.slice(0, 2));
+
+        const byDefCv = await request(server, '/hub-api/intel/battle-reports-search?sort=def_cv&dir=desc');
+        ok('sort=def_cv puts the 300-CV defender (9901) first',
+            byDefCv.body.feed[0].battle_report_id === 9901, byDefCv.body.feed.slice(0, 2));
 
         console.log('\n── search (q) ' + '─'.repeat(59));
         const search = await request(server, '/hub-api/intel/battle-reports-search?q=RouteDefenderSmall');

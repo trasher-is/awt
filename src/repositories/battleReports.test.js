@@ -380,6 +380,19 @@ const byPopDesc = battleReports.searchBattleReportsFeed({ sort: 'pop', dir: 'des
 ok('sort by population desc: the 50-population battle leads even though its CV was small',
     byPopDesc[0].battle_report_id === 9801 && byPopDesc[0].killed_population === 50, byPopDesc);
 
+// att_cv/def_cv: "largest fleet" sorts by a side's own committed CV, independent of who
+// lost more or who won — 9800's attacker brought 150 (the most of any attacker here),
+// while 9801's defender brought 40 (the most of any defender here).
+const byAttCvDesc = battleReports.searchBattleReportsFeed({ sort: 'att_cv', dir: 'desc', limit: 200 }).rows.filter(r => r.system_id === 900);
+ok('sort by att_cv desc: the 150-CV attacker (9800) leads over the 10-CV attacker (9801)',
+    byAttCvDesc[0].battle_report_id === 9800 && byAttCvDesc[1].battle_report_id === 9801, byAttCvDesc);
+ok('att_cv sort puts rows with no attacker CV at all (the bare pop-drop) last',
+    byAttCvDesc[byAttCvDesc.length - 1].battle_report_id === null, byAttCvDesc);
+
+const byDefCvDesc = battleReports.searchBattleReportsFeed({ sort: 'def_cv', dir: 'desc', limit: 200 }).rows.filter(r => r.system_id === 900);
+ok('sort by def_cv desc: the 40-CV defender (9801) leads over the 30-CV defender (9800)',
+    byDefCvDesc[0].battle_report_id === 9801 && byDefCvDesc[1].battle_report_id === 9800, byDefCvDesc);
+
 const searchByAttacker = battleReports.searchBattleReportsFeed({ q: 'BigAttacker', limit: 200 });
 ok('search matches the attacker name', searchByAttacker.rows.some(r => r.battle_report_id === 9800), searchByAttacker);
 ok('search excludes rows that do not match', !searchByAttacker.rows.some(r => r.battle_report_id === 9801), searchByAttacker);
