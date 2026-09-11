@@ -179,7 +179,188 @@ function getLeaderboards(sinceIso, limit = 10, scope = 'members', allianceId = n
     };
 }
 
+// --- Dynamic (non-linear) points system ---
+// The flat getCvRatio()/getPopRatio() system above credits every CV/pop unit equally
+// regardless of kill size. This section is the opposite: a single bigger kill is worth
+// disproportionately more PER UNIT than a small one (design discussion, 2026-09-11 —
+// killing a 50k CV fleet late-round should not earn the same per-CV rate as a 300 CV
+// early skirmish). Deliberately evaluated PER BATTLE REPORT / PER BOMBARDMENT EVENT, never
+// on a player's running total — applying either curve to a cumulative total would make a
+// player's score for past fights keep shifting as new ones are added, and would reward
+// someone who's already scored a lot with a better rate on their next small kill too;
+// neither is the intent. Sum the per-event points instead.
+function getPopBandWidth() {
+    return Math.max(1, Math.round(settingNumber('battle_points_pop_band_width', 9)));
+}
+function getCvExponent() {
+    return settingNumber('battle_points_cv_exponent', 1.5);
+}
+function getCvAnchorCv() {
+    return settingNumber('battle_points_cv_anchor_cv', 5000);
+}
+function getCvAnchorPop() {
+    return settingNumber('battle_points_cv_anchor_pop', 20);
+}
+// Pure display multiplier applied at the very end, after the curves and the CV/pop anchor
+// calibration below — it exists only so early-round kills don't all round to fractions of
+// a point on the leaderboard. It changes nothing about the relative fairness between CV
+// and pop, or between a small and a huge kill, since both get multiplied identically.
+function getDisplayScale() {
+    return settingNumber('battle_points_display_scale', 20);
+}
+
+function round1(n) {
+    return Math.round(n * 10) / 10;
+}
+
+// Population killed in ONE event: a fixed band width W, marginal rate = the band number —
+// 1 point/pop for the first W population, 2 points/pop for the next W, 3 for the next W,
+// and so on indefinitely. Killing further into a planet's population costs
+// disproportionately more per pop than the first few, matching how much longer the planet
+// takes to regrow. A single tunable width extends forever, unlike a hand-picked bracket
+// table (which couldn't be made to extend past its last manually-chosen boundary).
+function popDynamicPoints(pop) {
+    if (!Number.isFinite(pop) || pop <= 0) return 0;
+    const w = getPopBandWidth();
+    let total = 0;
+    let remaining = Math.floor(pop);
+    let band = 1;
+    while (remaining > 0) {
+        const unitsInBand = Math.min(remaining, w);
+        total += unitsInBand * band;
+        remaining -= unitsInBand;
+        band++;
+    }
+    return total;
+}
+
+// CV killed in ONE event: points = k * cv^exponent, a smooth superlinear curve — CV spans
+// ~30 early-round to 100k+ late-round (3+ orders of magnitude), which a bracket table
+// would need constant retuning to cover. k is not a free constant: it is derived from ONE
+// calibration anchor ("cvAnchorPop population killed feels roughly equal to cvAnchorCv CV
+// killed"), expressed via popDynamicPoints itself so the two curves stay in sync if the
+// pop band width is ever retuned independently.
+function cvDynamicPoints(cv) {
+    if (!Number.isFinite(cv) || cv <= 0) return 0;
+    const exponent = getCvExponent();
+    const anchorCv = getCvAnchorCv();
+    const anchorPoints = popDynamicPoints(getCvAnchorPop());
+    if (anchorCv <= 0 || anchorPoints <= 0) return 0;
+    const k = anchorPoints / Math.pow(anchorCv, exponent);
+    return k * Math.pow(cv, exponent);
+}
+
+// Unaggregated per-event CV/pop credit rows — deliberately parallel to getCvLeaderboard's/
+// getPopLeaderboard's own queries above (identical exclusion/scope/since logic) but
+// WITHOUT the SUM/GROUP BY: the non-linear formulas above must be applied to each
+// individual event's raw value before summing, not to a player's already-summed total.
+function getCvCreditRows(sinceIso, scope, allianceId) {
+    const { clause, params } = exclusionClauseFor('att_alliance_tag', 'def_alliance_tag', getExcludedAllianceTags());
+    const sinceSql = sinceIso ? `AND started_at >= ?` : '';
+    const wherePart = `${sinceSql} AND ${clause}`;
+    const wherePartParams = sinceIso ? [sinceIso, ...params] : [...params];
+    const { clause: scopeSql, params: scopeParams } = scopeClauseFor(scope, allianceId);
+
+    const sql = `
+        SELECT player_id, player_name, cv_credit FROM (
+            SELECT att_player_id AS player_id, att_player_name AS player_name, def_lost_cv AS cv_credit
+            FROM battle_reports
+            WHERE att_player_id IS NOT NULL ${wherePart}
+            UNION ALL
+            SELECT def_player_id AS player_id, def_player_name AS player_name, att_lost_cv AS cv_credit
+            FROM battle_reports
+            WHERE def_player_id IS NOT NULL ${wherePart}
+        )
+        WHERE ${scopeSql}
+    `;
+    return db.prepare(sql).all(...wherePartParams, ...wherePartParams, ...scopeParams);
+}
+
+function getPopCreditRows(sinceIso, scope, allianceId) {
+    const excludedTags = getExcludedAllianceTags();
+
+    const br = exclusionClauseFor('att_alliance_tag', 'def_alliance_tag', excludedTags);
+    const brSinceSql = sinceIso ? `AND started_at >= ?` : '';
+    const brWherePart = `${brSinceSql} AND ${br.clause}`;
+    const brParams = sinceIso ? [sinceIso, ...br.params] : [...br.params];
+
+    const ne = exclusionClauseFor('ca.tag', 'oa.tag', excludedTags);
+    const neSinceSql = sinceIso ? `AND ne.occurred_at >= ?` : '';
+    const neWherePart = `${neSinceSql} AND ${ne.clause}`;
+    const neParams = sinceIso ? [sinceIso, ...ne.params] : [...ne.params];
+
+    const { clause: scopeSql, params: scopeParams } = scopeClauseFor(scope, allianceId);
+
+    // See getPopLeaderboard above for why `op` is joined the way it is (direction:'lost'
+    // rows) and why a NULL other_player_id must be tolerated (self-bombing with no known
+    // opponent) — identical logic, just without the outer SUM/GROUP BY.
+    const sql = `
+        SELECT player_id, player_name, pop_credit FROM (
+            SELECT att_player_id AS player_id, att_player_name AS player_name, killed_population AS pop_credit
+            FROM battle_reports
+            WHERE att_player_id IS NOT NULL ${brWherePart}
+
+            UNION ALL
+
+            SELECT ne.credited_player_id AS player_id, cp.name AS player_name, ne.population_delta AS pop_credit
+            FROM news_events ne
+            JOIN players cp ON cp.id = ne.credited_player_id
+            LEFT JOIN players op ON op.id = (CASE
+                WHEN ne.credited_player_id = ne.player_id THEN ne.other_player_id
+                ELSE ne.player_id
+            END)
+            LEFT JOIN alliances ca ON ca.id = cp.alliance_id
+            LEFT JOIN alliances oa ON oa.id = op.alliance_id
+            WHERE ne.message_type IN ('battle-bombarded', 'battle-conquer')
+              AND ne.matched_battle_report_id IS NULL
+              AND ne.credited_player_id IS NOT NULL
+              ${neWherePart}
+        )
+        WHERE ${scopeSql}
+    `;
+    return db.prepare(sql).all(...brParams, ...neParams, ...scopeParams);
+}
+
+// The combined leaderboard: CV + population, each transformed through its own non-linear
+// curve above THEN summed per player (never the other way — see this section's header
+// comment for why per-event order matters).
+function getDynamicLeaderboard(sinceIso, limit = 10, scope = 'members', allianceId = null) {
+    const cvRows = getCvCreditRows(sinceIso, scope, allianceId);
+    const popRows = getPopCreditRows(sinceIso, scope, allianceId);
+
+    const totals = new Map();
+    const entryFor = (id, name) => {
+        let e = totals.get(id);
+        if (!e) { e = { player_id: id, player_name: name || null, cv_points: 0, pop_points: 0 }; totals.set(id, e); }
+        else if (!e.player_name && name) e.player_name = name;
+        return e;
+    };
+    for (const r of cvRows) {
+        if (r.cv_credit == null || r.cv_credit <= 0) continue;
+        entryFor(r.player_id, r.player_name).cv_points += cvDynamicPoints(r.cv_credit);
+    }
+    for (const r of popRows) {
+        if (r.pop_credit == null || r.pop_credit <= 0) continue;
+        entryFor(r.player_id, r.player_name).pop_points += popDynamicPoints(r.pop_credit);
+    }
+
+    const scale = getDisplayScale();
+    const rows = [...totals.values()]
+        .map(e => ({
+            player_id: e.player_id,
+            player_name: e.player_name,
+            cv_points: round1(e.cv_points * scale),
+            pop_points: round1(e.pop_points * scale),
+            points: round1((e.cv_points + e.pop_points) * scale),
+        }))
+        .filter(r => r.points > 0)
+        .sort((a, b) => b.points - a.points);
+    return rows.slice(0, limit);
+}
+
 module.exports = {
     getCvRatio, getPopRatio, getExcludedAllianceTags,
     getCvLeaderboard, getPopLeaderboard, getLeaderboards,
+    getPopBandWidth, getCvExponent, getCvAnchorCv, getCvAnchorPop, getDisplayScale,
+    popDynamicPoints, cvDynamicPoints, getDynamicLeaderboard,
 };
