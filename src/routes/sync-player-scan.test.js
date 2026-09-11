@@ -2,13 +2,11 @@
 // "Deep scan" button (2026-08-30): /sync/player-scan-claim hands out player ids,
 // least-recently-scanned first, and bumps last_api_scan_at (an optimistic claim, not a
 // reservation — see that route's own comment); /sync/player-scan-status is its read-only
-// counterpart that feeds the button's status line. The claim used to exclude anyone
-// already "fresh" (scanned inside a 6h/1h floor); it no longer does — every claim just
-// hands out the whole roster in least-recently-scanned order, forever, so freshness is
-// bounded by the sweep's own pace, not a floor that leaves it idle for hours. Status still
-// reports a genuine "how many haven't been scanned recently" count for the UI, from the
-// same underlying predicate — but the two are independent now, not a matched pair: a
-// claim can (and, once the roster is small, will) hand out ids status doesn't call stale.
+// counterpart that feeds the button's status line. The claim's own staleness floor
+// (CLAIM_STALE_FLOOR_MINUTES, a few minutes) is intentionally much shorter than the
+// status line's 6h/1h "worth telling a member about" window (API_SCAN_STALE_SQL) — the
+// two serve different purposes and are independent, not a matched pair: a claim can (and
+// normally will) skip an id status still calls fresh long before status would.
 //
 // Run with: node src/routes/sync-player-scan.test.js
 
@@ -88,12 +86,12 @@ function request(server, method, urlPath) {
         ok('status now reports a non-null last_scan_at (the claim just bumped one)',
             statusAfter.body.last_scan_at != null, statusAfter.body);
 
-        console.log('\n── a second claim re-includes the just-claimed ids too — no staleness floor any more ' + '─'.repeat(2));
+        console.log('\n── a second claim moments later only gets the still-never-scanned id ' + '─'.repeat(4));
         const neverScannedId = [801, 802, 803].find(id => !claimRes.body.ids.includes(id));
         const claimRes2 = await request(server, 'POST', '/hub-api/sync/player-scan-claim?limit=10');
-        ok('a second claim hands out all 3 ids again, not just the still-stale one — nothing is excluded for being fresh',
-            claimRes2.body.ids.length === 3, claimRes2.body);
-        ok('the never-scanned id still sorts first (least-recently-scanned first ordering)',
+        ok('second claim only gets the 1 still-never-scanned id, not the 2 just claimed (inside the floor)',
+            claimRes2.body.ids.length === 1, claimRes2.body);
+        ok('the still-never-scanned id is the one NOT in the first claim',
             claimRes2.body.ids[0] === neverScannedId, { expected: neverScannedId, got: claimRes2.body.ids });
 
         const statusFinal = await request(server, 'GET', '/hub-api/sync/player-scan-status');

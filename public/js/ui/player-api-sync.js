@@ -7,22 +7,26 @@
 //   2. Player/{id} sweep: a continuous, least-recently-scanned-first background scan
 //      filling in the activity/status fields ListPlayer doesn't have. Claims a batch via
 //      /hub-api/sync/player-scan-claim (see that route's comment for what "claim" means
-//      here), then calls Player/{id} once per claimed id. There is no per-round staleness
-//      floor any more (removed alongside players.js's getStalePlayerIdsForApiScanStmt) —
-//      the sweep just keeps cycling the whole roster forever, oldest scan first, so
-//      "freshest possible, all the time" is the actual goal rather than "good enough, then
-//      go idle." SWEEP_BATCH_SIZE is what actually bounds real traffic. The agreed ceiling
-//      is PER ACCOUNT, not pooled across the hub (see docs/game-api.md and AGENTS.md's
-//      "Production game API: agreed, with boundaries") — 5 req/s AND 200 requests/5min,
-//      each measured against the one member whose session this browser is using. At
-//      20/min this sweep alone spends 100 of that account's 200-per-5min budget, leaving
-//      the other half free for that same member's own deliberate lookups (search, travel
-//      calc, a manual deep scan) happening in the same window — going higher would start
-//      eating into that headroom rather than spending slack that was sitting unused,
-//      since the two draw from the SAME per-account pool, not separate ones. Neither
-//      ceiling is a tuning knob — raising either needs the game admin's renewed consent,
-//      not a code change. A re-entrancy flag (`sweeping`) keeps a slow tick from
-//      overlapping the next scheduled one.
+//      here), then calls Player/{id} once per claimed id. The claim query has a SHORT
+//      staleness floor (players.js's CLAIM_STALE_FLOOR_MINUTES, a few minutes — brought
+//      back after a real incident: with no floor at all, several simultaneously-active
+//      members' accounts each ran this same sweep with no idea another account had just
+//      refreshed the same player, and endlessly re-scanned an already-fully-caught-up
+//      roster between them, each spending its own 200/5min budget for zero benefit). Once
+//      genuinely caught up, a tick's claim can come back empty — that's it correctly going
+//      quiet, not a bug. SWEEP_BATCH_SIZE is what actually bounds real traffic. The agreed
+//      ceiling is PER ACCOUNT, not pooled across the hub (see docs/game-api.md and
+//      AGENTS.md's "Production game API: agreed, with boundaries") — 5 req/s AND 200
+//      requests/5min, each measured against the one member whose session this browser is
+//      using. At 20/min this sweep alone can spend up to 100 of that account's
+//      200-per-5min budget, leaving the other half free for that same member's own
+//      deliberate lookups (search, travel calc, a manual deep scan) happening in the same
+//      window — going higher would start eating into that headroom rather than spending
+//      slack that was sitting unused, since the two draw from the SAME per-account pool,
+//      not separate ones. Neither ceiling is a tuning knob — raising either needs the game
+//      admin's renewed consent, not a code change. A re-entrancy flag (`scanning`, shared
+//      with deepScanPlayers — see its own comment) keeps a slow tick from overlapping the
+//      next scheduled one or a manual deep scan.
 //
 // Cross-tab dedup follows battle-sync.js's localStorage-lock pattern exactly.
 
