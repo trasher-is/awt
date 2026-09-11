@@ -104,8 +104,9 @@ window.addEventListener('DOMContentLoaded', () => {
         .catch(err => console.warn('[BattleSync] failed to start:', err));
 
     // Background player API sync (ListPlayer roster refresh + continuous, least-recently-
-    // scanned-first Player/{id} detail sweep — no staleness floor any more). Same
-    // on-demand-load pattern as battle-sync above.
+    // scanned-first Player/{id} detail sweep, with a short few-minute staleness floor —
+    // see player-api-sync.js's own comment). Same on-demand-load pattern as battle-sync
+    // above.
     import('./player-api-sync.js')
         .then(({ initPlayerApiSync }) => initPlayerApiSync())
         .catch(err => console.warn('[PlayerApiSync] failed to start:', err));

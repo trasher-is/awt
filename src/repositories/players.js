@@ -744,32 +744,38 @@ const API_SCAN_STALE_SQL = `(
         AND datetime(last_activity_at) >= datetime(last_api_scan_at, '-24 hours'))
 )`;
 
-// No staleness floor: every claim just hands out the LEAST recently scanned players,
-// oldest (or never-scanned) first, forever — a continuous round-robin over the whole
-// roster rather than "skip anyone already fresh enough." There used to be a 6h/1h cutoff
-// here that stopped the sweep once everyone had been touched recently, on the theory that
-// re-scanning unchanged data wasted the agreed game API budget. In practice, one browser's
-// sweep is bounded by its OWN account's budget (5 req/s and 200 calls/5min, PER ACCOUNT —
-// see docs/game-api.md), and the sweep's own pace (player-api-sync.js's SWEEP_BATCH_SIZE)
-// already stays well inside that, so the right lever for "don't overspend the budget" is
-// that batch size, not an extra gate here that mostly just left the roster stale for hours.
+// A SHORT staleness floor — CLAIM_STALE_FLOOR_MINUTES, currently a few minutes — not the
+// old 6h/1h tiers. #170 removed the floor entirely on the theory that one browser's sweep
+// is bounded by its own account's 200/5min budget (see docs/game-api.md), so an extra gate
+// here could only ever leave the roster MORE stale, never save anything real. That
+// reasoning missed the case where several members have the hub open at once: confirmed
+// live (2026-09-11), with the roster fully caught up (0 stale) and NOTHING left to
+// usefully re-scan, four simultaneously-active accounts still burned 555 Player/{id}
+// calls between them in a few minutes — each account's own sweep has no idea another
+// account just refreshed the same player seconds ago, so with no floor at all they just
+// take turns re-scanning each other's work forever. A few minutes' floor stops that
+// specific waste (immediately re-claiming something anyone scanned moments ago) while
+// staying far fresher than the pre-#170 baseline.
+//
 // joined='N/A' is the game's OWN signal for "this account has resigned" (see the comment
 // on getJoinedDates/queueNewPlayers above) — confirmed live (2026-09-11): Player/{id}
 // answers "Unable to find player with id: ..." for these, every single time, forever,
 // until the game itself starts sending a real joinedAt again on a rejoin (which already
-// flows through the ListPlayer sync independently of this sweep). With no staleness floor
-// any more, excluding them here is the difference between a resigned account quietly
-// costing nothing and it burning one guaranteed-to-fail call out of the account's 200/5min
-// budget on every single cycle, forever, right alongside real players who actually benefit
-// from being re-scanned.
+// flows through the ListPlayer sync independently of this sweep). Excluding them here is
+// the difference between a resigned account quietly costing nothing and it burning one
+// guaranteed-to-fail call every cycle, forever, right alongside real players who actually
+// benefit from being re-scanned.
+const CLAIM_STALE_FLOOR_MINUTES = 3;
+
 const getStalePlayerIdsForApiScanStmt = db.prepare(`
     SELECT id FROM players
-    WHERE joined IS NULL OR joined != 'N/A'
+    WHERE (joined IS NULL OR joined != 'N/A')
+      AND (last_api_scan_at IS NULL OR last_api_scan_at < datetime('now', '-' || @floorMinutes || ' minutes'))
     ORDER BY (last_api_scan_at IS NULL) DESC, last_api_scan_at ASC
-    LIMIT ?
+    LIMIT @limit
 `);
 function getStalePlayerIdsForApiScan(limit) {
-    return getStalePlayerIdsForApiScanStmt.all(limit).map(r => r.id);
+    return getStalePlayerIdsForApiScanStmt.all({ floorMinutes: CLAIM_STALE_FLOOR_MINUTES, limit }).map(r => r.id);
 }
 
 // Arity varies per call (ids length) — prepared fresh each call, same reasoning as
@@ -781,9 +787,10 @@ function markPlayersApiScanned(ids) {
 }
 
 // Feeds the "Deep scan" button's status line — total roster size, how many haven't been
-// scanned within API_SCAN_STALE_SQL's window (informational now — a claim will happily
-// hand out a "fresh" id too, see getStalePlayerIdsForApiScanStmt above), and when the
-// most recent claim of any size last touched a row.
+// scanned within API_SCAN_STALE_SQL's window (a much longer horizon than the claim
+// query's own CLAIM_STALE_FLOOR_MINUTES — this is "worth telling a member about", not
+// "eligible to claim"; a claim can and normally will hand out an id this call still
+// considers fresh), and when the most recent claim of any size last touched a row.
 const getPlayerApiScanStatsStmt = db.prepare(`
     SELECT
         (SELECT COUNT(*) FROM players) as total,

@@ -216,20 +216,26 @@ ok('getStalePlayerIdsForApiScan returns players never scanned, in some order',
     stale.includes(701) && stale.includes(702) && stale.includes(703), stale);
 
 players.markPlayersApiScanned([702, 703]);
-// No staleness floor any more (see the function's own comment in players.js): a claim
-// hands out the whole roster continuously, oldest scan first, with nothing EXCLUDED just
-// because it was already scanned recently.
+// A short staleness floor (CLAIM_STALE_FLOOR_MINUTES, a few minutes — see players.js's own
+// comment) — re-added after a real production incident: with NO floor at all (the
+// original #170 behavior), several simultaneously-active accounts kept endlessly
+// re-scanning a roster that was already fully caught up, each burning its own 200/5min
+// budget for zero freshness benefit. This is nowhere near the old pre-#170 6h/1h tiers —
+// just enough to stop an immediate re-claim of something scanned moments ago.
 const staleAfterMark = players.getStalePlayerIdsForApiScan(10000);
-ok('a player scanned moments ago is still included in the queue, not excluded',
-    staleAfterMark.includes(702) && staleAfterMark.includes(703), staleAfterMark);
-const idxOf = id => staleAfterMark.indexOf(id);
-ok('a never-scanned player sorts before ones that have been scanned',
-    idxOf(701) < idxOf(702) && idxOf(701) < idxOf(703), staleAfterMark);
+ok('a player scanned moments ago is EXCLUDED from the queue — inside the floor',
+    !staleAfterMark.includes(702) && !staleAfterMark.includes(703), staleAfterMark);
+ok('a never-scanned player is still included', staleAfterMark.includes(701), staleAfterMark);
 
-db.prepare(`UPDATE players SET last_api_scan_at = datetime('now', '-7 hours') WHERE id = 702`).run();
+db.prepare(`UPDATE players SET last_api_scan_at = datetime('now', '-10 minutes') WHERE id = 702`).run();
 const afterBackdate = players.getStalePlayerIdsForApiScan(10000);
-ok('the player scanned longest ago (702, backdated) now sorts ahead of the one scanned moments ago (703)',
-    afterBackdate.indexOf(702) < afterBackdate.indexOf(703), afterBackdate);
+ok('a player scanned past the floor (702, backdated 10 min ago) re-enters the queue',
+    afterBackdate.includes(702), afterBackdate);
+ok('a player still inside the floor (703, scanned moments ago) stays excluded',
+    !afterBackdate.includes(703), afterBackdate);
+const idxOf = id => afterBackdate.indexOf(id);
+ok('a never-scanned player still sorts before one scanned past the floor',
+    idxOf(701) < idxOf(702), afterBackdate);
 
 // A resigned player (joined='N/A', the game's own signal — confirmed live 2026-09-11:
 // Player/{id} answers "Unable to find player" for these, every time) must never be
