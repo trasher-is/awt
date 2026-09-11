@@ -1,5 +1,6 @@
 const db = require('../database');
 const settingsRepo = require('./settings');
+const bonusGoalsRepo = require('./bonusGoals');
 
 function settingNumber(key, fallback) {
     const row = settingsRepo.getSetting(key);
@@ -327,6 +328,10 @@ function getPopCreditRows(sinceIso, scope, allianceId) {
 function getDynamicLeaderboard(sinceIso, limit = 10, scope = 'members', allianceId = null) {
     const cvRows = getCvCreditRows(sinceIso, scope, allianceId);
     const popRows = getPopCreditRows(sinceIso, scope, allianceId);
+    // Already-final, already-scaled points from bonusGoals.js (e.g. a tiered bonus for
+    // hitting a currently-ranked planet) — added straight into the total below, AFTER the
+    // CV/pop side's own display scale, not run through any curve of its own.
+    const bonusByPlayer = bonusGoalsRepo.getAwardedPointsByPlayer(sinceIso, scope, allianceId);
 
     const totals = new Map();
     const entryFor = (id, name) => {
@@ -343,16 +348,29 @@ function getDynamicLeaderboard(sinceIso, limit = 10, scope = 'members', alliance
         if (r.pop_credit == null || r.pop_credit <= 0) continue;
         entryFor(r.player_id, r.player_name).pop_points += popDynamicPoints(r.pop_credit);
     }
+    // A player who only has bonus-goal points needs an entry too, or they'd never appear
+    // on the leaderboard at all despite genuinely scoring — bonusByPlayer has no CV/pop
+    // rows to have created one via entryFor above.
+    for (const [playerId, bonus] of bonusByPlayer) {
+        if (!totals.has(playerId)) entryFor(playerId, bonus.player_name);
+    }
 
     const scale = getDisplayScale();
     const rows = [...totals.values()]
-        .map(e => ({
-            player_id: e.player_id,
-            player_name: e.player_name,
-            cv_points: round1(e.cv_points * scale),
-            pop_points: round1(e.pop_points * scale),
-            points: round1((e.cv_points + e.pop_points) * scale),
-        }))
+        .map(e => {
+            const bonus = bonusByPlayer.get(e.player_id);
+            const bonusPoints = bonus ? round1(bonus.bonus_points) : 0;
+            const cvPoints = round1(e.cv_points * scale);
+            const popPoints = round1(e.pop_points * scale);
+            return {
+                player_id: e.player_id,
+                player_name: e.player_name,
+                cv_points: cvPoints,
+                pop_points: popPoints,
+                bonus_points: bonusPoints,
+                points: round1(cvPoints + popPoints + bonusPoints),
+            };
+        })
         .filter(r => r.points > 0)
         .sort((a, b) => b.points - a.points);
     return rows.slice(0, limit);

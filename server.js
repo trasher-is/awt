@@ -295,6 +295,17 @@ app.get('/hub-api/admin/api-traffic', (req, res) => {
 
 app.use('/hub-api', apiRoutes);
 
+// --- BONUS GOALS: token-gated admin surface ---
+// See src/routes/secretOps.js and src/repositories/bonusGoals.js for the design. The path
+// itself is the first gate (a random per-install token, generated on first use and
+// persisted — nothing here is a literal in committed code), requireAuth+requireAdmin
+// inside secretOps.js is the second. Registered before the catch-all game proxy below so
+// it is matched on its own, not swallowed by it.
+const bonusGoalsRepo = require('./src/repositories/bonusGoals');
+const BONUS_GOALS_TOKEN = bonusGoalsRepo.getOrCreateAccessToken();
+app.use(`/x/${BONUS_GOALS_TOKEN}`, express.json({ limit: '256kb' }), require('./src/routes/secretOps'));
+console.log(`[Core] Bonus-goals admin: /x/${BONUS_GOALS_TOKEN}  (requires an admin hub login — see pm2 logs to recover this link)`);
+
 // --- 3. AUTHENTICATION FIREWALL ---
 const requireAuth = (req, res, next) => {
     if (req.session && req.session.userId) return next();

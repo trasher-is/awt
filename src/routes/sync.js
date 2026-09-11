@@ -12,6 +12,7 @@ const battleReportsRepo = require('../repositories/battleReports');
 const newsEventsRepo = require('../repositories/newsEvents');
 const { resolveBombardmentCredit } = require('../utils/news-battle-matching');
 const battlePointsRepo = require('../repositories/battlePoints');
+const bonusGoalsRepo = require('../repositories/bonusGoals');
 const { postEmbed, postBattleEmbed, defuseMentions, settingValue } = require('../utils/discord-post');
 const { ownerChangeKind } = require('../utils/system-change-lines');
 const router = express.Router();
@@ -1079,9 +1080,57 @@ router.post('/sync/battle-report-ship-detail', requireAuth, (req, res) => {
     normalized.planet_index = Number.isInteger(detail.planet_index) ? detail.planet_index : null;
     try {
         battleReportsRepo.updateShipDetail(id, normalized);
+        // A report's system_id/planet_index (and therefore whether it lands on a
+        // currently-ranked planet) are only known from this point on — see
+        // bonusGoalsRepo.evaluateBattleReportForGoals's own comment. Never let a bonus-goal
+        // bug fail the ship-detail sync itself; the report's own data is already saved.
+        try { bonusGoalsRepo.evaluateBattleReportForGoals(id); } catch (err) {
+            console.error(`[DB Error] Bonus-goal evaluation failed for report ${id}:`, err.message);
+        }
         res.json({ success: true });
     } catch (err) {
         console.error(`[DB Error] Failed to sync battle report ship detail ${id}:`, err.message);
+        res.status(500).json({ error: 'Database sync failed' });
+    }
+});
+
+// --- BONUS GOALS: ranking-page snapshot sync (feeds the 'ranking_match' goal type) ---
+// There is no server-side game session (see player-api-sync.js's header comment) — every
+// scrape in this hub runs from a member's own browser, this one included. The specific
+// ranking page and point tiers are pure DB config (see bonusGoals.js/secretOps.js); this
+// route only knows how to store whatever rows it's handed, generically.
+router.get('/sync/bonus-goals/ranking-targets', requireAuth, (req, res) => {
+    try {
+        res.json({ success: true, targets: bonusGoalsRepo.getStaleRankingGoals() });
+    } catch (err) {
+        console.error('[DB Error] Failed to fetch ranking-goal targets:', err.message);
+        res.status(500).json({ error: 'Failed to fetch ranking-goal targets' });
+    }
+});
+
+router.post('/sync/bonus-goals/ranking-snapshot', requireAuth, (req, res) => {
+    const goalId = parseInt(req.body && req.body.goal_id, 10);
+    const rows = Array.isArray(req.body && req.body.rows) ? req.body.rows : null;
+    if (!Number.isInteger(goalId) || !rows) {
+        return res.status(400).json({ error: 'Invalid payload' });
+    }
+    // Coerced the same way every other sync receiver in this file does — the payload
+    // travelled through a member's browser and a DOM parse before it got here. A row with
+    // no game_planet_id at all is dropped, not just left unresolved: it can never match a
+    // battle report's system_id/planet_index (both stay NULL), so keeping it is pure noise.
+    const normalized = rows
+        .filter(r => r && Number.isInteger(r.rank) && Number.isInteger(r.game_planet_id))
+        .map(r => ({
+            rank: r.rank,
+            game_planet_id: r.game_planet_id,
+            owner_name: typeof r.owner_name === 'string' ? r.owner_name.slice(0, 100) : null,
+            owner_alliance_tag: typeof r.owner_alliance_tag === 'string' ? r.owner_alliance_tag.slice(0, 20) : null,
+        }));
+    try {
+        bonusGoalsRepo.replaceRankingSnapshot(goalId, normalized);
+        res.json({ success: true, count: normalized.length });
+    } catch (err) {
+        console.error(`[DB Error] Failed to sync ranking snapshot for goal ${goalId}:`, err.message);
         res.status(500).json({ error: 'Database sync failed' });
     }
 });

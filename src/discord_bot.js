@@ -565,8 +565,11 @@ async function handleMessage(message) {
         }
 
         const rows = battlePointsRepo.getDynamicLeaderboard(sinceIso, 10, scope, allianceId);
+        // Bonus points only show up in the breakdown when a player actually has any —
+        // most won't, and "+ 0 bonus" on every line would just be noise. What earns bonus
+        // points, and how much, is deliberately never named here (see bonusGoals.js).
         const lines = rows.length
-            ? rows.map((r, i) => `**${i + 1}.** ${r.player_name || 'Unknown'} — **${r.points.toLocaleString()}** pts _(${r.cv_points.toLocaleString()} CV + ${r.pop_points.toLocaleString()} pop)_`).join('\n')
+            ? rows.map((r, i) => `**${i + 1}.** ${r.player_name || 'Unknown'} — **${r.points.toLocaleString()}** pts _(${r.cv_points.toLocaleString()} CV + ${r.pop_points.toLocaleString()} pop${r.bonus_points ? ` + ${r.bonus_points.toLocaleString()} bonus` : ''})_`).join('\n')
             : '_No battles recorded yet._';
 
         const embed = new EmbedBuilder()
