@@ -149,23 +149,32 @@ async function scanClaimedBatch(limit, onProgress = () => {}) {
     return { ok: true, claimed: ids.length, scanned, failed };
 }
 
-let sweeping = false;
+// Shared across BOTH the background tick and a manual deep scan — real production
+// incident (2026-09-11): the two used separate flags, so a 60s-interval sweep tick could
+// fire WHILE a 150-player deep scan's own getPlayer loop was still running, adding its
+// own SWEEP_BATCH_SIZE calls on top from the SAME account. Deep Scan alone (plus its own
+// forced list pull) already uses a large share of the account's 200/5min budget — a
+// concurrent sweep tick landing on top of that is what tipped it over and cost the tail
+// of that run to 429s. One flag for "this account's browser is already spending calls on
+// player detail scans" means the two now take turns instead of racing.
+let scanning = false;
 async function runSweepTick() {
     // Re-entrancy guard: a tick can easily run long (up to SWEEP_BATCH_SIZE sequential
     // getPlayer calls + POSTs can exceed the 60s interval), and the cross-tab
     // claimLock/localStorage check above solves a DIFFERENT problem (another tab/window
-    // running its own tick), not this one — an overlapping tick in the SAME tab would
-    // otherwise always re-claim successfully and ticks could stack with no ceiling.
-    if (sweeping) return;
+    // running its own tick), not this one — an overlapping tick in the SAME tab, OR a
+    // manual deep scan already in flight, would otherwise both draw from the same budget
+    // at once.
+    if (scanning) return;
     if (!claimLock(SWEEP_LOCK_KEY, SWEEP_LOCK_TTL_MS)) return;
-    sweeping = true;
+    scanning = true;
     try {
         const result = await scanClaimedBatch(SWEEP_BATCH_SIZE);
         if (!result.ok) console.warn('[PlayerApiSync] scan-claim failed:', result.error);
     } catch (err) {
         console.warn('[PlayerApiSync] sweep tick failed:', err.message);
     } finally {
-        sweeping = false;
+        scanning = false;
     }
 }
 
@@ -187,15 +196,29 @@ export async function deepScanPlayers(limit, onProgress = () => {}) {
     if (!claimLock(DEEP_SCAN_LOCK_KEY, DEEP_SCAN_LOCK_TTL_MS)) {
         return { ok: false, error: 'cooldown' };
     }
-    onProgress('Refreshing the player roster…', 0, 0);
-    const listResult = await pullPlayerList();
-    if (!listResult.ok && listResult.error === 'session') {
-        return { ok: false, error: 'session' };
+    // Shares `scanning` with the background sweep (see runSweepTick's comment): a manual
+    // deep scan already spends a large share of this account's 5-minute budget on its own,
+    // so the quiet background tick must not ALSO be spending calls on the same account for
+    // the several tens of seconds this loop runs. If a sweep tick is already mid-flight
+    // when this starts, that one tick is left to finish rather than aborted — only new
+    // ticks are held off.
+    if (scanning) {
+        return { ok: false, error: 'A background scan is already using this account\'s budget — try again in a moment.' };
     }
-    onProgress('Claiming stale players…', 0, 0);
-    const scanResult = await scanClaimedBatch(limit, onProgress);
-    if (!scanResult.ok) return scanResult;
-    return { ok: true, listUpdated: listResult.ok ? listResult.count : null, ...scanResult };
+    scanning = true;
+    try {
+        onProgress('Refreshing the player roster…', 0, 0);
+        const listResult = await pullPlayerList();
+        if (!listResult.ok && listResult.error === 'session') {
+            return { ok: false, error: 'session' };
+        }
+        onProgress('Claiming stale players…', 0, 0);
+        const scanResult = await scanClaimedBatch(limit, onProgress);
+        if (!scanResult.ok) return scanResult;
+        return { ok: true, listUpdated: listResult.ok ? listResult.count : null, ...scanResult };
+    } finally {
+        scanning = false;
+    }
 }
 
 let started = false;
