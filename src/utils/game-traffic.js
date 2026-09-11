@@ -58,6 +58,18 @@ function gameTrafficGate({
         maxObservedPerSecond: 0,
     };
 
+    // Which endpoints are actually spending the budget — added after a real incident where
+    // a member suspected the automatic galaxy seed was calling the game once per system
+    // (it isn't: one Map/sectors call per run, see api-galaxy-seed.js) but there was no way
+    // to just LOOK and settle it instead of reading source and trusting a comment. Numeric
+    // path segments are collapsed to `:id` so this can't grow unbounded from one counter
+    // per player id ever scanned.
+    const byPath = new Map();
+    function bumpPath(path) {
+        const normalized = typeof path === 'string' ? path.replace(/\/\d+(?=\/|$)/g, '/:id') : 'unknown';
+        byPath.set(normalized, (byPath.get(normalized) || 0) + 1);
+    }
+
     // Buckets for members who stopped scanning must not accumulate forever.
     const sweeper = setInterval(() => {
         const cutoff = Date.now() - 60 * 1000;
@@ -130,6 +142,7 @@ function gameTrafficGate({
                 bucket.lastSeen = t;
                 counters.admitted++;
                 counters.maxObservedPerSecond = Math.max(counters.maxObservedPerSecond, bucket.recent.length);
+                bumpPath(req.path);
                 return next();
             }
 
@@ -157,11 +170,13 @@ function gameTrafficGate({
         limit: maxPerSecond,
         buckets: buckets.size,
         waiting: [...buckets.values()].reduce((n, b) => n + b.waiting, 0),
+        byPath: Object.fromEntries(byPath),
     });
 
     // Tests only: drop all state so one process can exercise several scenarios.
     middleware.reset = () => {
         buckets.clear();
+        byPath.clear();
         Object.assign(counters, { admitted: 0, delayed: 0, rejected: 0, unmarkedXhr: 0, maxObservedPerSecond: 0 });
     };
 
