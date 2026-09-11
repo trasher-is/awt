@@ -390,6 +390,7 @@ async function handleMessage(message) {
                 { name: '`!mortal` / `!mortalday` / `!mortalweek` `[all|<alliance_tag>]`', value: 'Shows the CV/population-killed battle leaderboards, each with a simple points column. All-time, last 24 hours, or last 7 days. Defaults to Hub tool users only; `all` lifts that; any alliance tag filters to that alliance (any alliance, not just your own).\n*Example: `!mortalweek nsa`*' },
                 { name: '`!cvkills` / `!cvkillsday` / `!cvkillsweek` `[all|<alliance_tag>]`', value: 'Pure CV-killed ranking — the raw number only, no points. Same scope rules as `!mortal`.\n*Example: `!cvkillsweek nsa`*' },
                 { name: '`!popkills` / `!popkillsday` / `!popkillsweek` `[all|<alliance_tag>]`', value: 'Pure population-killed ranking — the raw number only, no points. Same scope rules as `!mortal`.\n*Example: `!popkillsweek nsa`*' },
+                { name: '`!glory` / `!gloryday` / `!gloryweek` `[all|<alliance_tag>]`', value: 'Combined CV + population points leaderboard, weighted so a bigger single kill is worth disproportionately more per unit. Same scope rules as `!mortal`.\n*Example: `!gloryweek nsa`*' },
                 { name: '`!lastseen <player_name>`', value: 'Shows up to 5 recent system/planet locations a player was involved in a battle report or News-page bombardment at, on either side, newest first.\n*Example: `!lastseen Hkiller89`*' },
                 { name: '`!8ball <question>`', value: 'Ask the magic 8-ball a question.\n*Example: `!8ball will we win this round?`*' }
             )
@@ -482,10 +483,9 @@ async function handleMessage(message) {
     // !cvkills[day|week] / !popkills[day|week] - PURE RAW LEADERBOARDS (no points)
     // Split out of !mortal on request: a straight ranking by the raw number killed, with
     // no points formula involved at all. !mortal's own points column uses a flat linear
-    // ratio (battle_points_cv_ratio/battle_points_pop_ratio) that's being replaced by a
-    // proper non-linear points system (bigger kills worth disproportionately more per
-    // unit) — these two commands are for members who just want the raw ranking in the
-    // meantime, not tied to whatever formula that ends up being.
+    // ratio (battle_points_cv_ratio/battle_points_pop_ratio); !glory below is the proper
+    // non-linear points system — these two commands are for members who just want the raw
+    // ranking, not tied to either formula.
     // ----------------------------------------------------
     const RAW_LEADERBOARD_COMMANDS = ['cvkills', 'cvkillsday', 'cvkillsweek', 'popkills', 'popkillsday', 'popkillsweek'];
     if (RAW_LEADERBOARD_COMMANDS.includes(command)) {
@@ -526,6 +526,53 @@ async function handleMessage(message) {
             .setTitle(`${isPop ? '☠️ Population Killed' : '💥 CV Killed'} — ${label}${scopeLabel}`)
             .setDescription(lines)
             .setColor('#e11d48');
+
+        return message.reply({ embeds: [embed] });
+    }
+
+    // ----------------------------------------------------
+    // !glory / !gloryday / !gloryweek - COMBINED DYNAMIC POINTS LEADERBOARD
+    // CV + population killed, each run through its own non-linear curve (see
+    // battlePoints.js's getDynamicLeaderboard for the full design) then summed per player
+    // — a big single kill earns disproportionately more per unit than a small one, and a
+    // routine CV skirmish and a routine pop kill land in the same ballpark. The successor
+    // to !mortal's flat linear points; !cvkills/!popkills (raw, no points) still exist
+    // alongside this for members who just want the plain numbers.
+    // ----------------------------------------------------
+    if (command === 'glory' || command === 'gloryday' || command === 'gloryweek') {
+        const now = Date.now();
+        const sinceIso = command === 'gloryday' ? new Date(now - 24 * 60 * 60 * 1000).toISOString()
+            : command === 'gloryweek' ? new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString()
+            : null;
+        const label = command === 'gloryday' ? 'Last 24 Hours' : command === 'gloryweek' ? 'Last 7 Days' : 'All Time';
+
+        // Same scope convention as !mortal (see its own comment above).
+        const scopeArg = (args[0] || '').trim();
+        let scope = 'members';
+        let allianceId = null;
+        let scopeLabel = '';
+        if (scopeArg.toLowerCase() === 'all') {
+            scope = 'all';
+            scopeLabel = ' (All Players)';
+        } else if (scopeArg) {
+            const alliance = alliancesRepo.getAllianceIdByTag(scopeArg);
+            if (!alliance) {
+                return message.reply(`❌ Unknown alliance tag \`${scopeArg}\`. Usage: \`!${command} [all|<alliance_tag>]\`.`);
+            }
+            scope = 'alliance';
+            allianceId = alliance.id;
+            scopeLabel = ` (${scopeArg.toUpperCase()})`;
+        }
+
+        const rows = battlePointsRepo.getDynamicLeaderboard(sinceIso, 10, scope, allianceId);
+        const lines = rows.length
+            ? rows.map((r, i) => `**${i + 1}.** ${r.player_name || 'Unknown'} — **${r.points.toLocaleString()}** pts _(${r.cv_points.toLocaleString()} CV + ${r.pop_points.toLocaleString()} pop)_`).join('\n')
+            : '_No battles recorded yet._';
+
+        const embed = new EmbedBuilder()
+            .setTitle(`🏆 Glory — ${label}${scopeLabel}`)
+            .setDescription(lines)
+            .setColor('#f59e0b');
 
         return message.reply({ embeds: [embed] });
     }
