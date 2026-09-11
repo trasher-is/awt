@@ -327,6 +327,88 @@ ok('a battle report\'s occurred_at is normalized to SQLite\'s space-separated sh
 ok('the normalized battle row still sorts newest-first against a real CURRENT_TIMESTAMP pop-drop row',
     formatFeed[0].battle_report_id === 9600, formatFeed);
 
+// --- searchBattleReportsFeed: the panel's search box and sortable columns ---
+console.log('\n── searchBattleReportsFeed: search + sort by CV/population ' + '─'.repeat(14));
+
+db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (900, 'Search System', 9, 9)`).run();
+db.prepare(`
+    INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_name, att_alliance_tag, def_player_name, def_alliance_tag, att_lost_cv, def_lost_cv, killed_population)
+    VALUES
+        (9800, '2026-09-01T10:00:00Z', 900, 1, 'BigAttacker', 'BAT', 'SmallDefender', 'SDF', 100, 20, 5),
+        (9801, '2026-09-01T11:00:00Z', 900, 2, 'SmallAttacker', 'SAT', 'BigDefender', 'BDF', 3, 2, 50),
+        (9802, '2026-09-01T12:00:00Z', 900, 3, 'ZeroSide', 'ZZZ', 'AlsoZero', 'ZZ2', 0, 0, 0)
+`).run();
+// A bare pop-drop (no matching report) in the same system — no CV of its own at all.
+db.prepare(`INSERT INTO players (id, name) VALUES (900, 'DropOwner900')`).run();
+db.prepare(`INSERT INTO planets (system_id, planet_index, owner_id) VALUES (900, 9, 900)`).run();
+db.prepare(`INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp) VALUES (900, 9, 2, 8, 1, '2026-09-01T09:00:00Z')`).run();
+
+// 9800: attacker won, brought 150 CV and lost 100 of it (att_lost_cv above) -> 50 left.
+db.prepare(`UPDATE battle_reports SET att_has_won = 1, att_combat_value = 150, att_survived_cv = 50, def_combat_value = 30, def_survived_cv = 10 WHERE id = 9800`).run();
+// 9801: defender won, brought 40 CV and lost 2 of it -> 38 left.
+db.prepare(`UPDATE battle_reports SET def_has_won = 1, def_combat_value = 40, def_survived_cv = 38, att_combat_value = 10, att_survived_cv = 7 WHERE id = 9801`).run();
+// 9802: neither side flagged as winner (has_won left NULL on both) — genuinely undecided.
+
+const byId = (rows, id) => rows.find(r => r.battle_report_id === id);
+const withWinners = battleReports.searchBattleReportsFeed({ limit: 200 }).rows.filter(r => r.system_id === 900);
+ok('an attacker win reports winner_side "att"', byId(withWinners, 9800).winner_side === 'att', byId(withWinners, 9800));
+ok('the winning attacker\'s committed/survived CV are both exposed',
+    byId(withWinners, 9800).attacker_combat_value === 150 && byId(withWinners, 9800).attacker_survived_cv === 50, byId(withWinners, 9800));
+ok('the losing defender\'s own committed/survived CV are still exposed (not hidden just for losing)',
+    byId(withWinners, 9800).defender_combat_value === 30 && byId(withWinners, 9800).defender_survived_cv === 10, byId(withWinners, 9800));
+ok('a defender win reports winner_side "def"', byId(withWinners, 9801).winner_side === 'def', byId(withWinners, 9801));
+ok('a report with neither side flagged as won has winner_side null (genuinely undecided)',
+    byId(withWinners, 9802).winner_side === null, byId(withWinners, 9802));
+ok('a bare pop-drop row has winner_side null and no per-side CV at all',
+    withWinners.find(r => r.battle_report_id === null).winner_side === null
+    && withWinners.find(r => r.battle_report_id === null).attacker_combat_value === null,
+    withWinners.find(r => r.battle_report_id === null));
+
+const byCvDesc = battleReports.searchBattleReportsFeed({ sort: 'cv', dir: 'desc', limit: 200 }).rows.filter(r => r.system_id === 900);
+ok('sort by CV desc: the 100+20 CV battle leads', byCvDesc[0].battle_report_id === 9800 && byCvDesc[0].total_cv_lost === 120, byCvDesc);
+ok('the 3+2 CV battle is second', byCvDesc[1].battle_report_id === 9801 && byCvDesc[1].total_cv_lost === 5, byCvDesc);
+ok('a real battle with genuinely 0 CV lost still outranks a bare pop-drop (0 is a value, null is not)',
+    byCvDesc[2].battle_report_id === 9802 && byCvDesc[2].total_cv_lost === 0, byCvDesc);
+ok('the bare pop-drop (no CV at all) sorts dead last on a CV sort',
+    byCvDesc[3].battle_report_id === null && byCvDesc[3].total_cv_lost === 0, byCvDesc);
+
+const byCvAsc = battleReports.searchBattleReportsFeed({ sort: 'cv', dir: 'asc', limit: 200 }).rows.filter(r => r.system_id === 900);
+ok('sort by CV asc still puts the biggest battle last, not the pop-drop',
+    byCvAsc[byCvAsc.length - 1].battle_report_id === 9800, byCvAsc);
+
+const byPopDesc = battleReports.searchBattleReportsFeed({ sort: 'pop', dir: 'desc', limit: 200 }).rows.filter(r => r.system_id === 900);
+ok('sort by population desc: the 50-population battle leads even though its CV was small',
+    byPopDesc[0].battle_report_id === 9801 && byPopDesc[0].killed_population === 50, byPopDesc);
+
+const searchByAttacker = battleReports.searchBattleReportsFeed({ q: 'BigAttacker', limit: 200 });
+ok('search matches the attacker name', searchByAttacker.rows.some(r => r.battle_report_id === 9800), searchByAttacker);
+ok('search excludes rows that do not match', !searchByAttacker.rows.some(r => r.battle_report_id === 9801), searchByAttacker);
+
+const searchByAllianceTag = battleReports.searchBattleReportsFeed({ q: 'BDF', limit: 200 });
+ok('search matches an alliance tag, not just a player name', searchByAllianceTag.rows.some(r => r.battle_report_id === 9801), searchByAllianceTag);
+
+const searchBySystem = battleReports.searchBattleReportsFeed({ q: 'Search System', limit: 200 });
+ok('search matches the system name', searchBySystem.total >= 4, searchBySystem);
+
+const searchByDropOwner = battleReports.searchBattleReportsFeed({ q: 'DropOwner900', limit: 200 });
+ok('search finds a bare pop-drop row by the affected owner\'s name',
+    searchByDropOwner.rows.some(r => r.battle_report_id === null && r.defender_name === 'DropOwner900'), searchByDropOwner);
+
+const searchNoMatch = battleReports.searchBattleReportsFeed({ q: 'NoSuchPlayerAtAll', limit: 200 });
+ok('a search with no matches returns an empty result, not an error or everything',
+    searchNoMatch.total === 0 && searchNoMatch.rows.length === 0, searchNoMatch);
+
+const paged = battleReports.searchBattleReportsFeed({ q: 'Search System', sort: 'cv', dir: 'desc', limit: 2, offset: 0 });
+const pagedNext = battleReports.searchBattleReportsFeed({ q: 'Search System', sort: 'cv', dir: 'desc', limit: 2, offset: 2 });
+ok('limit caps the page size while `total` still reports the full match count',
+    paged.rows.length === 2 && paged.total === pagedNext.total && paged.total >= 4, { paged, pagedNext });
+ok('offset advances to the next page, not the same rows again',
+    paged.rows[0].battle_report_id !== pagedNext.rows[0]?.battle_report_id, { paged, pagedNext });
+
+const emptyQueryFeed = battleReports.searchBattleReportsFeed({ q: '', limit: 200 }).rows.filter(r => r.system_id === 900);
+ok('an empty search box returns every row for this system, same as the plain feed would',
+    emptyQueryFeed.length === 4, emptyQueryFeed);
+
 // --- findRecentAttackerAtPlanet: victim and scan interval are required evidence ---
 db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (801, 'Bombard System', 3, 3)`).run();
 const minutesAgo = m => new Date(Date.now() - m * 60000).toISOString();

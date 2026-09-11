@@ -370,6 +370,11 @@ export async function refreshAllianceStatsData() {
     } catch (err) {}
 }
 
+// Search/sort state for the panel — module-level since only one instance of this panel
+// ever exists at a time (see the singleton `panel` lookup in openBattleReportsPanel).
+const battleReportsState = { q: '', sort: 'occurred_at', dir: 'desc' };
+let battleReportsSearchTimer = null;
+
 export async function openBattleReportsPanel() {
     let panel = document.getElementById('battle-reports-panel');
     if (!panel) {
@@ -379,46 +384,103 @@ export async function openBattleReportsPanel() {
         document.getElementById('battle-reports-close-btn')?.addEventListener('click', () => {
             panel.classList.replace('translate-x-0', 'translate-x-full');
         });
+        // Debounced — this hits the server (it searches the whole history, not just what's
+        // currently on screen), unlike the other panels' instant client-side filters.
+        panel.querySelector('#battle-reports-search-input')?.addEventListener('input', (e) => {
+            battleReportsState.q = e.target.value;
+            clearTimeout(battleReportsSearchTimer);
+            battleReportsSearchTimer = setTimeout(loadBattleReportsTable, 300);
+        });
+        panel.querySelectorAll('[data-sort-key]').forEach(th => {
+            th.addEventListener('click', () => {
+                const key = th.getAttribute('data-sort-key');
+                if (battleReportsState.sort === key) {
+                    battleReportsState.dir = battleReportsState.dir === 'desc' ? 'asc' : 'desc';
+                } else {
+                    battleReportsState.sort = key;
+                    battleReportsState.dir = 'desc';
+                }
+                loadBattleReportsTable();
+            });
+        });
     }
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
     closeOtherPanels('battle-reports-panel');
     panel.classList.replace('translate-x-full', 'translate-x-0');
     if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
 
-    document.getElementById('battle-reports-table-body').innerHTML = '<tr><td colspan="6" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading battle reports...</td></tr>';
+    await loadBattleReportsTable();
+}
+
+async function loadBattleReportsTable() {
+    updateSortArrows();
+    document.getElementById('battle-reports-table-body').innerHTML = '<tr><td colspan="7" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading battle reports...</td></tr>';
     try {
-        const res = await fetch('/hub-api/intel/battle-reports-feed');
+        const params = new URLSearchParams({ q: battleReportsState.q, sort: battleReportsState.sort, dir: battleReportsState.dir, limit: '150' });
+        const res = await fetch(`/hub-api/intel/battle-reports-search?${params}`);
         const data = await res.json();
-        if (data.success) renderBattleReportsTable(data.feed);
+        if (data.success) renderBattleReportsTable(data.feed, data.total);
         else throw new Error(data.error || 'unknown error');
     } catch (err) {
-        document.getElementById('battle-reports-table-body').innerHTML = '<tr><td colspan="6" class="text-center py-8 text-red-500">Failed to load data.</td></tr>';
+        document.getElementById('battle-reports-table-body').innerHTML = '<tr><td colspan="7" class="text-center py-8 text-red-500">Failed to load data.</td></tr>';
     }
 }
 
-function renderBattleReportsTable(feed) {
+function updateSortArrows() {
+    document.querySelectorAll('#battle-reports-panel [data-sort-key]').forEach(th => {
+        const arrow = th.querySelector('.sort-arrow');
+        if (!arrow) return;
+        arrow.textContent = th.getAttribute('data-sort-key') === battleReportsState.sort
+            ? (battleReportsState.dir === 'desc' ? '▼' : '▲')
+            : '';
+    });
+}
+
+// One side's cell: name (bold if this side won the battle) plus its own committed CV —
+// shown as "committed → left" for the winner specifically (how much of what they brought
+// is still standing), or just the committed amount for the loser/an undecided report. A
+// bare population-drop row has no side data at all (combatValue is null), so the CV line
+// is omitted entirely rather than showing a misleading "— CV".
+function battleSideCell(name, tag, combatValue, survivedCv, isWinner) {
+    if (!name) return '<span class="text-muted-foreground">—</span>';
+    const label = `${tag ? `[${esc(tag)}] ` : ''}${esc(name)}`;
+    const nameHtml = isWinner ? `<strong>${label}</strong>` : label;
+    if (combatValue == null) return nameHtml;
+    const cvLine = isWinner && survivedCv != null
+        ? `${combatValue.toLocaleString()} → ${survivedCv.toLocaleString()} left`
+        : `${combatValue.toLocaleString()} CV`;
+    return `${nameHtml}<div class="text-xs text-muted-foreground font-mono">${cvLine}</div>`;
+}
+
+function renderBattleReportsTable(feed, total) {
     const body = document.getElementById('battle-reports-table-body');
     const countEl = document.getElementById('battle-reports-result-count');
+    const totalEl = document.getElementById('battle-reports-total-count');
     if (countEl) countEl.textContent = feed.length;
+    if (totalEl) totalEl.textContent = total != null ? total : feed.length;
     if (!body) return;
 
     if (!feed.length) {
-        body.innerHTML = '<tr><td colspan="6" class="text-center py-8 text-muted-foreground">No battles or population drops recorded yet.</td></tr>';
+        body.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-muted-foreground">${battleReportsState.q ? 'No battles or population drops match that search.' : 'No battles or population drops recorded yet.'}</td></tr>`;
         return;
     }
 
     body.innerHTML = feed.map(row => {
         const when = formatSqliteUtc(row.occurred_at, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         const systemLabel = row.system_name ? `${esc(row.system_name)} [${row.system_id}] #${row.planet_index}` : `#${row.system_id}/${row.planet_index}`;
-        const attacker = row.attacker_name
-            ? `${row.attacker_alliance_tag ? `[${esc(row.attacker_alliance_tag)}] ` : ''}${esc(row.attacker_name)}`
-            : '<span class="text-muted-foreground">—</span>';
-        const defender = row.defender_name
-            ? `${row.defender_alliance_tag ? `[${esc(row.defender_alliance_tag)}] ` : ''}${esc(row.defender_name)}`
-            : '<span class="text-muted-foreground">—</span>';
+        const attacker = battleSideCell(row.attacker_name, row.attacker_alliance_tag,
+            row.attacker_combat_value, row.attacker_survived_cv, row.winner_side === 'att');
+        const defender = battleSideCell(row.defender_name, row.defender_alliance_tag,
+            row.defender_combat_value, row.defender_survived_cv, row.winner_side === 'def');
+        // 0 is a real value (a battle where nothing was actually lost, or a bare pop-drop
+        // row with no CV at all) — shown as-is rather than masked as "no data".
+        const cv = row.total_cv_lost != null ? row.total_cv_lost.toLocaleString() : '<span class="text-muted-foreground">—</span>';
+        // killed_population === 0 is a real value (a battle that killed nobody) — shown
+        // as plain "0", not "-0" (a bare unary minus in front of 0 is still "-0" in a
+        // template string, which reads as a display bug, not a number).
         const population = (row.old_population != null && row.new_population != null)
             ? `${row.old_population} → ${row.new_population}`
-            : (row.killed_population != null ? `-${row.killed_population}` : '—');
+            : (row.killed_population ? `-${row.killed_population}` : (row.killed_population === 0 ? '0' : '—'));
         // Battles link to the game's own report; a population drop with no matching
         // report has nothing to link to, so it's plain text instead.
         const report = row.battle_report_id
@@ -430,6 +492,7 @@ function renderBattleReportsTable(feed) {
             <td class="p-3">${systemLabel}</td>
             <td class="p-3">${attacker}</td>
             <td class="p-3">${defender}</td>
+            <td class="p-3 font-mono">${cv}</td>
             <td class="p-3 text-red-400">${esc(population)}</td>
             <td class="p-3">${report}</td>
         </tr>`;
