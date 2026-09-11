@@ -822,6 +822,65 @@ function initDatabase() {
     // departure-based: no inferred target or travel-time recalculation during migration.
     addColumn('routes', 'target_arrival_at', 'DATETIME');
 
+    // --- BONUS GOALS (generic engine) ---
+    // A configurable "extra points" system for battlePoints.js's !glory leaderboard —
+    // deliberately generic in both table AND column names. Anything specific (which real
+    // objective is active, its thresholds, its point values) lives ONLY as `config` JSON
+    // data on a row, entered through the token-gated admin page (see src/routes/secretOps.js
+    // and bonusGoals.js's getOrCreateAccessToken) — never as a literal in committed code.
+    // This repo is public and a collaborator needs `git pull` to work on it, so hiding
+    // source isn't an option; hiding DATA is, since the database itself is never on GitHub.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS bonus_goals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            name TEXT NOT NULL,
+            config TEXT NOT NULL DEFAULT '{}',
+            enabled INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- One row per credited event. source_key is the dedupe key (e.g. "br:1234" for a
+        -- battle report) so the same event can never double-award the same goal, even if
+        -- whatever triggers evaluation fires more than once for it (a re-sent ship-detail
+        -- payload, a retried request, ...).
+        CREATE TABLE IF NOT EXISTS bonus_goal_awards (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            goal_id INTEGER NOT NULL,
+            player_id INTEGER,
+            player_name TEXT,
+            points REAL NOT NULL,
+            source_key TEXT NOT NULL,
+            detail TEXT,
+            awarded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(goal_id, source_key),
+            FOREIGN KEY(goal_id) REFERENCES bonus_goals(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_bonus_goal_awards_player ON bonus_goal_awards(player_id, awarded_at);
+
+        -- The current standing of whatever ranking page a 'ranking_match' goal watches —
+        -- replaced wholesale on every re-scrape (see bonusGoals.js's replaceRankingSnapshot),
+        -- so this always reflects only the latest pull, never a history of old ones.
+        -- system_id/planet_index are resolved from game_planet_id via the planets table's
+        -- own UNIQUE game_planet_id column and may be NULL when that planet has never been
+        -- scanned into it yet — a later re-scrape naturally resolves it once it has been.
+        CREATE TABLE IF NOT EXISTS ranking_snapshot_rows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            goal_id INTEGER NOT NULL,
+            rank INTEGER NOT NULL,
+            game_planet_id INTEGER,
+            system_id INTEGER,
+            planet_index INTEGER,
+            owner_name TEXT,
+            owner_alliance_tag TEXT,
+            captured_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(goal_id) REFERENCES bonus_goals(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_ranking_snapshot_rows_lookup ON ranking_snapshot_rows(goal_id, system_id, planet_index);
+        CREATE INDEX IF NOT EXISTS idx_ranking_snapshot_rows_goal ON ranking_snapshot_rows(goal_id, captured_at);
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

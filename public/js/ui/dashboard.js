@@ -117,6 +117,13 @@ window.addEventListener('DOMContentLoaded', () => {
         .then(({ initBattleReportDetailSync }) => initBattleReportDetailSync())
         .catch(err => console.warn('[BattleReportDetailSync] failed to start:', err));
 
+    // Background bonus-goals ranking sync (see bonus-goals-sync.js and database.js's
+    // bonus_goals comment) — hourly check, only actually fetches anything when an admin
+    // has a 'ranking_match' goal enabled. Same on-demand-load pattern as the others.
+    import('./bonus-goals-sync.js')
+        .then(({ initBonusGoalsSync }) => initBonusGoalsSync())
+        .catch(err => console.warn('[BonusGoalsSync] failed to start:', err));
+
     // Background galaxy/system seed (was manual-button-only — see api-galaxy-seed.js's
     // startAutoGalaxySeed for what this does and does not fix). Same on-demand-load
     // pattern as the other background sync modules above.

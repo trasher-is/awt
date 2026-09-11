@@ -15,6 +15,7 @@ process.env.AWT_DB_PATH = tmpDb;
 const db = require('../database');
 const settingsRepo = require('./settings');
 const battlePoints = require('./battlePoints');
+const bonusGoals = require('./bonusGoals');
 
 let failed = 0;
 function ok(desc, cond, detail) {
@@ -117,6 +118,36 @@ ok('display scale 1 vs 20 changes the absolute number by exactly that factor, no
     && close(wren.cv_points / wren.pop_points, wrenUnscaled.cv_points / wrenUnscaled.pop_points, 0.02),
     { scaled: wren, unscaled: wrenUnscaled });
 settingsRepo.setSetting('battle_points_display_scale', '20'); // restore default
+
+console.log('\n── bonus-goal awards fold into the same leaderboard ' + '─'.repeat(19));
+// Wren also earned a bonus-goal award (e.g. a ranking_match hit — see bonusGoals.test.js
+// for that engine's own coverage; here it's just a plain row, the mechanism that produced
+// it doesn't matter to getDynamicLeaderboard).
+const bonusTestGoal = bonusGoals.createGoal({ type: 'ranking_match', name: 'bonus test', config: {}, enabled: true });
+db.prepare(`
+    INSERT INTO bonus_goal_awards (goal_id, player_id, player_name, points, source_key)
+    VALUES (?, 1, 'Wren', 250, 'test:1')
+`).run(bonusTestGoal.id);
+
+const boardWithBonus = battlePoints.getDynamicLeaderboard(null, 10, 'all');
+const wrenWithBonus = boardWithBonus.find(r => r.player_name === 'Wren');
+ok('bonus_points reflects the awarded row (250)', wrenWithBonus.bonus_points === 250, wrenWithBonus);
+ok('points is cv_points + pop_points + bonus_points, all three added together',
+    close(wrenWithBonus.points, wrenWithBonus.cv_points + wrenWithBonus.pop_points + wrenWithBonus.bonus_points, 0.01),
+    wrenWithBonus);
+ok('the combined total actually grew relative to before the bonus award existed',
+    wrenWithBonus.points > wren.points, { before: wren.points, after: wrenWithBonus.points });
+
+db.prepare(`INSERT INTO players (id, name) VALUES (99, 'BonusOnly')`).run();
+db.prepare(`
+    INSERT INTO bonus_goal_awards (goal_id, player_id, player_name, points, source_key)
+    VALUES (?, 99, 'BonusOnly', 42, 'test:2')
+`).run(bonusTestGoal.id);
+const boardWithBonusOnly = battlePoints.getDynamicLeaderboard(null, 10, 'all');
+const bonusOnlyRow = boardWithBonusOnly.find(r => r.player_name === 'BonusOnly');
+ok('a player with ONLY a bonus award (no CV/pop credit at all) still appears on the leaderboard',
+    !!bonusOnlyRow && bonusOnlyRow.points === 42 && bonusOnlyRow.cv_points === 0 && bonusOnlyRow.pop_points === 0,
+    bonusOnlyRow);
 
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
