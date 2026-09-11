@@ -392,7 +392,7 @@ async function handleMessage(message) {
                 { name: '`!mortal` / `!mortalday` / `!mortalweek` `[all|<alliance_tag>]`', value: 'Shows the CV/population-killed battle leaderboards, each with a simple points column. All-time, last 24 hours, or last 7 days. Defaults to Hub tool users only; `all` lifts that; any alliance tag filters to that alliance (any alliance, not just your own).\n*Example: `!mortalweek nsa`*' },
                 { name: '`!cvkills` / `!cvkillsday` / `!cvkillsweek` `[all|<alliance_tag>]`', value: 'Pure CV-killed ranking — the raw number only, no points. Same scope rules as `!mortal`.\n*Example: `!cvkillsweek nsa`*' },
                 { name: '`!popkills` / `!popkillsday` / `!popkillsweek` `[all|<alliance_tag>]`', value: 'Pure population-killed ranking — the raw number only, no points. Same scope rules as `!mortal`.\n*Example: `!popkillsweek nsa`*' },
-                { name: '`!glory` / `!gloryday` / `!gloryweek` `[all|<alliance_tag>]`', value: 'Combined CV + population points leaderboard, weighted so a bigger single kill is worth disproportionately more per unit. Same scope rules as `!mortal`.\n*Example: `!gloryweek nsa`*' },
+                { name: '`!glory` / `!gloryday` / `!gloryweek`', value: 'Combined CV + population points leaderboard (plus any bonus-goal points), weighted so a bigger single kill is worth disproportionately more per unit. Alliance-only — no `[all|<alliance_tag>]` option, unlike `!mortal`.' },
                 { name: '`!lastseen <player_name>`', value: 'Shows up to 5 recent system/planet locations a player was involved in a battle report or News-page bombardment at, on either side, newest first.\n*Example: `!lastseen Hkiller89`*' },
                 { name: '`!8ball <question>`', value: 'Ask the magic 8-ball a question.\n*Example: `!8ball will we win this round?`*' }
             )
@@ -540,6 +540,11 @@ async function handleMessage(message) {
     // routine CV skirmish and a routine pop kill land in the same ballpark. The successor
     // to !mortal's flat linear points; !cvkills/!popkills (raw, no points) still exist
     // alongside this for members who just want the plain numbers.
+    //
+    // Unlike !mortal/!cvkills/!popkills, this is deliberately ALWAYS scoped to Hub tool
+    // users — no [all|<alliance_tag>] argument at all. This is our own internal fun-points
+    // game (bonus-goal points especially — see bonusGoals.js), not a battle-stats lookup;
+    // tracking or displaying another alliance's score here has no purpose.
     // ----------------------------------------------------
     if (command === 'glory' || command === 'gloryday' || command === 'gloryweek') {
         const now = Date.now();
@@ -548,25 +553,7 @@ async function handleMessage(message) {
             : null;
         const label = command === 'gloryday' ? 'Last 24 Hours' : command === 'gloryweek' ? 'Last 7 Days' : 'All Time';
 
-        // Same scope convention as !mortal (see its own comment above).
-        const scopeArg = (args[0] || '').trim();
-        let scope = 'members';
-        let allianceId = null;
-        let scopeLabel = '';
-        if (scopeArg.toLowerCase() === 'all') {
-            scope = 'all';
-            scopeLabel = ' (All Players)';
-        } else if (scopeArg) {
-            const alliance = alliancesRepo.getAllianceIdByTag(scopeArg);
-            if (!alliance) {
-                return message.reply(`❌ Unknown alliance tag \`${scopeArg}\`. Usage: \`!${command} [all|<alliance_tag>]\`.`);
-            }
-            scope = 'alliance';
-            allianceId = alliance.id;
-            scopeLabel = ` (${scopeArg.toUpperCase()})`;
-        }
-
-        const rows = battlePointsRepo.getDynamicLeaderboard(sinceIso, 10, scope, allianceId);
+        const rows = battlePointsRepo.getDynamicLeaderboard(sinceIso, 10, 'members', null);
         // Bonus points only show up in the breakdown when a player actually has any —
         // most won't, and "+ 0 bonus" on every line would just be noise. What earns bonus
         // points, and how much, is deliberately never named here (see bonusGoals.js).
@@ -575,7 +562,7 @@ async function handleMessage(message) {
             : '_No battles recorded yet._';
 
         const embed = new EmbedBuilder()
-            .setTitle(`🏆 Glory — ${label}${scopeLabel}`)
+            .setTitle(`🏆 Glory — ${label}`)
             .setDescription(lines)
             .setColor('#f59e0b');
 
