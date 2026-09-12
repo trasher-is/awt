@@ -1,4 +1,5 @@
 import { parseArrivalCellToISO } from '../utils/fleet-time.js';
+import { parseSiegeIndicator } from '../utils/siege-indicator-parser.js';
 import '../utils/scrape-report.js';
 import '../utils/parse-number.js';
 import '../utils/game-rate-limit.js';
@@ -100,6 +101,11 @@ export function extractSystemData(doc = document, report = new ScrapeReport('sys
             // renders the literal word "Unknown" there, distinct from "Free Planet".
             const isUnknown = containsLabel(tds[3].innerText, ['unknown']);
 
+            // Siege state (2026-09-12b): unlike the API-sourced hasSiege flag (a bare
+            // boolean, no attacker identity), the live page always knows — you cannot be
+            // viewing this table without vision of it. See siege-indicator-parser.js.
+            const siege = parseSiegeIndicator(row);
+
             planets.push({
                 game_planet_id: gamePlanetId,
                 planet_index: planetIndex,
@@ -107,7 +113,10 @@ export function extractSystemData(doc = document, report = new ScrapeReport('sys
                 starbase,
                 owner,
                 has_fleet: hasFleet ? 1 : 0,
-                is_unknown: isUnknown
+                is_unknown: isUnknown,
+                is_sieged: siege.is_sieged,
+                siege_is_friendly: siege.siege_is_friendly,
+                siege_attacker_name: siege.siege_attacker_name
             });
 
             // --- FLEET EXTRACTION ---

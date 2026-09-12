@@ -103,10 +103,30 @@ function isEnemyGain(e, friendlyTagsUpper) {
     return !tag || !friendlyTagsUpper.has(tag);
 }
 
+// A SIEGE_STARTED only counts as "enemy entered" when the BESIEGED planet is friendly-owned
+// (2026-09-12 fix: this used to fire for every siege regardless of owner — including us
+// besieging an enemy, or two other parties fighting each other — which isn't a threat to
+// us and just floods the channel with noise). Unlike isEnemyGain, an unowned/unaffiliated
+// victim does NOT qualify — there's nothing of ours to alarm about.
+// AND the besieger itself isn't friendly, when that's actually known (2026-09-12b: the DOM
+// directly labels a siege's allegiance — see siege-indicator-parser.js — which owner-
+// friendliness alone can't rule out; a friendly fleet somehow shown sieging a friendly
+// planet isn't an enemy at all). attacker_is_friendly is null when only the API-sourced
+// boolean was available (no attacker identity), in which case a fresh siege on a friendly
+// planet is still assumed hostile, same as before.
+function isEnemySiegeOnUs(e, friendlyTagsUpper) {
+    if (!e || e.type !== 'SIEGE_STARTED') return false;
+    const tag = e.owner_alliance_tag ? String(e.owner_alliance_tag).toUpperCase() : null;
+    if (!tag || !friendlyTagsUpper.has(tag)) return false;
+    return e.attacker_is_friendly !== true;
+}
+
 function milestoneLine(e) {
     switch (e.type) {
-        case 'SIEGE_STARTED':
-            return `🚨 ${bold(`Planet ${e.planet_index}`)}: ${e.owner || 'this planet'} is under siege!`;
+        case 'SIEGE_STARTED': {
+            const by = e.attacker_name ? ` by ${bold(e.attacker_name)}` : '';
+            return `🚨 ${bold(`Planet ${e.planet_index}`)}: ${e.owner || 'this planet'} is under siege${by}!`;
+        }
         case 'OWNER_CHANGE':
             return `⚔️ ${bold(`Planet ${e.planet_index}`)}: taken by ${bold(e.new_owner || 'an enemy')} (${e.old_owner || 'Free'} lost it)`;
         case 'SYSTEM_SECURED':
@@ -123,7 +143,7 @@ function buildSystemMilestoneLines(events, friendlyTagsUpper) {
     const list = Array.isArray(events) ? events : [];
     const tags = friendlyTagsUpper || new Set();
     return list
-        .filter(e => e && (e.type === 'SIEGE_STARTED' || e.type === 'SYSTEM_SECURED' || isEnemyGain(e, tags)))
+        .filter(e => e && (isEnemySiegeOnUs(e, tags) || e.type === 'SYSTEM_SECURED' || isEnemyGain(e, tags)))
         .map(milestoneLine)
         .filter(Boolean);
 }
