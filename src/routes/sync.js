@@ -94,9 +94,13 @@ router.post('/sync/system', requireAuth, (req, res) => {
             let finalHasFleet = (p.has_fleet === undefined || p.has_fleet === null)
                 ? (oldP ? oldP.has_fleet : null)
                 : p.has_fleet;
-            // is_sieged only arrives from the API-sourced sync path (the game's hasSiege
-            // flag) — DOM scrapers never send it. Absent means "this payload cannot see
-            // siege state", so keep whatever we knew rather than zeroing it out.
+            // is_sieged arrives from either the API-sourced sync path (the game's hasSiege
+            // flag — a bare boolean, no attacker identity) or, since 2026-09-12b, the DOM
+            // scraper (system-parser.js), which additionally knows whether the besieger is
+            // friendly or hostile and their name (see siege-indicator-parser.js) — you
+            // cannot be viewing a live system page without vision of it, so that's always
+            // trustworthy. Absent means "this payload cannot see siege state", so keep
+            // whatever we knew rather than zeroing it out.
             let finalIsSieged = (p.is_sieged === undefined || p.is_sieged === null)
                 ? (oldP ? oldP.is_sieged : 0)
                 : (p.is_sieged ? 1 : 0);
@@ -182,25 +186,35 @@ router.post('/sync/system', requireAuth, (req, res) => {
                         `🪐 **Planet ${p.planet_index}** in system #${system_id}: ${newOwnerLabel} took it from ${oldOwnerLabel} — both are friendly tags.`);
                 }
 
-                // SIEGE_STARTED (2026-09-12): is_sieged only ever arrives from the
-                // API-sourced sync path (the game's hasSiege flag) — a hostile fleet
-                // actively attacking. The 0->1 transition is a stronger, earlier "enemy
-                // entered" signal than waiting for a conquest to complete. Routed only to
-                // the per-system Discord channel (announceSystemMilestones) — not the
-                // main System Change/Population Drop channels, which are about
-                // completed changes, not attacks in progress.
+                // SIEGE_STARTED (2026-09-12): a hostile fleet actively attacking. The 0->1
+                // transition is a stronger, earlier "enemy entered" signal than waiting for
+                // a conquest to complete. Routed only to the per-system Discord channel
+                // (announceSystemMilestones) — not the main System Change/Population Drop
+                // channels, which are about completed changes, not attacks in progress.
                 // The raw owner tag rides along (not just the formatted label) so the
                 // milestone router can tell "our planet just got besieged" (alarm-worthy)
                 // apart from a siege on an enemy/unowned/unaffiliated planet — us besieging
                 // THEM, or two other parties fighting — which isn't an "enemy entered"
                 // event for us at all (2026-09-12 fix: this used to fire for every siege in
                 // a watched system regardless of who owned the planet).
+                // attacker_is_friendly/attacker_name (2026-09-12b) ride along too, whenever
+                // the DOM scraper actually saw this siege (see siege-indicator-parser.js) —
+                // it directly tells us the BESIEGER's allegiance instead of assuming one
+                // from the owner, which matters for the rare case a friendly fleet somehow
+                // shows sieging a friendly-owned planet (not an enemy at all, so not this
+                // channel's concern) and lets the alert name the actual attacker. When only
+                // the API-sourced boolean is available (no attacker identity at all),
+                // attacker_is_friendly is left null and the milestone filter falls back to
+                // the old assumption: a fresh siege on a friendly planet can only be hostile.
                 if (!oldP.is_sieged && finalIsSieged) {
                     announceEvents.push({
                         planet_index: p.planet_index,
                         type: 'SIEGE_STARTED',
                         owner: oldOwnerLabel,
                         owner_alliance_tag: tagOf(oldP.owner_id),
+                        attacker_is_friendly: (p.siege_is_friendly === true || p.siege_is_friendly === false)
+                            ? p.siege_is_friendly : null,
+                        attacker_name: p.siege_attacker_name || null,
                     });
                 }
 

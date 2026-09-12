@@ -73,7 +73,7 @@ console.log('\n── Per-system milestone channel ' + '─'.repeat(45));
 {
     const friendly = new Set(['RAID', 'NAP1']);
 
-    const siege = { planet_index: 3, type: 'SIEGE_STARTED', owner: '[RAID] Holder', owner_alliance_tag: 'RAID' };
+    const siege = { planet_index: 3, type: 'SIEGE_STARTED', owner: '[RAID] Holder', owner_alliance_tag: 'RAID', attacker_is_friendly: false, attacker_name: 'Raider1' };
     const friendlyTakeover = { planet_index: 4, type: 'OWNER_CHANGE', kind: 'conquered', old_owner: 'Foe', new_owner: '[NAP1] Ally', new_owner_alliance_tag: 'NAP1' };
     const enemyConquest = { planet_index: 5, type: 'OWNER_CHANGE', kind: 'conquered', old_owner: '[RAID] Holder', new_owner: '[FOE] Raider', new_owner_alliance_tag: 'FOE' };
     const enemyColonization = { planet_index: 6, type: 'OWNER_CHANGE', kind: 'colonized', old_owner: null, new_owner: 'Unaffiliated', new_owner_alliance_tag: null };
@@ -85,14 +85,22 @@ console.log('\n── Per-system milestone channel ' + '─'.repeat(45));
     // someone else's siege, is not an "enemy entered" event for us.
     const siegeOnEnemy = { planet_index: 9, type: 'SIEGE_STARTED', owner: '[FOE] Raider', owner_alliance_tag: 'FOE' };
     const siegeOnUnaffiliated = { planet_index: 10, type: 'SIEGE_STARTED', owner: 'Nomad', owner_alliance_tag: null };
+    // 2026-09-12b: the DOM-sourced attacker_is_friendly is the real allegiance check, not
+    // just an inference from the besieged planet's owner — a friendly fleet somehow shown
+    // sieging a friendly-owned planet is not an "enemy entered" event at all.
+    const friendlySiegeOnFriendlyPlanet = { planet_index: 11, type: 'SIEGE_STARTED', owner: '[RAID] Holder', owner_alliance_tag: 'RAID', attacker_is_friendly: true, attacker_name: 'AllyRunner' };
+    // API-sourced sieges never carry attacker identity — attacker_is_friendly is left
+    // undefined, and a fresh siege on a friendly planet must still be assumed hostile.
+    const apiOnlySiegeOnFriendly = { planet_index: 12, type: 'SIEGE_STARTED', owner: '[RAID] Holder', owner_alliance_tag: 'RAID' };
 
     const lines = buildSystemMilestoneLines(
-        [siege, friendlyTakeover, enemyConquest, enemyColonization, lostToUnknown, secured, unrelatedPopDrop, siegeOnEnemy, siegeOnUnaffiliated],
+        [siege, friendlyTakeover, enemyConquest, enemyColonization, lostToUnknown, secured, unrelatedPopDrop, siegeOnEnemy, siegeOnUnaffiliated, friendlySiegeOnFriendlyPlanet, apiOnlySiegeOnFriendly],
         friendly,
     );
 
-    ok('exactly four lines survive (friendly siege, enemy conquest, enemy colonization, secured)', lines.length === 4, lines);
-    ok('a siege on a FRIENDLY planet shows, naming the besieged owner', lines.some(l => l.includes('Planet 3') && l.includes('[RAID] Holder') && l.includes('under siege')), lines);
+    ok('exactly five lines survive (friendly siege, enemy conquest, enemy colonization, secured, API-only siege)', lines.length === 5, lines);
+    ok('a siege on a FRIENDLY planet shows, naming the besieged owner and the attacker',
+        lines.some(l => l.includes('Planet 3') && l.includes('[RAID] Holder') && l.includes('under siege') && l.includes('Raider1')), lines);
     ok('a friendly (NAP) takeover is NOT flagged as enemy activity', !lines.some(l => l.includes('Planet 4')), lines);
     ok('an enemy conquest is flagged', lines.some(l => l.includes('Planet 5') && l.includes('[FOE] Raider')), lines);
     ok('an unaffiliated (no-tag) colonization still counts as non-friendly', lines.some(l => l.includes('Planet 6')), lines);
@@ -101,6 +109,10 @@ console.log('\n── Per-system milestone channel ' + '─'.repeat(45));
     ok('SYSTEM_SECURED shows its own celebration line', lines.some(l => l.includes('secured')), lines);
     ok('a siege on an ENEMY-owned planet is not our "enemy entered" — we\'re the one attacking', !lines.some(l => l.includes('Planet 9')), lines);
     ok('a siege on an unaffiliated/unowned planet is not ours to alarm about either', !lines.some(l => l.includes('Planet 10')), lines);
+    ok('a FRIENDLY fleet sieging a friendly planet is not an enemy, even though the owner tag alone would suggest alarm',
+        !lines.some(l => l.includes('Planet 11')), lines);
+    ok('an API-only siege (no attacker identity) on a friendly planet still assumes hostile, without naming an attacker',
+        lines.some(l => l.includes('Planet 12') && l.includes('under siege!') && !l.includes(' by ')), lines);
 
     ok('no friendlyTagsUpper set still works (defaults to nothing friendly)',
         buildSystemMilestoneLines([enemyConquest], undefined).length === 1);
