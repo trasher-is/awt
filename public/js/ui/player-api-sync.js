@@ -14,19 +14,20 @@
 //      refreshed the same player, and endlessly re-scanned an already-fully-caught-up
 //      roster between them, each spending its own 200/5min budget for zero benefit). Once
 //      genuinely caught up, a tick's claim can come back empty — that's it correctly going
-//      quiet, not a bug. SWEEP_BATCH_SIZE is what actually bounds real traffic. The agreed
-//      ceiling is PER ACCOUNT, not pooled across the hub (see docs/game-api.md and
-//      AGENTS.md's "Production game API: agreed, with boundaries") — 5 req/s AND 200
-//      requests/5min, each measured against the one member whose session this browser is
-//      using. At 20/min this sweep alone can spend up to 100 of that account's
-//      200-per-5min budget, leaving the other half free for that same member's own
-//      deliberate lookups (search, travel calc, a manual deep scan) happening in the same
-//      window — going higher would start eating into that headroom rather than spending
-//      slack that was sitting unused, since the two draw from the SAME per-account pool,
-//      not separate ones. Neither ceiling is a tuning knob — raising either needs the game
-//      admin's renewed consent, not a code change. A re-entrancy flag (`scanning`, shared
-//      with deepScanPlayers — see its own comment) keeps a slow tick from overlapping the
-//      next scheduled one or a manual deep scan.
+//      quiet, not a bug. SWEEP_BATCH_SIZE/SWEEP_INTERVAL_MS is what actually bounds real
+//      traffic. The agreed ceiling is PER ACCOUNT, not pooled across the hub (see
+//      docs/game-api.md and AGENTS.md's "Production game API: agreed, with boundaries") —
+//      5 req/s AND 200 requests/5min, each measured against the one member whose session
+//      this browser is using. At 1 call/30s this sweep spends only ~10 of that account's
+//      200-per-5min budget (deliberately well under budget, not just under the ceiling —
+//      2026-09-12: dialed down from the original 20/min after concerns that several
+//      members' accounts running this at once could still tip into 429s in practice),
+//      leaving nearly all of it free for that same member's own deliberate lookups
+//      (search, travel calc, a manual deep scan) happening in the same window. Neither
+//      ceiling is a tuning knob — raising either needs the game admin's renewed consent,
+//      not a code change. A re-entrancy flag (`scanning`, shared with deepScanPlayers —
+//      see its own comment) keeps a slow tick from overlapping the next scheduled one or a
+//      manual deep scan.
 //
 // Cross-tab dedup follows battle-sync.js's localStorage-lock pattern exactly.
 
@@ -42,11 +43,11 @@ const LIST_INTERVAL_RELAXED_MS = 6 * 60 * 60 * 1000; // after that
 const FREQUENT_PHASE_DAYS = 14;
 
 const SWEEP_LOCK_KEY = 'awt.playerSweepSync.lock.v1';
-const SWEEP_LOCK_TTL_MS = 50 * 1000; // shorter than the 60s sweep interval
-const SWEEP_INTERVAL_MS = 60 * 1000;
+const SWEEP_LOCK_TTL_MS = 25 * 1000; // shorter than the 30s sweep interval
+const SWEEP_INTERVAL_MS = 30 * 1000;
 // Hardcoded for this landing — see this plan's Global Constraints re: not wiring this to
 // app_settings yet. Tune here directly if the real budget usage needs adjusting.
-const SWEEP_BATCH_SIZE = 20; // 20 calls/minute — see the per-account budget math in the file header above
+const SWEEP_BATCH_SIZE = 1; // 1 call/30s — see the per-account budget math in the file header above
 
 function claimLock(key, ttlMs) {
     try {
