@@ -21,7 +21,10 @@
 
 import { esc } from '../utils/escape.js';
 import '../utils/parse-number.js';   // side-effect import: AWNumber.compareNumeric, one locale parser
+import '../utils/idle-parse.js';     // side-effect import: AWIdleParse.parseIdleStringToSeconds
 const { compareNumeric } = globalThis.AWNumber;
+const { parseIdleStringToSeconds } = globalThis.AWIdleParse;
+export { parseIdleStringToSeconds };
 
 // ─── FORMATTING HELPERS (shared by archives.js) ───────────────────────────────
 
@@ -31,22 +34,6 @@ export function parseSqliteUtc(ts) {
     if (!ts) return null;
     const d = new Date(String(ts).replace(' ', 'T') + 'Z');
     return isNaN(d.getTime()) ? null : d;
-}
-
-export function parseIdleStringToSeconds(idleStr) {
-    if (!idleStr || idleStr === 'Unknown') return -1;
-    if (/active|online/i.test(idleStr)) return 0;
-    let secs = 0;
-    const d = idleStr.match(/(\d+)\s*d/);
-    const h = idleStr.match(/(\d+)\s*h/);
-    const m = idleStr.match(/(\d+)\s*m/);
-    const s = idleStr.match(/(\d+)\s*s/);
-    if (!d && !h && !m && !s) return -1;
-    if (d) secs += parseInt(d[1], 10) * 86400;
-    if (h) secs += parseInt(h[1], 10) * 3600;
-    if (m) secs += parseInt(m[1], 10) * 60;
-    if (s) secs += parseInt(s[1], 10);
-    return secs;
 }
 
 export function formatIdleSeconds(secs) {

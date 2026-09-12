@@ -284,6 +284,10 @@ router.post('/sync/player', requireAuth, (req, res) => {
         country: p.country || null,
         local_time: p.local_time || null,
         idle_time: p.idle_time || null,
+        // A DOM scrape's best guess, derived from idle_time client-side (player-parser.js) —
+        // validated here rather than trusted blindly, same caution as origin_system above.
+        last_activity_at: (typeof p.last_activity_at === 'string' && !isNaN(Date.parse(p.last_activity_at)))
+            ? p.last_activity_at : null,
         origin_system: observedOrigin,
         level: p.level || 0,
         ranking: p.ranking || null,

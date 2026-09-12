@@ -9,15 +9,17 @@
 import '../utils/scrape-report.js';
 import '../utils/parse-number.js';
 import '../utils/game-rate-limit.js';
+import '../utils/idle-parse.js';
 const { gameFetch } = globalThis.AWGameRate;
 
 const { ScrapeReport, LABELS, labelledValue, headerIndex, matchesLabel } = globalThis.AWScrape;
 const { parseLocaleInt, parseLocaleNumber } = globalThis.AWNumber;
+const { parseIdleStringToSeconds } = globalThis.AWIdleParse;
 
 export function extractPlayerData(playerId, doc = document, report = new ScrapeReport('player profile')) {
     const p = {
         id: parseInt(playerId, 10), name: null, alliance_id: null, alliance_tag: null,
-        country: null, local_time: null, idle_time: null, origin_system: null,
+        country: null, local_time: null, idle_time: null, last_activity_at: null, origin_system: null,
         joined: null, logins: 0,
         level: 0, ranking: null, points: 0, science_level: 0, culture_level: 0,
         biology: 0, economy: 0, energy: 0, mathematics: 0, physics: 0, social: 0,
@@ -69,6 +71,14 @@ export function extractPlayerData(playerId, doc = document, report = new ScrapeR
 
     p.local_time = getRowVal('local time', LABELS.localTime);
     p.idle_time = getRowVal('idle', LABELS.idle);
+    // A DOM scrape only ever sees a duration ("3h 10m" / "Active"), never a raw timestamp
+    // like the API gives us — so derive one, anchored to right now (the moment this page
+    // was actually loaded), and feed it into the SAME last_activity_at column the API
+    // sweep uses. Before this, a manual profile visit or the "Players" button only ever
+    // updated the frozen idle_time string, leaving last_activity_at to depend entirely on
+    // the API sweep ever having reached this player (2026-09-12).
+    const idleSecs = parseIdleStringToSeconds(p.idle_time);
+    if (idleSecs >= 0) p.last_activity_at = new Date(Date.now() - idleSecs * 1000).toISOString();
     p.joined = getRowVal('joined', LABELS.joined);
     p.logins = parseLocaleInt(getRowVal('logins', LABELS.logins));
 

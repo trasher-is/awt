@@ -110,7 +110,7 @@ const idByName = players.getPlayerIdByName('CAVEMAN');
 ok('getPlayerIdByName is case-insensitive', idByName && idByName.id === 1);
 
 players.upsertPlayerFull({
-    id: 3, name: 'newscout', alliance_id: null, country: null, local_time: null, idle_time: null,
+    id: 3, name: 'newscout', alliance_id: null, country: null, local_time: null, idle_time: null, last_activity_at: null,
     origin_system: null, level: 5, ranking: null, points: 100, science_level: 2, culture_level: 1,
     biology: 3, economy: 0, energy: 0, mathematics: 0, physics: 0, social: 0,
     trade_revenue: 0, artefact: null, eco_bonus: 0,
@@ -123,6 +123,37 @@ ok('upsertPlayerFull created the player', players.countPlayers() === 3);
 ok('upsertPlayerFull respected has_intel=1 for biology', players.getPlayerWithPlanetCount(3).biology === 3);
 ok('upsertPlayerFull stamps stats_scraped_at — the profile page uses this for building-count staleness, not updated_at',
     players.getPlayerWithPlanetCount(3).stats_scraped_at != null);
+
+// last_activity_at (2026-09-12): a DOM scrape (player-parser.js) derives this from the
+// idle_time string and sends it alongside idle_time, so it must land in the SAME column
+// the API sweep uses — but must never REGRESS a fresher API-sourced value just because a
+// DOM scrape happened to sync in afterward.
+const basePlayer = (overrides) => ({
+    id: 3, name: 'newscout', alliance_id: null, country: null, local_time: null, idle_time: null, last_activity_at: null,
+    origin_system: null, level: 5, ranking: null, points: 100, science_level: 2, culture_level: 1,
+    biology: 3, economy: 0, energy: 0, mathematics: 0, physics: 0, social: 0,
+    trade_revenue: 0, artefact: null, eco_bonus: 0,
+    race_growth: 0, race_science: 0, race_culture: 0, race_production: 0, race_speed: 0, race_attack: 0, race_defense: 0,
+    race_trader: 0, race_sul: 0, joined: null, logins: 1, has_intel: 1,
+    home_planet_id: null, home_system_id: null, home_planet_index: null, possible_homes: '[]',
+    total_planets: 0, total_population: 0, total_farms: 0, total_factories: 0, total_labs: 0, total_cybernetics: 0, cv_used: 0, cv_limit: 0,
+    ...overrides,
+});
+
+players.upsertPlayerFull(basePlayer({ last_activity_at: '2026-09-10T10:00:00.000Z' }));
+ok('a first-ever last_activity_at is stored', players.getPlayerWithPlanetCount(3).last_activity_at === '2026-09-10T10:00:00.000Z');
+
+players.upsertPlayerFull(basePlayer({ last_activity_at: '2026-09-10T08:00:00.000Z' }));
+ok('an OLDER incoming last_activity_at does not regress the stored one (e.g. a delayed DOM scrape after a fresher API sweep)',
+    players.getPlayerWithPlanetCount(3).last_activity_at === '2026-09-10T10:00:00.000Z', players.getPlayerWithPlanetCount(3).last_activity_at);
+
+players.upsertPlayerFull(basePlayer({ last_activity_at: '2026-09-10T12:00:00.000Z' }));
+ok('a NEWER incoming last_activity_at does advance the stored one',
+    players.getPlayerWithPlanetCount(3).last_activity_at === '2026-09-10T12:00:00.000Z', players.getPlayerWithPlanetCount(3).last_activity_at);
+
+players.upsertPlayerFull(basePlayer({ last_activity_at: null }));
+ok('a null last_activity_at (no idle_time on this scrape) never clobbers the stored one',
+    players.getPlayerWithPlanetCount(3).last_activity_at === '2026-09-10T12:00:00.000Z', players.getPlayerWithPlanetCount(3).last_activity_at);
 
 players.resetPlayerOnRestart(3);
 ok('resetPlayerOnRestart also clears stats_scraped_at — the buildings it timestamped were just zeroed',

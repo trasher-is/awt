@@ -201,7 +201,7 @@ function resetPlayerOnRestart(id) {
 
 const upsertPlayerFullStmt = db.prepare(`
     INSERT INTO players (
-        id, name, alliance_id, country, local_time, idle_time, origin_system,
+        id, name, alliance_id, country, local_time, idle_time, last_activity_at, origin_system,
         level, ranking, points, science_level, culture_level,
         biology, economy, energy, mathematics, physics, social,
         trade_revenue, artefact, eco_bonus,
@@ -211,7 +211,7 @@ const upsertPlayerFullStmt = db.prepare(`
         total_planets, total_population, total_farms, total_factories, total_labs, total_cybernetics, cv_used, cv_limit,
         stats_scraped_at
     ) VALUES (
-        @id, @name, @alliance_id, @country, @local_time, @idle_time, @origin_system,
+        @id, @name, @alliance_id, @country, @local_time, @idle_time, @last_activity_at, @origin_system,
         @level, @ranking, @points, @science_level, @culture_level,
         @biology, @economy, @energy, @mathematics, @physics, @social,
         @trade_revenue, @artefact, @eco_bonus,
@@ -224,6 +224,16 @@ const upsertPlayerFullStmt = db.prepare(`
     ) ON CONFLICT(id) DO UPDATE SET
         name=excluded.name, alliance_id=excluded.alliance_id, country=excluded.country,
         local_time=excluded.local_time, idle_time=excluded.idle_time, origin_system=excluded.origin_system,
+        -- last_activity_at is also written by the API sweep (a real timestamp straight from
+        -- the game) — a DOM scrape's derived guess must never clobber a fresher API reading
+        -- just because it happened to sync later, so this only advances the value, never
+        -- regresses it. datetime() normalizes both sides (offsets included) before comparing.
+        last_activity_at = CASE
+            WHEN excluded.last_activity_at IS NOT NULL
+                 AND (players.last_activity_at IS NULL OR datetime(excluded.last_activity_at) > datetime(players.last_activity_at))
+            THEN excluded.last_activity_at
+            ELSE players.last_activity_at
+        END,
         level=excluded.level, ranking=excluded.ranking, points=excluded.points,
         science_level=excluded.science_level, culture_level=excluded.culture_level,
         joined=excluded.joined, logins=excluded.logins,
