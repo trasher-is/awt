@@ -323,7 +323,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
             // for this system (matched by name, no admin config needed — see
             // announceSystemMilestones). Only worth checking "secured" when something
             // in this system actually changed this sync, not on every no-op re-seed.
-            const secured = systemsRepo.checkAndUpdateSystemSecured(system_id, friendlyAllianceTags());
+            const secured = systemsRepo.checkAndUpdateSystemSecured(system_id, friendlyAllianceTags(), ownAllianceTags());
             const milestoneEvents = secured === 'secured' ? [...announceEvents, { type: 'SYSTEM_SECURED' }] : announceEvents;
             announceSystemMilestones(sys, milestoneEvents).catch(err =>
                 console.error('[Discord] system-milestone announce error:', err.message)
