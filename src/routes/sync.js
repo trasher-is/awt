@@ -340,24 +340,41 @@ router.post('/sync/system', requireAuth, (req, res) => {
     try {
         syncTransaction(planets, fleets || []);
 
+        const sys = systemsRepo.getSystemCoords(system_id) || { id: system_id };
+
+        // "Secured" is recomputed on EVERY sync of this system, not only when something
+        // announceable changed (2026-09-12g fix). Gating it on announceEvents.length was
+        // wrong in both directions, because plenty of real secured/unsecured transitions
+        // produce no announceEvents at all: a siege simply ENDING logs nothing, and a
+        // system sitting quietly fully-owned never generates another event to ride along
+        // with. Confirmed live: Alshemali [42] was genuinely closed (12/12 owned, 8 RAID +
+        // 4 NAP, no siege) yet still flagged 0, while three systems that had long since
+        // stopped qualifying were still flagged 1 — inflating the "We now hold N fully
+        // secured systems" milestone to 3 when the real answer was 1.
+        // This is one cheap read over a dozen planet rows, and checkAndUpdateSystemSecured
+        // itself only returns non-null on a real 0->1/1->0 transition, so announcing stays
+        // exactly once per actual change.
+        const secured = systemsRepo.checkAndUpdateSystemSecured(system_id, friendlyAllianceTags(), ownAllianceTags());
+
         // Announce detected planet events to Discord — both during a full galaxy scan
         // and during normal map browsing.
         if (announceEvents.length > 0) {
-            const sys = systemsRepo.getSystemCoords(system_id) || { id: system_id };
             announceSystemChanges(sys, announceEvents).catch(err =>
                 console.error('[Discord] announce error:', err.message)
             );
+        }
 
+        {
             // Per-system milestone channel (2026-09-12): an "enemy entered"/"system
             // closed" curated feed for whichever channel a member has already created
             // for this system (matched by name, no admin config needed — see
-            // announceSystemMilestones). Only worth checking "secured" when something
-            // in this system actually changed this sync, not on every no-op re-seed.
-            const secured = systemsRepo.checkAndUpdateSystemSecured(system_id, friendlyAllianceTags(), ownAllianceTags());
+            // announceSystemMilestones).
             const milestoneEvents = secured === 'secured' ? [...announceEvents, { type: 'SYSTEM_SECURED' }] : announceEvents;
-            announceSystemMilestones(sys, milestoneEvents).catch(err =>
-                console.error('[Discord] system-milestone announce error:', err.message)
-            );
+            if (milestoneEvents.length > 0) {
+                announceSystemMilestones(sys, milestoneEvents).catch(err =>
+                    console.error('[Discord] system-milestone announce error:', err.message)
+                );
+            }
 
             // Various Changes: alliance-wide secured-systems milestone (2026-09-12) — a
             // DIFFERENT message than the per-system celebration above: that one says
