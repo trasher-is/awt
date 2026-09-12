@@ -29,7 +29,12 @@ function load(file, injected = {}) {
     return context;
 }
 const time = load('utils/fleet-time.js');
-const helpers = { readUtcTimestamp: time.readUtcTimestamp, parseArrivalCellToISO: time.parseArrivalCellToISO };
+const siege = load('utils/siege-indicator-parser.js');
+const helpers = {
+    readUtcTimestamp: time.readUtcTimestamp,
+    parseArrivalCellToISO: time.parseArrivalCellToISO,
+    parseSiegeIndicator: siege.parseSiegeIndicator,
+};
 const system = load('scrapers/system-parser.js', helpers);
 const alliance = load('scrapers/alliance-parser.js', helpers);
 const incoming = load('ui/news-incoming.js', helpers);
@@ -66,7 +71,7 @@ function systemDoc(arrival) {
     const fleetRow = { querySelectorAll: () => fleetCells, querySelector: () => null };
     const fleetContainer = { classList: { contains: () => true }, querySelector: () => null, querySelectorAll: () => [fleetRow] };
     const planetCells = [cell('1'), cell('20'), cell('0'), cell('Free Planet')];
-    const row = { getAttribute: () => '123', querySelectorAll: () => planetCells, querySelector: () => null, nextElementSibling: fleetContainer };
+    const row = { getAttribute: () => '123', querySelectorAll: () => planetCells, querySelector: () => null, nextElementSibling: fleetContainer, classList: { contains: () => false } };
     return { querySelectorAll: () => [row] };
 }
 function allianceDoc(arrival) {
