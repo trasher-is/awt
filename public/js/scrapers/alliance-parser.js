@@ -1,4 +1,4 @@
-import { parseArrivalToISO } from '../utils/fleet-time.js';
+import { parseArrivalCellToISO } from '../utils/fleet-time.js';
 import '../utils/scrape-report.js';
 import '../utils/parse-number.js';
 import '../utils/game-rate-limit.js';
@@ -175,7 +175,7 @@ function extractMemberFleets(doc, playerId, report) {
         // server treats it as "lands later, then can relaunch".
         let arrival_at = null;
         const timerCell = Array.from(cells).find(c => c.getAttribute('colspan') === '4');
-        if (timerCell) arrival_at = parseArrivalToISO(timerCell.innerText.trim());
+        if (timerCell) arrival_at = parseArrivalCellToISO(timerCell);
 
         fleets.push({
             system_id: parseInt(m[1], 10),

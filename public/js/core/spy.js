@@ -1,5 +1,6 @@
 import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates, initColonizeLaunchWindows, initAllianceRelationIcons, initEcoBonusJoinDates, initFleetLaunchModalETA, initSocialHint, initEconomyMilestone, initBioThreatPills } from './page-injections.js';
 import { initNewsIncomingTools } from '../ui/news-incoming.js';
+import { initLocalGameTimestamps } from './page-injections.js';
 import { initNewsBattleEvents } from '../ui/news-battle-events.js';
 import '../utils/game-rate-limit.js';
 const { gameFetch } = globalThis.AWGameRate;
@@ -511,6 +512,7 @@ export function initSpy() {
         injecting = true;
         spyStats.viewPasses++;
         try {
+            initLocalGameTimestamps();
             const pathLower = viewToken().toLowerCase();
 
             if (pathLower.includes('/game/map')) {

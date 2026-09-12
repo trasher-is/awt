@@ -42,8 +42,8 @@ const $ = id => document.getElementById(id);
 // hourCycle 'h23' pins the dial regardless of the browser locale — without it an en-US
 // browser renders "03:45 PM" next to the 24-hour "13:45Z" UTC stamp, the exact AM/PM vs
 // 24h mix the report was about. (hour12: false is NOT equivalent: some engines map it to
-// 'h24' and print midnight as "24:05".) The <input type="datetime-local"> picker itself
-// follows the OS/browser locale and cannot be forced from script.
+// 'h24' and print midnight as "24:05".) The schedule uses a separate date picker and a
+// text clock because native time pickers choose AM/PM in some browser locales (#193).
 function fmtLocal(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
@@ -235,14 +235,18 @@ function wireWaypointRow(row) {
 
 function currentPayload() {
     const dateInput = $('rp-start');
-    if (!dateInput.validity.valid) throw new Error('Enter a valid local date and time, including seconds.');
+    const timeInput = $('rp-start-time');
+    if (!dateInput.validity.valid || !timeInput.validity.valid || Boolean(dateInput.value) !== Boolean(timeInput.value)) {
+        throw new Error('Enter a valid local date and a 24-hour time (HH:mm or HH:mm:ss), or leave both empty.');
+    }
+    const scheduleValue = dateInput.value ? `${dateInput.value}T${timeInput.value}` : '';
     return {
         waypoints: collectWaypoints().map(w => ({ systemId: w.systemId, planetIndex: w.planetIndex })),
         energy: parseInt($('rp-energy').value, 10) || 0,
         raceSpeed: parseInt($('rp-speed').value, 10) || 0,
         biology: parseInt($('rp-biology').value, 10) || 0,
         isAllianceMove: $('rp-alliance').checked,
-        ...scheduleInput.fields(dateInput.value),
+        ...scheduleInput.fields(scheduleValue),
         title: $('rp-title').value,
         note: $('rp-note').value,
         visibility: $('rp-shared').checked ? 'alliance' : 'private'
@@ -261,6 +265,12 @@ function schedulePreview() {
 
 function updateScheduleLabel() {
     $('rp-schedule-label').textContent = `${scheduleInput.mode === 'arrival' ? 'Target arrival' : 'Planned start'} (your local time)`;
+}
+
+function setScheduleValue(value) {
+    const [date = '', time = ''] = value.split('T');
+    $('rp-start').value = date;
+    $('rp-start-time').value = time;
 }
 
 function clearSchedule() {
@@ -554,7 +564,7 @@ function resetForm() {
     editingId = null;
     $('rp-title').value = '';
     $('rp-note').value = '';
-    $('rp-start').value = '';
+    setScheduleValue('');
     $('rp-schedule-mode').value = 'start';
     scheduleInput.setMode('start');
     updateScheduleLabel();
@@ -571,7 +581,7 @@ export function loadRouteDraft(draft) {
     editingId = null;
     $('rp-title').value = '';
     $('rp-note').value = '';
-    $('rp-start').value = '';
+    setScheduleValue('');
     $('rp-schedule-mode').value = 'start';
     scheduleInput.setMode('start');
     updateScheduleLabel();
@@ -600,7 +610,7 @@ function loadIntoForm(route) {
     $('rp-shared').checked = route.visibility !== 'private';
     const schedule = scheduleInput.load(route);
     $('rp-schedule-mode').value = schedule.mode;
-    $('rp-start').value = schedule.value;
+    setScheduleValue(schedule.value);
     updateScheduleLabel();
 
     const stops = [];
@@ -789,7 +799,7 @@ export async function initRoutePlanner() {
 
     $('rp-schedule-mode')?.addEventListener('change', () => {
         scheduleInput.setMode($('rp-schedule-mode').value);
-        $('rp-start').value = '';
+        setScheduleValue('');
         updateScheduleLabel();
         schedulePreview();
     });
@@ -797,8 +807,10 @@ export async function initRoutePlanner() {
         scheduleInput.edit();
         schedulePreview();
     };
-    $('rp-start')?.addEventListener('input', onDateEdit);
-    $('rp-start')?.addEventListener('change', onDateEdit);
+    for (const id of ['rp-start', 'rp-start-time']) {
+        $(id)?.addEventListener('input', onDateEdit);
+        $(id)?.addEventListener('change', onDateEdit);
+    }
 
     $('rp-save')?.addEventListener('click', save);
     $('rp-reset')?.addEventListener('click', resetForm);

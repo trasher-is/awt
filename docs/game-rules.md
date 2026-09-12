@@ -665,17 +665,19 @@ Each of the six science fields does something different besides its raw growth r
 - **Mathematics** — reduces combat losses (more survivors). **Level 12** lets you manually
   choose any energy level from 1 up to your max at launch, instead of always launching at
   max energy. **Level 15** is required to build Cruisers.
-  > The old help text claims a flat **25%** survivor bonus/malus once the mathematics gap
-  > between two players reaches 6 levels (plus a smaller, unlisted bonus below that gap).
-  > `public/js/utils/battle-model.js` instead uses a **12.5%** toughness multiplier
-  > (`MATH_BRACKET = 0.125`) fitted against real battle-fixture data — see
-  > `docs/battle-model.md`. Treat the fitted 12.5% as authoritative; the 25% in the old help
-  > text may describe an earlier, unrebalanced version of the mechanic.
-- **Physics** — increases win chance. **Level 15** is required to build Battleships. The old
-  help text claims a flat **25%** win-chance bonus at a 6-level physics gap; the calibrated
-  model in `battle-model.js` (`WIN_PHYS_BASE6`/`WIN_PHYS_SLOPE`) uses a logit-space term
-  fitted to real outcomes rather than a flat linear percentage — same caveat as Mathematics
-  above, don't treat "25%" as literal.
+  The [official Mathematics glossary](https://portal.astrowars.mudflatgames.com/glossary/mathematics/)
+  describes a **25%** defence bonus/malus at a six-level gap. The current
+  [battle model](battle-model.md) agrees: `MATH_BRACKET = 0.25` gives toughness factors
+  `1.25` / `0.75`, multiplied by `1 + 0.0015 × ownMath`. The old `0.125` regression
+  coefficient was replaced on 2026-09-06; it must not be used for race inference.
+  This modifies toughness, not the number of survivors by a flat 25%.
+- **Physics** — increases win chance. **Level 15** is required to build Battleships.
+  The [official Physics glossary](https://portal.astrowars.mudflatgames.com/glossary/physics/)
+  gives a **25% attack modifier** at a six-level advantage. The current battle model
+  combines the absolute factors `1 + 0.01491 × Physics` with a relative `1.25` bracket
+  in log-power space. It is not a flat 25-percentage-point addition to win probability.
+  See [battle report tools](battle-report-tools.md#why-science-and-player-level-do-not-become-a-false-race-bonus)
+  for how unknown historical science and player-level bonuses limit race inference.
 - **Social** — raises the population cap per planet (see the table below). If a Hydroponic
   Farm shows **+0 growth**, the planet has hit its population cap and needs a higher Social
   level to grow further. **Spontaneous growth**: at the 00:00 CET daily update, if any of

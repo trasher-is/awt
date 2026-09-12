@@ -10,6 +10,7 @@
 import { extractPlayerData } from '../scrapers/player-parser.js';
 import { runAllianceFleetScan } from '../scrapers/alliance-parser.js';
 import { esc } from '../utils/escape.js';
+import { readUtcTimestamp } from '../utils/fleet-time.js';
 import '../utils/game-rate-limit.js';
 const { gameFetch } = globalThis.AWGameRate;
 
@@ -92,6 +93,12 @@ function parseNewsTimeToUnix(timeText) {
         d = new Date(now.getFullYear(), now.getMonth() - 1, day, +tm[1], +tm[2], +tm[3]);
     }
     return Math.floor(d.getTime() / 1000);
+}
+
+function readNewsTimeToUnix(msgCell) {
+    const timestamp = readUtcTimestamp(msgCell);
+    if (timestamp !== undefined) return timestamp ? Math.floor(timestamp.getTime() / 1000) : 0;
+    return parseNewsTimeToUnix((msgCell.innerText || '').split('\n')[0].trim());
 }
 
 function renderStat(span, stats) {
@@ -370,9 +377,8 @@ export function initNewsIncomingTools() {
         info.bcLink.insertAdjacentElement('beforebegin', span);
         info.bcLink.insertAdjacentElement('beforebegin', document.createElement('br'));
 
-        // Notification time from the first line of the timestamp cell -> Discord unix code.
-        const timeText = (msgCell.innerText || '').split('\n')[0].trim();
-        const arrivalUnix = parseNewsTimeToUnix(timeText);
+        // Prefer source metadata: the visible clock may already have been localized.
+        const arrivalUnix = readNewsTimeToUnix(msgCell);
 
         // Defender analysis container (filled after a refresh).
         const defBox = document.createElement('div');

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Astro Wars Redzone — QoL Timers & Calculators
 // @namespace    https://37.27.17.97.nip.io/userscripts/
-// @version      1.9.1
+// @version      1.9.2
 // @description  Population timer, science/culture research-queue timers, culture level calculator, and an interactive science level calculator for redzone.astrowars.games. Pure client-side — no login, no backend, reads only the current page's own DOM plus the game's own /Info/* tables.
 // @match        *://redzone.astrowars.games/*
 // @updateURL    https://37.27.17.97.nip.io/userscripts/redzone-qol.user.js
@@ -18,6 +18,14 @@
 // thing to re-check.
 (function () {
     'use strict';
+
+    // Remain self-contained: every ETA uses the browser timezone and a 00–23 clock,
+    // including locales where hour12:false would produce 24:00 at midnight.
+    function formatLocalFinishDate(date) {
+        return date.toLocaleString(undefined, {
+            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+        });
+    }
 
     // -----------------------------------------------------------------
     // POPULATION TIMER — /Game/Planets
@@ -267,8 +275,7 @@
 
                     if (secondsToReach > 0) {
                         const finishDate = new Date(Date.now() + secondsToReach * 1000);
-                        const dateStr = finishDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
-                                        finishDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+                        const dateStr = formatLocalFinishDate(finishDate);
 
                         nextLevels.push({
                             lvl: targetLvl,
@@ -402,8 +409,7 @@
                 }
 
                 const finish = new Date(Date.now() + total * 1000);
-                const dateStr = finish.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
-                                finish.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+                const dateStr = formatLocalFinishDate(finish);
                 let html = `<span style="color:#aaa;">Lvl ${st.level} → ${target}:</span> <span style="color:#fff;font-weight:bold;">${formatDuration(total)}</span> <span style="color:#888;">(${dateStr})</span>`;
                 html += `<br><span style="color:#666;font-size:11px;">rate ${Math.round(effRate).toLocaleString()}/h${modified ? ` (was ${Math.round(st.rate).toLocaleString()})` : ''}${st.researching ? ' · current research counted' : ''}</span>`;
                 if (missing.length) html += `<br><span style="color:#c96;font-size:11px;">No cost data for level(s): ${missing.join(', ')}</span>`;
@@ -453,8 +459,7 @@
             cumulativeSeconds += item.seconds;
 
             const finishDate = new Date(Date.now() + cumulativeSeconds * 1000);
-            const dateStr = finishDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
-                            finishDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+            const dateStr = formatLocalFinishDate(finishDate);
 
             let dateSpan = item.timerEl.nextElementSibling;
             if (!dateSpan || !dateSpan.classList.contains('custom-science-date')) {

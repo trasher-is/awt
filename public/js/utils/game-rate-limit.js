@@ -189,11 +189,15 @@
             stats.lastAt = t;
             stats.maxObservedPerSecond = Math.max(stats.maxObservedPerSecond, inWindow);
 
-            // Fire and immediately consider the next slot: the cap is on how often
-            // requests START, not on how many are in flight.
-            Promise.resolve()
-                .then(job.run)
-                .then(job.resolve, job.reject);
+            // Start in the same turn as the reservation. Deferring job.run to a
+            // microtask lets a busy page delay the actual request while its slot ages;
+            // the next burst can then start less than a second after this one.
+            // Only promise settlement is deferred: in-flight requests do not block FIFO.
+            try {
+                Promise.resolve(job.run()).then(job.resolve, job.reject);
+            } catch (error) {
+                job.reject(error);
+            }
 
             step();
         };

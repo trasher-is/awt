@@ -5,16 +5,20 @@ const fleetsRepo = require('../repositories/fleets');
 const plansRepo = require('../repositories/plans');
 const playersRepo = require('../repositories/players');
 const alliancesRepo = require('../repositories/alliances');
+const tradeRepo = require('../repositories/trade');
 const battleReportsRepo = require('../repositories/battleReports');
+const { parseBattleReportFilters, serializeBattleReportExport } = require('../utils/battle-report-export');
 const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
-const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
+const { observedNumber, positiveMachineNumber } = require('../utils/observed-number');
+const { parseTimestamp } = require('../../public/js/utils/sqlite-time.js');
 const { previousNames, findByFormerName } = require('../utils/round-archive');
 const { friendlyAllianceTags } = require('../utils/friendly-alliance-tags');
 const { truePowerForAllianceRow } = require('../utils/true-power');
 const settingsRepo = require('../repositories/settings');
 const systemClaimsRepo = require('../repositories/systemClaims');
 const router = express.Router();
+const tradePriceStmt = db.prepare("SELECT value, updated_at FROM app_settings WHERE key = 'pp_price'");
 
 // --- WHO USED TO BE CALLED THIS ---
 // The reverse lookup. Searching for a name that no longer exists should find the account
@@ -344,20 +348,22 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
         try {
             const history = playersRepo.getPlayerLoginHistory(playerId);
 
+            // Send instants, not server-local display labels. A browser in another
+            // timezone can be on a different calendar day for the very same sample.
             formattedActivity = history.map(row => ({
-                date: new Date(row.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                date: parseTimestamp(row.timestamp)?.toISOString() || null,
                 points: row.total_logins
             }));
 
             if (formattedActivity.length === 0) {
                  formattedActivity = [{
-                    date: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                    date: new Date().toISOString(),
                     points: playerInfo.logins || 0
                 }];
             }
         } catch (historyErr) {
             formattedActivity = [{
-                date: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                    date: new Date().toISOString(),
                 points: playerInfo.logins || 0
             }];
         }
@@ -423,33 +429,28 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
 // for the client-side Trade Agreement scheduler.
 router.get('/intel/trade-analysis', requireAuth, (req, res) => {
     try {
-        // This inline toInt stripped every non-digit, so "1,5" read as 15 and a decimal
-        // rate silently became ten times itself. Same shared parser as everywhere else.
-        const toInt = parseLocaleInt;
-
         const rows = alliancesRepo.getTradeAnalysisRows();
+        const partnerObservations = tradeRepo.getPartnerObservations();
 
         const players = rows.map(r => {
-            let partners = [];
-            if (r.trade_partners) {
-                try {
-                    const parsed = JSON.parse(r.trade_partners);
-                    if (Array.isArray(parsed)) partners = parsed.map(x => String(x).toLowerCase());
-                } catch (e) { /* not JSON / empty */ }
-            }
+            // Use the same canonical graph as Board, including known completions
+            // from a partial report or from a partner outside the member roster.
+            const partners = partnerObservations.get(r.name.toLowerCase());
             return {
+                id: r.id,
                 name: r.name,
-                production_rate: toInt(r.production_rate),
-                astro_dollars: toInt(r.astro_dollars),
-                production_points: toInt(r.production_points),
-                trade_partners: partners
+                production_rate: observedNumber(r.production_rate, true),
+                astro_dollars: observedNumber(r.astro_dollars),
+                production_points: observedNumber(r.production_points),
+                trade_partners: partners?.reported_partners ?? null,
+                known_partners: partners?.known_partners ?? []
             };
         });
 
-        const ppRow = settingsRepo.getPpPrice();
-        const pp_price = ppRow ? (parseFloat(ppRow.value) || 0) : 0;
+        const ppRow = tradePriceStmt.get();
+        const pp_price = positiveMachineNumber(ppRow?.value);
 
-        res.json({ success: true, players, pp_price });
+        res.json({ success: true, players, pp_price, pp_price_updated_at: ppRow?.updated_at ?? null });
     } catch (err) {
         console.error('[DB Error] Failed trade analysis:', err);
         res.status(500).json({ error: 'Failed to build trade analysis' });
@@ -501,9 +502,7 @@ router.get('/intel/battle-reports-feed', requireAuth, (req, res) => {
 // pagination, for "Showing X of Y".
 router.get('/intel/battle-reports-search', requireAuth, (req, res) => {
     try {
-        const q = typeof req.query.q === 'string' ? req.query.q.slice(0, 200) : '';
-        const sort = ['occurred_at', 'cv', 'pop', 'att_cv', 'def_cv'].includes(req.query.sort) ? req.query.sort : 'occurred_at';
-        const dir = req.query.dir === 'asc' ? 'asc' : 'desc';
+        const { q, sort, dir } = parseBattleReportFilters(req.query);
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
         const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
         const { total, rows } = battleReportsRepo.searchBattleReportsFeed({ q, sort, dir, limit, offset });
@@ -511,6 +510,30 @@ router.get('/intel/battle-reports-search', requireAuth, (req, res) => {
     } catch (err) {
         console.error('[DB Error] Failed to search battle reports:', err);
         res.status(500).json({ error: 'Failed to search battle reports' });
+    }
+});
+
+// All means every stored battle report, including reports whose location is unknown.
+// Filtered means the whole matching feed, including unlinked population drops, without
+// the table's pagination limit. record_type makes these two evidence sources explicit.
+router.get('/intel/battle-reports-export', requireAuth, (req, res) => {
+    const { scope, format } = req.query;
+    if (!['all', 'filtered'].includes(scope) || !['csv', 'json'].includes(format)) {
+        return res.status(400).json({ error: 'Choose an export scope (all or filtered) and format (csv or json)' });
+    }
+    try {
+        const filters = parseBattleReportFilters(req.query);
+        const exportedAt = new Date().toISOString();
+        const { columns, rows } = battleReportsRepo.getBattleReportsExport({ scope, ...filters });
+        const body = serializeBattleReportExport({ columns, rows, format, scope, filters, exportedAt });
+        const filename = `battle-reports-${scope}-${exportedAt.replace(/[:.]/g, '-')}.${format}`;
+        res.set('Cache-Control', 'private, no-store');
+        res.set('Content-Disposition', `attachment; filename="${filename}"`);
+        res.type(format === 'csv' ? 'text/csv; charset=utf-8' : 'application/json; charset=utf-8');
+        res.send(body);
+    } catch (err) {
+        console.error('[DB Error] Failed to export battle reports:', err);
+        res.status(500).json({ error: 'Failed to export battle reports' });
     }
 });
 

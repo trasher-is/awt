@@ -11,6 +11,32 @@
 // Parsing happens in the scraper's browser, so the displayed time is in THAT viewer's
 // local timezone — `new Date(y, m, d, h, mi, s).toISOString()` yields correct UTC
 // regardless of where the member is (Chile, Finland, etc.).
+import './sqlite-time.js';
+
+const { parseTimestamp } = globalThis.AWSqliteTime;
+
+// Read only the timestamp cell supplied by the caller, never an entire row/page. The
+// game exposes canonical instants on leaf spans; display localization may change their
+// text before a scraper runs. Missing metadata permits the legacy text fallback, while
+// invalid/ambiguous metadata must not turn into an invented arrival via that fallback.
+// undefined = no canonical clock, null = unusable clock, Date = exact source instant.
+export function readUtcTimestamp(cell) {
+    if (!cell) return undefined;
+    const candidates = cell.matches?.('span[data-utc]') ? [cell]
+        : Array.from(cell.querySelectorAll('span[data-utc]'));
+    const clocks = candidates.filter(span => !span.children.length
+        && !span.closest('.timer, .timer-active, [data-timer], [data-at-datetime]'));
+    if (!clocks.length) return undefined;
+    if (clocks.length !== 1) return null;
+    return parseTimestamp(clocks[0].getAttribute('data-utc'));
+}
+
+export function parseArrivalCellToISO(cell, nowMs = Date.now()) {
+    if (!cell) return null;
+    const timestamp = readUtcTimestamp(cell);
+    if (timestamp !== undefined) return timestamp ? timestamp.toISOString() : null;
+    return parseArrivalToISO((cell.innerText || cell.textContent || '').trim(), nowMs);
+}
 
 export function parseArrivalToISO(text, nowMs = Date.now()) {
     if (!text || typeof text !== 'string') return null;

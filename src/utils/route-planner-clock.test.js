@@ -37,6 +37,21 @@ const notH23 = localeCalls.filter(c => !/hourCycle:\s*'h23'/.test(c));
 ok('every toLocale*String call pins hourCycle: \'h23\' (no AM/PM leaking from the browser locale)', notH23.length === 0, notH23);
 ok('no call relies on hour12: false (maps to a 24:xx midnight in some engines)', !/hour12/.test(code));
 
+console.log('\n── Schedule entry keeps a 24-hour clock in every browser locale ' + '─'.repeat(10));
+const html = fs.readFileSync(path.join(__dirname, '../../public/components/route-planner.html'), 'utf8');
+const timeInput = (html.match(/<input\b[^>]*\bid="rp-start-time"[^>]*>/) || [''])[0];
+ok('the schedule uses a native date picker and a clock independent of the browser hour cycle',
+    /<input\b[^>]*type="date"[^>]*id="rp-start"/.test(html) && /type="text"/.test(timeInput)
+    && !/type="(?:time|datetime-local)"/.test(html));
+ok('the 24-hour clock has an accessible label and a seconds placeholder', /aria-label="Time \(24-hour, HH:mm:ss\)"/.test(timeInput) && /placeholder="HH:mm:ss"/.test(timeInput));
+const clockPattern = new RegExp(`^(?:${(timeInput.match(/pattern="([^"]*)"/) || ['', '(?!)'])[1]})$`);
+for (const time of ['00:00', '00:00:00', '18:46:23', '23:59:59']) {
+    ok(`the schedule accepts a valid 24-hour clock: ${time}`, clockPattern.test(time));
+}
+for (const time of ['12:00 AM', '6:46 PM', '24:00', '18:60', '18:46:60']) {
+    ok(`the schedule rejects a non-24-hour or invalid clock: ${time}`, !clockPattern.test(time));
+}
+
 console.log('\n── The visible text carries one zone only ' + '─'.repeat(34));
 // The UTC stamp is allowed as a hover tooltip (title="...") — never as visible text.
 const utcOutsideTitle = [];

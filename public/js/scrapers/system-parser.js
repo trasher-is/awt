@@ -1,4 +1,4 @@
-import { parseArrivalToISO } from '../utils/fleet-time.js';
+import { parseArrivalCellToISO } from '../utils/fleet-time.js';
 import { parseSiegeIndicator } from '../utils/siege-indicator-parser.js';
 import '../utils/scrape-report.js';
 import '../utils/parse-number.js';
@@ -146,6 +146,7 @@ export function extractSystemData(doc = document, report = new ScrapeReport('sys
                             }
 
                             let arrival_time = null;
+                            let arrival_at = null;
                                     // The 8th column (index 7) contains the Arrival Time and the BC button
                                     if (fTds.length >= 8) {
                                         const clone = fTds[7].cloneNode(true);
@@ -153,6 +154,7 @@ export function extractSystemData(doc = document, report = new ScrapeReport('sys
                                         clone.querySelectorAll('a, button').forEach(n => n.remove());
                                         const text = clone.innerText.trim();
                                         if (text.length > 3) arrival_time = text;
+                                        arrival_at = parseArrivalCellToISO(clone);
                                     }
 
                                     const ships = {};
@@ -167,7 +169,7 @@ export function extractSystemData(doc = document, report = new ScrapeReport('sys
                                         planet_index: planetIndex,
                                         ...ships,
                                         arrival_time: arrival_time,
-                                        arrival_at: parseArrivalToISO(arrival_time)
+                                        arrival_at
                                     });
                                     return true;
                         }

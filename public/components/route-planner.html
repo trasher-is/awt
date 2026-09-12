@@ -78,8 +78,11 @@
                             <option value="arrival">Target arrival</option>
                         </select>
                         <label for="rp-start" id="rp-schedule-label" class="text-xs text-muted-foreground">Planned start (your local time)</label>
-                        <input type="datetime-local" id="rp-start" step="1" class="h-9 w-full min-w-0 rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500">
-                        <p class="text-xs text-muted-foreground">Optional. Leave empty to calculate travel time only.</p>
+                        <div class="flex gap-2 min-w-0">
+                            <input type="date" id="rp-start" aria-describedby="rp-schedule-help" class="h-9 w-full min-w-0 rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500">
+                            <input type="text" id="rp-start-time" placeholder="HH:mm:ss" maxlength="8" pattern="([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?" autocomplete="off" spellcheck="false" aria-label="Time (24-hour, HH:mm:ss)" aria-describedby="rp-schedule-help" class="h-9 w-28 shrink-0 rounded border border-input bg-zinc-950 px-2 text-sm font-mono text-foreground focus:outline-none focus:border-zinc-500">
+                        </div>
+                        <p id="rp-schedule-help" class="text-xs text-muted-foreground">24-hour time (HH:mm or HH:mm:ss). Leave both fields empty to calculate travel time only.</p>
                     </div>
                     <div class="flex flex-col gap-1">
                         <label class="text-xs text-muted-foreground">Title</label>
