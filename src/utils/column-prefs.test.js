@@ -137,6 +137,23 @@ async function loadEsm(rel, tmp) {
         ok('race picks render signed', /\+4<\/span>/.test(scanned) && />-2<\/span>/.test(scanned));
     }
 
+    console.log('\n── War Room never shows the alliance-Member-sheet-only columns ' + '─'.repeat(12));
+    // science_rate/culture_rate/production_rate/astro_dollars/production_points are only
+    // ever written by alliance-parser.js's syncMember(), which walks
+    // /Game/Alliance/Member/{id} — a page that only renders real data for YOUR OWN
+    // alliance. Every War Room row is an enemy player by definition, so these would be
+    // permanently blank there, not "occasionally unscanned" — they belong on
+    // ALLY_STATS_COLUMNS only. See 2026-09-12.
+    {
+        const warRoomKeys = new Set(tables.warRoom.columns.map(c => c.key));
+        const memberSheetOnly = ['science_rate', 'culture_rate', 'production_rate', 'astro_dollars', 'production_points'];
+        ok('War Room has none of the Member-sheet-only columns',
+            memberSheetOnly.every(k => !warRoomKeys.has(k)), memberSheetOnly.filter(k => warRoomKeys.has(k)));
+        ok('Alliance stats still has all of them (own-alliance members DO get real values)',
+            memberSheetOnly.every(k => tables.allyStats.columns.some(c => c.key === k)),
+            memberSheetOnly.filter(k => !tables.allyStats.columns.some(c => c.key === k)));
+    }
+
     console.log('\n── Sorting ' + '─'.repeat(64));
     const sortCols = [{ key: 'n' }, { key: 's', sort: 'string' }, { key: 't', sort: 'numtext' }, { key: 'v', sortValue: r => r.a + r.b }];
     const rows = [{ n: 5, s: 'b', t: '1,000', a: 1, b: 1 }, { n: null, s: 'A', t: '999.9', a: 5, b: 5 }, { n: 12, s: 'c', t: '10', a: 2, b: 2 }];
