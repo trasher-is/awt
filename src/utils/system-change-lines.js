@@ -103,6 +103,17 @@ function isEnemyGain(e, friendlyTagsUpper) {
     return !tag || !friendlyTagsUpper.has(tag);
 }
 
+// A SIEGE_STARTED only counts as "enemy entered" when the BESIEGED planet is friendly-owned
+// (2026-09-12 fix: this used to fire for every siege regardless of owner — including us
+// besieging an enemy, or two other parties fighting each other — which isn't a threat to
+// us and just floods the channel with noise). Unlike isEnemyGain, an unowned/unaffiliated
+// victim does NOT qualify — there's nothing of ours to alarm about.
+function isFriendlySiege(e, friendlyTagsUpper) {
+    if (!e || e.type !== 'SIEGE_STARTED') return false;
+    const tag = e.owner_alliance_tag ? String(e.owner_alliance_tag).toUpperCase() : null;
+    return !!tag && friendlyTagsUpper.has(tag);
+}
+
 function milestoneLine(e) {
     switch (e.type) {
         case 'SIEGE_STARTED':
@@ -123,7 +134,7 @@ function buildSystemMilestoneLines(events, friendlyTagsUpper) {
     const list = Array.isArray(events) ? events : [];
     const tags = friendlyTagsUpper || new Set();
     return list
-        .filter(e => e && (e.type === 'SIEGE_STARTED' || e.type === 'SYSTEM_SECURED' || isEnemyGain(e, tags)))
+        .filter(e => e && (isFriendlySiege(e, tags) || e.type === 'SYSTEM_SECURED' || isEnemyGain(e, tags)))
         .map(milestoneLine)
         .filter(Boolean);
 }

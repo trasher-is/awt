@@ -274,12 +274,17 @@ function getSystemPlanetsForBot(sysId) {
 // A system is "fully friendly" once every REAL owner in it (own alliance or an admin-
 // configured NAP/ally — see friendly-alliance-tags.js) is friendly, AND at least one
 // planet is actually owned by someone — an untouched or all-Free system is not "ours",
-// so it never counts as secured just for having no enemies in it either.
+// so it never counts as secured just for having no enemies in it either. A friendly-owned
+// planet currently under active siege (is_sieged) does NOT count as secure either — a
+// hostile fleet mid-attack there means the system is actively contested, not "closed"
+// (2026-09-12 fix: this used to only check ownership tags, so a system could be marked
+// secured — and counted in the aggregate milestone — while most of its own planets were
+// under active enemy siege).
 function isSystemFullyFriendly(sysId, friendlyTagsUpper) {
     const rows = getSystemPlanetsForBotStmt.all(sysId);
     const owned = rows.filter(p => p.owner_id != null);
     if (!owned.length) return false;
-    return owned.every(p => p.ally_tag && friendlyTagsUpper.has(String(p.ally_tag).toUpperCase()));
+    return owned.every(p => p.ally_tag && friendlyTagsUpper.has(String(p.ally_tag).toUpperCase()) && !p.is_sieged);
 }
 
 const getSystemSecuredStmt = db.prepare(`SELECT is_secured FROM systems WHERE id = ?`);

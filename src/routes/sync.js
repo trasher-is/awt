@@ -189,11 +189,18 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 // the per-system Discord channel (announceSystemMilestones) — not the
                 // main System Change/Population Drop channels, which are about
                 // completed changes, not attacks in progress.
+                // The raw owner tag rides along (not just the formatted label) so the
+                // milestone router can tell "our planet just got besieged" (alarm-worthy)
+                // apart from a siege on an enemy/unowned/unaffiliated planet — us besieging
+                // THEM, or two other parties fighting — which isn't an "enemy entered"
+                // event for us at all (2026-09-12 fix: this used to fire for every siege in
+                // a watched system regardless of who owned the planet).
                 if (!oldP.is_sieged && finalIsSieged) {
                     announceEvents.push({
                         planet_index: p.planet_index,
                         type: 'SIEGE_STARTED',
                         owner: oldOwnerLabel,
+                        owner_alliance_tag: tagOf(oldP.owner_id),
                     });
                 }
 
