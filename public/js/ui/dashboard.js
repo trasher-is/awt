@@ -129,6 +129,13 @@ window.addEventListener('DOMContentLoaded', () => {
     import('../scrapers/api-galaxy-seed.js')
         .then(({ startAutoGalaxySeed }) => startAutoGalaxySeed())
         .catch(err => console.warn('[GalaxyAutoSeed] failed to start:', err));
+
+    // Various Changes: Best Planets coverage watch (2026-09-12) — hourly check, public
+    // and standalone from the secret bonus-goals ranking_match mechanism even though both
+    // watch /Ranking/BestPlanets. Same on-demand-load pattern as the others.
+    import('./best-planets-watch.js')
+        .then(({ initBestPlanetsWatch }) => initBestPlanetsWatch())
+        .catch(err => console.warn('[BestPlanetsWatch] failed to start:', err));
 });
 
 // --- CORE UI CONTROLS ---

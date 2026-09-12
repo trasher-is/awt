@@ -1870,6 +1870,34 @@ function getPopdropChannelId() {
     return getSettingValue('discord_popdrop_channel');
 }
 
+function getVariousChangesChannelId() {
+    return getSettingValue('discord_variouschanges_channel');
+}
+
+// Generic sender for the "Various Changes" catch-all channel (2026-09-12) — Best Guarded
+// shakeups, Best Planets ranking coverage, secured-systems milestones, possible friendly-
+// fire/NAP incidents, resigned/returned enemies. One channel, one embed shape; each caller
+// just supplies a title/description/color. Best-effort, safe no-op if not configured.
+async function sendVariousChangeEmbed(title, description, color = '#6366f1') {
+    const channelId = getVariousChangesChannelId();
+    if (!channelId || !description) return;
+    if (!client.isReady()) return;
+    let channel;
+    try {
+        channel = await client.channels.fetch(channelId);
+    } catch (err) {
+        console.error('[Discord] Could not fetch various-changes channel:', err.message);
+        return;
+    }
+    if (!channel || typeof channel.send !== 'function') return;
+    const embed = new EmbedBuilder().setTitle(title).setDescription(description).setColor(color);
+    try {
+        await channel.send({ embeds: [embed] });
+    } catch (err) {
+        console.error('[Discord] Failed to send various-changes announcement:', err.message);
+    }
+}
+
 
 // Send one system-change embed to a channel. Best-effort, safe no-op if the channel
 // isn't configured / usable. `color` distinguishes owner-change vs pop-drop embeds.
@@ -2111,7 +2139,7 @@ async function replyToIncoming(channelId, messageId, content) {
 }
 
 module.exports = {
-    initDiscordBot, announceSystemChanges, announceSystemMilestones, sendIncomingAlert, sendOrEditIncoming,
+    initDiscordBot, announceSystemChanges, announceSystemMilestones, sendVariousChangeEmbed, sendIncomingAlert, sendOrEditIncoming,
     replyToIncoming, updateIncomingCover,
     // Exported for the tests: these are the pieces with real logic in them, and they run
     // without a Discord connection.

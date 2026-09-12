@@ -1,8 +1,12 @@
 const express = require('express');
 const db = require('../database');
 const { requireAuth } = require('./_middleware');
-const { announceSystemChanges, announceSystemMilestones } = require('../discord_bot');
+const { announceSystemChanges, announceSystemMilestones, sendVariousChangeEmbed } = require('../discord_bot');
 const { friendlyAllianceTags } = require('../utils/friendly-alliance-tags');
+
+// Best Guarded / various-changes: "close by" means within this many straight-line systems
+// of friendly territory (2026-09-12 — a flat radius, not per-player biology).
+const BEST_GUARDED_AREA_RADIUS = 6;
 const systemsRepo = require('../repositories/systems');
 const fleetsRepo = require('../repositories/fleets');
 const playersRepo = require('../repositories/players');
@@ -47,6 +51,25 @@ router.post('/sync/system', requireAuth, (req, res) => {
         const row = playersRepo.getPlayerNameWithTag(id);
         if (!row) return `#${id}`;
         return row.alliance_tag ? `[${row.alliance_tag}] ${row.name}` : row.name;
+    };
+    const tagOf = (id) => {
+        if (!id) return null;
+        const row = playersRepo.getPlayerNameWithTag(id);
+        return row ? row.alliance_tag : null;
+    };
+    // Various Changes: possible friendly-fire/NAP violation (2026-09-12) — real damage
+    // only (a conquest, or a bombardment with a confidently matched attacker), not just
+    // any battle report existing between two friendlies: routine XP-farming duels between
+    // allies/alliance-mates don't actually take territory or kill population, so gating on
+    // real loss keeps this from firing on ordinary sparring.
+    const friendlyTagsForFireCheck = new Set([...friendlyAllianceTags()].map(t => String(t).toUpperCase()));
+    const isFriendlyTag = (tag) => !!tag && friendlyTagsForFireCheck.has(String(tag).toUpperCase());
+    const flagPossibleFriendlyFire = (victimTag, attackerTag, description) => {
+        if (isFriendlyTag(victimTag) && isFriendlyTag(attackerTag)) {
+            sendVariousChangeEmbed('⚠️ Possible friendly-fire / NAP violation', description).catch(err =>
+                console.error('[Discord] friendly-fire various-changes announce error:', err.message)
+            );
+        }
     };
 
     const syncTransaction = db.transaction((planetsData, fleetsData) => {
@@ -154,6 +177,9 @@ router.post('/sync/system', requireAuth, (req, res) => {
                         new_owner_alliance_tag: p.owner ? (p.owner.alliance_tag || null) : null,
                         old_pop: Number.isFinite(oldPop) ? oldPop : null
                     });
+
+                    flagPossibleFriendlyFire(tagOf(oldP.owner_id), p.owner ? p.owner.alliance_tag : null,
+                        `🪐 **Planet ${p.planet_index}** in system #${system_id}: ${newOwnerLabel} took it from ${oldOwnerLabel} — both are friendly tags.`);
                 }
 
                 // SIEGE_STARTED (2026-09-12): is_sieged only ever arrives from the
@@ -220,6 +246,12 @@ router.post('/sync/system', requireAuth, (req, res) => {
                                 ? (battle.att_alliance_tag ? `[${battle.att_alliance_tag}] ${battle.att_player_name}` : battle.att_player_name)
                                 : null
                         });
+
+                        if (battle && battle.att_player_name) {
+                            const attackerLabel = battle.att_alliance_tag ? `[${battle.att_alliance_tag}] ${battle.att_player_name}` : battle.att_player_name;
+                            flagPossibleFriendlyFire(tagOf(oldP.owner_id), battle.att_alliance_tag,
+                                `🪐 **Planet ${p.planet_index}** in system #${system_id}: ${attackerLabel} bombarded ${oldOwnerLabel}, killing ${oldPop - newPop} population — both are friendly tags.`);
+                        }
                     }
                 }
             }
@@ -275,6 +307,18 @@ router.post('/sync/system', requireAuth, (req, res) => {
             announceSystemMilestones(sys, milestoneEvents).catch(err =>
                 console.error('[Discord] system-milestone announce error:', err.message)
             );
+
+            // Various Changes: alliance-wide secured-systems milestone (2026-09-12) — a
+            // DIFFERENT message than the per-system celebration above: that one says
+            // "THIS system is secured", this one says how many total the alliance holds.
+            // Only worth recomputing when a transition actually happened this sync.
+            if (secured === 'secured' || secured === 'lost') {
+                const totalSecured = systemsRepo.countSecuredSystems();
+                sendVariousChangeEmbed(
+                    '🏰 Secured systems',
+                    `We now hold **${totalSecured}** fully secured system${totalSecured === 1 ? '' : 's'}.`,
+                ).catch(err => console.error('[Discord] secured-systems various-changes announce error:', err.message));
+            }
         }
 
         res.json({ success: true, synced_count: planets.length });
@@ -456,10 +500,15 @@ router.post('/sync/player-list', requireAuth, (req, res) => {
     if (!Array.isArray(players) || players.length === 0) {
         return res.status(400).json({ error: 'Invalid payload' });
     }
+    // Various Changes: resigned/returned enemy (2026-09-12) — scoped to players with a
+    // KNOWN non-friendly alliance (not random unaffiliated churn, which would be
+    // extremely noisy in a game with this much turnover).
+    const friendlyTagsForResignCheck = new Set([...friendlyAllianceTags()].map(t => String(t).toUpperCase()));
     let stored = 0;
     for (const p of players) {
         if (!Number.isInteger(p.id) || p.id <= 0) continue;
         const newName = typeof p.name === 'string' ? p.name : null;
+        const before = playersRepo.getPlayerJoinedWithTag(p.id);
         playersRepo.recordNameChangeIfDifferent(p.id, newName);
         // As in the single-player scan and system scan: seed the alliances row (FOREIGN
         // KEY on players.alliance_id) BEFORE writing a player who belongs to an alliance
@@ -480,6 +529,25 @@ router.post('/sync/player-list', requireAuth, (req, res) => {
             p.is_active_player ? 1 : 0,
             typeof p.joined === 'string' ? p.joined : null
         );
+
+        // Resigned/returned enemy: only for a player whose alliance tag was already known
+        // and is NOT friendly — a brand-new row (before === undefined) or an unaffiliated
+        // player (no alliance_tag) never qualifies. upsertPlayerFromApiList's own COALESCE
+        // means a null incoming `joined` keeps the old value, so that's the same fallback
+        // used here to know what "after" actually became.
+        if (before && before.alliance_tag && friendlyTagsForResignCheck.has(String(before.alliance_tag).toUpperCase()) === false) {
+            const beforeJoined = before.joined;
+            const afterJoined = typeof p.joined === 'string' ? p.joined : beforeJoined;
+            const resignedNow = beforeJoined !== 'N/A' && afterJoined === 'N/A';
+            const returnedNow = beforeJoined === 'N/A' && afterJoined && afterJoined !== 'N/A';
+            if (resignedNow || returnedNow) {
+                const label = `[${before.alliance_tag}] ${before.name || newName || `#${p.id}`}`;
+                sendVariousChangeEmbed(
+                    resignedNow ? '🏳️ Enemy resigned' : '🔁 Enemy returned',
+                    resignedNow ? `${label} has resigned.` : `${label} has rejoined the round.`,
+                ).catch(err => console.error('[Discord] resigned-enemy various-changes announce error:', err.message));
+            }
+        }
         stored++;
     }
 
@@ -850,9 +918,91 @@ router.post('/sync/best-guarded', requireAuth, (req, res) => {
 
     try {
         syncTx(entries);
+
+        // Various Changes: "all top50 in the area", not just #1/top10 (2026-09-12) —
+        // filter the WHOLE fresh snapshot to planets owned by, or within
+        // BEST_GUARDED_AREA_RADIUS systems of, friendly territory, then announce only
+        // what actually entered or left that filtered set since last time.
+        const inArea = systemsRepo.getBestGuardedInArea(
+            new Set([...friendlyAllianceTags()].map(t => String(t).toUpperCase())),
+            BEST_GUARDED_AREA_RADIUS,
+        );
+        const { entered, left } = systemsRepo.diffAndReplaceBestGuardedAreaWatch(inArea.map(r => r.game_planet_id));
+        if (entered.length || left.length) {
+            const areaByGameId = new Map(inArea.map(r => [r.game_planet_id, r]));
+            const lines = [];
+            for (const id of entered) {
+                const r = areaByGameId.get(id);
+                if (r) lines.push(`🛡️ **${r.system_name || `System #${r.system_id}`} #${r.planet_index}**: newly guarded at **${r.cv}** CV`);
+            }
+            for (const id of left) {
+                const loc = systemsRepo.getPlanetLocationByGameId(id);
+                lines.push(loc
+                    ? `📤 **${loc.name || 'A planet'}** (system #${loc.system_id} #${loc.planet_index}) dropped off the Best Guarded list`
+                    : `📤 Planet #${id} dropped off the Best Guarded list`);
+            }
+            sendVariousChangeEmbed('🛡️ Best Guarded — near your territory', lines.join('\n')).catch(err =>
+                console.error('[Discord] best-guarded various-changes announce error:', err.message)
+            );
+        }
+
         res.json({ success: true, skipped: false });
     } catch (err) {
         console.error('[DB Error] Best Guarded sync process failure:', err);
+        res.status(500).json({ error: 'Database ranking sync error event' });
+    }
+});
+
+// --- RANKING: BEST PLANETS COVERAGE (Various Changes, 2026-09-12) ---
+// Public and aggregate-only, deliberately separate from the SECRET bonus-goals
+// ranking_match mechanism (src/repositories/bonusGoals.js) even though both watch
+// /Ranking/BestPlanets: an admin may never configure that secret goal at all, and this
+// count ("how many of the top-N are ours") reveals nothing about tier/point values the
+// way that system's targeting does — see database.js's bonus_goals comment for why THAT
+// stays admin-configured-and-hidden. This one is a standalone daily snapshot with no
+// secrecy requirement, so it needs none of that machinery.
+//
+// No same-tick dedup guard (unlike /sync/best-guarded, which has a real page-supplied
+// timestamp to key off): the client checks hourly regardless, and re-processing an
+// unchanged page here is harmless — a wholesale replace of identical rows, then a
+// friendly-coverage recompute that matches the last-announced count and so announces
+// nothing. Correctness (never missing a real change) wins over skipping a cheap no-op.
+router.post('/sync/best-planets-snapshot', requireAuth, (req, res) => {
+    const { rows } = req.body;
+    if (!Array.isArray(rows)) {
+        return res.status(400).json({ error: 'Invalid payload' });
+    }
+    const syncedAt = new Date().toISOString();
+
+    const syncTx = db.transaction((entries) => {
+        systemsRepo.clearBestPlanetsSnapshot();
+        for (const row of entries) {
+            if (!Number.isInteger(row.game_planet_id) || !Number.isInteger(row.rank)) continue;
+            systemsRepo.insertBestPlanetsSnapshot(row.game_planet_id, row.rank, syncedAt);
+        }
+    });
+
+    try {
+        syncTx(rows);
+
+        const { friendly, total } = systemsRepo.getBestPlanetsFriendlyCoverage(
+            new Set([...friendlyAllianceTags()].map(t => String(t).toUpperCase()))
+        );
+        const lastAnnounced = settingsRepo.getSetting('best_planets_friendly_count_last_announced');
+        const lastCount = lastAnnounced ? parseInt(lastAnnounced.value, 10) : null;
+        if (total > 0 && friendly !== lastCount) {
+            const delta = Number.isFinite(lastCount) ? friendly - lastCount : null;
+            const trend = delta == null ? '' : delta > 0 ? ` (+${delta})` : delta < 0 ? ` (${delta})` : '';
+            sendVariousChangeEmbed(
+                '🌍 Best Planets coverage',
+                `We now hold **${friendly}/${total}**${trend} of the Best Planets ranking.`,
+            ).catch(err => console.error('[Discord] best-planets various-changes announce error:', err.message));
+            settingsRepo.setSetting('best_planets_friendly_count_last_announced', String(friendly));
+        }
+
+        res.json({ success: true, skipped: false });
+    } catch (err) {
+        console.error('[DB Error] Best Planets snapshot sync failure:', err);
         res.status(500).json({ error: 'Database ranking sync error event' });
     }
 });

@@ -153,6 +153,95 @@ function insertBestGuarded(planetId, cv, updatedAt) {
     insertBestGuardedStmt.run(planetId, cv, updatedAt);
 }
 
+// Every current Best Guarded entry that resolves to a known system location AND is
+// "in the area": owned by a friendly tag, or within `radiusSystems` straight-line systems
+// of one (2026-09-12 — "all top50 in the area", not just #1/top10: best_guarded already
+// holds however many rows the page shows, this just filters by location, not rank).
+const getBestGuardedResolvedStmt = db.prepare(`
+    SELECT bg.game_planet_id, bg.cv, p.system_id, p.planet_index, s.name as system_name, s.x, s.y
+    FROM best_guarded bg
+    JOIN planets p ON p.game_planet_id = bg.game_planet_id
+    JOIN systems s ON s.id = p.system_id
+    WHERE s.x IS NOT NULL AND s.y IS NOT NULL
+`);
+const getSystemOwnerTagsStmt = db.prepare(`
+    SELECT DISTINCT p.system_id, s.x, s.y, a.tag
+    FROM planets p
+    JOIN systems s ON s.id = p.system_id
+    JOIN players u ON p.owner_id = u.id
+    JOIN alliances a ON u.alliance_id = a.id
+    WHERE s.x IS NOT NULL AND s.y IS NOT NULL
+`);
+function getBestGuardedInArea(friendlyTagsUpper, radiusSystems) {
+    const { systemDistance } = require('../../public/js/utils/vision-model.js');
+    const friendlySystems = getSystemOwnerTagsStmt.all()
+        .filter(r => r.tag && friendlyTagsUpper.has(String(r.tag).toUpperCase()));
+    const friendlyIds = new Set(friendlySystems.map(s => s.system_id));
+    return getBestGuardedResolvedStmt.all().filter(row => {
+        if (friendlyIds.has(row.system_id)) return true;
+        return friendlySystems.some(f => systemDistance(f.x, f.y, row.x, row.y) <= radiusSystems);
+    });
+}
+
+const getBestGuardedAreaWatchStmt = db.prepare(`SELECT game_planet_id FROM best_guarded_area_watch`);
+const clearBestGuardedAreaWatchStmt = db.prepare(`DELETE FROM best_guarded_area_watch`);
+const insertBestGuardedAreaWatchStmt = db.prepare(`INSERT INTO best_guarded_area_watch (game_planet_id) VALUES (?)`);
+
+// Diffs the current in-area Best Guarded ids against what was there last time, then
+// replaces the watch table with the new set. Returns { entered, left } (arrays of
+// game_planet_id) — entered is what's worth announcing; left is informational.
+function diffAndReplaceBestGuardedAreaWatch(currentIds) {
+    const previous = new Set(getBestGuardedAreaWatchStmt.all().map(r => r.game_planet_id));
+    const current = new Set(currentIds);
+    const entered = [...current].filter(id => !previous.has(id));
+    const left = [...previous].filter(id => !current.has(id));
+    const replace = db.transaction((ids) => {
+        clearBestGuardedAreaWatchStmt.run();
+        for (const id of ids) insertBestGuardedAreaWatchStmt.run(id);
+    });
+    replace(currentIds);
+    return { entered, left };
+}
+
+const countSecuredSystemsStmt = db.prepare(`SELECT COUNT(*) as n FROM systems WHERE is_secured = 1`);
+function countSecuredSystems() {
+    return countSecuredSystemsStmt.get().n;
+}
+
+// --- best_planets_snapshot (Various Changes: Best Planets coverage) ---
+
+const clearBestPlanetsSnapshotStmt = db.prepare(`DELETE FROM best_planets_snapshot`);
+function clearBestPlanetsSnapshot() {
+    clearBestPlanetsSnapshotStmt.run();
+}
+
+const insertBestPlanetsSnapshotStmt = db.prepare(`INSERT INTO best_planets_snapshot (game_planet_id, rank, updated_at) VALUES (?, ?, ?)`);
+function insertBestPlanetsSnapshot(gamePlanetId, rank, updatedAt) {
+    insertBestPlanetsSnapshotStmt.run(gamePlanetId, rank, updatedAt);
+}
+
+// How many of the CURRENT Best Planets snapshot's planets are friendly-owned right now —
+// resolved via our own synced ownership (planets/players/alliances), not the ranking
+// page's own owner text, so this always reflects the freshest data the hub has. Total is
+// the snapshot's full size (the page's own cutoff, whatever that is — "all top50", not a
+// number this code hardcodes). Arity varies per call, so prepared fresh each time (same
+// reasoning as getSystemsByIds/getFriendlyRouteAirports).
+function getBestPlanetsFriendlyCoverage(friendlyTagsUpper) {
+    const tags = [...friendlyTagsUpper];
+    const total = db.prepare(`SELECT COUNT(*) as n FROM best_planets_snapshot`).get().n;
+    if (!tags.length) return { friendly: 0, total };
+    const placeholders = tags.map(() => '?').join(',');
+    const friendly = db.prepare(`
+        SELECT COUNT(*) as n
+        FROM best_planets_snapshot bp
+        JOIN planets p ON p.game_planet_id = bp.game_planet_id
+        JOIN players u ON p.owner_id = u.id
+        JOIN alliances a ON u.alliance_id = a.id
+        WHERE UPPER(a.tag) IN (${placeholders})
+    `).get(...tags).n;
+    return { friendly, total };
+}
+
 // --- planets ---
 
 const getSystemPlanetsWithIntelStmt = db.prepare(`
@@ -515,6 +604,8 @@ module.exports = {
     getSystemsDbSummary, getGalaxyMapSystems, getGalaxyMapOwnership, upsertSystemStub,
     upsertSystemFull, setSystemInVision, deleteAllSystems, countBestGuardedAt, clearBestGuarded, insertBestGuarded,
     getSystemPlanetsWithIntel, getSystemPlanetsForBot, getPlanetsFullDb, checkAndUpdateSystemSecured,
+    getBestGuardedInArea, diffAndReplaceBestGuardedAreaWatch,
+    clearBestPlanetsSnapshot, insertBestPlanetsSnapshot, getBestPlanetsFriendlyCoverage, countSecuredSystems,
     getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getPlanetsByOwner, getOldPlanet, upsertPlanet,
     getPlanetsForAllianceTag, getPlanetOwnerName, getPlanetOwnersByLocations, getRoutePlanetIntelByLocations,
     getFriendlyRouteAirports, getPlanetNameByLocation, getPlanetNameByGameId, getPlanetLocationByGameId,

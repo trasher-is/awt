@@ -9,6 +9,7 @@
 // comment for why the specifics live only in config data, never here.
 
 import '../utils/game-rate-limit.js'; // must load before gameFetch resolves the gate
+import { parseRankingPage } from '../utils/ranking-page-parser.js';
 const { gameFetch } = globalThis.AWGameRate;
 
 // The underlying ranking itself only updates once/day in-game — hourly is more than
@@ -28,32 +29,6 @@ function claimLock(key, ttlMs) {
     } catch (err) {
         return true; // no localStorage — degrade to "always run", same fallback as game-rate-limit.js
     }
-}
-
-// A row counts if it has a leading integer rank AND a /Game/Map/Planet/{id} link
-// somewhere in it — nothing more specific than that. Owner name/tag are best-effort
-// extras for the admin page's own readability; neither is required for the row to score.
-function parseRankingPage(doc) {
-    const rows = [];
-    doc.querySelectorAll('table tr').forEach(tr => {
-        const cells = tr.querySelectorAll('td');
-        if (!cells.length) return;
-        const rank = parseInt((cells[0].textContent || '').trim(), 10);
-        if (!Number.isInteger(rank) || rank <= 0) return;
-        const planetLink = tr.querySelector('a[href^="/Game/Map/Planet/"]');
-        if (!planetLink) return;
-        const gamePlanetId = parseInt((planetLink.getAttribute('href') || '').split('/').pop(), 10);
-        if (!Number.isInteger(gamePlanetId)) return;
-        const ownerLink = tr.querySelector('a[href*="/Game/Players/Profile/"]');
-        const tagLink = tr.querySelector('a[href*="/Game/Alliance/Profile/"]');
-        rows.push({
-            rank,
-            game_planet_id: gamePlanetId,
-            owner_name: ownerLink ? ownerLink.textContent.trim() : null,
-            owner_alliance_tag: tagLink ? tagLink.textContent.trim() : null,
-        });
-    });
-    return rows;
 }
 
 async function syncOneTarget(target) {
