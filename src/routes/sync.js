@@ -906,7 +906,13 @@ router.post('/sync/alliance-roster', requireAuth, (req, res) => {
 // session (battle-sync.js's own newestStartedAt is a per-tab module variable that starts
 // null on every fresh load; this reads the hub-wide truth straight from the DB instead).
 router.get('/sync/battle-reports-watermark', requireAuth, (req, res) => {
-    res.json({ newest_started_at: battleReportsRepo.getNewestStartedAt() });
+    const lastRun = settingsRepo.getSetting('battle_sync_last_run_at');
+    const lastCount = settingsRepo.getSetting('battle_sync_last_inserted_count');
+    res.json({
+        newest_started_at: battleReportsRepo.getNewestStartedAt(),
+        last_run_at: lastRun ? lastRun.value : null,
+        last_inserted_count: lastCount ? (parseInt(lastCount.value, 10) || 0) : null,
+    });
 });
 
 // Which alliance tags' battles are worth a Discord post. battle-sync.js pulls EVERY report
@@ -1027,6 +1033,12 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
         // newest_started_at is the dashboard scheduler's contract: the next pull uses it
         // as BattleDateFrom so the search window only ever moves forward.
         const newest = battleReportsRepo.getNewestStartedAt();
+
+        // battle-sync.js now runs once a day (2026-09-12), not every 30 min — recording
+        // when this last ran and how many were genuinely new is how a member confirms the
+        // daily pull actually happened, instead of guessing from watermark staleness alone.
+        settingsRepo.setSetting('battle_sync_last_run_at', new Date().toISOString());
+        settingsRepo.setSetting('battle_sync_last_inserted_count', String(inserted.length));
 
         res.json({ success: true, inserted: inserted.length, skipped, newest_started_at: newest });
     } catch (err) {

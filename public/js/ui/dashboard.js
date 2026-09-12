@@ -68,7 +68,6 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-mass-scan')?.addEventListener('click', runMassGalaxyScan);
     document.getElementById('btn-mass-scan-players')?.addEventListener('click', runMassPlayerScan);
     document.getElementById('btn-deep-scan-players')?.addEventListener('click', runDeepScanPlayers);
-    document.getElementById('btn-sync-battles')?.addEventListener('click', runManualBattleSync);
     refreshBattleReportsWatermark();
     refreshDeepScanStatus();
 
@@ -394,63 +393,23 @@ async function refreshDeepScanStatus() {
     }
 }
 
-// Manual "sync now" for battle reports — the background battle-sync.js module already
-// pulls every 30 min, and battle-report-detail-sync.js's ship-detail sweep runs on its
-// own separate 90 s timer; this runs BOTH immediately, back-to-back, for a member who
-// wants !mortal/!lastseen to reflect a fight right now instead of waiting on either clock.
-async function runManualBattleSync() {
-    const btn = document.getElementById('btn-sync-battles');
-    const originalHtml = btn ? btn.innerHTML : null;
-    if (btn) btn.disabled = true;
-    try {
-        if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Syncing reports...';
-        const { triggerManualSync } = await import('./battle-sync.js');
-        const syncResult = await triggerManualSync();
-        if (!syncResult.ok) {
-            // No alliance yet is no longer a failure case here — battle-sync.js falls
-            // back to a per-player search instead, so anything reaching this branch is a
-            // genuine problem (bridge unresolved, or the search itself failed).
-            showToast(`Battle-report sync failed: ${syncResult.error || 'unknown error'}`);
-            return;
-        }
-
-        if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Scraping details...';
-        const { triggerManualSweep, triggerManualLocationBackfill } = await import('./battle-report-detail-sync.js');
-        const sweepResult = await triggerManualSweep();
-
-        // Legacy gap: reports already scraped before planet capture existed, or by a
-        // stale browser tab still running old JS, are stuck with ship_detail_scraped_at
-        // set but no location — triggerManualSweep's claim never revisits them (it only
-        // looks at ship_detail_scraped_at IS NULL). This is the separate one-time pass.
-        if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Backfilling locations...';
-        const backfillResult = await triggerManualLocationBackfill();
-
-        const syncMsg = syncResult.inserted > 0 ? `Synced ${syncResult.inserted} new report(s)` : 'Reports up to date';
-        const parts = [syncMsg];
-        parts.push(sweepResult.ok ? `scraped location/CV for ${sweepResult.scraped} report(s)` : `ship-detail sweep failed (${sweepResult.error || 'unknown error'})`);
-        if (backfillResult.claimed > 0 || !backfillResult.ok) {
-            parts.push(backfillResult.ok ? `backfilled location for ${backfillResult.scraped}/${backfillResult.claimed} legacy report(s)` : `location backfill failed (${backfillResult.error || 'unknown error'})`);
-        }
-        showToast(parts.join('. ') + '.');
-        refreshBattleReportsWatermark();
-    } finally {
-        if (btn) { btn.disabled = false; btn.innerHTML = originalHtml; }
-    }
-}
-
-// "Synced through: <date>" under the button — the date battle-sync.js's next pull will
-// use as BattleDateFrom. Reads the hub-wide DB value via a GET, not battle-sync.js's own
-// newestStartedAt (a per-tab module variable that resets to null on every fresh load), so
-// it reflects reality even before this tab has run a sync of its own.
+// Battle-report sync is fully automatic now (once daily, shortly after the reset — see
+// battle-sync.js), so there is no manual button any more. This just reads back what that
+// background sync last did — the hub-wide DB value via a GET, not battle-sync.js's own
+// per-tab module state, so it reflects reality even before this tab has run anything.
 async function refreshBattleReportsWatermark() {
     const el = document.getElementById('battle-reports-watermark');
     if (!el) return;
     try {
         const res = await fetch('/hub-api/sync/battle-reports-watermark');
         const data = await res.json();
-        el.textContent = data.newest_started_at
-            ? `Synced through: ${new Date(data.newest_started_at).toLocaleString()}`
-            : 'No reports synced yet';
+        if (!data.newest_started_at) { el.textContent = 'No reports synced yet'; return; }
+        let text = `Synced through: ${new Date(data.newest_started_at).toLocaleString()}`;
+        if (data.last_run_at) {
+            const count = data.last_inserted_count || 0;
+            text += ` · Last check: ${new Date(data.last_run_at).toLocaleString()} (${count} new)`;
+        }
+        el.textContent = text;
     } catch (err) {
         el.textContent = '';
     }
