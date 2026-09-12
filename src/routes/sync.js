@@ -2,7 +2,7 @@ const express = require('express');
 const db = require('../database');
 const { requireAuth } = require('./_middleware');
 const { announceSystemChanges, announceSystemMilestones, sendVariousChangeEmbed } = require('../discord_bot');
-const { friendlyAllianceTags } = require('../utils/friendly-alliance-tags');
+const { friendlyAllianceTags, ownAllianceTags } = require('../utils/friendly-alliance-tags');
 
 // Best Guarded / various-changes: "close by" means within this many straight-line systems
 // of friendly territory (2026-09-12 — a flat radius, not per-player biology).
@@ -954,7 +954,11 @@ router.post('/sync/best-guarded', requireAuth, (req, res) => {
             const lines = [];
             for (const id of entered) {
                 const r = areaByGameId.get(id);
-                if (r) lines.push(`🛡️ **${r.system_name || `System #${r.system_id}`} #${r.planet_index}**: newly guarded at **${r.cv}** CV`);
+                if (!r) continue;
+                const owner = r.owner_name
+                    ? (r.owner_tag ? `[${r.owner_tag}] ${r.owner_name}` : r.owner_name)
+                    : 'Free Planet';
+                lines.push(`🛡️ **${r.system_name || 'System'} [${r.system_id}]** #${r.planet_index} (${owner}): newly guarded at **${r.cv}** CV`);
             }
             for (const id of left) {
                 const loc = systemsRepo.getPlanetLocationByGameId(id);
@@ -1006,9 +1010,10 @@ router.post('/sync/best-planets-snapshot', requireAuth, (req, res) => {
     try {
         syncTx(rows);
 
-        const { friendly, total } = systemsRepo.getBestPlanetsFriendlyCoverage(
-            new Set([...friendlyAllianceTags()].map(t => String(t).toUpperCase()))
-        );
+        // "We hold" means RAID itself here (2026-09-12d fix), NOT RAID+NAP like the
+        // closed-system/siege features — a NAP partner's planet ranking well isn't
+        // something WE hold, and counting it inflated this specific number.
+        const { friendly, total } = systemsRepo.getBestPlanetsFriendlyCoverage(ownAllianceTags());
         const lastAnnounced = settingsRepo.getSetting('best_planets_friendly_count_last_announced');
         const lastCount = lastAnnounced ? parseInt(lastAnnounced.value, 10) : null;
         if (total > 0 && friendly !== lastCount) {

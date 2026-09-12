@@ -177,6 +177,15 @@ ok('in-area includes a planet exactly at the radius boundary (inclusive)', inAre
 ok('the far planet is excluded', !inAreaIds.includes(92001), inAreaIds);
 ok('exactly two planets are in area', inAreaIds.length === 2, inAreaIds);
 
+// 2026-09-12d: rows carry the owner's name/tag now, so the Discord line can name who
+// actually holds a newly-guarded planet instead of leaving it anonymous.
+const ownPlanetRow = inArea.find(r => r.game_planet_id === 90001);
+ok('a friendly-owned planet\'s row carries the owner\'s name and tag',
+    ownPlanetRow && ownPlanetRow.owner_name === 'Raider1' && ownPlanetRow.owner_tag === 'RAID', ownPlanetRow);
+const neighborPlanetRow = inArea.find(r => r.game_planet_id === 91001);
+ok('a non-friendly owner in area still carries its own real name/tag (not blanked out)',
+    neighborPlanetRow && neighborPlanetRow.owner_name === 'Neighbor1' && neighborPlanetRow.owner_tag === 'FOE', neighborPlanetRow);
+
 const firstDiff = systems.diffAndReplaceBestGuardedAreaWatch(inAreaIds);
 ok('a fresh watch (nothing stored before) reports everything as newly entered', firstDiff.entered.sort().join(',') === inAreaIds.join(','), firstDiff);
 ok('nothing has left on the very first diff', firstDiff.left.length === 0, firstDiff);

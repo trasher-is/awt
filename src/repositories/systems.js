@@ -158,10 +158,13 @@ function insertBestGuarded(planetId, cv, updatedAt) {
 // of one (2026-09-12 — "all top50 in the area", not just #1/top10: best_guarded already
 // holds however many rows the page shows, this just filters by location, not rank).
 const getBestGuardedResolvedStmt = db.prepare(`
-    SELECT bg.game_planet_id, bg.cv, p.system_id, p.planet_index, s.name as system_name, s.x, s.y
+    SELECT bg.game_planet_id, bg.cv, p.system_id, p.planet_index, s.name as system_name, s.x, s.y,
+           u.name as owner_name, a.tag as owner_tag
     FROM best_guarded bg
     JOIN planets p ON p.game_planet_id = bg.game_planet_id
     JOIN systems s ON s.id = p.system_id
+    LEFT JOIN players u ON u.id = p.owner_id
+    LEFT JOIN alliances a ON a.id = u.alliance_id
     WHERE s.x IS NOT NULL AND s.y IS NOT NULL
 `);
 const getSystemOwnerTagsStmt = db.prepare(`

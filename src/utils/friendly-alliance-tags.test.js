@@ -16,7 +16,7 @@ delete process.env.DISCORD_TOKEN;
 
 const db = require('../database');
 const settingsRepo = require('../repositories/settings');
-const { friendlyAllianceTags } = require('./friendly-alliance-tags');
+const { friendlyAllianceTags, ownAllianceTags } = require('./friendly-alliance-tags');
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail) => {
@@ -43,6 +43,14 @@ ok('admin-configured allied tags are added, uppercased',
     withAllies.has('AO') && withAllies.has('XYZ'), [...withAllies]);
 ok('own tag is still present alongside the configured allies',
     withAllies.has('RAID') && withAllies.size === 3, [...withAllies]);
+
+console.log('\n── ownAllianceTags: RAID only, NAP partners excluded ' + '─'.repeat(24));
+{
+    const own = ownAllianceTags();
+    ok('own alliance tag is present', own.has('RAID'), [...own]);
+    ok('the configured NAP/allied tag is NOT included, unlike friendlyAllianceTags',
+        !own.has('AO') && !own.has('XYZ') && own.size === 1, [...own]);
+}
 
 console.log('\n' + '─'.repeat(75));
 console.log(`${pass} passed, ${fail} failed`);
