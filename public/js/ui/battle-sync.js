@@ -1,31 +1,38 @@
 // Battle-report background sync — wrapper realm only.
 //
-// While a dashboard is open it periodically pulls the newest battle reports from the game
-// API — GLOBALLY, every report on the server, not scoped to any one alliance (see pullOnce)
-// — and hands them to the hub (POST /hub-api/sync/battle-reports), which stores them
-// idempotently and announces the genuinely new, alliance-relevant ones on Discord (the
-// alliance filter lives server-side now, at announce time — see routes/sync.js). First
-// pull 10 s after load, then every 30 minutes.
+// Pulls the newest battle reports from the game API — GLOBALLY, every report on the
+// server, not scoped to any one alliance (see pullOnce) — and hands them to the hub (POST
+// /hub-api/sync/battle-reports), which stores them idempotently and announces the
+// genuinely new, alliance-relevant ones on Discord (the alliance filter lives server-side
+// now, at announce time — see routes/sync.js).
 //
-// A setInterval here does NOT violate the no-polling rule: that rule bans polling the
-// game's DOM inside the injected frame (the 200ms interval spy.js was rewritten to
-// remove). This is the wrapper document making rate-gated API calls on a slow clock — one
-// request per pull, through the same shared 5/s budget as everything else.
+// Once a day, shortly after the reset, not a poll (2026-09-12, replacing a 30-min
+// setInterval): confirmed against how the game actually behaves, battle reports are only
+// posted once a day, at the 00:00 CET/CEST reset — pulling every 30 minutes all day just
+// re-asked for the same (empty) window over and over. Scheduling follows the exact same
+// day-lock/attempt-lock/retry pattern as api-galaxy-seed.js — see that file's comment for
+// the full reasoning; the two were unified deliberately, not independently invented.
 //
-// Two open dashboards must not double-pull, so a pull first claims a localStorage
-// timestamp lock (25-min TTL — shorter than the 30-min interval, so a pull that died
-// mid-flight is retried on the next tick instead of wedging the sync forever).
+// A setInterval/setTimeout here does NOT violate the no-polling rule: that rule bans
+// polling the game's DOM inside the injected frame (the 200ms interval spy.js was
+// rewritten to remove). This is the wrapper document making a rate-gated API call once a
+// day, through the same shared 5/s budget as everything else.
 //
 // This is background housekeeping: every failure is console.warn'd and swallowed.
-// No toasts — nobody wants a popup every half hour because their session expired.
+// No toasts — nobody wants a popup because their session expired hours ago.
 
 import '../utils/game-rate-limit.js'; // must load before aw-api resolves the gate
 import '../utils/aw-api.js';
+import '../utils/daily-reset.js';
 
-const FIRST_PULL_DELAY_MS = 10 * 1000;
-const PULL_INTERVAL_MS = 30 * 60 * 1000;
-const LOCK_KEY = 'awt.battleSync.lock.v1';
-const LOCK_TTL_MS = 25 * 60 * 1000;
+const AWDailyReset = globalThis.AWDailyReset;
+
+const RESET_BUFFER_MINUTES = 5; // pull at 00:05 Europe/Berlin — a few minutes after the reset lands
+const DAY_LOCK_KEY = 'awt.battleSync.lastPullDay.v2'; // Berlin-date of the last SUCCESSFUL pull
+const ATTEMPT_LOCK_KEY = 'awt.battleSync.attemptLock.v2'; // short cross-tab mutex, not a daily gate
+const ATTEMPT_LOCK_TTL_MS = 5 * 60 * 1000;
+const RETRY_DELAY_MS = 30 * 60 * 1000; // a failed attempt retries in 30 min, not a full day later
+const CATCHUP_DELAY_MS = 10 * 1000; // let the page settle before the very first check
 // 500 confirmed to work against production (2026-08-30, ?Take=500) — no confirmed offset/
 // paging parameter exists to walk past a full page, so this is a bigger safety margin, not
 // a hard guarantee. See the full-page warning below: results are Descending by DateTime, so
@@ -40,52 +47,59 @@ const TAKE = 500;
 // server's INSERT OR IGNORE makes the overlap free.
 let newestStartedAt = null;
 
-let started = false;
+function getLastPulledDay() {
+    try { return localStorage.getItem(DAY_LOCK_KEY); } catch (err) { return null; }
+}
+function setLastPulledDay(day) {
+    try { localStorage.setItem(DAY_LOCK_KEY, day); } catch (err) { console.warn('[BattleSync] could not persist last-pulled day:', err.message); }
+}
+function claimAttemptLock() {
+    try {
+        const raw = localStorage.getItem(ATTEMPT_LOCK_KEY);
+        const now = Date.now();
+        if (raw && now - parseInt(raw, 10) < ATTEMPT_LOCK_TTL_MS) return false;
+        localStorage.setItem(ATTEMPT_LOCK_KEY, String(now));
+        return true;
+    } catch (err) {
+        return true; // no localStorage — degrade to "always run", same as player-api-sync.js
+    }
+}
 
+function scheduleWake(when) {
+    const delay = Math.max(1000, when.getTime() - Date.now());
+    setTimeout(tick, delay);
+}
+
+// Always checks "did today's pull already succeed" first (across tabs and reloads, via
+// the Berlin-date day-lock) rather than assuming a fixed clock tick means work is due —
+// see api-galaxy-seed.js's identical tick() for the full reasoning.
+async function tick() {
+    const today = AWDailyReset.berlinDateKey();
+    if (getLastPulledDay() === today) {
+        scheduleWake(AWDailyReset.nextDailyWindow(RESET_BUFFER_MINUTES));
+        return;
+    }
+    if (!claimAttemptLock()) {
+        scheduleWake(new Date(Date.now() + RETRY_DELAY_MS));
+        return;
+    }
+    try {
+        const result = await pullOnce();
+        if (result && result.ok) setLastPulledDay(today);
+        else console.warn('[BattleSync] pull failed:', result && result.error);
+    } catch (err) {
+        console.warn('[BattleSync] pull failed:', err.message);
+    }
+    scheduleWake(getLastPulledDay() === today
+        ? AWDailyReset.nextDailyWindow(RESET_BUFFER_MINUTES)
+        : new Date(Date.now() + RETRY_DELAY_MS));
+}
+
+let started = false;
 export function initBattleSync() {
     if (started) return; // one scheduler per dashboard document
     started = true;
-    setTimeout(runPull, FIRST_PULL_DELAY_MS);
-    setInterval(runPull, PULL_INTERVAL_MS);
-}
-
-// Claim the cross-dashboard lock: true means "this document pulls now". Claimed at pull
-// START, not on success — a failed pull just waits for the next 30-min tick, by which
-// time the 25-min TTL has expired. localStorage is same-origin shared, so two open
-// dashboards see one lock (same mechanism the rate gate uses for its window).
-function claimPullLock() {
-    try {
-        const ts = Number(localStorage.getItem(LOCK_KEY));
-        if (Number.isFinite(ts) && Date.now() - ts < LOCK_TTL_MS) return false;
-        localStorage.setItem(LOCK_KEY, String(Date.now()));
-        return true;
-    } catch (err) {
-        return true; // no localStorage — no second dashboard to race with either
-    }
-}
-
-async function runPull() {
-    if (!claimPullLock()) return; // another dashboard pulled recently
-    try {
-        await pullOnce();
-    } catch (err) {
-        console.warn('[BattleSync] pull failed:', err);
-    }
-}
-
-// Manual "sync now" — a sidebar button, not the background clock. Bypasses the
-// cross-dashboard lock (an explicit click should always run, unlike the periodic timer)
-// but still refreshes it afterward so the next automatic tick doesn't immediately re-pull.
-// Unlike runPull, this surfaces a result to the caller (for a toast) instead of only
-// console.warn'ing — a user who clicked a button deserves to see what happened.
-export async function triggerManualSync() {
-    try {
-        const result = await pullOnce();
-        try { localStorage.setItem(LOCK_KEY, String(Date.now())); } catch (err) { /* no-op */ }
-        return result || { ok: true, inserted: 0 };
-    } catch (err) {
-        return { ok: false, error: err.message };
-    }
+    setTimeout(tick, CATCHUP_DELAY_MS);
 }
 
 // The search-response envelope is SPEC-DERIVED (OpenAPI 3.0.1), never observed against
@@ -131,10 +145,10 @@ async function pullOnce() {
     // than we asked for — Descending order means those extra ones are older than everything
     // here, and with no confirmed way to page past this, they are silently gone from this
     // pull. Fail loudly instead of pretending the window was fully covered (same philosophy
-    // as extractReports' "unrecognized shape" warning). A global feed fills this cap far
-    // faster than the old alliance-scoped one did, so this is far more likely to fire now —
-    // if it does often, PULL_INTERVAL_MS needs shortening, not TAKE raising past what's
-    // confirmed to work.
+    // as extractReports' "unrecognized shape" warning). Now that a pull only happens once a
+    // day, this window covers a full day's worth of global battle activity — if this fires
+    // often, RESET_BUFFER_MINUTES pulling too late in the day is more suspect than TAKE
+    // itself; raising TAKE past what's confirmed to work is not the first thing to try.
     if (reports.length >= TAKE) {
         console.warn(`[BattleSync] search page hit the Take cap (${TAKE}) — older reports in this window may have been missed.`);
     }

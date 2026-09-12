@@ -3,8 +3,11 @@
 // not-yet-scraped reports, scrape each one's page, sync the result back.
 //
 // Runs independently of battle-sync.js (which populates battle_reports rows from the API
-// on its own 30-min clock) — this sweep only ever touches rows that already exist,
-// filling in the one thing the API doesn't provide.
+// once a day, after the reset — see that file) — this sweep only ever touches rows that
+// already exist, filling in the one thing the API doesn't provide. Its own 90s clock is
+// unchanged by that: it self-limits (the claim query only ever returns what still needs
+// scraping), so it quietly drains each day's new batch over a couple of hours and then
+// goes idle until the next one, with no need for its own once-a-day schedule.
 
 import '../utils/game-rate-limit.js'; // must load before either gameFetch or aw-api resolves the gate
 import '../scrapers/battle-report-parser.js';
@@ -90,39 +93,4 @@ export function initBattleReportDetailSync() {
     if (started) return;
     started = true;
     setInterval(runSweepTick, SWEEP_INTERVAL_MS);
-}
-
-// Manual "scrape now" — a sidebar button paired with battle-sync.js's triggerManualSync,
-// so clicking once both pulls new reports AND immediately backfills their planet/CV
-// location instead of waiting up to SWEEP_INTERVAL_MS for the background timer. Unlike
-// runSweepTick this loops across multiple claim batches (a fresh resync can easily bring
-// in more than SWEEP_BATCH_SIZE reports at once) until it catches up or hits the safety
-// cap, and it bypasses the lock — an explicit click should always run even if the
-// background timer just claimed the lock a moment ago.
-let manualSweeping = false;
-export async function triggerManualSweep(maxBatches = 10) {
-    if (manualSweeping) return { ok: false, error: 'a sweep is already running' };
-    manualSweeping = true;
-    try {
-        return await runClaimLoop('/hub-api/sync/battle-report-ship-detail-claim', maxBatches);
-    } catch (err) {
-        return { ok: false, error: err.message, scraped: 0, claimed: 0 };
-    } finally {
-        manualSweeping = false;
-    }
-}
-
-// Manual "backfill legacy locations now" — same idea as triggerManualSweep but for
-// reports already scraped with no system_id (see getReportsNeedingLocationBackfill).
-let manualBackfilling = false;
-export async function triggerManualLocationBackfill(maxBatches = 10) {
-    if (manualBackfilling) return { ok: false, error: 'a backfill is already running' };
-    manualBackfilling = true;
-    try {
-        return await runClaimLoop('/hub-api/sync/battle-report-location-backfill-claim', maxBatches);
-    } catch (err) {
-        return { ok: false, error: err.message, scraped: 0, claimed: 0 };
-    } finally {
-        manualBackfilling = false;
-    }
 }
