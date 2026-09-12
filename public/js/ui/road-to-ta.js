@@ -24,22 +24,15 @@ const when = value => value == null ? 'Not reached' : formatLocalDateTime(value,
 const valueOf = input => input?.value.trim() === '' ? null : Number(input?.value);
 const list = values => `<ul class="list-disc pl-5 space-y-1">${values.map(s => `<li>${esc(s)}</li>`).join('')}</ul>`;
 
-// Isolated UI state per mounted panel. Nothing is written to intel or browser storage.
+// State belongs to this mounted Trade Agreements view and survives switching tabs.
+// Nothing is written to intel or browser storage; the parent owns opening and closing.
 export function initRoadToTa(panel) {
     if (panel.dataset.initialized) return;
     panel.dataset.initialized = 'true';
     const $ = id => panel.querySelector(`#rta-${id}`);
     let snapshot = null, request = 0, controller = null, selectedMode = 'normal';
     let results = null, inputAtResult = null, added = 0, growthUsesBio = false;
-
-    function close() {
-        panel.classList.replace('translate-x-0', 'translate-x-full');
-        document.getElementById('open-road-to-ta-btn')?.focus();
-    }
-    $('close').addEventListener('click', close);
-    panel.addEventListener('keydown', event => {
-        if (event.key === 'Escape' && panel.classList.contains('translate-x-0')) close();
-    });
+    const partnerRanges = new Map();
 
     function invalidate() {
         results = null;
@@ -108,6 +101,7 @@ export function initRoadToTa(panel) {
         $('coverage').textContent = `${data.planets.length} known planet(s) / ${player.total_planets ?? 'unknown'} reported. ${player.planet_count_matches ? 'Planet count matches the saved profile.' : 'Coverage is incomplete or inconsistent: add missing current planets or refresh the source first.'} Buildings and local PP must be entered separately. Saved total PP: ${num(player.production_points)} (check against the local balances you enter).`;
         $('planets').replaceChildren(...data.planets.map(p => planetRow(p)));
         $('partners').replaceChildren();
+        partnerRanges.clear();
         updatePartners();
         updateConversion();
     }
@@ -140,13 +134,32 @@ export function initRoadToTa(panel) {
 
     function updatePartners() {
         const completed = valueOf($('completed'));
-        const previous = Array.from($('partners').querySelectorAll('input'), el => [el.dataset.number, el.value]);
-        const values = new Map(previous);
         $('partners').innerHTML = Number.isInteger(completed) && completed >= 0 && completed <= 5
             ? Array.from({ length: 5 - completed }, (_, i) => {
-                const number = completed + i + 1;
-                return `<label>TA ${number}: partner planets at 10+<input data-number="${number}" type="number" min="0" max="100" step="1" value="${esc(values.get(String(number)) ?? 0)}" required></label>`;
+                const number = completed + i + 1, key = String(number);
+                const partner = snapshot?.future_partners?.[i];
+                const count = partner?.population10_planets;
+                const observedRange = Number.isInteger(count) && count >= 0 && count <= 100 ? [count, count] : null;
+                const range = partnerRanges.get(key) || observedRange || M.constants.DEFAULT_PARTNER_BONUS_RANGES[number - 1];
+                const source = partner
+                    ? `${partner.name}: ${partner.population10_planets == null ? 'qualified planet count unknown' : `${partner.population10_planets} qualified planet(s)`} · ${observedAt(partner.observed_at)}. Current observed; future growth not predicted.`
+                    : 'Editable planning assumption for this TA number; not a verified game rule.';
+                return `<div class="rta-box space-y-2"><div class="text-sm font-semibold">TA ${number}: added trade bonus</div><div class="rta-range">${['min', 'max'].map((bound, j) => `<label>${bound === 'min' ? 'Lower' : 'Upper'} bonus (%)<input data-number="${number}" data-bound="${bound}" aria-label="TA ${number} ${bound === 'min' ? 'lower' : 'upper'} added bonus" type="number" min="0" max="100" step="1" value="${esc(range[j])}" required></label>`).join('')}</div><p class="rta-help">${esc(source)}</p></div>`;
             }).join('') : '';
+    }
+
+    function readPartnerRanges(completed) {
+        if (!Number.isInteger(completed) || completed < 0 || completed > 5) throw new Error('Enter a completed TA count from 0 to 5.');
+        return Array.from({ length: 5 - completed }, (_, i) => {
+            const number = completed + i + 1;
+            const fields = Array.from($('partners').querySelectorAll('input')).filter(el => Number(el.dataset.number) === number);
+            const lower = valueOf(fields.find(el => el.dataset.bound === 'min'));
+            const upper = valueOf(fields.find(el => el.dataset.bound === 'max'));
+            if (![lower, upper].every(value => Number.isInteger(value) && value >= 0 && value <= 100) || lower > upper) {
+                throw new Error(`TA ${number}: enter whole-number bonus bounds from 0 to 100%, with lower no greater than upper.`);
+            }
+            return [lower, upper];
+        });
     }
 
     function readInput() {
@@ -154,6 +167,10 @@ export function initRoadToTa(panel) {
         for (const [key, id] of Object.entries(FIELD_IDS)) input[key] = valueOf($(id));
         const ecoBonus = valueOf($('eco-bonus'));
         if (ecoBonus !== 0 && ecoBonus !== 5) throw new Error('Confirm whether the current economy bonus is 0% or 5%.');
+        if (input.currentTradeBonusPct == null || !Number.isFinite(input.currentTradeBonusPct) || input.currentTradeBonusPct < 0) {
+            throw new Error('Enter the observed current trade revenue, including an explicit 0% when there is none.');
+        }
+        input.currentTradeRevenuePct = input.currentTradeBonusPct;
         input.currentTradeBonusPct += ecoBonus;
         input.planets = Array.from($('planets').children, row => {
             const p = { id: row.dataset.planetId, name: row.dataset.planetName };
@@ -178,17 +195,23 @@ export function initRoadToTa(panel) {
             if (!(input.scienceRate > 0)) throw new Error('Enter a science multiplier or a positive science/hour rate.');
             input.scienceMultiplier = input.scienceRate / totalBase('RL');
         }
-        input.partnerQualifiedPlanets = Array.from($('partners').querySelectorAll('input'), valueOf);
+        if (input.cultureRate == null) delete input.cultureRate;
+        else if (!Number.isFinite(input.cultureRate) || input.cultureRate < 0) throw new Error('Culture per hour must be zero or positive when supplied.');
+        const completeCulture = reported === input.planets.length && input.planets.every(p => Number.isInteger(p.population) && p.population > 0 && Number.isInteger(p.GC) && p.GC >= 0);
+        const cultureBase = input.planets.reduce((sum, planet) => sum + planet.GC, 0);
+        if (input.cultureRate != null && completeCulture && cultureBase > 0) input.cultureMultiplier = input.cultureRate / cultureBase;
+        input.partnerBonusRanges = readPartnerRanges(input.completedTas);
+        input.partnerQualifiedPlanets = input.partnerBonusRanges.map(range => range[0]);
         return input;
     }
 
     function renderResults() {
         if (!results) return;
         const selected = results.find(x => x.mode === selectedMode);
-        $('results').innerHTML = `<div class="space-y-5"><h3 class="font-semibold">Strategy comparison</h3><p class="rta-help">Scenario starts ${esc(when(inputAtResult.now))}. All dates use your browser timezone. Targets are selected from a bounded strategy search, not a guarantee of the best possible play.</p><div class="rta-strategies">${MODES.map(mode => {
+        $('results').innerHTML = `<div class="space-y-5"><h3 class="font-semibold">Strategy comparison</h3><p class="rta-help">Scenario starts ${esc(when(inputAtResult.now))}. All dates use your browser timezone. The primary building plan uses the lower future bonuses. The upper-bonus scenario selects its own targets; its dates are not a guaranteed forecast range. Targets come from a bounded strategy search.</p><div class="rta-strategies">${MODES.map(mode => {
             const result = results.find(x => x.mode === mode.key);
             const first = result.agreements?.[0];
-            return `<button type="button" data-mode="${mode.key}" aria-pressed="${selectedMode === mode.key}" class="rta-box text-left space-y-2" style="border-color:${selectedMode === mode.key ? '#e4e4e7' : '#27272a'}"><div class="font-semibold text-sm">${mode.name}</div><div class="rta-help">${mode.gate} planets at population 10+</div><p class="rta-help">${mode.description}</p><div class="text-sm">${result.ok ? (first ? `Next TA: ${esc(when(first.activeAt))}` : (inputAtResult.completedTas === 5 ? 'All 5 agreements completed' : 'Not reached within horizon')) : 'Needs more data or planets'}</div></button>`;
+            return `<button type="button" data-mode="${mode.key}" aria-pressed="${selectedMode === mode.key}" class="rta-box text-left space-y-2" style="border-color:${selectedMode === mode.key ? '#e4e4e7' : '#27272a'}"><div class="font-semibold text-sm">${mode.name}</div><div class="rta-help">${mode.gate} planets at population 10+</div><p class="rta-help">${mode.description}</p><div class="text-sm">${result.ok ? (first ? `Lower-bonus next TA: ${esc(when(first.activeAt))}` : (inputAtResult.completedTas === 5 ? 'All 5 agreements completed' : 'Not reached within horizon')) : 'Needs more data or planets'}</div></button>`;
         }).join('')}</div><div id="rta-detail">${detail(selected)}</div></div>`;
         $('results').querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => {
             selectedMode = button.dataset.mode;
@@ -206,20 +229,32 @@ export function initRoadToTa(panel) {
             return `<tr><td>${num(inputAtResult.ppPrice * factor)} A$/PP${factor === 1 ? ' (chosen)' : ''}</td><td>${forecast.ok ? esc(when(forecast.agreements?.[0]?.activeAt)) : 'Unavailable'}</td></tr>`;
         }).join('');
         const gates = `<div class="rta-grid"><div class="rta-box"><div class="rta-help">Population gate (${result.gate.qualifiedNow}/${result.gate.requiredPlanets} now)</div><div class="font-semibold">${esc(when(result.gate.at))}</div></div><div class="rta-box"><div class="rta-help">All selected building targets complete / saving</div><div class="font-semibold">${esc(when(result.savingAt))}</div></div><div class="rta-box"><div class="rta-help">Building investment</div><div class="font-semibold">${num(result.totals.buildingPP)} PP</div></div></div>`;
-        const agreements = result.agreements.map(a => `<tr><td>TA ${a.number}</td><td>${num(a.cost)} A$</td><td>${esc(when(a.fundedAt))}</td><td>${esc(when(a.activeAt))}</td><td>+${num(a.partnerQualifiedPlanets)}%</td></tr>`).join('');
+        let lowerTrade = inputAtResult.currentTradeRevenuePct, upperTrade = lowerTrade;
+        const agreements = inputAtResult.partnerBonusRanges.map(([lowerBonus, upperBonus], index) => {
+            const number = inputAtResult.completedTas + index + 1;
+            lowerTrade += lowerBonus; upperTrade += upperBonus;
+            const lower = result.agreements.find(a => a.number === number);
+            const upper = result.upper?.agreements?.find(a => a.number === number);
+            return `<tr><td>TA ${number}</td><td>+${num(lowerBonus)}% / +${num(upperBonus)}%</td><td>${num(lowerTrade)}% / ${num(upperTrade)}%</td><td>${esc(when(lower?.activeAt))}</td><td>${esc(when(upper?.activeAt))}</td><td>${lower ? num(lower.cost) + ' A$' : '—'}</td><td>${esc(when(lower?.fundedAt))}</td><td>${esc(when(upper?.fundedAt))}</td></tr>`;
+        }).join('');
         const planets = result.planets.map(p => `<tr><td>${esc(p.name)}</td><td>${p.start.HF} → ${p.target.HF}</td><td>${p.start.RF} → ${p.target.RF}</td><td>${p.start.RL} → ${p.target.RL}</td><td>${p.start.GC} → ${p.target.GC}</td><td>${esc(when(p.savingAt))}</td></tr>`).join('');
         const builds = result.planets.flatMap(p => p.builds.map(b => ({ ...b, planet: p.name }))).sort((a, b) => a.hours - b.hours || a.planet.localeCompare(b.planet));
         const buildRows = builds.map(b => `<tr><td>${esc(when(b.at))}</td><td>${esc(b.planet)}</td><td>${esc(b.building)} ${b.from} → ${b.to}</td><td>${num(b.cost)} PP</td></tr>`).join('');
         return `<div class="space-y-5">${gates}
-            <section class="rta-box space-y-3"><h4 class="font-semibold text-sm">Next agreements</h4><p class="rta-help">Funding is conditional on the population gate and sale rules. Activation uses the next eligible Berlin acceptance window plus a conservative five-minute bonus refresh buffer. Partners must be ready too.</p><div class="overflow-x-auto"><table class="rta-table"><thead><tr><th>Agreement</th><th>Your fee</th><th>Funds ready</th><th>Active estimate (+5 min buffer)</th><th>Partner bonus</th></tr></thead><tbody>${agreements || '<tr><td colspan="5">No further TA reached within this horizon.</td></tr>'}</tbody></table></div></section>
-            <section class="rta-box space-y-3"><h4 class="font-semibold text-sm">Build here, then stop and save</h4><p class="rta-help">Levels never decrease. Each planet pays for its own buildings. Stop building there at the listed time and accumulate PP. Once all selected targets are complete, Spend All sells the combined PP into A$ for TA. Research output continues while PP are saved.</p><div class="overflow-x-auto"><table class="rta-table"><thead><tr><th>Planet</th><th>Farms</th><th>Factories</th><th>Labs</th><th>Cybernets</th><th>Saving from</th></tr></thead><tbody>${planets}</tbody></table></div></section>
+            <section class="rta-box space-y-3"><h4 class="font-semibold text-sm">Next agreements: lower and upper bonus scenarios</h4><p class="rta-help">Bonus columns show lower / upper assumptions. Cumulative TR includes existing trade revenue and each new partner, excluding the separate economy bonus. Upper dates come from a separately optimized plan and are not guaranteed bounds. Funding is conditional on the population gate and sale rules. Activation uses the next eligible Berlin acceptance window plus a conservative five-minute bonus refresh buffer. Partners must be ready too.</p><div class="overflow-x-auto"><table class="rta-table"><thead><tr><th>Agreement</th><th>Added bonus (lower / upper)</th><th>Cumulative TR (lower / upper)</th><th>Lower active estimate (+5 min)</th><th>Upper active estimate (+5 min)</th><th>Your fee (lower)</th><th>Funds ready (lower)</th><th>Funds ready (upper)</th></tr></thead><tbody>${agreements || '<tr><td colspan="8">No further TA reached within this horizon.</td></tr>'}</tbody></table></div></section>
+            <section class="rta-box space-y-3"><h4 class="font-semibold text-sm">Lower-bonus plan: build here, then stop and save</h4><p class="rta-help">Levels never decrease. Each planet pays for its own buildings. Stop building there at the listed time and accumulate PP. Once all selected targets are complete, Spend All sells the combined PP into A$ for TA. Research output continues while PP are saved.</p><div class="overflow-x-auto"><table class="rta-table"><thead><tr><th>Planet</th><th>Farms</th><th>Factories</th><th>Labs</th><th>Cybernets</th><th>Saving from</th></tr></thead><tbody>${planets}</tbody></table></div></section>
             <section class="rta-box space-y-3"><h4 class="font-semibold text-sm">If the market price changes</h4><p class="rta-help">Separate constant-price scenarios, each with its own selected building targets. These are sensitivity checks, not a market prediction.</p><table class="rta-table"><thead><tr><th>Sale price</th><th>Next TA active estimate</th></tr></thead><tbody>${prices}</tbody></table></section>
             <details class="rta-box"><summary class="cursor-pointer text-sm font-semibold">Ordered building plan (${builds.length} upgrades)</summary><div class="overflow-x-auto"><table class="rta-table"><thead><tr><th>Estimated time</th><th>Planet</th><th>Upgrade</th><th>Local cost</th></tr></thead><tbody>${buildRows || '<tr><td colspan="4">No upgrades scheduled before funding or the forecast horizon.</td></tr>'}</tbody></table></div></details>
-            <details class="rta-box" open><summary class="cursor-pointer text-sm font-semibold">Assumptions &amp; limits</summary><div class="rta-help mt-3">${list([...(result.warnings || []), ...(result.assumptions || [])])}<p class="mt-3">PP produced: ${num(result.totals.earnedPP)} · PP built: ${num(result.totals.buildingPP)} · PP sold: ${num(result.totals.soldPP)} · A$ spent: ${num(result.totals.spentCash)}. Simulated ${num(result.totals.simulatedHours / 24)} days of the ${num(result.horizonHours / 24)}-day horizon.</p></div></details>
+            <details class="rta-box" open><summary class="cursor-pointer text-sm font-semibold">Assumptions &amp; limits</summary><div class="rta-help mt-3">${list([...(result.warnings || []), ...(result.assumptions || [])])}<p class="mt-3">Output at the simulation end: ${num(result.rates?.production)} PP/h · ${num(result.rates?.science)} science/h · ${num(result.rates?.culture)} culture/h. These rates may precede the last planned TA activation.</p><p class="mt-3">Culture produced: ${num(result.totals.culturePoints)} · PP produced: ${num(result.totals.earnedPP)} · PP built: ${num(result.totals.buildingPP)} · PP sold: ${num(result.totals.soldPP)} · A$ spent: ${num(result.totals.spentCash)}. Simulated ${num(result.totals.simulatedHours / 24)} days of the ${num(result.horizonHours / 24)}-day horizon.</p></div></details>
         </div>`;
     }
 
     $('form').addEventListener('input', event => {
+        if (event.target.dataset.number && event.target.dataset.bound) {
+            const number = event.target.dataset.number;
+            partnerRanges.set(number, ['min', 'max'].map(bound => Array.from($('partners').querySelectorAll('input'))
+                .find(el => el.dataset.number === number && el.dataset.bound === bound)?.value ?? ''));
+        }
         if (event.target === $('completed')) updatePartners();
         if (event.target === $('growth')) growthUsesBio = false;
         if (growthUsesBio && [ $('trade-bonus'), $('eco-bonus') ].includes(event.target)) {
@@ -234,7 +269,10 @@ export function initRoadToTa(panel) {
         if ($('inputs').disabled || !$('form').reportValidity() || !snapshot?.player) return;
         try {
             inputAtResult = readInput();
-            results = MODES.map(mode => ({ ...M.plan({ ...inputAtResult, mode: mode.key }), mode: mode.key }));
+            results = MODES.map(mode => {
+                const scenarios = M.planBonusScenarios({ ...inputAtResult, mode: mode.key }, inputAtResult.partnerBonusRanges);
+                return { ...scenarios.lower, upper: scenarios.upper, mode: mode.key };
+            });
             renderResults();
         } catch (err) {
             results = null;

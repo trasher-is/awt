@@ -20,7 +20,8 @@ router.get('/road-to-ta', requireAuth, (req, res) => {
             return res.status(404).json({ success: false, error: 'Player is not in the recorded alliance member roster.' });
         }
         res.json({ success: true, me, players, player: snapshot?.player ?? null,
-            planets: snapshot?.planets ?? [], market: roadToTa.getMarket() });
+            planets: snapshot?.planets ?? [], future_partners: snapshot?.future_partners ?? [],
+            market: roadToTa.getMarket() });
     } catch (error) {
         console.error('[DB Error] Road to TA snapshot:', error);
         res.status(500).json({ success: false, error: 'Failed to load Road to TA data.' });

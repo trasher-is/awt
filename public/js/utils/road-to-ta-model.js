@@ -10,6 +10,8 @@
     'use strict';
 
     const FEE = 20000, MAX_TAS = 5, HOUR = 3600000, EPS = 1e-8;
+    // User-requested planning assumptions by absolute TA number, not game rules.
+    const DEFAULT_PARTNER_BONUS_RANGES = Object.freeze([[3, 4], [5, 6], [6, 7], [8, 9], [10, 10]].map(Object.freeze));
     const BUILDINGS = ['HF', 'RF', 'RL', 'GC'];
     const POLICIES = {
         rush: { required: 2, order: ['RF', 'HF', 'RL', 'GC'], profiles: [[0, 0, 0, 0], [6, 8, 0, 0], [8, 10, 0, 0], [10, 12, 0, 0]] },
@@ -57,6 +59,9 @@
         };
         for (const [key, limits] of Object.entries(ranges)) {
             if (!finite(input[key], ...limits)) errors.push(`Enter a valid ${key}; missing values cannot be treated as zero.`);
+        }
+        for (const key of ['cultureRate', 'cultureMultiplier']) {
+            if (input[key] !== undefined && !finite(input[key], 0, 1e9)) errors.push(`Enter a valid ${key}, or omit the unknown observation.`);
         }
         if (input.horizonDays !== undefined && !finite(input.horizonDays, 1 / 24, 180)) errors.push('Use a horizon between one hour and 180 days.');
         if (input.traderAccept !== undefined && typeof input.traderAccept !== 'boolean') errors.push('Trader acceptance must be true or false.');
@@ -117,6 +122,21 @@
         return selected;
     }
 
+    // Each endpoint is an independently selected development scenario. These are
+    // sensitivity checks, not probability bounds on future partners or market prices.
+    function planBonusScenarios(input, ranges) {
+        const remaining = MAX_TAS - input?.completedTas;
+        if (!Array.isArray(ranges) || ranges.length !== remaining || ranges.some(range =>
+            !Array.isArray(range) || range.length !== 2 || range.some(n => !finite(n, 0, 100, true)) || range[0] > range[1])) {
+            const failure = { ok: false, mode: input?.mode, errors: ['Enter a minimum and maximum of 0–100 qualifying partner planets for every remaining TA; minimum cannot exceed maximum.'], warnings: [], assumptions: [] };
+            return { lower: { ...failure }, upper: { ...failure } };
+        }
+        return {
+            lower: plan({ ...input, partnerQualifiedPlanets: ranges.map(range => range[0]) }),
+            upper: plan({ ...input, partnerQualifiedPlanets: ranges.map(range => range[1]) }),
+        };
+    }
+
     function simulate(input, now, policy, profile) {
         const horizon = (input.horizonDays ?? 60) * 24;
         const iso = hours => hours === null ? null : new Date(now + Math.round(hours * HOUR)).toISOString();
@@ -137,7 +157,7 @@
         });
         let hours = 0, social = input.social, socialPoints = 0, cash = input.cash;
         let addedTradePct = 0, gateHours = planets.filter(p => p.population >= 10).length >= policy.required ? 0 : null;
-        const totals = { buildingPP: 0, soldPP: 0, earnedPP: 0, spentCash: 0, sciencePoints: 0, saleProceeds: 0, lostSiegePP: 0 };
+        const totals = { buildingPP: 0, soldPP: 0, earnedPP: 0, spentCash: 0, sciencePoints: 0, culturePoints: input.cultureRate === undefined ? null : 0, saleProceeds: 0, lostSiegePP: 0 };
         const agreements = Array.from({ length: MAX_TAS - input.completedTas }, (_, i) => ({
             number: input.completedTas + i + 1, fundedHours: null, activeHours: null,
             cost: input.traderAccept ? 0 : FEE, partnerQualifiedPlanets: input.partnerQualifiedPlanets?.[i] ?? 0
@@ -145,6 +165,8 @@
         const warnings = [];
         const tradeFactor = () => (1 + (input.currentTradeBonusPct + addedTradePct) / 100) / (1 + input.currentTradeBonusPct / 100);
         const scienceRate = () => (input.scienceRate + planets.reduce((n, p) => n + p.population - p.start.population + p.RL - p.start.RL, 0) * input.scienceMultiplier) * tradeFactor();
+        const cultureRate = () => input.cultureRate === undefined ? null
+            : (input.cultureRate + planets.reduce((n, p) => n + p.GC - p.start.GC, 0) * (input.cultureMultiplier ?? 0)) * tradeFactor();
         const productionRate = p => (p.RF + p.population) * input.productionMultiplier * tradeFactor();
         const growthRate = p => p.population < popCap(social) && p.population < 100 ? (p.HF + 1) * input.growthMultiplier * tradeFactor() : 0;
         const ready = p => BUILDINGS.every(b => p[b] >= p.target[b]);
@@ -232,6 +254,7 @@
                 p.growthPoints += growthRate(p) * step;
             }
             totals.sciencePoints += sci * step;
+            if (totals.culturePoints !== null) totals.culturePoints += cultureRate() * step;
             if (social < 10) socialPoints += sci * step;
             hours += step;
         }
@@ -252,6 +275,7 @@
         if (input.planets.some(p => p.growthPoints === undefined)) assumptions.push('Missing within-level population progress is conservatively treated as zero.');
         if (input.social < 10) assumptions.push('Research switches to Social until level 10, with zero existing progress credited; other research can continue afterward. Science points are never spent as PP.');
         if (!input.partnerQualifiedPlanets || input.partnerQualifiedPlanets.length < agreements.length) assumptions.push('Unknown future partners add zero forecast trade bonus; fill their qualifying planet counts to include that benefit.');
+        if (input.cultureRate !== undefined && input.cultureMultiplier === undefined) assumptions.push('Measured culture scales with future TA bonuses only; missing culture calibration means cybernet gains are not credited.');
         if (input.traderAccept) assumptions.push('Every forecast agreement is accepted by a confirmed Trader for free; initiating still costs 20,000 A$.');
         return { ok: true, mode: input.mode, errors: [], warnings, assumptions, horizonHours: horizon,
             gate: { requiredPlanets: policy.required, qualifiedNow: input.planets.filter(p => p.population >= 10).length, population: 10, at: iso(gateHours), hours: gateHours },
@@ -260,10 +284,11 @@
             planets: planets.map(p => ({ id: p.id, name: p.name, start: p.start, target: p.target,
                 final: { population: p.population, HF: p.HF, RF: p.RF, RL: p.RL, GC: p.GC, pp: p.pp },
                 builds: p.builds, savingAt: iso(p.savingHours), savingHours: p.savingHours })),
+            rates: { production: planets.reduce((n, p) => n + productionRate(p), 0), science: scienceRate(), culture: cultureRate(), growth: planets.reduce((n, p) => n + growthRate(p), 0), tradeAndEconomyBonusPct: input.currentTradeBonusPct + addedTradePct },
             totals: { ...totals, cash, pp: planets.reduce((n, p) => n + p.pp, 0), simulatedHours: hours, social },
             profile: Object.fromEntries(BUILDINGS.map((b, i) => [b, profile[i]]))
         };
     }
 
-    return { plan, validate, nextTradeActivation, constants: { FEE, MAX_TAS } };
+    return { plan, planBonusScenarios, validate, nextTradeActivation, constants: { FEE, MAX_TAS, DEFAULT_PARTNER_BONUS_RANGES } };
 });

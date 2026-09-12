@@ -1,5 +1,7 @@
 const db = require('../database');
-const { parseLocaleNumber } = require('../../public/js/utils/parse-number.js');
+const { observedNumber, positiveMachineNumber } = require('../utils/observed-number');
+const { parseTimestamp } = require('../../public/js/utils/sqlite-time');
+const tradeRepo = require('./trade');
 
 const rosterStmt = db.prepare(`
     SELECT p.id, p.name
@@ -26,18 +28,14 @@ const planetsStmt = db.prepare(`
 `);
 const priceStmt = db.prepare(`SELECT value, updated_at FROM app_settings WHERE key = 'pp_price'`);
 const partnerIdStmt = db.prepare('SELECT id FROM players WHERE name = ? COLLATE NOCASE LIMIT 1');
+const futurePartnerStmt = db.prepare(`
+    SELECT p.id, p.name, p.total_planets, p.stats_scraped_at,
+           s.planets_text, s.updated_at AS sheet_updated_at
+    FROM players p LEFT JOIN alliance_member_stats s ON s.player_id = p.id
+    WHERE p.name = ? COLLATE NOCASE LIMIT 1
+`);
 
-// parseLocaleNumber intentionally returns zero for garbage. Planning cannot treat
-// missing input as free money/zero output, so validate the stored observation first.
-const NUMBER_TEXT = /^\+?(?:\d+(?:[.,]\d+)?|\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d{1,3}(?:[ \u00a0\u202f\u2009\u2007]\d{3})+(?:[.,]\d+)?)$/;
-function observedNumber(value, rate = false) {
-    if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? value : null;
-    if (typeof value !== 'string') return null;
-    const text = (rate ? value.replace(/\s*\/\s*h\s*$/i, '') : value).trim();
-    if (!NUMBER_TEXT.test(text)) return null;
-    const number = parseLocaleNumber(text);
-    return Number.isFinite(number) && number >= 0 ? number : null;
-}
+
 function integer(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
     if (typeof value !== 'number' && (typeof value !== 'string' || !/^-?\d+$/.test(value.trim()))) return null;
     const number = Number(value);
@@ -52,8 +50,8 @@ function observedText(value) {
     return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-// Only reported partners are completed agreements. The coordination board's proposed
-// and confirmed rows are intentions, so this repository deliberately never reads it.
+// Only reported partners are completed agreements. Confirmed coordination-board
+// rows are exposed separately as future candidates, never counted as completed TAs.
 function completedPartners(raw, player) {
     if (typeof raw !== 'string' || !raw.trim()) return null;
     let values;
@@ -80,6 +78,49 @@ function completedPartners(raw, player) {
         }
     }
     return [...unique.values()];
+}
+
+// A complete saved footprint can estimate a partner's current trade contribution.
+// Expose its oldest supporting timestamp; matching counts do not guarantee live data.
+function qualifiedPartnerSnapshot(name) {
+    const partner = futurePartnerStmt.get(name);
+    const result = { player_id: partner?.id ?? null, name: partner?.name ?? name,
+        population10_planets: null, observed_at: null };
+    if (!partner) return result;
+    const totals = [
+        { count: leadingInteger(partner.planets_text), time: parseTimestamp(partner.sheet_updated_at) },
+        { count: integer(partner.total_planets), time: parseTimestamp(partner.stats_scraped_at) },
+    ].filter(source => source.count !== null && source.time).sort((a, b) => b.time - a.time);
+    if (!totals.length) return result;
+    const { count: total, time: countTime } = totals[0];
+    if (total < 1) return result;
+    if (totals.some(source => source.time.getTime() === countTime.getTime() && source.count !== total)) return result;
+    const planets = planetsStmt.all(partner.id);
+    if (total !== planets.length) return result;
+    const populations = planets.map(planet => integer(planet.population, 1, 100));
+    const times = planets.map(planet => parseTimestamp(planet.updated_at));
+    if (populations.includes(null) || times.includes(null)) return result;
+    result.population10_planets = populations.filter(population => population >= 10).length;
+    result.observed_at = new Date(Math.min(countTime.getTime(), ...times.map(time => time.getTime()))).toISOString();
+    return result;
+}
+
+function getFuturePartners(player) {
+    const self = player.name.toLowerCase();
+    const completed = new Set(tradeRepo.getPartnerObservations().get(self)?.known_partners ?? []);
+    const candidates = new Map();
+    // The existing repository returns ID order. This is reproducible candidate order,
+    // not a prediction or recommendation of the future activation sequence.
+    for (const agreement of tradeRepo.getActiveAgreements()) {
+        if (agreement.status !== 'confirmed') continue;
+        const pair = agreement.pair_key.split('|');
+        if (!pair.includes(self)) continue;
+        const other = pair.find(name => name !== self);
+        if (!other || completed.has(other) || candidates.has(other)) continue;
+        const displayName = agreement.player_a.toLowerCase() === other ? agreement.player_a : agreement.player_b;
+        candidates.set(other, qualifiedPartnerSnapshot(displayName));
+    }
+    return [...candidates.values()];
 }
 
 function getPlayers() {
@@ -131,16 +172,12 @@ function getPlayerSnapshot(playerId) {
         player[field] = observedNumber(row[field], field.endsWith('_rate'));
         player.economy_sources[field] = player[field] === null ? null : 'alliance_member_stats';
     }
-    return { player, planets };
+    return { player, planets, future_partners: getFuturePartners(row) };
 }
 
 function getMarket() {
     const row = priceStmt.get();
-    // /sync/trade-prices serializes a numeric API value with String(), not localized
-    // display text. A three-digit fraction such as 0.125 must remain a fraction here.
-    const text = typeof row?.value === 'string' ? row.value.trim() : '';
-    const price = /^(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?$/i.test(text) ? Number(text) : null;
-    return { pp_price: Number.isFinite(price) && price > 0 ? price : null, updated_at: row?.updated_at ?? null };
+    return { pp_price: positiveMachineNumber(row?.value), updated_at: row?.updated_at ?? null };
 }
 
 module.exports = { getPlayers, getPlayerSnapshot, getMarket };

@@ -47,10 +47,16 @@ function setup() {
     const $ = id => fields.get('rta-' + id);
     const panel = new Field();
     panel.querySelector = selector => fields.get(selector.slice(1));
-    const calls = [], pending = [];
+    const calls = [], ranges = [], pending = [];
     const context = vm.createContext({
         Date, console, AbortController, AWSqliteTime, AWTables,
-        AWRoadToTA: { plan(input) { calls.push(input); return { ok: false, errors: ['Synthetic model boundary'] }; } },
+        AWRoadToTA: {
+            constants: { DEFAULT_PARTNER_BONUS_RANGES: [[3, 4], [5, 6], [6, 7], [8, 9], [10, 10]] },
+            planBonusScenarios(input, bounds) {
+                calls.push(input); ranges.push(bounds);
+                return { lower: { ok: false, errors: ['Synthetic model boundary'] }, upper: { ok: false } };
+            },
+        },
         document: { createElement: () => new Field(), getElementById: () => new Field() },
         fetch(url, options) { return new Promise(resolve => pending.push({ url, options, resolve })); },
     });
@@ -64,13 +70,13 @@ function setup() {
         pending[index].resolve({ ok: status === 200, json: async () => data });
         await flush();
     }
-    return { $, set, calls, pending, respond, panel, context };
+    return { $, set, calls, ranges, pending, respond, panel, context };
 }
 function snapshot(id = 1) {
     return { success: true, players: [{ id: 1, name: 'Synthetic One' }, { id: 2, name: 'Synthetic Two' }],
         player: { id, name: `Synthetic ${id}`, has_intel: true, race_growth: 0, race_trader: 0,
             artefact: 'Charcoal Diamond 1', trade_revenue: 0, trade_partners: [], astro_dollars: 0,
-            level: 12, social: 10, production_rate: 20, science_rate: 20, total_planets: 1 },
+            level: 12, social: 10, production_rate: 20, science_rate: 20, culture_rate: 8, total_planets: 1 },
         planets: [{ id: id * 100, name: 'Synthetic Planet', population: 10, farm: 8, factory: 10, lab: 10,
             cybernetics: 8, local_pp: 0, growth_progress: null, is_sieged: false }], market: { pp_price: 1 } };
 }
@@ -78,6 +84,10 @@ function snapshot(id = 1) {
 (async () => {
     const state = setup(), { $, set, calls, pending, respond } = state;
     await respond(0, snapshot());
+    set('cash', '1234.5');
+    state.context.initRoadToTa(state.panel);
+    ok('revisiting the mounted tab preserves scenario input without another fetch', $('cash').value === '1234.5' && pending.length === 1);
+    ok('embedded view leaves dialog closing and Escape handling to its parent', !$('close') && !state.panel.listeners.keydown);
     ok('loading bio does not guess the separate economy bonus or effective growth', $('eco-bonus').value === '' && $('growth').value === '');
     $('use-bio').fire('click');
     ok('bio calculation requires an explicit economy bonus', $('growth').value === '' && $('results').innerHTML.includes('explicit trade and economy bonuses'));
@@ -91,6 +101,22 @@ function snapshot(id = 1) {
     ok('all strategy inputs receive the combined current bonus once', calls.length === 3
         && calls.every(input => input.currentTradeBonusPct === 25 && input.growthMultiplier === 1.25));
     ok('automatic output multipliers use the supplied complete planet totals', calls.every(input => input.productionMultiplier === 1 && input.scienceMultiplier === 1));
+    ok('optional culture uses measured output and complete GC/population coverage', calls.every(input => input.cultureRate === 8 && input.cultureMultiplier === 1));
+    ok('initial bonus scenarios use all five absolute TA defaults', JSON.stringify(state.ranges[0]) === '[[3,4],[5,6],[6,7],[8,9],[10,10]]');
+    const rangeField = (number, bound) => $('partners').children.find(el => Number(el.dataset.number) === number && el.dataset.bound === bound);
+    rangeField(3, 'min').value = '11'; rangeField(3, 'max').value = '12'; $('form').fire('input', rangeField(3, 'min'));
+    set('completed', '3');
+    ok('nonzero completed count starts at the correct absolute TA range', $('partners').children[0].dataset.number === '4' && $('partners').children[0].value === '8');
+    set('completed', '2');
+    ok('temporarily hidden ranges retain scenario edits', rangeField(3, 'min').value === '11' && rangeField(3, 'max').value === '12');
+    $('form').fire('submit');
+    ok('only remaining ranges reach the model after two completed agreements', JSON.stringify(state.ranges.at(-1)) === '[[11,12],[8,9],[10,10]]');
+    rangeField(3, 'min').value = '13'; const beforeBounds = calls.length; $('form').fire('submit');
+    ok('inverted range never reaches the model', calls.length === beforeBounds && $('results').innerHTML.includes('TA 3:'));
+    rangeField(3, 'min').value = ''; $('form').fire('submit');
+    ok('blank bonus bound is unknown rather than zero', calls.length === beforeBounds && $('results').innerHTML.includes('whole-number bonus bounds'));
+    rangeField(3, 'min').value = '11'; set('completed', '0');
+
     set('eco-bonus', '0');
     ok('changing economy also invalidates derived growth', $('growth').value === '');
     set('growth', '1.4'); set('trade-bonus', '10');
@@ -98,14 +124,17 @@ function snapshot(id = 1) {
     set('eco-bonus', '3'); const beforeInvalid = calls.length; $('form').fire('submit');
     ok('invalid economy bonus cannot reach the model even through direct submission', calls.length === beforeInvalid
         && $('results').innerHTML.includes('0% or 5%'));
+    set('eco-bonus', '0'); set('trade-bonus', ''); $('form').fire('submit');
+    ok('an unknown current trade bonus cannot become zero by adding Eco', calls.length === beforeInvalid && $('results').innerHTML.includes('observed current trade revenue'));
+
 
     $('partners').children[0].value = '9'; $('player').value = '2'; $('player').fire('change');
     ok('player switch disables prior snapshot before the response arrives', $('inputs').disabled === true);
     await respond(1, snapshot(2));
-    ok('player switch resets partner assumptions and unverified bonuses', $('partners').children[0].value === '0'
+    ok('player switch resets partner assumptions and unverified bonuses', $('partners').children[0].value === '3'
         && $('eco-bonus').value === '' && $('growth').value === '');
     $('partners').children[0].value = '7'; $('reload').fire('click'); await respond(2, snapshot(2));
-    ok('reload resets future partner assumptions too', $('partners').children[0].value === '0');
+    ok('reload resets future partner assumptions too', $('partners').children[0].value === '3');
 
     $('player').value = '1'; $('player').fire('change');
     $('player').value = '2'; $('player').fire('change');
@@ -118,6 +147,28 @@ function snapshot(id = 1) {
         && $('status').textContent.includes('Synthetic failure'));
     state.context.initRoadToTa(state.panel);
     ok('reinitializing a mounted panel does not duplicate requests/listeners', pending.length === 6);
+
+    const known = setup(), knownData = snapshot();
+    knownData.player.trade_partners = [{ name: 'Completed Synthetic Partner' }];
+    knownData.future_partners = [{ name: '<img src=x onerror=alert(1)>', population10_planets: 9, observed_at: '2026-09-12 17:00:00' }];
+    await known.respond(0, knownData);
+    ok('known future partner count seeds a fixed range for the first remaining TA', known.$('partners').children[0].dataset.number === '2'
+        && known.$('partners').children[0].value === '9' && known.$('partners').children[1].value === '9');
+    ok('known partner source is escaped and identifies observation limits', known.$('partners').innerHTML.includes('&lt;img')
+        && !known.$('partners').innerHTML.includes('<img') && known.$('partners').innerHTML.includes('future growth not predicted'));
+    ok('unknown next partner retains its absolute-number heuristic', known.$('partners').children[2].value === '6' && known.$('partners').children[3].value === '7');
+    known.set('completed', '2');
+    ok('increasing the completed count reassigns a known pending partner to the next TA', known.$('partners').children[0].dataset.number === '3' && known.$('partners').children[0].value === '9');
+    known.set('completed', '0');
+    ok('decreasing the completed count also reassigns the known partner', known.$('partners').children[0].dataset.number === '1' && known.$('partners').children[0].value === '9');
+    known.$('partners').children[0].value = '7'; known.$('form').fire('input', known.$('partners').children[0]);
+    known.set('completed', '1');
+    ok('manual bounds remain tied to an absolute TA while observed candidate defaults move', known.$('partners').children[0].dataset.number === '2' && known.$('partners').children[0].value === '9');
+    known.set('completed', '0');
+    ok('returning to the edited TA restores its explicit override', known.$('partners').children[0].value === '7' && known.$('partners').children[1].value === '9');
+
+    known.set('eco-bonus', '0'); known.$('use-bio').fire('click'); known.set('culture-rate', ''); known.$('form').fire('submit');
+    ok('unknown optional culture is omitted instead of forced to zero', known.calls.length === 3 && known.calls.every(input => !('cultureRate' in input) && !('cultureMultiplier' in input)));
     console.log(`${pass} passed, ${fail} failed`);
     process.exitCode = fail ? 1 : 0;
 })().catch(error => { console.error(error); process.exitCode = 1; });

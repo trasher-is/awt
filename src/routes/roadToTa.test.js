@@ -131,6 +131,85 @@ db.prepare(`INSERT INTO planets (game_planet_id,system_id,planet_index,name,owne
         ok('a proposed board agreement is not a completed reported TA', repository.getPlayerSnapshot(1).player.trade_partners.length === 0);
         db.prepare("UPDATE trade_agreements SET status='confirmed'").run();
         ok('a confirmed board intention is not a completed reported TA', repository.getPlayerSnapshot(1).player.trade_partners.length === 0);
+        let candidate = repository.getPlayerSnapshot(1).future_partners[0];
+        ok('confirmed future candidates retain identity without inventing an unknown population count',
+            candidate.player_id === 4 && candidate.name === 'Synthetic Partner'
+            && candidate.population10_planets === null && candidate.observed_at === null, candidate);
+        db.prepare("UPDATE players SET total_planets=0, stats_scraped_at='2026-09-12 07:00:00' WHERE id=4").run();
+        db.prepare("INSERT INTO alliance_member_stats (player_id,planets_text,updated_at) VALUES (4,'0','2026-09-12 08:00:00')").run();
+        ok('zero empire totals with no saved planets do not invent a known zero contribution',
+            repository.getPlayerSnapshot(1).future_partners[0].population10_planets === null);
+        db.prepare('DELETE FROM alliance_member_stats WHERE player_id=4').run();
+        db.prepare("UPDATE players SET total_planets=3, stats_scraped_at='2026-09-12 07:00:00' WHERE id=4").run();
+        db.prepare(`INSERT INTO planets (game_planet_id,system_id,planet_index,name,owner_id,population,updated_at)
+            VALUES (903,900,3,'Synthetic Future A',4,10,'2026-09-12 05:00:00'),
+                   (904,900,4,'Synthetic Future B',4,9,'2026-09-12T08:00:00+02:00'),
+                   (905,900,5,'Synthetic Future C',4,21,'2026-09-12 06:30:00')`).run();
+        result = await get();
+        candidate = result.body.future_partners[0];
+        ok('complete partner coverage exposes population-10 count and oldest supporting instant via HTTP',
+            candidate.population10_planets === 2 && candidate.observed_at === '2026-09-12T05:00:00.000Z', candidate);
+        ok('future partner observations do not become completed agreements', result.body.player.trade_partners.length === 0);
+        db.prepare('UPDATE planets SET population=NULL WHERE game_planet_id=904').run();
+        ok('one unknown planet population makes the whole future contribution unknown',
+            repository.getPlayerSnapshot(1).future_partners[0].population10_planets === null);
+        for (const population of [0, -1, 101, 1.5, 'unknown']) {
+            db.prepare('UPDATE planets SET population=? WHERE game_planet_id=904').run(population);
+            ok('invalid owned-planet population never yields an exact future contribution',
+                repository.getPlayerSnapshot(1).future_partners[0].population10_planets === null, population);
+        }
+        db.prepare('UPDATE planets SET population=100 WHERE game_planet_id=904').run();
+        ok('the highest supported population remains a qualifying owned planet',
+            repository.getPlayerSnapshot(1).future_partners[0].population10_planets === 3);
+        db.prepare('UPDATE planets SET population=9 WHERE owner_id=4').run();
+        ok('complete valid planets all below ten establish a real zero contribution',
+            repository.getPlayerSnapshot(1).future_partners[0].population10_planets === 0);
+        db.prepare('UPDATE planets SET population=10 WHERE game_planet_id=903').run();
+        db.prepare('UPDATE planets SET population=21 WHERE game_planet_id=905').run();
+        db.prepare('UPDATE players SET total_planets=4 WHERE id=4').run();
+        ok('incomplete partner planet coverage never becomes an exact contribution',
+            repository.getPlayerSnapshot(1).future_partners[0].population10_planets === null);
+        db.prepare("INSERT INTO alliance_member_stats (player_id,planets_text,updated_at) VALUES (4,'3 (4)','2026-09-11 07:00:00')").run();
+        ok('an older matching sheet total cannot override a newer mismatching profile total',
+            repository.getPlayerSnapshot(1).future_partners[0].population10_planets === null);
+        db.prepare("UPDATE alliance_member_stats SET updated_at='2026-09-12 08:00:00' WHERE player_id=4").run();
+        ok('a newer complete sheet total can establish observed partner coverage',
+            repository.getPlayerSnapshot(1).future_partners[0].population10_planets === 2);
+        db.prepare('UPDATE players SET total_planets=3 WHERE id=4').run();
+        db.prepare("UPDATE alliance_member_stats SET planets_text='0' WHERE player_id=4").run();
+        ok('a newer zero total cannot fall back to an older apparently complete footprint',
+            repository.getPlayerSnapshot(1).future_partners[0].population10_planets === null);
+        db.prepare("UPDATE alliance_member_stats SET planets_text='3 (4)' WHERE player_id=4").run();
+        db.prepare('UPDATE players SET total_planets=4 WHERE id=4').run();
+        db.prepare("UPDATE alliance_member_stats SET updated_at='2026-09-12 07:00:00' WHERE player_id=4").run();
+        ok('equally timed contradictory totals cannot establish exact coverage',
+            repository.getPlayerSnapshot(1).future_partners[0].population10_planets === null);
+        db.prepare('DELETE FROM alliance_member_stats WHERE player_id=4').run();
+        db.prepare('UPDATE players SET total_planets=3, stats_scraped_at=NULL WHERE id=4').run();
+        ok('a schema-level total without a Statistics observation timestamp is unknown',
+            repository.getPlayerSnapshot(1).future_partners[0].population10_planets === null);
+        db.prepare("UPDATE players SET stats_scraped_at='2026-09-12 07:00:00' WHERE id=4").run();
+        db.prepare('UPDATE planets SET updated_at=NULL WHERE game_planet_id=904').run();
+        ok('undated planet data does not assert an observed exact contribution',
+            repository.getPlayerSnapshot(1).future_partners[0].population10_planets === null);
+        db.prepare("UPDATE planets SET updated_at='2026-09-12 06:00:00' WHERE game_planet_id=904").run();
+        db.prepare("UPDATE players SET trade_partners='[1]' WHERE id=4").run();
+        ok('a counterpart-reported completion removes the pair from future candidates',
+            repository.getPlayerSnapshot(1).future_partners.length === 0);
+        db.prepare("UPDATE players SET trade_partners='[]' WHERE id=4").run();
+        db.prepare("UPDATE players SET trade_partners='[4]' WHERE id=1").run();
+        ok('an own reported completion removes the pair from future candidates',
+            repository.getPlayerSnapshot(1).future_partners.length === 0);
+        db.prepare("UPDATE players SET trade_partners='[]' WHERE id=1").run();
+        db.prepare(`INSERT INTO trade_agreements (pair_key,player_a,player_b,status,initiator)
+            VALUES ('synthetic member|unknown candidate','Synthetic Member','Unknown Candidate','confirmed','Synthetic Member'),
+                   ('proposal only|synthetic member','Proposal Only','Synthetic Member','proposed','Synthetic Member'),
+                   ('finished only|synthetic member','Finished Only','Synthetic Member','done','Synthetic Member'),
+                   ('cancelled only|synthetic member','Cancelled Only','Synthetic Member','cancelled','Synthetic Member')`).run();
+        const candidates = repository.getPlayerSnapshot(1).future_partners;
+        ok('only confirmed candidates are listed, in board ID order, with unknown identities explicit',
+            candidates.length === 2 && candidates[0].player_id === 4 && candidates[1].name === 'Unknown Candidate'
+            && candidates[1].player_id === null && candidates[1].population10_planets === null, candidates);
 
         const before = db.prepare('SELECT total_changes() AS count').get().count;
         await get(); await get('?player_id=2');

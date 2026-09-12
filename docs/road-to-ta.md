@@ -6,6 +6,39 @@ stops construction and starts accumulating saleable PP, and funding/activation e
 for the remaining trade agreements. It is a planning calculator; it does not place game
 orders, sell resources, initiate agreements or contact another player.
 
+## Where it fits in Trade Agreements
+
+Open **Trade Agreements → Road to TA** from the sidebar. The existing tools and the
+personal planner share one panel:
+
+| Tab | Question it answers | Scope |
+| --- | --- | --- |
+| Board | Who should partner with whom, and which pairs are confirmed or complete? | Alliance coordination; reported completed partners and active reservations share the five-slot limit. |
+| Schedule | When can confirmed pairs fund their fees at today's income and price? | A constant-rate funding estimate with Trader partners prioritized. |
+| Road to TA | What should this player build, when should construction stop, and when could each TA activate? | Current-planet development, strategy population gates, science, selling and activation scenarios. |
+
+The Schedule and Road to TA use the same 20,000 A$ standard fee and A$/PP units. Their
+dates can differ because Schedule does not simulate construction, population or Social
+10 readiness, sale eligibility or siege discounts, future TA bonuses, partner acceptance,
+or hosting windows. It assumes available PP can be sold at the selected price and holds
+income constant. Road to TA explicitly models those player-side constraints and labels
+unknown partner decisions. Neither tab initiates an agreement in the game.
+
+Schedule converts **both existing PP and future PP/hour** through the market price. For
+example, 100 PP/hour at 0.80 A$/PP raises 80 A$/hour, not 100 A$/hour. Missing observations
+remain unknown; unfundable pairs are listed as unresolved instead of receiving enormous
+fictional dates. Sub-hour estimates round up to minutes. A Trader paired with an ordinary
+player is assumed to accept for free; the ordinary player initiates. Trader–Trader pairs
+remain unsupported, matching the Board. Reported completed pairs are excluded, and known
+partner lists guard the five-agreement limit. If a partner list is missing, the slot count
+is only a known lower bound, which the Board marks with `+`.
+
+Switching tabs or closing and reopening Trade Agreements preserves the Road to TA form.
+**Sync partners** retains the existing alliance scan and refreshes the visible Schedule.
+Road to TA has a separate **Reload intel & reset inputs** action so a coordination refresh
+does not discard a planning scenario. Browser requests that finish after a newer Schedule
+calculation or tab change cannot replace the current result.
+
 ## Money and production points
 
 A standard-server trade agreement costs **20,000 A$ per side**, with at most five
@@ -143,9 +176,53 @@ future adjustment = (1 + (current trade/eco percent + newly received percent) / 
                   / (1 + current trade/eco percent / 100)
 ```
 
-Unknown future partner counts contribute zero additional bonus in the forecast. An entered
-count is held constant and assumes the partner accepts and can pay. The planner never
-substitutes the player's own qualifying planet count for the partner's.
+The UI starts with editable **planning assumptions** for each absolute TA number:
+
+| TA number | Additional partner bonus | Cumulative new bonus from TA 1 |
+| --- | ---: | ---: |
+| 1 | 3–4% | 3–4% |
+| 2 | 5–6% | 8–10% |
+| 3 | 6–7% | 14–17% |
+| 4 | 8–9% | 22–26% |
+| 5 | 10% | 32–36% |
+
+These are user-requested partner-development scenarios, not fixed rewards attached to an
+agreement number. For a player with two completed agreements, only TA 3–5 are added to
+the **observed current** trade revenue; the first two assumptions are not applied again.
+Partner bonuses add together in the trade factor. They do not multiply each other: with
+20% current TA+Eco and a new +4 percentage points, the current output is multiplied by
+`1.24 / 1.20`, approximately a 3.33% increase. Race and artifact factors remain embedded
+in the measured output.
+
+Confirmed Board pairings supply candidate partners in stable Board-record order, excluding
+any completion reported by either participant. This order is a scenario, not a forecast of
+actual acceptance order. A known candidate's current qualifying-planet count overrides the
+default bounds only when the saved planet list matches the latest reported empire total,
+every population is known, and source timestamps are valid. Its name and oldest supporting
+observation time are displayed. Incomplete candidates retain the editable assumptions.
+The data endpoint does not promote Board intentions into completed game agreements.
+
+The lower and upper bonus endpoints are simulated independently, with separate building
+plans. The displayed build order uses the lower-bonus scenario. Both scenarios show each
+remaining TA's funding/activation dates and cumulative trade revenue **excluding Eco**.
+They are sensitivity scenarios, not confidence intervals or guaranteed earliest/latest
+completion bounds. An entered count remains constant after activation; later growth or
+losses on existing or future partners are not predicted. The planner never substitutes
+this player's own qualifying planet count for a partner's.
+
+The core `plan(input)` still defaults omitted partner counts to zero and discloses that
+assumption. The UI supplies all endpoint counts explicitly through
+`planBonusScenarios(input, ranges)`, where `ranges` has exactly one `[lower, upper]`
+integer pair for each remaining agreement. Missing, reversed or invalid bounds are errors.
+
+Optional measured culture is accumulated under the same future trade adjustment. A
+cybernet adds one base culture per hour; population does not add culture. Automatic
+culture calibration divides measured culture/hour by the sum of current cybernet levels
+only with complete coverage and a positive cybernet total. If that calibration is unknown,
+only the observed culture and future TA adjustment are credited; missing culture remains
+unknown and does not block funding. See the
+[Galactic Cybernet guide](https://portal.astrowars.mudflatgames.com/glossary/galactic-cybernet/)
+and [Population guide](https://portal.astrowars.mudflatgames.com/glossary/population/).
 
 Funding and activation are distinct. Activation uses the repository's recorded acceptance
 schedule, **00:00, 06:00, 12:00 and 18:00 Europe/Berlin**, followed by a conservative
@@ -177,7 +254,8 @@ Required inputs are:
 
 Optional values are `now` (an epoch, Date or ISO/SQLite timestamp parsed by the shared
 UTC timestamp helper; timezone-free hub timestamps mean UTC), `horizonDays` (default 60, maximum 180),
-`traderAccept`, and `partnerQualifiedPlanets` in the order of the remaining agreements.
+`traderAccept`, `partnerQualifiedPlanets` in the order of the remaining agreements, and
+optional measured `cultureRate` / effective `cultureMultiplier`.
 Per-planet `growthPoints` is progress toward the next population level; omission explicitly
 assumes zero. Fractions of a partially constructed building are not inferred from a
 completed level. Exclude already committed construction PP from the unspent balance.
@@ -191,7 +269,8 @@ The result contains the selected candidate, per-planet ordered builds, populatio
 milestones, every remaining agreement's funding and activation estimate, and resource totals.
 Unknown milestones are `null`. `horizonHours` is the permitted horizon;
 `totals.simulatedHours` is the actual simulated duration, ending at the last funded agreement
-or the horizon. Totals obey both resource identities:
+or the horizon. `rates` describe that final simulated instant, which can precede the
+last agreement's activation; future bonuses are not applied early. Totals obey both resource identities:
 
 ```text
 initial PP + earned PP = building PP + sold PP + remaining PP

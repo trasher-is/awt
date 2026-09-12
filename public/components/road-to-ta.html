@@ -1,6 +1,7 @@
-<div id="road-to-ta-panel" role="dialog" aria-labelledby="rta-title" class="fixed top-0 right-0 h-full w-full md:w-[calc(100%-3.5rem)] bg-black border-l border-border transform translate-x-full transition-transform duration-300 z-40 flex flex-col shadow-2xl">
+<div id="road-to-ta-panel" aria-labelledby="rta-title" class="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden">
     <style>
         #road-to-ta-panel .rta-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px }
+        #road-to-ta-panel .rta-range { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px }
         #road-to-ta-panel label { display:flex; flex-direction:column; gap:5px; color:#a1a1aa; font-size:12px }
         #road-to-ta-panel input:not([type=checkbox]), #road-to-ta-panel select { min-width:0; width:100%; height:36px; border:1px solid #3f3f46; border-radius:5px; background:#09090b; color:#fafafa; padding:0 8px; font-size:13px }
         #road-to-ta-panel input:focus-visible, #road-to-ta-panel select:focus-visible, #road-to-ta-panel button:focus-visible { outline:2px solid #a1a1aa; outline-offset:2px }
@@ -14,11 +15,11 @@
         #road-to-ta-panel .rta-strategies { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px }
         @media(max-width:650px) { #road-to-ta-panel .rta-strategies { grid-template-columns:1fr } #road-to-ta-panel .rta-grid { grid-template-columns:repeat(2,minmax(0,1fr)) } }
     </style>
-    <div class="border-b border-border flex items-center justify-between gap-3 px-4 md:px-6 py-3 bg-zinc-900 shrink-0">
-        <div><h2 id="rta-title" class="font-bold text-foreground"><i class="fa-solid fa-road mr-2"></i>Road to TA</h2><p class="rta-help">Build, grow and save toward your next trade agreements.</p></div>
-        <button id="rta-close" aria-label="Close Road to TA" class="w-9 h-9 shrink-0 rounded-md hover:bg-accent"><i class="fa-solid fa-xmark"></i></button>
-    </div>
     <div class="flex-1 min-h-0 overflow-auto p-4 md:p-6 space-y-5">
+        <div class="space-y-1">
+            <h3 id="rta-title" class="font-semibold text-foreground">Road to TA</h3>
+            <p class="rta-help">Compare how to build, grow and save for your next agreements. Use Board and Schedule to coordinate them with your alliance.</p>
+        </div>
         <div class="flex flex-wrap items-end gap-3">
             <label class="flex-1 min-w-[160px]">Player<select id="rta-player"><option value="">Loading members…</option></select></label>
             <button id="rta-reload" type="button" class="h-9 px-3 rounded-md border border-border text-xs hover:bg-accent">Reload intel &amp; reset inputs</button>
@@ -63,9 +64,9 @@
                     <p id="rta-coverage" class="rta-help"></p>
                     <div class="overflow-x-auto"><table class="rta-table"><thead><tr><th>Planet / last seen</th><th>Pop</th><th>HF</th><th>RF</th><th>RL</th><th>GC</th><th>Local PP</th><th>Growth points</th><th>Sieged</th><th></th></tr></thead><tbody id="rta-planets"></tbody></table></div>
                 </section>
-                <details class="rta-box space-y-3">
-                    <summary class="cursor-pointer font-semibold text-sm">Partners &amp; future bonuses</summary>
-                    <p class="rta-help">Each partner contributes 1% per planet at population 10+. Enter the expected count for each future partner. Zero means no assumed extra bonus. Dates assume the partner can fund and accept the agreement; coordinate actual pairings on the Trade Agreements board.</p>
+                <details class="rta-box space-y-3" open>
+                    <summary class="cursor-pointer font-semibold text-sm">Partners &amp; future bonus ranges</summary>
+                    <p class="rta-help">Each partner contributes 1% per planet at population 10+. Added bonuses accumulate with current TR. Default planning assumptions are TA 1: 3–4%, TA 2: 5–6%, TA 3: 6–7%, TA 4: 8–9%, TA 5: 10%; edit both bounds. A confirmed board partner with observed qualified planets replaces that assumption with its current count. Existing effective output already includes current race, artifact, TR and economy bonuses. Dates assume each partner is ready to accept; coordinate pairings on Board.</p>
                     <div id="rta-partners" class="rta-grid"></div>
                 </details>
                 <button id="rta-calculate" type="submit" class="h-10 px-5 rounded-md bg-white text-black font-semibold text-sm hover:bg-zinc-200">Compare strategies</button>
