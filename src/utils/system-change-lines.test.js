@@ -47,23 +47,27 @@ ok('colonizing a free planet names the settler', owner[5] === '🪐 **Planet 6**
 ok('an unclassified event keeps the old arrow wording', owner[6] === '🪐 **Planet 7**: A → **B**', owner[6]);
 
 console.log('\n── Population lines ' + '─'.repeat(57));
-const pop = buildSystemChangeLines([
+const popEvents = [
     { planet_index: 1, type: 'POP_DROP', kind: 'conquest', old_pop: 3, new_pop: 0, victim: '[OLD] Caveman', by: '[NEW] Conqueror' },
     { planet_index: 5, type: 'POP_DROP', kind: 'colonization', old_pop: 4, new_pop: 0, victim: null, by: 'Settler' },
     { planet_index: 8, type: 'POP_DROP', kind: 'bombardment', old_pop: 9, new_pop: 7, owner: '[DEF] Holder', attacker: '[ATK] Raider' },
     { planet_index: 9, type: 'POP_DROP', kind: 'bombardment', old_pop: 5, new_pop: 3, owner: 'Holder', attacker: null },
     { planet_index: 10, type: 'POP_DROP', old_pop: 5, new_pop: 3 },
-]).popLines;
-ok('five population lines', pop.length === 5, pop);
+];
+const pop = buildSystemChangeLines(popEvents).popLines;
+// kind:'colonization' (2026-09-12) is deliberately excluded from popLines: it's an
+// Unknown/free planet's leftover population getting wiped by a settler, not a real player
+// losing anything, so it does not belong in the "who's fighting who" pop-drop channel.
+ok('four population lines — the colonization one is filtered out', pop.length === 4, pop);
+ok('the excluded event was specifically the colonization one, not some other line',
+    !pop.some(l => l.includes('Planet 5')), pop);
 ok('a conquest kill is the old owner\'s FULL population, credited to the conqueror (the #156 math)',
     pop[0] === '📉 **Planet 1**: **[NEW] Conqueror** wiped 3 population of [OLD] Caveman (conquest)', pop[0]);
-ok('colonizing an Unknown planet credits the settler with the leftover population',
-    pop[1] === '📉 **Planet 5**: **Settler** wiped 4 leftover population of an Unknown planet (colonization)', pop[1]);
 ok('a bombardment with a matched battle report names the attacker',
-    pop[2] === '📉 **Planet 8**: [DEF] Holder lost 2 population (9 → 7) — bombarded by **[ATK] Raider**', pop[2]);
+    pop[1] === '📉 **Planet 8**: [DEF] Holder lost 2 population (9 → 7) — bombarded by **[ATK] Raider**', pop[1]);
 ok('a bombardment with no matched report says the attacker is not visible, instead of guessing',
-    pop[3] === '📉 **Planet 9**: Holder lost 2 population (5 → 3) — attacker not visible from a system scan', pop[3]);
-ok('an unclassified drop keeps the old wording', pop[4] === '📉 **Planet 10**: population 5 → 3', pop[4]);
+    pop[2] === '📉 **Planet 9**: Holder lost 2 population (5 → 3) — attacker not visible from a system scan', pop[2]);
+ok('an unclassified drop keeps the old wording', pop[3] === '📉 **Planet 10**: population 5 → 3', pop[3]);
 
 console.log('\n── Routing ' + '─'.repeat(66));
 const mixed = buildSystemChangeLines([{ type: 'OWNER_CHANGE', planet_index: 1, kind: 'lost' }, { type: 'POP_DROP', planet_index: 1, kind: 'bombardment', old_pop: 2, new_pop: 1 }, null]);
