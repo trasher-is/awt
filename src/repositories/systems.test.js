@@ -114,33 +114,49 @@ ok('countBestGuardedAt finds the inserted row', systems.countBestGuardedAt('2026
 systems.clearBestGuarded();
 ok('clearBestGuarded empties the table', systems.countBestGuardedAt('2026-08-27') === 0);
 
-// checkAndUpdateSystemSecured (2026-09-12): fires the "system closed" Discord milestone
-// only on the 0->1 transition. own alliance [RAID] and ally [NAP1] both count as friendly.
+// checkAndUpdateSystemSecured (2026-09-12, tightened 2026-09-12e): fires the "system
+// closed" Discord milestone only on the 0->1 transition. Closed means EVERY known planet
+// in the system is owned by a friendly tag (own alliance [RAID] or ally [NAP1]) — no Free
+// planet left uncounted — AND at least one of them is RAID itself, not NAP1 alone.
 db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (1, 'RAID', 'Raiders'), (2, 'NAP1', 'Allies'), (3, 'FOE', 'Enemies')`).run();
 db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (901, 'Raider1', 1), (902, 'Ally1', 2), (903, 'Enemy1', 3)`).run();
 systems.upsertSystemFull(900, 'Secured Test System', 1, 1);
 const friendly = new Set(['RAID', 'NAP1']);
+const ownOnly = new Set(['RAID']);
+const isSecured900 = () => systems.getFullSystem(900).is_secured === 1;
 
 systems.upsertPlanet(90001, 900, 1, 901, 5, 0, 0, 0); // RAID-owned
-systems.upsertPlanet(90002, 900, 2, null, 0, 0, 0, 0); // Free — must not block "secured"
-ok('an untouched-by-enemies system with only friendly/free planets is secured',
-    systems.checkAndUpdateSystemSecured(900, friendly) === 'secured');
-ok('re-checking an already-secured system with no change returns null (no re-announce)',
-    systems.checkAndUpdateSystemSecured(900, friendly) === null);
+systems.upsertPlanet(90002, 900, 2, null, 0, 0, 0, 0); // Free planet
+systems.checkAndUpdateSystemSecured(900, friendly, ownOnly);
+ok('a Free planet still in the system blocks "secured", even with a friendly planet present (2026-09-12e tightening)',
+    !isSecured900());
 
-systems.upsertPlanet(90003, 900, 3, 903, 4, 0, 0, 0); // FOE takes a planet
-ok('an enemy taking a planet loses the secured status, silently ("lost", not "secured")',
-    systems.checkAndUpdateSystemSecured(900, friendly) === 'lost');
+systems.upsertPlanet(90002, 900, 2, 902, 3, 0, 0, 0); // NAP1 claims the last Free planet
+ok('claiming the last Free planet with a friendly owner finally secures the system',
+    systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === 'secured');
+ok('re-checking an already-secured system with no change returns null (no re-announce)',
+    systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === null);
+
+systems.upsertPlanet(90003, 900, 3, 903, 4, 0, 0, 0); // a new planet appears, FOE-owned
+ok('an enemy owning any planet loses the secured status, silently ("lost", not "secured")',
+    systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === 'lost');
 ok('re-checking the now-lost system with no further change returns null',
-    systems.checkAndUpdateSystemSecured(900, friendly) === null);
+    systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === null);
 
 systems.upsertPlanet(90003, 900, 3, 902, 4, 0, 0, 0); // NAP1 retakes it — re-secured
 ok('re-securing after a loss announces again (a fresh 0->1 transition)',
-    systems.checkAndUpdateSystemSecured(900, friendly) === 'secured');
+    systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === 'secured');
+
+db.prepare(`UPDATE planets SET owner_id = 902 WHERE game_planet_id = 90001`).run(); // NAP1 takes the last RAID planet too
+ok('a system fully owned by NAP partners alone, with nothing RAID, is NOT secured (2026-09-12e)',
+    systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === 'lost');
+db.prepare(`UPDATE planets SET owner_id = 901 WHERE game_planet_id = 90001`).run(); // RAID reclaims it
+ok('RAID reclaiming at least one planet re-secures the system',
+    systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === 'secured');
 
 db.prepare(`UPDATE planets SET owner_id = NULL WHERE game_planet_id IN (90001, 90002, 90003)`).run();
 ok('a system with zero real owners is never "secured" (nothing has actually been claimed)',
-    systems.checkAndUpdateSystemSecured(900, friendly) === 'lost');
+    systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === 'lost');
 
 // 2026-09-12 fix: a friendly-owned planet under active siege must NOT count towards
 // "secured" — a hostile fleet mid-attack means the system is actively contested, not
@@ -148,13 +164,13 @@ ok('a system with zero real owners is never "secured" (nothing has actually been
 // was still showing as "secured" because this check only ever looked at ownership tags.
 db.prepare(`UPDATE planets SET owner_id = 901 WHERE game_planet_id IN (90001, 90002, 90003)`).run();
 ok('back to fully friendly-owned (sanity check before the siege case)',
-    systems.checkAndUpdateSystemSecured(900, friendly) === 'secured');
+    systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === 'secured');
 systems.upsertPlanet(90001, 900, 1, 901, 5, 0, 0, 1); // still RAID-owned, but now under siege
 ok('a friendly planet under active siege is NOT secured, even though every owner is still friendly',
-    systems.checkAndUpdateSystemSecured(900, friendly) === 'lost');
+    systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === 'lost');
 systems.upsertPlanet(90001, 900, 1, 901, 5, 0, 0, 0); // siege lifted
 ok('clearing the siege re-secures the system (a fresh 0->1 transition)',
-    systems.checkAndUpdateSystemSecured(900, friendly) === 'secured');
+    systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === 'secured');
 
 // getBestGuardedInArea / diffAndReplaceBestGuardedAreaWatch (2026-09-12): "all top50 in
 // the area", not just #1/top10 — filters the FULL Best Guarded snapshot down to planets
@@ -176,6 +192,15 @@ ok('in-area includes our own system\'s guarded planet', inAreaIds.includes(90001
 ok('in-area includes a planet exactly at the radius boundary (inclusive)', inAreaIds.includes(91001), inAreaIds);
 ok('the far planet is excluded', !inAreaIds.includes(92001), inAreaIds);
 ok('exactly two planets are in area', inAreaIds.length === 2, inAreaIds);
+
+// 2026-09-12d: rows carry the owner's name/tag now, so the Discord line can name who
+// actually holds a newly-guarded planet instead of leaving it anonymous.
+const ownPlanetRow = inArea.find(r => r.game_planet_id === 90001);
+ok('a friendly-owned planet\'s row carries the owner\'s name and tag',
+    ownPlanetRow && ownPlanetRow.owner_name === 'Raider1' && ownPlanetRow.owner_tag === 'RAID', ownPlanetRow);
+const neighborPlanetRow = inArea.find(r => r.game_planet_id === 91001);
+ok('a non-friendly owner in area still carries its own real name/tag (not blanked out)',
+    neighborPlanetRow && neighborPlanetRow.owner_name === 'Neighbor1' && neighborPlanetRow.owner_tag === 'FOE', neighborPlanetRow);
 
 const firstDiff = systems.diffAndReplaceBestGuardedAreaWatch(inAreaIds);
 ok('a fresh watch (nothing stored before) reports everything as newly entered', firstDiff.entered.sort().join(',') === inAreaIds.join(','), firstDiff);

@@ -19,4 +19,15 @@ function friendlyAllianceTags() {
     return tags;
 }
 
-module.exports = { friendlyAllianceTags };
+// Just our own alliance's tag — no NAP/allied list — for the handful of features where
+// "we hold X" specifically means RAID itself, not RAID+NAP partners (2026-09-12d: Best
+// Planets coverage. An ally's planet ranking well isn't something WE hold, unlike the
+// closed-system/siege-defense features, which deliberately DO treat a NAP partner as
+// friendly territory — see friendlyAllianceTags's own history for that distinction).
+function ownAllianceTags() {
+    const memberIds = alliancesRepo.getAllianceMemberStatIds().map(r => r.player_id);
+    const ownTag = (playersRepo.getAllianceTagForMembers(memberIds) || {}).tag || null;
+    return ownTag ? new Set([String(ownTag).toUpperCase()]) : new Set();
+}
+
+module.exports = { friendlyAllianceTags, ownAllianceTags };

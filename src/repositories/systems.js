@@ -158,10 +158,13 @@ function insertBestGuarded(planetId, cv, updatedAt) {
 // of one (2026-09-12 — "all top50 in the area", not just #1/top10: best_guarded already
 // holds however many rows the page shows, this just filters by location, not rank).
 const getBestGuardedResolvedStmt = db.prepare(`
-    SELECT bg.game_planet_id, bg.cv, p.system_id, p.planet_index, s.name as system_name, s.x, s.y
+    SELECT bg.game_planet_id, bg.cv, p.system_id, p.planet_index, s.name as system_name, s.x, s.y,
+           u.name as owner_name, a.tag as owner_tag
     FROM best_guarded bg
     JOIN planets p ON p.game_planet_id = bg.game_planet_id
     JOIN systems s ON s.id = p.system_id
+    LEFT JOIN players u ON u.id = p.owner_id
+    LEFT JOIN alliances a ON a.id = u.alliance_id
     WHERE s.x IS NOT NULL AND s.y IS NOT NULL
 `);
 const getSystemOwnerTagsStmt = db.prepare(`
@@ -271,20 +274,24 @@ function getSystemPlanetsForBot(sysId) {
     return getSystemPlanetsForBotStmt.all(sysId);
 }
 
-// A system is "fully friendly" once every REAL owner in it (own alliance or an admin-
-// configured NAP/ally — see friendly-alliance-tags.js) is friendly, AND at least one
-// planet is actually owned by someone — an untouched or all-Free system is not "ours",
-// so it never counts as secured just for having no enemies in it either. A friendly-owned
-// planet currently under active siege (is_sieged) does NOT count as secure either — a
-// hostile fleet mid-attack there means the system is actively contested, not "closed"
-// (2026-09-12 fix: this used to only check ownership tags, so a system could be marked
-// secured — and counted in the aggregate milestone — while most of its own planets were
-// under active enemy siege).
-function isSystemFullyFriendly(sysId, friendlyTagsUpper) {
+// A system is "fully friendly" (closed) once EVERY known planet slot in it is actually
+// owned — no Free/unclaimed planet left — by a friendly tag (own alliance or an admin-
+// configured NAP/ally, see friendly-alliance-tags.js), AND at least one of those planets
+// is owned by our OWN alliance specifically, not NAP partners alone (2026-09-12e fix — a
+// system entirely held by an ally, with none of it ours, isn't "ours" to call closed). A
+// friendly-owned planet currently under active siege (is_sieged) does NOT count as secure
+// either — a hostile fleet mid-attack there means the system is actively contested, not
+// closed. (This tightened the original 2026-09-12 version, which only required every
+// OWNED planet to be friendly and let Free planets sit uncounted — confirmed live to
+// undercount how "closed" the maintainer actually meant.)
+function isSystemFullyFriendly(sysId, friendlyTagsUpper, ownTagsUpper) {
     const rows = getSystemPlanetsForBotStmt.all(sysId);
-    const owned = rows.filter(p => p.owner_id != null);
-    if (!owned.length) return false;
-    return owned.every(p => p.ally_tag && friendlyTagsUpper.has(String(p.ally_tag).toUpperCase()) && !p.is_sieged);
+    if (!rows.length) return false;
+    const allOwnedAndFriendly = rows.every(p =>
+        p.owner_id != null && p.ally_tag && friendlyTagsUpper.has(String(p.ally_tag).toUpperCase()) && !p.is_sieged);
+    if (!allOwnedAndFriendly) return false;
+    const own = ownTagsUpper || new Set();
+    return rows.some(p => p.ally_tag && own.has(String(p.ally_tag).toUpperCase()));
 }
 
 const getSystemSecuredStmt = db.prepare(`SELECT is_secured FROM systems WHERE id = ?`);
@@ -294,10 +301,10 @@ const setSystemSecuredStmt = db.prepare(`UPDATE systems SET is_secured = ? WHERE
 // the 0->1 transition (the moment worth celebrating — see discord_bot.js's
 // announceSystemMilestones), 'lost' on a silent 1->0 (no announcement for that, so a
 // system can be re-secured and celebrated again later), or null when nothing changed.
-function checkAndUpdateSystemSecured(sysId, friendlyTagsUpper) {
+function checkAndUpdateSystemSecured(sysId, friendlyTagsUpper, ownTagsUpper) {
     const row = getSystemSecuredStmt.get(sysId);
     const wasSecured = !!(row && row.is_secured);
-    const isSecuredNow = isSystemFullyFriendly(sysId, friendlyTagsUpper);
+    const isSecuredNow = isSystemFullyFriendly(sysId, friendlyTagsUpper, ownTagsUpper);
     if (isSecuredNow === wasSecured) return null;
     setSystemSecuredStmt.run(isSecuredNow ? 1 : 0, sysId);
     return isSecuredNow ? 'secured' : 'lost';
