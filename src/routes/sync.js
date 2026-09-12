@@ -24,13 +24,14 @@ const POP_DROP_ATTACKER_WINDOW_MINUTES = 180;
 
 // --- MAP SCRAPER DATA RECEIVER ---
 router.post('/sync/system', requireAuth, (req, res) => {
-    const { system_id, planets, fleets, scan_mode } = req.body; // <-- Added fleets, scan_mode
-    // scan_mode: 'galaxy' (mass-scanner.js) is currently only informational and does not
-    // change behavior here. 'silent' (bulk API seed via galaxy-map.js seedPlanetsFromSectors)
-    // suppresses Discord announcements below — the DB writes and planet_events history log
-    // happen exactly the same either way, only the announceEvents.push() calls are skipped,
-    // so a full-map bulk seed doesn't flood the channel with hundreds of stale-looking
-    // transitions.
+    const { system_id, planets, fleets } = req.body;
+    // Every detected change announces to Discord now (2026-09-12) — including from the
+    // bulk galaxy auto-seed, which used to pass scan_mode: 'silent' to suppress this. That
+    // guard is gone: event detection below only ever fires on a genuine transition against
+    // a REAL prior observation (oldP must exist, and vision_uncertain data is excluded), so
+    // there was never an actual flood risk from a bulk seed — a system with no real change
+    // simply produces no event, seeded or not. Silencing it just meant a conquest or
+    // pop-kill caught by the auto-seed announced nowhere at all.
 
     if (!system_id || !Array.isArray(planets)) {
         return res.status(400).json({ error: 'Invalid payload' });
@@ -139,18 +140,14 @@ router.post('/sync/system', requireAuth, (req, res) => {
                     // "Empty -> owner" used to be skipped as low-value and as a flood risk
                     // while the planets table healed from the old null-purge corruption;
                     // the maintainer now asks for every colonization, so it announces too.
-                    // 'silent' bulk seeds still stay quiet; the history event is logged
-                    // regardless.
-                    if (scan_mode !== 'silent') {
-                        announceEvents.push({
-                            planet_index: p.planet_index,
-                            type: 'OWNER_CHANGE',
-                            kind: ownerChangeKind({ oldOwnerId: oldP.owner_id, newOwnerId: finalOwnerId, isUnknown: !!p.is_unknown, oldPop }),
-                            old_owner: oldOwnerLabel,
-                            new_owner: newOwnerLabel,
-                            old_pop: Number.isFinite(oldPop) ? oldPop : null
-                        });
-                    }
+                    announceEvents.push({
+                        planet_index: p.planet_index,
+                        type: 'OWNER_CHANGE',
+                        kind: ownerChangeKind({ oldOwnerId: oldP.owner_id, newOwnerId: finalOwnerId, isUnknown: !!p.is_unknown, oldPop }),
+                        old_owner: oldOwnerLabel,
+                        new_owner: newOwnerLabel,
+                        old_pop: Number.isFinite(oldPop) ? oldPop : null
+                    });
                 }
 
                 // POP DROP — logged on every population loss, owner change or not (it feeds
@@ -173,39 +170,35 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 if (Number.isFinite(oldPop) && Number.isFinite(newPop)) {
                     if (ownerChanged && finalOwnerId != null && oldPop > 0) {
                         systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, 0); // 2 = POP_DROP
-                        if (scan_mode !== 'silent') {
-                            announceEvents.push({
-                                planet_index: p.planet_index,
-                                type: 'POP_DROP',
-                                kind: oldP.owner_id != null ? 'conquest' : 'colonization',
-                                old_pop: oldPop,
-                                new_pop: 0,
-                                victim: oldOwnerLabel,
-                                by: newOwnerLabel
-                            });
-                        }
+                        announceEvents.push({
+                            planet_index: p.planet_index,
+                            type: 'POP_DROP',
+                            kind: oldP.owner_id != null ? 'conquest' : 'colonization',
+                            old_pop: oldPop,
+                            new_pop: 0,
+                            victim: oldOwnerLabel,
+                            by: newOwnerLabel
+                        });
                     } else if (newPop < oldPop) {
                         systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, newPop); // 2 = POP_DROP
-                        if (scan_mode !== 'silent') {
-                            // updated_at also advances on uncertain/fog syncs. It is a
-                            // conservative lower bound, not proof of a fresh observation:
-                            // if it excludes a real battle, leave attribution unknown.
-                            const battle = !ownerChanged && battleReportsRepo.findRecentAttackerAtPlanet(
-                                system_id, p.planet_index, POP_DROP_ATTACKER_WINDOW_MINUTES,
-                                { defenderId: oldP.owner_id, observedAfter: oldP.updated_at, observedLoss: oldPop - newPop }
-                            );
-                            announceEvents.push({
-                                planet_index: p.planet_index,
-                                type: 'POP_DROP',
-                                kind: ownerChanged ? 'population_loss' : 'bombardment',
-                                old_pop: oldPop,
-                                new_pop: newPop,
-                                owner: oldOwnerLabel,
-                                attacker: battle && battle.att_player_name
-                                    ? (battle.att_alliance_tag ? `[${battle.att_alliance_tag}] ${battle.att_player_name}` : battle.att_player_name)
-                                    : null
-                            });
-                        }
+                        // updated_at also advances on uncertain/fog syncs. It is a
+                        // conservative lower bound, not proof of a fresh observation:
+                        // if it excludes a real battle, leave attribution unknown.
+                        const battle = !ownerChanged && battleReportsRepo.findRecentAttackerAtPlanet(
+                            system_id, p.planet_index, POP_DROP_ATTACKER_WINDOW_MINUTES,
+                            { defenderId: oldP.owner_id, observedAfter: oldP.updated_at, observedLoss: oldPop - newPop }
+                        );
+                        announceEvents.push({
+                            planet_index: p.planet_index,
+                            type: 'POP_DROP',
+                            kind: ownerChanged ? 'population_loss' : 'bombardment',
+                            old_pop: oldPop,
+                            new_pop: newPop,
+                            owner: oldOwnerLabel,
+                            attacker: battle && battle.att_player_name
+                                ? (battle.att_alliance_tag ? `[${battle.att_alliance_tag}] ${battle.att_player_name}` : battle.att_player_name)
+                                : null
+                        });
                     }
                 }
             }

@@ -72,11 +72,17 @@ function popLine(e) {
 }
 
 // events: [{ type: 'OWNER_CHANGE' | 'POP_DROP', ... }] -> { ownerLines, popLines }
+//
+// popLines excludes kind:'colonization' (2026-09-12): that's an Unknown/free planet's
+// leftover population getting wiped when someone settles it — not a real player losing
+// anything, so it has no place in a "who's fighting who" feed. The matching OWNER_CHANGE
+// event (kind:'colonized'/'colonized_unknown') still goes to ownerLines — colonizing in
+// peace is exactly the kind of galaxy activity the System Change channel is for.
 function buildSystemChangeLines(events) {
     const list = Array.isArray(events) ? events : [];
     return {
         ownerLines: list.filter(e => e && e.type === 'OWNER_CHANGE').map(ownerLine),
-        popLines: list.filter(e => e && e.type === 'POP_DROP').map(popLine),
+        popLines: list.filter(e => e && e.type === 'POP_DROP' && e.kind !== 'colonization').map(popLine),
     };
 }
 
