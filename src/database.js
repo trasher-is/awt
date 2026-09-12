@@ -228,6 +228,11 @@ function initDatabase() {
     addColumn('systems', 'info', 'TEXT');
     addColumn('systems', 'population_level', 'INTEGER');
     addColumn('systems', 'is_in_vision', 'INTEGER');
+    // is_secured (2026-09-12): every real planet owner in the system is a friendly tag
+    // (own alliance or an admin-configured NAP/ally, see friendly-alliance-tags.js) —
+    // tracked so the "system closed" Discord celebration fires once, on the transition
+    // into that state, rather than on every subsequent sync of an already-secure system.
+    addColumn('systems', 'is_secured', 'INTEGER DEFAULT 0');
     addColumn('planets', 'name', 'TEXT');
 
     // 4.5 Alliance Meta-Data (Planning)

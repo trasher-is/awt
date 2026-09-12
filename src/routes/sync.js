@@ -1,7 +1,8 @@
 const express = require('express');
 const db = require('../database');
 const { requireAuth } = require('./_middleware');
-const { announceSystemChanges } = require('../discord_bot');
+const { announceSystemChanges, announceSystemMilestones } = require('../discord_bot');
+const { friendlyAllianceTags } = require('../utils/friendly-alliance-tags');
 const systemsRepo = require('../repositories/systems');
 const fleetsRepo = require('../repositories/fleets');
 const playersRepo = require('../repositories/players');
@@ -146,7 +147,27 @@ router.post('/sync/system', requireAuth, (req, res) => {
                         kind: ownerChangeKind({ oldOwnerId: oldP.owner_id, newOwnerId: finalOwnerId, isUnknown: !!p.is_unknown, oldPop }),
                         old_owner: oldOwnerLabel,
                         new_owner: newOwnerLabel,
+                        // Raw tag (not the "[TAG] Name" label above) so the per-system
+                        // milestone router can tell a friendly takeover from an enemy one
+                        // without re-parsing a formatted string — see
+                        // announceSystemMilestones's "enemy entered via conquest" check.
+                        new_owner_alliance_tag: p.owner ? (p.owner.alliance_tag || null) : null,
                         old_pop: Number.isFinite(oldPop) ? oldPop : null
+                    });
+                }
+
+                // SIEGE_STARTED (2026-09-12): is_sieged only ever arrives from the
+                // API-sourced sync path (the game's hasSiege flag) — a hostile fleet
+                // actively attacking. The 0->1 transition is a stronger, earlier "enemy
+                // entered" signal than waiting for a conquest to complete. Routed only to
+                // the per-system Discord channel (announceSystemMilestones) — not the
+                // main System Change/Population Drop channels, which are about
+                // completed changes, not attacks in progress.
+                if (!oldP.is_sieged && finalIsSieged) {
+                    announceEvents.push({
+                        planet_index: p.planet_index,
+                        type: 'SIEGE_STARTED',
+                        owner: oldOwnerLabel,
                     });
                 }
 
@@ -242,6 +263,17 @@ router.post('/sync/system', requireAuth, (req, res) => {
             const sys = systemsRepo.getSystemCoords(system_id) || { id: system_id };
             announceSystemChanges(sys, announceEvents).catch(err =>
                 console.error('[Discord] announce error:', err.message)
+            );
+
+            // Per-system milestone channel (2026-09-12): an "enemy entered"/"system
+            // closed" curated feed for whichever channel a member has already created
+            // for this system (matched by name, no admin config needed — see
+            // announceSystemMilestones). Only worth checking "secured" when something
+            // in this system actually changed this sync, not on every no-op re-seed.
+            const secured = systemsRepo.checkAndUpdateSystemSecured(system_id, friendlyAllianceTags());
+            const milestoneEvents = secured === 'secured' ? [...announceEvents, { type: 'SYSTEM_SECURED' }] : announceEvents;
+            announceSystemMilestones(sys, milestoneEvents).catch(err =>
+                console.error('[Discord] system-milestone announce error:', err.message)
             );
         }
 

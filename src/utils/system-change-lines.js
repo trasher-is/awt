@@ -86,4 +86,46 @@ function buildSystemChangeLines(events) {
     };
 }
 
-module.exports = { ownerChangeKind, buildSystemChangeLines };
+// ─── PER-SYSTEM MILESTONE CHANNEL (2026-09-12) ─────────────────────────────────
+// A curated subset of the same events, for a Discord channel a member created for one
+// specific system (matched by name in discord_bot.js — no admin config needed). Deliberately
+// NOT everything System Change shows for that system — see announceSystemMilestones's own
+// comment for why a second firehose defeats the point of having a dedicated channel.
+
+const OWNER_GAIN_KINDS = new Set(['conquered', 'colonized', 'colonized_unknown']);
+
+// An OWNER_CHANGE counts as "enemy entered" only when someone actually GAINED the planet
+// (not lost_unknown/lost, which have no new owner to judge) and that new owner's tag isn't
+// friendly — including an unaffiliated player (no tag at all), who is still not "ours".
+function isEnemyGain(e, friendlyTagsUpper) {
+    if (!e || e.type !== 'OWNER_CHANGE' || !OWNER_GAIN_KINDS.has(e.kind)) return false;
+    const tag = e.new_owner_alliance_tag ? String(e.new_owner_alliance_tag).toUpperCase() : null;
+    return !tag || !friendlyTagsUpper.has(tag);
+}
+
+function milestoneLine(e) {
+    switch (e.type) {
+        case 'SIEGE_STARTED':
+            return `🚨 ${bold(`Planet ${e.planet_index}`)}: ${e.owner || 'this planet'} is under siege!`;
+        case 'OWNER_CHANGE':
+            return `⚔️ ${bold(`Planet ${e.planet_index}`)}: taken by ${bold(e.new_owner || 'an enemy')} (${e.old_owner || 'Free'} lost it)`;
+        case 'SYSTEM_SECURED':
+            return `🎉 This system is now fully secured — every planet is friendly!`;
+        default:
+            return null;
+    }
+}
+
+// events: the SAME array sync.js builds for buildSystemChangeLines, plus SIEGE_STARTED
+// and a synthetic SYSTEM_SECURED marker. friendlyTagsUpper: a Set of UPPERCASE tags (own
+// alliance + admin-configured NAP/allies — see friendly-alliance-tags.js).
+function buildSystemMilestoneLines(events, friendlyTagsUpper) {
+    const list = Array.isArray(events) ? events : [];
+    const tags = friendlyTagsUpper || new Set();
+    return list
+        .filter(e => e && (e.type === 'SIEGE_STARTED' || e.type === 'SYSTEM_SECURED' || isEnemyGain(e, tags)))
+        .map(milestoneLine)
+        .filter(Boolean);
+}
+
+module.exports = { ownerChangeKind, buildSystemChangeLines, buildSystemMilestoneLines };

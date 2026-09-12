@@ -8,7 +8,8 @@ const alliancesRepo = require('./repositories/alliances');
 const usersRepo = require('./repositories/users');
 const discordTimersRepo = require('./repositories/discordTimers');
 const incomingRepo = require('./repositories/incoming');
-const { buildSystemChangeLines } = require('./utils/system-change-lines');
+const { buildSystemChangeLines, buildSystemMilestoneLines } = require('./utils/system-change-lines');
+const { friendlyAllianceTags } = require('./utils/friendly-alliance-tags');
 const settingsRepo = require('./repositories/settings');
 const battlePointsRepo = require('./repositories/battlePoints');
 const battleReportsRepo = require('./repositories/battleReports');
@@ -1918,6 +1919,56 @@ async function announceSystemChanges(system, events) {
     ]);
 }
 
+// Finds a channel a member already created for a specific system — matched by name, not
+// admin config. Screenshots confirm the convention: "<system name>-<system id>" (e.g.
+// "phact-41"), so this only trusts the trailing number, not the name part (robust to a
+// renamed system, a typo, or any prefix style — see the design discussion, 2026-09-12).
+// Cheap: channels.cache is already populated from the gateway, no API call per lookup.
+function findSystemChannel(systemId) {
+    for (const [, guild] of client.guilds.cache) {
+        for (const [, channel] of guild.channels.cache) {
+            if (!channel || typeof channel.name !== 'string' || typeof channel.send !== 'function') continue;
+            const m = channel.name.match(/-(\d+)$/);
+            if (m && parseInt(m[1], 10) === systemId) return channel;
+        }
+    }
+    return null;
+}
+
+/**
+ * Curated "serious stuff" feed for a system's own Discord channel (2026-09-12) — found by
+ * name (findSystemChannel), not admin-configured. Deliberately NOT everything System
+ * Change already shows for this system: a channel someone created to watch ONE system
+ * would just become a second firehose if it mirrored the full change list, defeating the
+ * reason to have a dedicated channel at all. Only three things post here (see
+ * system-change-lines.js's buildSystemMilestoneLines): a new siege (an enemy fleet is
+ * actively attacking — "enemy entered"), an enemy alliance/unaffiliated player taking or
+ * colonizing a planet here, and the system becoming fully secured by the alliance + NAP
+ * partners (a one-time celebration on that transition, see checkAndUpdateSystemSecured).
+ * `events` is the same array passed to announceSystemChanges, plus a SIEGE_STARTED entry
+ * per newly-sieged planet and a synthetic { type: 'SYSTEM_SECURED' } marker when relevant.
+ * No-op if no channel matches this system's id, or nothing curated is in this batch.
+ */
+async function announceSystemMilestones(system, events) {
+    if (!Array.isArray(events) || events.length === 0) return;
+    if (!client.isReady()) return;
+    if (!Number.isInteger(system && system.id)) return;
+
+    const channel = findSystemChannel(system.id);
+    if (!channel) return;
+
+    const friendlyTagsUpper = new Set([...friendlyAllianceTags()].map(t => String(t).toUpperCase()));
+    const lines = buildSystemMilestoneLines(events, friendlyTagsUpper);
+    if (!lines.length) return;
+
+    const embed = new EmbedBuilder().setTitle('🛡️ System Watch').setDescription(lines.join('\n')).setColor('#e11d48');
+    try {
+        await channel.send({ embeds: [embed] });
+    } catch (err) {
+        console.error('[Discord] Failed to send system-milestone announcement:', err.message);
+    }
+}
+
 /**
  * Send a pre-built incoming-attack alert to the configured incoming channel.
  * The webhook route assembles the message (it has DB + travel-calc access);
@@ -2060,7 +2111,7 @@ async function replyToIncoming(channelId, messageId, content) {
 }
 
 module.exports = {
-    initDiscordBot, announceSystemChanges, sendIncomingAlert, sendOrEditIncoming,
+    initDiscordBot, announceSystemChanges, announceSystemMilestones, sendIncomingAlert, sendOrEditIncoming,
     replyToIncoming, updateIncomingCover,
     // Exported for the tests: these are the pieces with real logic in them, and they run
     // without a Discord connection.
