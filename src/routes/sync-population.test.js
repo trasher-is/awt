@@ -119,6 +119,44 @@ const insertReport = db.prepare(`INSERT INTO battle_reports
             const event = announcements.at(-1).events.find(e => e.type === 'POP_DROP');
             ok(test.name, event && event.attacker === test.expected && event.old_pop === 9 && event.new_pop === population, event);
         }
+
+        console.log('\n── Population regrowth sanity guard (2026-09-12f) ' + '─'.repeat(24));
+        {
+            const sysId = 4900;
+            await sync(sysId, { owner: holder, population: 6 });
+            await sync(sysId, { owner: holder, population: 5 }); // a real drop
+            const afterDrop = db.prepare('SELECT population FROM planets WHERE system_id=?').get(sysId);
+            ok('the real drop to 5 is recorded', afterDrop.population === 5, afterDrop);
+
+            // Real production bug: a stale/inconsistent sync claiming the population bounced
+            // back up to 6, only moments later -- far too soon to be real regrowth (game rate
+            // established elsewhere: ~6-12h per point).
+            const announcementCountBeforeBounce = announcements.length;
+            await sync(sysId, { owner: holder, population: 6 });
+            const afterBounce = db.prepare('SELECT population FROM planets WHERE system_id=?').get(sysId);
+            ok('a same-owner population increase too soon after the last observation is rejected, keeping the lower value',
+                afterBounce.population === 5, afterBounce);
+            const dropCount = db.prepare('SELECT COUNT(*) as n FROM planet_events WHERE system_id=? AND event_type_id=2').get(sysId).n;
+            ok('rejecting the bounce-back does not fabricate a second identical history event',
+                dropCount === 1, dropCount);
+            ok('rejecting the bounce-back does not announce a phantom drop either (nothing changed, so nothing new to announce)',
+                announcements.length === announcementCountBeforeBounce, announcements.slice(announcementCountBeforeBounce));
+
+            // Backdate the last observation far enough that real regrowth becomes plausible --
+            // the same reported increase must then be accepted.
+            db.prepare('UPDATE planets SET updated_at=? WHERE system_id=?').run(minutesAgo(5 * 60 + 1), sysId);
+            await sync(sysId, { owner: holder, population: 6 });
+            const afterRealGrowth = db.prepare('SELECT population FROM planets WHERE system_id=?').get(sysId);
+            ok('the same increase IS accepted once enough time has passed for it to be plausible regrowth',
+                afterRealGrowth.population === 6, afterRealGrowth);
+
+            // An owner change wipes/replaces population through a completely different
+            // branch -- this guard must never interfere with a real conquest/colonization.
+            await sync(sysId, { owner: { id: 4901, name: 'Conqueror' }, population: 6 });
+            const afterConquest = db.prepare('SELECT population FROM planets WHERE system_id=?').get(sysId);
+            ok('an owner change is never blocked by the regrowth guard, even with a same-or-higher reported population',
+                afterConquest.population === 6, afterConquest);
+        }
     } finally {
         await new Promise(resolve => server.close(resolve));
         db.close();
