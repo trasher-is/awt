@@ -3,6 +3,7 @@ const db = require('../database');
 const { requireAuth } = require('./_middleware');
 const { announceSystemChanges, announceSystemMilestones, sendVariousChangeEmbed } = require('../discord_bot');
 const { friendlyAllianceTags, ownAllianceTags } = require('../utils/friendly-alliance-tags');
+const { parseSqliteUtc } = require('../../public/js/utils/sqlite-time.js');
 
 // Best Guarded / various-changes: "close by" means within this many straight-line systems
 // of friendly territory (2026-09-12 — a flat radius, not per-player biology).
@@ -26,6 +27,12 @@ const router = express.Router();
 // A scan only observes a population loss; the repository requires positive evidence
 // for the same victim and one unambiguous attacker before naming anyone.
 const POP_DROP_ATTACKER_WINDOW_MINUTES = 180;
+
+// Confirmed live (2026-09-12f): the game's own regrowth rate is roughly 6-12h per
+// population point, so a same-owner population figure that's HIGHER than last observed,
+// sooner than this could plausibly explain, is far more likely a stale/inconsistent read
+// than real growth — see the guard below, where this is used.
+const MIN_HOURS_PER_POP_POINT_REGROWN = 4;
 
 // --- MAP SCRAPER DATA RECEIVER ---
 router.post('/sync/system', requireAuth, (req, res) => {
@@ -145,6 +152,29 @@ router.post('/sync/system', requireAuth, (req, res) => {
             // ownership clear to NULL when the planet is genuinely empty (pop 0).
             if (!p.is_unknown && finalOwnerId == null && finalPopulation > 0 && oldP && oldP.owner_id != null) {
                 finalOwnerId = oldP.owner_id;
+            }
+
+            // POPULATION REGROWTH SANITY GUARD (2026-09-12f): confirmed live — a planet's
+            // population bouncing back UP between two real observations (a differently-
+            // sourced sync, still claiming in-vision, handing back a stale higher cached
+            // number) got treated as a genuine increase, silently undoing a real drop until
+            // the next fresh read caught it "dropping" again — logging and announcing an
+            // IDENTICAL population-drop event every single auto-seed tick. Confirmed in
+            // planet_events: the exact same "6 -> 5" logged five times, exactly 5 minutes
+            // apart (the auto-seed interval). Same-owner population reported higher than
+            // last observed, sooner than natural regrowth could explain, is distrusted and
+            // the last known (lower) value is kept instead. Doesn't touch an owner change —
+            // that wipes/replaces population through a completely different branch below,
+            // never diffed against the previous owner's number.
+            if (oldP && finalOwnerId === oldP.owner_id
+                && Number.isFinite(finalPopulation) && Number.isFinite(oldP.population)
+                && finalPopulation > oldP.population) {
+                const lastUpdate = parseSqliteUtc(oldP.updated_at);
+                const hoursSinceLastUpdate = lastUpdate ? (Date.now() - lastUpdate.getTime()) / 3600000 : Infinity;
+                const pointsGained = finalPopulation - oldP.population;
+                if (hoursSinceLastUpdate < pointsGained * MIN_HOURS_PER_POP_POINT_REGROWN) {
+                    finalPopulation = oldP.population;
+                }
             }
 
             if (oldP && !p.vision_uncertain) {
