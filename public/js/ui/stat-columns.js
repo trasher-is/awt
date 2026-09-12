@@ -363,11 +363,14 @@ export const WAR_ROOM_COLUMNS = [
     traderCol('race_trader', 'Trd', 'Race', 'has_intel', { default: false }),
     raceCol('race_sul', 'SUL', 'Race', 'has_intel', { default: false, title: 'Start Up Lab race pick' }),
     col('artefact', 'Artefact', { group: 'Economy', default: false, sort: 'string', cell: 'text-pink-400', render: r => (W_INTEL(r) ? text(r.artefact) : Q) }),
-    gatedNum('science_rate', 'Sci/h', 'Economy', W_INTEL, { default: false, title: 'Science rate as scraped (vs. the ~Sci/h estimate)' }),
-    gatedNum('culture_rate', 'Cul/h', 'Economy', W_INTEL, { default: false }),
-    gatedNum('production_rate', 'Prd/h', 'Economy', W_INTEL, { default: false, title: 'Production rate as scraped (vs. the ~Prod/h estimate)' }),
-    gatedNum('astro_dollars', 'A$', 'Economy', W_INTEL, { default: false }),
-    gatedNum('production_points', 'PP', 'Economy', W_INTEL, { default: false }),
+    // science_rate/culture_rate/production_rate/astro_dollars/production_points are
+    // DELIBERATELY not columns here (2026-09-12): the only code that ever writes them is
+    // alliance-parser.js's syncMember(), which walks /Game/Alliance/Member/{id} — a page
+    // that only ever renders real numbers for your OWN alliance's members (confirmed:
+    // enemy alliance member sheets don't expose this). Every row the War Room shows is by
+    // definition an enemy player (getWarRoomPlayers scopes to a chosen enemy alliance), so
+    // these columns would be permanently blank here, not "occasionally unscanned" — that's
+    // why ALLY_STATS_COLUMNS below still has them, and War Room does not.
     col('country', 'Country', { group: 'Player', default: false, sort: 'string', render: r => text(r.country) }),
     col('joined', 'Joined', { group: 'Player', default: false, sort: 'string', render: r => text(r.joined) }),
     col('logins', 'Logins', { group: 'Player', default: false, render: r => fmtInt(r.logins) }),
