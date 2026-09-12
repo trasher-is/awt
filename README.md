@@ -7,6 +7,8 @@ database, and exposes that back through a dashboard and a Discord bot.
 
 The dashboard can [export battle reports and estimate race ranges from stored
 battles](docs/battle-report-tools.md), with confirmed bio intelligence always taking precedence.
+[Road to TA](docs/road-to-ta.md) compares development and saving plans for current planets.
+[Clock displays](docs/time-display.md) use local 24-hour time.
 
 ## How it fits together
 

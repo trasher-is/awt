@@ -1,4 +1,5 @@
 import { esc } from '../utils/escape.js';
+import { readUtcTimestamp } from '../utils/fleet-time.js';
 import { mountBattleRaceIntel } from '../ui/battle-race-intel.js';
 import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
 import '../utils/game-rate-limit.js';
@@ -10,13 +11,28 @@ import '../utils/login-gaps.js';     // side-effect import: AWLoginGaps, the pro
 import '../utils/social-hint.js';    // side-effect import: AWSocialHint, the Science page's Social marker (needs game-tables above)
 import '../utils/research-time.js';  // side-effect import: AWResearch, research time shared by the calculator and the Economy countdown
 const { gameFetch } = globalThis.AWGameRate;
-const { formatSqliteUtc } = globalThis.AWSqliteTime;
+const { formatSqliteUtc, formatLocalDateTime, parseTimestamp } = globalThis.AWSqliteTime;
 const LoginGaps = globalThis.AWLoginGaps;
 const SocialHint = globalThis.AWSocialHint;
 const Research = globalThis.AWResearch;
 const Tables = globalThis.AWTables;
 const { TRAIT_PCT } = globalThis.AWEmpire.constants;
 const { getTravelTime } = globalThis.AWApi;
+
+// The game's UTC-backed ranking timestamps expose their source in data-utc. Only
+// normalize leaf timestamp spans already displaying a clock: date-only labels, native
+// countdowns, nested controls, and arbitrary page text retain their original semantics.
+// Keep source attributes intact for the game's own code and the ranking scraper.
+export function initLocalGameTimestamps() {
+    for (const el of document.querySelectorAll('span[data-utc]')) {
+        if (el.children.length || el.closest('.timer, .timer-active, [data-timer], [data-at-datetime]')) continue;
+        if (!/\b\d{1,2}:\d{2}\b/.test(el.textContent || '')) continue;
+        const date = parseTimestamp(el.getAttribute('data-utc'));
+        if (!date) continue;
+        const label = formatLocalDateTime(date);
+        if (el.textContent !== label) el.textContent = label;
+    }
+}
 
 // .NET TimeSpan text as the game renders it in a progress bar's title: "[D.]HH:MM:SS",
 // e.g. "1.19:16:10" (1 day 19h16m10s) or "10:38:06" (no day prefix under 24h). Returns
@@ -81,8 +97,7 @@ export function initPlanetPopTimers() {
 
         if (totalSeconds != null) {
             const finishDate = new Date(Date.now() + totalSeconds * 1000);
-            const dateStr = finishDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
-                finishDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+            const dateStr = formatLocalDateTime(finishDate, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
             const dateSpan = document.createElement('span');
             dateSpan.className = 'custom-pop-timer-date';
             dateSpan.style.cssText = 'margin-left: 6px; color: #ccc; font-size: 8pt; font-weight: normal;';
@@ -175,8 +190,7 @@ export async function initScienceCultureCalc() {
 
                 if (secondsToReach > 0) {
                     const finishDate = new Date(Date.now() + secondsToReach * 1000);
-                    const dateStr = finishDate.toLocaleDateString(undefined, {month:'short', day:'numeric'}) + ' ' + 
-                                    finishDate.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit', hour12: false});
+                    const dateStr = formatLocalDateTime(finishDate, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
                     nextLevels.push({
                         lvl: targetLvl,
@@ -334,8 +348,7 @@ export async function initColonizeLaunchWindows() {
             results.push({
                 label,
                 pastDue: launchMs <= Date.now(),
-                dateStr: launchDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
-                         launchDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false }),
+                dateStr: formatLocalDateTime(launchDate, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
             });
         } catch (e) {
             // One bad plan must not block the rest.
@@ -802,8 +815,7 @@ export async function initScienceLevelCalculator() {
             const { seconds: total, missing } = Research.secondsToLevel(st, table, target, effRate);
 
             const finish = new Date(Date.now() + total * 1000);
-            const dateStr = finish.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
-                            finish.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+            const dateStr = formatLocalDateTime(finish, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
             let html = `<span style="color:#aaa;">Lvl ${st.level} → ${target}:</span> <span style="color:#fff;font-weight:bold;">${formatDuration(total)}</span> <span style="color:#888;">(${dateStr})</span>`;
             html += `<br><span style="color:#666;font-size:11px;">rate ${Math.round(effRate).toLocaleString()}/h${modified ? ` (was ${Math.round(st.rate).toLocaleString()})` : ''}${st.researching ? ' · current research counted' : ''}</span>`;
             if (missing.length) html += `<br><span style="color:#c96;font-size:11px;">No cost data for level(s): ${missing.join(', ')}</span>`;
@@ -974,18 +986,33 @@ function readRaceStat(label) {
     return val;
 }
 
-// Next PL update is at 00:00 or 12:00 Europe/Berlin time. Returns a Date.
-function nextPLUpdate() {
-    const now = new Date();
-    const parts = new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit',
-        second: '2-digit', hour12: false
-    }).formatToParts(now);
-    const get = t => parseInt(parts.find(p => p.type === t).value, 10);
-    const h = get('hour') % 24, m = get('minute'), s = get('second');
-    const secsSinceMidnight = h * 3600 + m * 60 + s;
-    const secsToNext = ((secsSinceMidnight < 43200) ? 43200 : 86400) - secsSinceMidnight;
-    return new Date(now.getTime() + secsToNext * 1000);
+// Count game-calendar noon/midnight boundaries in Europe/Berlin, then resolve the
+// target wall clock back to an instant. Fixed 12-hour elapsed intervals drift by an
+// hour across DST; noon and midnight themselves are unambiguous in this timezone.
+// Display remains browser-local through formatLocalDateTime at the call site.
+function nextPLUpdate(updates = 1, now = new Date()) {
+    if (!Number.isInteger(updates) || updates < 1 || !Number.isFinite(now.getTime())) return null;
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+    });
+    const wallTime = date => {
+        const parts = formatter.formatToParts(date);
+        const get = type => Number(parts.find(part => part.type === type).value);
+        return Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
+    };
+    const halfDay = 12 * 3600 * 1000;
+    const targetWall = (Math.floor(wallTime(now) / halfDay) + updates) * halfDay;
+    let candidate = targetWall;
+    // Use the offset at the target date, including when many updates cross a transition.
+    for (let attempt = 0; attempt < 4; attempt++) {
+        const date = new Date(candidate);
+        if (!Number.isFinite(date.getTime())) return null;
+        const adjustment = targetWall - wallTime(date);
+        if (adjustment === 0) return date;
+        candidate += adjustment;
+    }
+    return null;
 }
 
 export async function initProfilePLGrowth() {
@@ -1049,9 +1076,9 @@ export async function initProfilePLGrowth() {
         // Updates to reach the next level, compounding (1 + factor) per update.
         const updates = Math.ceil(Math.log(target / currentXP) / Math.log(1 + factor));
         // First growth lands at the next update; level-up after `updates` updates.
-        const finish = new Date(nextPLUpdate().getTime() + (updates - 1) * 43200 * 1000);
-        const fmtDate = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
-                             d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+        const finish = nextPLUpdate(updates);
+        if (!finish) { placeholder.remove(); return; }
+        const fmtDate = d => formatLocalDateTime(d, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
         placeholder.innerHTML = `<span style="color:#aaa;">PL → lvl ${nextLevel} in </span>`
             + `<b style="color:#fff;">${updates} upd</b> <span style="color:#666;">(${fmtDate(finish)})</span>`;
@@ -1156,29 +1183,37 @@ function hideSupporterPromo() {
     });
 }
 
+// These all-time counters are stored by UTC hour, without individual event dates.
+// Keep each counter attached to its UTC bin, project with the CURRENT local offset,
+// then sort by the local clock. Fractional zones keep their :30/:45 bin boundaries.
+function localActivityBins(counts, offsetMinutes = -new Date().getTimezoneOffset()) {
+    return counts.map((count, utcHour) => {
+        const minuteOfDay = ((utcHour * 60 + offsetMinutes) % 1440 + 1440) % 1440;
+        const hour = String(Math.floor(minuteOfDay / 60)).padStart(2, '0');
+        const minute = String(minuteOfDay % 60).padStart(2, '0');
+        return { minuteOfDay, label: `${hour}:${minute}`, count };
+    }).sort((a, b) => a.minuteOfDay - b.minuteOfDay);
+}
+
 // No last-active line here on purpose — the game's own "Idle" field on this same page
 // already says that, more precisely (live seconds/minutes, not our own polling cadence).
 function buildActivityLogCard(heatmap, loginSamples) {
     const counts = Array.isArray(heatmap) && heatmap.length === 24 ? heatmap : Array(24).fill(0);
     const max = Math.max(1, ...counts);
-    const offsetHours = Math.round(-new Date().getTimezoneOffset() / 60);
-    const bars = counts.map((_, i) => {
-        // Rotate UTC hours into the viewer's local time, same as intel.js's raw
-        // per-hour counts assume UTC storage.
-        const localHour = (i + offsetHours + 24) % 24;
-        const count = counts[localHour];
+    const bins = localActivityBins(counts);
+    const bars = bins.map(({ label, count }) => {
         const pct = Math.round((count / max) * 100);
-        return `<div title="${localHour}:00 — ${count} login(s)" style="flex:1;height:${Math.max(pct, 2)}%;background:#22c55e;border-radius:1px 1px 0 0;"></div>`;
+        return `<div title="${label} — ${count} login(s)" style="flex:1;height:${Math.max(pct, 2)}%;background:#22c55e;border-radius:1px 1px 0 0;"></div>`;
     }).join('');
 
     return `
         <table class="table">
-            <thead><tr><th><i class="bi bi-activity"></i> Activity <span style="font-weight:normal;font-size:10px;color:#888;">(local time)</span></th></tr></thead>
+            <thead><tr><th title="Hourly totals use your current timezone offset; past daylight-saving offsets are unavailable."><i class="bi bi-activity"></i> Activity <span style="font-weight:normal;font-size:10px;color:#888;">(local time)</span></th></tr></thead>
             <tbody>
                 <tr><td>
                     <div style="display:flex;align-items:flex-end;gap:1px;height:50px;">${bars}</div>
                     <div style="display:flex;justify-content:space-between;font-size:9px;color:#888;margin-top:2px;">
-                        <span>00h</span><span>12h</span><span>23h</span>
+                        <span>${bins[0].label}</span><span>${bins[12].label}</span><span>${bins[23].label}</span>
                     </div>
                     ${buildQuietWindowsSection(loginSamples)}
                 </td></tr>
@@ -1202,13 +1237,17 @@ function buildQuietWindowsSection(loginSamples) {
         </div>`;
     if (samples.length < 2) return head(`not enough scans yet (${samples.length})`);
 
-    const a = LoginGaps.analyze(samples, { now: Date.now(), tzOffsetMin: -new Date().getTimezoneOffset() });
+    const a = LoginGaps.analyze(samples, { now: Date.now(), localTime: true });
     const color = { active: '#ef4444', quiet: '#22c55e', unknown: '#2a2a2a', future: 'transparent' };
     const pad = h => String(h).padStart(2, '0');
     const rows = a.rows.map(r => {
         const label = new Date(r.dayStartUtc).toLocaleDateString(undefined, { weekday: 'short' });
-        const cells = r.cells.map((c, h) =>
-            `<div title="${esc(label)} ${pad(h)}:00 — ${c}" style="flex:1;height:8px;background:${color[c]};border-radius:1px;"></div>`).join('');
+        const cells = r.cells.map((c, h) => {
+            const minutes = r.hourDurations ? r.hourDurations[h] / 60000 : 60;
+            const note = minutes === 0 ? 'clock change: skipped hour'
+                : `${c}${minutes !== 60 ? ` (${minutes} minutes on this date)` : ''}`;
+            return `<div title="${esc(label)} ${pad(h)}:00 — ${note}" style="flex:1;height:8px;background:${color[c]};border-radius:1px;"></div>`;
+        }).join('');
         return `<div style="display:flex;align-items:center;gap:3px;margin-top:2px;">
             <span style="width:26px;font-size:9px;color:#888;text-align:right;">${esc(label)}</span>
             <div style="display:flex;flex:1;gap:1px;">${cells}</div>
@@ -1485,8 +1524,7 @@ export function initScienceTimers() {
         cumulativeSeconds += item.seconds;
 
         const finishDate = new Date(Date.now() + cumulativeSeconds * 1000);
-        const dateStr = finishDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + 
-                        finishDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+        const dateStr = formatLocalDateTime(finishDate, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
         // Idempotency: Check if the badge is already there so we don't stack duplicates
         let dateSpan = item.timerEl.nextElementSibling;
@@ -1523,8 +1561,7 @@ export function initAutoProduceFinishDates() {
         cumulativeSeconds += seconds;
 
         const finishDate = new Date(Date.now() + cumulativeSeconds * 1000);
-        const dateStr = finishDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
-                        finishDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+        const dateStr = formatLocalDateTime(finishDate, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
         // Idempotency: reuse the badge already there instead of stacking duplicates.
         let dateSpan = timerEl.nextElementSibling;
@@ -1563,6 +1600,12 @@ function parseFleetArrival(text) {
     if (d.getTime() - now.getTime() < -2 * 86400 * 1000) d = new Date(now.getFullYear() + 1, mo, +m[5], +m[1], +m[2], +m[3]);
     return d;
 }
+// Prefer the immutable source instant, including the repeated hour at a DST rollback.
+// A present but invalid source must not fall back to guessing from the display text.
+function readFleetArrival(cell) {
+    const timestamp = readUtcTimestamp(cell);
+    return timestamp === undefined ? parseFleetArrival(cell.textContent) : timestamp;
+}
 function fmtFleetRemaining(ms) {
     if (ms <= 0) return 'arrived';
     let s = Math.floor(ms / 1000);
@@ -1579,7 +1622,7 @@ export function initFleetTimers() {
         // Cache the parsed target on the cell so repeat passes only recompute the text.
         let ms = td.getAttribute('data-aw-eta-ms');
         if (ms == null) {
-            const d = parseFleetArrival(td.textContent);
+            const d = readFleetArrival(td);
             if (!d) return;
             // A fleet's nominal ETA (the game's own displayed arrival time) is not when it
             // actually lands — fleets are only processed on the Fleet hosting cycle's own
@@ -1632,7 +1675,7 @@ export function initFleetLaunchModalETA() {
 
             let ms = td.getAttribute('data-aw-launch-eta-ms');
             if (ms == null) {
-                const d = parseFleetArrival(td.textContent);
+                const d = readFleetArrival(td);
                 if (!d) return;
                 ms = String(d.getTime());
                 td.setAttribute('data-aw-launch-eta-ms', ms);
@@ -1725,8 +1768,8 @@ async function getJoinedDates() {
 }
 
 function formatJoinedAge(joinedIso) {
-    const d = new Date(joinedIso);
-    if (isNaN(d.getTime())) return null;
+    const d = parseTimestamp(joinedIso);
+    if (!d) return null;
     const secs = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
     const days = Math.floor(secs / 86400);
     const hours = Math.floor((secs % 86400) / 3600);
@@ -1767,7 +1810,7 @@ export async function initEcoBonusJoinDates() {
         td.className = 'aw-joined-cell';
         const info = joinedIso ? formatJoinedAge(joinedIso) : null;
         if (info) {
-            td.title = new Date(joinedIso).toLocaleString();
+            td.title = formatLocalDateTime(joinedIso);
             td.textContent = `${info.dateLabel} (${info.age})`;
         } else {
             td.textContent = '—';

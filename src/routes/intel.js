@@ -10,6 +10,7 @@ const { parseBattleReportFilters, serializeBattleReportExport } = require('../ut
 const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
 const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
+const { parseTimestamp } = require('../../public/js/utils/sqlite-time.js');
 const { previousNames, findByFormerName } = require('../utils/round-archive');
 const { friendlyAllianceTags } = require('../utils/friendly-alliance-tags');
 const { truePowerForAllianceRow } = require('../utils/true-power');
@@ -345,20 +346,22 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
         try {
             const history = playersRepo.getPlayerLoginHistory(playerId);
 
+            // Send instants, not server-local display labels. A browser in another
+            // timezone can be on a different calendar day for the very same sample.
             formattedActivity = history.map(row => ({
-                date: new Date(row.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                date: parseTimestamp(row.timestamp)?.toISOString() || null,
                 points: row.total_logins
             }));
 
             if (formattedActivity.length === 0) {
                  formattedActivity = [{
-                    date: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                    date: new Date().toISOString(),
                     points: playerInfo.logins || 0
                 }];
             }
         } catch (historyErr) {
             formattedActivity = [{
-                date: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                    date: new Date().toISOString(),
                 points: playerInfo.logins || 0
             }];
         }

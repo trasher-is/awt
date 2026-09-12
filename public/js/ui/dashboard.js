@@ -8,6 +8,7 @@ import {
     openEnemyIntelPanel,
     openAllianceStatsPanel,
     openTradeAgreementsPanel,
+    openRoadToTaPanel,
     openBattleCalcPanel,
     openTravelCalcPanel,
     openRoutePlannerPanel,
@@ -19,7 +20,7 @@ import { runPlayerScan } from '../scrapers/mass-scanner.js';
 import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
 import '../utils/vision-model.js';   // side-effect import: the !vision rule, defined once
 
-const { formatSqliteUtc } = globalThis.AWSqliteTime;
+const { formatSqliteUtc, formatLocalDateTime } = globalThis.AWSqliteTime;
 
 let toolUser = null;
 let currentSystemId = null;
@@ -48,6 +49,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('open-war-room-btn')?.addEventListener('click', openEnemyIntelPanel);
     document.getElementById('open-alliance-stats-btn')?.addEventListener('click', openAllianceStatsPanel);
     document.getElementById('open-trade-agreements-btn')?.addEventListener('click', openTradeAgreementsPanel);
+    document.getElementById('open-road-to-ta-btn')?.addEventListener('click', openRoadToTaPanel);
     document.getElementById('open-players-db-btn')?.addEventListener('click', openDatabasePanel);
     document.getElementById('open-systems-db-btn')?.addEventListener('click', openSystemDatabasePanel);
     document.getElementById('open-planets-db-btn')?.addEventListener('click', openPlanetDatabasePanel);
@@ -411,10 +413,10 @@ async function refreshBattleReportsWatermark() {
         const res = await fetch('/hub-api/sync/battle-reports-watermark');
         const data = await res.json();
         if (!data.newest_started_at) { el.textContent = 'No reports synced yet'; return; }
-        let text = `Synced through: ${new Date(data.newest_started_at).toLocaleString()}`;
+        let text = `Synced through: ${formatLocalDateTime(data.newest_started_at)}`;
         if (data.last_run_at) {
             const count = data.last_inserted_count || 0;
-            text += ` · Last check: ${new Date(data.last_run_at).toLocaleString()} (${count} new)`;
+            text += ` · Last check: ${formatLocalDateTime(data.last_run_at)} (${count} new)`;
         }
         el.textContent = text;
     } catch (err) {

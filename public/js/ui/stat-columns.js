@@ -22,18 +22,18 @@
 import { esc } from '../utils/escape.js';
 import '../utils/parse-number.js';   // side-effect import: AWNumber.compareNumeric, one locale parser
 import '../utils/idle-parse.js';     // side-effect import: AWIdleParse.parseIdleStringToSeconds
+import '../utils/sqlite-time.js';
 const { compareNumeric } = globalThis.AWNumber;
 const { parseIdleStringToSeconds } = globalThis.AWIdleParse;
+const { parseTimestamp, formatLocalDateTime } = globalThis.AWSqliteTime;
 export { parseIdleStringToSeconds };
 
 // ─── FORMATTING HELPERS (shared by archives.js) ───────────────────────────────
 
-// SQLite CURRENT_TIMESTAMP returns 'YYYY-MM-DD HH:MM:SS' in UTC with no zone marker.
-// new Date() would read that as local time, so we explicitly tag it as UTC before parsing.
+// Preserve the existing export for archive callers; one parser handles both SQLite UTC
+// timestamps and API timestamps carrying their own ISO offset.
 export function parseSqliteUtc(ts) {
-    if (!ts) return null;
-    const d = new Date(String(ts).replace(' ', 'T') + 'Z');
-    return isNaN(d.getTime()) ? null : d;
+    return parseTimestamp(ts);
 }
 
 export function formatIdleSeconds(secs) {
@@ -49,13 +49,12 @@ export function formatIdleSeconds(secs) {
 // Idle display, preferring a real timestamp (last_activity_at, from the API's background
 // detail sweep — near-total roster coverage) over the DOM-scrape-only idle_time string
 // (about half the roster, and frozen at whatever moment it was last scraped, so it only
-// gets MORE wrong the longer it's been since). last_activity_at is raw ISO8601 with its own
-// offset (e.g. "...T...+02:00"), NOT SQLite's space-separated format — parseSqliteUtc above
-// assumes the latter and would silently fail on it, so this reads it directly instead.
+// gets MORE wrong the longer it's been since). API activity timestamps retain their ISO
+// offset while SQLite timestamps are read as UTC by the shared parser.
 export function computeIdleDisplay(p, { activityField = 'last_activity_at', now = Date.now() } = {}) {
     if (p[activityField]) {
-        const d = new Date(p[activityField]);
-        if (!isNaN(d.getTime())) {
+        const d = parseTimestamp(p[activityField]);
+        if (d) {
             const secs = Math.max(0, Math.floor((now - d.getTime()) / 1000));
             return { secs, text: formatIdleSeconds(secs) };
         }
@@ -73,27 +72,20 @@ export function formatRaceModifier(val, isMasked) {
 // Parse a DB timestamp that may be ISO ("2026-06-22T10:00:00.000Z") or a sqlite
 // "YYYY-MM-DD HH:MM:SS" (UTC, no zone) into a localized short string.
 export function fmtIntelDate(val) {
-    if (!val) return '-';
-    let d = new Date(val);
-    if (isNaN(d) && typeof val === 'string') d = new Date(val.replace(' ', 'T') + 'Z');
-    if (isNaN(d)) return '-';
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
-           d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return formatLocalDateTime(val, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }, '-');
 }
 
 // True if the intel timestamp is parseable and older than 24h (used to grey stale sciences).
 export function isIntelStale(val, now = Date.now()) {
-    if (!val) return false;
-    let d = new Date(val);
-    if (isNaN(d) && typeof val === 'string') d = new Date(val.replace(' ', 'T') + 'Z');
-    if (isNaN(d)) return false;
+    const d = parseTimestamp(val);
+    if (!d) return false;
     return (now - d.getTime()) > 24 * 3600 * 1000;
 }
 
 export function formatCultureCountdown(isoStr, now = Date.now()) {
-    if (!isoStr) return '-';
-    const msLeft = new Date(isoStr) - now;
-    if (isNaN(msLeft)) return '-';
+    const date = parseTimestamp(isoStr);
+    if (!date) return '-';
+    const msLeft = date.getTime() - now;
     if (msLeft <= 0) return 'Ready';
     const totalSecs = Math.floor(msLeft / 1000);
     return `${Math.floor(totalSecs / 3600)}h ${Math.floor((totalSecs % 3600) / 60)}m ${totalSecs % 60}s`;
@@ -327,7 +319,7 @@ export const WAR_ROOM_COLUMNS = [
     col('calculated_science', '~Sci/h', { group: 'Estimates', cell: 'text-violet-400 font-bold', render: r => fmtInt(Math.round(r.calculated_science || 0)), title: '(labs + population) × race science × trade' }),
     col('intel_updated_at', 'Last Intel', {
         group: 'Intel', sort: 'string', cell: 'text-zinc-400',
-        render: r => { const d = parseSqliteUtc(r.intel_updated_at); return d ? `<span title="${d.toLocaleString()}">${d.toLocaleDateString()}</span>` : '<span class="text-zinc-600">never</span>'; },
+        render: r => { const d = parseSqliteUtc(r.intel_updated_at); return d ? `<span title="${esc(formatLocalDateTime(d))}">${d.toLocaleDateString()}</span>` : '<span class="text-zinc-600">never</span>'; },
     }),
 
     // Everything else the hub knows — off until asked for (issue #113).

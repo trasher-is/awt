@@ -3,7 +3,7 @@ import { esc } from '../utils/escape.js';
 import { navToIframe } from './search.js';
 // The three player-stats tables (players archive, war room, alliance stats) are column-
 // driven: header, rows, sort and the column picker all come from one definition per column.
-import { STAT_TABLES, renderHeaderCells, renderRowCells, sortRows, enrichWarRoomRow, parseSqliteUtc } from './stat-columns.js';
+import { STAT_TABLES, renderHeaderCells, renderRowCells, sortRows, enrichWarRoomRow } from './stat-columns.js';
 import { mountColumnPicker } from './column-picker.js';
 import '../utils/battle-model.js';   // side-effect import: cvOf, so CV is defined once
 import '../utils/parse-number.js';   // side-effect import: locale-aware sorting
@@ -12,7 +12,7 @@ import '../utils/game-rate-limit.js';
 const { gameFetch } = globalThis.AWGameRate;
 
 const { cvOf } = globalThis.AWBattleModel;
-const { formatSqliteUtc } = globalThis.AWSqliteTime;
+const { formatSqliteUtc, formatLocalDateTime, parseTimestamp } = globalThis.AWSqliteTime;
 
 let rawDbPlayers = [];
 const playerSort = { col: 'points', asc: false };
@@ -52,7 +52,7 @@ const rowsHtml = (table, rows, rowCls) =>
     rows.map(r => `<tr class="${rowCls}">${renderRowCells(table.columns, r, table.cellBase)}</tr>`).join('');
 
 function closeOtherPanels(exceptId) {
-    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'battle-calc-panel', 'travel-calc-panel', 'route-planner-panel', 'galaxy-map-panel', 'build-order-panel', 'empire-sim-panel', 'battle-reports-panel'].forEach(id => {
+    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'road-to-ta-panel', 'battle-calc-panel', 'travel-calc-panel', 'route-planner-panel', 'galaxy-map-panel', 'build-order-panel', 'empire-sim-panel', 'battle-reports-panel'].forEach(id => {
         if (id !== exceptId) document.getElementById(id)?.classList.replace('translate-x-0', 'translate-x-full');
     });
 }
@@ -235,12 +235,8 @@ function selectWarRoomAlliance(allianceId, tag, lastScanTime) {
     selectedAllianceId = allianceId;
     document.getElementById('btn-refresh-enemy-intel').removeAttribute('disabled');
     
-    const d = parseSqliteUtc(lastScanTime);
-    if (d) {
-        document.getElementById('enemy-intel-last-scanned').innerText = `Last Scanned: ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
-    } else {
-        document.getElementById('enemy-intel-last-scanned').innerText = 'Last Scanned: N/A';
-    }
+    const scannedAt = formatLocalDateTime(lastScanTime, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }, 'N/A');
+    document.getElementById('enemy-intel-last-scanned').innerText = `Last Scanned: ${scannedAt}`;
 
     loadWarRoomMatrixData();
     loadWarRoomAlliancesList();
@@ -714,7 +710,7 @@ function renderSystemTable() {
     const tbody = document.getElementById('sys-db-table-body'); if (!tbody) return;
     tbody.innerHTML = f.map(s => `
         <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3 font-mono">${s.id}</td><td class="p-3 font-medium text-foreground">${esc(s.name || 'Unknown')}</td><td>${s.x}</td><td>${s.y}</td><td class="p-3 border-l border-border text-aw-ally">${s.planet_count || 0}</td><td class="p-3 text-aw-enemy">${s.fleet_count || 0}</td><td class="p-3 border-l border-border text-muted-foreground">${new Date(s.updated_at).toLocaleString()}</td>
+            <td class="p-3 font-mono">${s.id}</td><td class="p-3 font-medium text-foreground">${esc(s.name || 'Unknown')}</td><td>${s.x}</td><td>${s.y}</td><td class="p-3 border-l border-border text-aw-ally">${s.planet_count || 0}</td><td class="p-3 text-aw-enemy">${s.fleet_count || 0}</td><td class="p-3 border-l border-border text-muted-foreground">${esc(formatLocalDateTime(s.updated_at))}</td>
         </tr>`).join('');
 }
 
@@ -727,7 +723,7 @@ function renderPlanetTable() {
     const tbody = document.getElementById('pln-db-table-body'); if (!tbody) return;
     tbody.innerHTML = f.map(p => `
         <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3 font-mono">${p.system_id}</td><td>${esc(p.system_name || 'Unknown')}</td><td class="p-3 font-medium text-foreground">#${p.planet_index}</td><td class="p-3 border-l border-border">${esc(p.owner_name || 'Empty')}</td><td class="p-3 text-aw-warning">${p.alliance_tag ? `[${esc(p.alliance_tag)}]` : '-'}</td><td class="p-3 border-l border-border text-primary">${(p.population || 0).toLocaleString()}</td><td class="p-3 text-aw-warning">${p.starbase || 0}</td><td class="p-3 border-l border-border text-muted-foreground">${new Date(p.updated_at).toLocaleString()}</td>
+            <td class="p-3 font-mono">${p.system_id}</td><td>${esc(p.system_name || 'Unknown')}</td><td class="p-3 font-medium text-foreground">#${p.planet_index}</td><td class="p-3 border-l border-border">${esc(p.owner_name || 'Empty')}</td><td class="p-3 text-aw-warning">${p.alliance_tag ? `[${esc(p.alliance_tag)}]` : '-'}</td><td class="p-3 border-l border-border text-primary">${(p.population || 0).toLocaleString()}</td><td class="p-3 text-aw-warning">${p.starbase || 0}</td><td class="p-3 border-l border-border text-muted-foreground">${esc(formatLocalDateTime(p.updated_at))}</td>
         </tr>`).join('');
 }
 
@@ -738,10 +734,18 @@ function renderFleetTable() {
     f.sort((a, b) => { let v1 = a[fltDbSortCol]||0, v2 = b[fltDbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (fltDbSortAsc?-1:1) : (v1>v2 ? (fltDbSortAsc?1:-1) : 0); });
     const countEl = document.getElementById('flt-db-result-count'); if (countEl) countEl.innerText = f.length;
     const tbody = document.getElementById('flt-db-table-body'); if (!tbody) return;
-    tbody.innerHTML = f.map(f => `
+    tbody.innerHTML = f.map(f => {
+        // Old display text has no timezone or reliable current countdown. Keep it as
+        // labelled source evidence rather than presenting it as a local arrival time.
+        const sourceArrival = f.arrival_time && f.arrival_time !== '-' ? f.arrival_time : '';
+        const canonicalArrival = formatLocalDateTime(f.arrival_at, undefined, '');
+        const arrival = canonicalArrival || (sourceArrival ? 'Time unknown' : '');
+        const arrivalTitle = !canonicalArrival && sourceArrival ? `Recorded source time (timezone unknown): ${sourceArrival}` : '';
+        return `
         <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3">${esc(f.system_name || 'Unknown')}</td><td class="p-3 font-medium text-foreground">#${f.planet_index}</td><td class="p-3 border-l border-border">${esc(f.owner_name || 'Unknown')}</td><td class="p-3 text-aw-warning">${f.alliance_tag ? `[${esc(f.alliance_tag)}]` : '-'}</td><td class="p-3 border-l border-border text-gray-400">${f.transports || 0}</td><td class="p-3 text-gray-400">${f.colony_ships || 0}</td><td class="p-3 text-red-400 border-l border-border">${f.destroyers || 0}</td><td class="p-3 text-red-400">${f.cruisers || 0}</td><td class="p-3 text-red-400">${f.battleships || 0}</td><td class="p-3 text-aw-warning border-l border-border font-bold">${(f.cv || 0).toLocaleString()}</td><td class="p-3 border-l border-border ${f.arrival_time && f.arrival_time !== '-' ? 'text-red-400 font-bold' : 'text-muted-foreground'}">${esc(f.arrival_time || 'Stationed')}</td>
-        </tr>`).join('');
+            <td class="p-3">${esc(f.system_name || 'Unknown')}</td><td class="p-3 font-medium text-foreground">#${f.planet_index}</td><td class="p-3 border-l border-border">${esc(f.owner_name || 'Unknown')}</td><td class="p-3 text-aw-warning">${f.alliance_tag ? `[${esc(f.alliance_tag)}]` : '-'}</td><td class="p-3 border-l border-border text-gray-400">${f.transports || 0}</td><td class="p-3 text-gray-400">${f.colony_ships || 0}</td><td class="p-3 text-red-400 border-l border-border">${f.destroyers || 0}</td><td class="p-3 text-red-400">${f.cruisers || 0}</td><td class="p-3 text-red-400">${f.battleships || 0}</td><td class="p-3 text-aw-warning border-l border-border font-bold">${(f.cv || 0).toLocaleString()}</td><td title="${esc(arrivalTitle)}" class="p-3 border-l border-border ${arrival ? 'text-red-400 font-bold' : 'text-muted-foreground'}">${esc(arrival || 'Stationed')}</td>
+        </tr>`;
+    }).join('');
 }
 
 // The sheet columns that hold localised number TEXT ("999.9", "1,000") are marked
@@ -753,7 +757,7 @@ function renderAllyStatsTable() {
 
     const stLabel = document.getElementById('alliance-stats-last-updated');
     if (stLabel && filtered.length > 0) {
-        const tms = filtered.map(s => s.updated_at ? new Date(s.updated_at.replace(' ', 'T') + 'Z').getTime() : 0).filter(t => !isNaN(t) && t > 0);
+        const tms = filtered.map(s => parseTimestamp(s.updated_at)?.getTime()).filter(t => Number.isFinite(t) && t > 0);
         if (tms.length > 0) {
             const diffMins = Math.floor((Date.now() - Math.max(...tms)) / 60000);
             stLabel.innerText = `Updated: ${diffMins < 1 ? 'Just now' : diffMins < 60 ? `${diffMins}m ago` : `${Math.floor(diffMins/60)}h ${diffMins%60}m ago`}`;
@@ -1279,4 +1283,33 @@ export async function openRoutePlannerPanel(options = {}) {
         const { showSavedRoutes } = await import('./route-planner.js');
         await showSavedRoutes();
     }
+}
+
+// Keep the template load single-flight when the sidebar is clicked repeatedly.
+let roadToTaPanelLoad = null;
+export async function openRoadToTaPanel() {
+    if (roadToTaPanelLoad) return roadToTaPanelLoad;
+    const existing = document.getElementById('road-to-ta-panel');
+    if (existing?.classList.contains('translate-x-0')) {
+        existing.classList.replace('translate-x-0', 'translate-x-full');
+        return;
+    }
+    roadToTaPanelLoad = (async () => {
+        let panel = document.getElementById('road-to-ta-panel');
+        if (!panel) {
+            const response = await fetch('/hub-assets/components/road-to-ta.html');
+            if (!response.ok) throw new Error('Could not load Road to TA.');
+            document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await response.text());
+            panel = document.getElementById('road-to-ta-panel');
+        }
+        const { initRoadToTa } = await import('./road-to-ta.js');
+        initRoadToTa(panel);
+        closeOtherPanels('road-to-ta-panel');
+        panel.classList.replace('translate-x-full', 'translate-x-0');
+        if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
+        panel.querySelector('#rta-player')?.focus();
+    })();
+    try { await roadToTaPanelLoad; }
+    catch (err) { window.alert(err.message); }
+    finally { roadToTaPanelLoad = null; }
 }

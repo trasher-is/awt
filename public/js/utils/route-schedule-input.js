@@ -31,7 +31,7 @@
         return `${String(d.getFullYear()).padStart(4, '0')}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     }
 
-    // Browsers omit :00 from the value of datetime-local controls even when it was set.
+    // Typing HH:mm is equivalent to HH:mm:00; either spelling keeps a saved anchor.
     const withSeconds = value => /^\d{4,}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value) ? `${value}:00` : value;
 
     function createScheduleInput() {

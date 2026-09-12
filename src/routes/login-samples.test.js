@@ -124,10 +124,14 @@ const detailPayload = (id, logins) => JSON.parse(JSON.stringify({
         ok('t is the raw SQLite UTC stamp, untouched by the server\'s locale', ls.every(s => /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s.t)), ls[0]);
         ok('ascending by time', ls.every((s, i) => i === 0 || s.t >= ls[i - 1].t));
         ok('the existing heatmap and activity fields are still there', Array.isArray(r.body.heatmap) && r.body.heatmap.length === 24 && Array.isArray(r.body.activity));
+        ok('activity dates are UTC instants rather than server-local display labels', r.body.activity.length > 0
+            && r.body.activity.every(point => /^\d{4}-\d{2}-\d{2}T.*Z$/.test(point.date)), r.body.activity);
 
         await request(server, 'POST', '/hub-api/sync/player', { id: 502, name: 'NeverCounted' });
         r = await request(server, 'GET', '/hub-api/intel/player/502');
         ok('a player with no observations gets an empty array, not a missing field', r.body && Array.isArray(r.body.loginSamples) && r.body.loginSamples.length === 0, r.body && r.body.loginSamples);
+        ok('fallback activity dates also remain timezone-independent', r.body.activity.length === 1
+            && /^\d{4}-\d{2}-\d{2}T.*Z$/.test(r.body.activity[0].date), r.body.activity);
 
         console.log('\n── The round nuke needs no extra delete ' + '─'.repeat(35));
         db.prepare('DELETE FROM players WHERE id = ?').run(501);

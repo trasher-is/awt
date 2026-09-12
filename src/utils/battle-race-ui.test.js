@@ -2,6 +2,7 @@
 // No game session, captured reports, or browser-specific dependencies are needed.
 const fs = require('fs');
 const path = require('path');
+require('../../public/js/utils/sqlite-time.js');
 
 let pass = 0, fail = 0;
 const ok = (name, condition, detail) => {
@@ -35,7 +36,7 @@ class Node {
 }
 
 const src = fs.readFileSync(path.join(__dirname, '../../public/js/ui/battle-race-intel.js'), 'utf8');
-const load = new Function('document', 'fetch', `${src.replace(/^export /gm, '')}\nreturn mountBattleRaceIntel;`);
+const load = new Function('document', 'fetch', `${src.replace(/^import .*$/gm, '').replace(/^export /gm, '')}\nreturn mountBattleRaceIntel;`);
 const deferred = () => {
     let resolve;
     const promise = new Promise(done => { resolve = done; });
@@ -66,6 +67,7 @@ function setup(options = {}) {
 }
 
 const estimate = {
+    updated_at: '2026-09-12 17:50:03',
     status: 'compatible', report_count: 6, eligible_report_count: 2,
     used_report_ids: [101, 202], skipped: { missing_ship_counts: 3, not_confirmed_winner: 1 },
     attack: { status: 'insufficient', bonus_percent_range: { min: -32, max: 32 }, reason: 'Historical physics is unknown.' },
@@ -97,6 +99,9 @@ const estimate = {
     await flush();
     ok('candidate signs, counts and conditional status are visible', /Compatible DEF picks: -4, -3, -2, \+0/.test(state.root.textContent)
         && /2 eligible of 6 stored reports/.test(state.root.textContent) && /Conditional estimate only/.test(state.root.textContent));
+    const updatedHour = String(new Date('2026-09-12T17:50:03Z').getHours()).padStart(2, '0');
+    ok('saved evidence timestamp reads SQLite as UTC and renders the local 24-hour clock',
+        state.root.textContent.includes(`${updatedHour}:50:03`) && !/\b(?:AM|PM)\b/.test(state.root.textContent));
     ok('attack shows its unresolved bonus range rather than an invented probability', /Attack: −32% to \+32% — unresolved/.test(state.root.textContent));
     ok('defence shows the narrowed bonus range and labels it conditional', /Defence: −48% to \+0% — conditional range/.test(state.root.textContent));
     ok('the evidence details link contributing reports and explain exclusions', find(state.root, node => node.tagName === 'a' && node.href === '/About/BattleReport/202')

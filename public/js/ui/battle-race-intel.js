@@ -1,6 +1,9 @@
 // Battle-derived race evidence stays separate from confirmed biology intel. This card
 // never writes the race/science fields and never presents model compatibility as a
 // calibrated probability. All requests stay on the hub's own stored reports.
+import '../utils/sqlite-time.js';
+const { formatLocalDateTime } = globalThis.AWSqliteTime;
+
 const mounted = new WeakMap();
 
 function element(tag, className, text) {
@@ -113,10 +116,8 @@ export function mountBattleRaceIntel(container, { playerId, hasBio = false, hasL
         const total = count(inference.report_count);
         const eligible = count(inference.eligible_report_count);
         evidence.textContent = `${eligible} eligible of ${total} stored report${total === 1 ? '' : 's'}.`;
-        if (inference.updated_at) {
-            const date = new Date(inference.updated_at);
-            if (Number.isFinite(date.getTime())) evidence.textContent += ` Updated ${date.toLocaleString()}.`;
-        }
+        const updatedAt = formatLocalDateTime(inference.updated_at, undefined, '');
+        if (updatedAt) evidence.textContent += ` Updated ${updatedAt}.`;
         const notes = [`Compatible DEF picks: ${candidateText(inference.defense)}`, inference.attack?.reason, inference.defense?.reason,
             ...(Array.isArray(inference.assumptions) ? inference.assumptions : [])]
             .filter(note => typeof note === 'string' && note.trim());

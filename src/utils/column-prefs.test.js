@@ -75,6 +75,25 @@ async function loadEsm(rel, tmp) {
     const tables = SC.STAT_TABLES;
     ok('three tables are defined', same(Object.keys(tables).sort(), ['allyStats', 'players', 'warRoom']));
 
+    const timestamp = '2026-08-30T17:50:03Z';
+    const sqliteTimestamp = '2026-08-30 17:50:03';
+    const offsetTimestamp = '2026-08-30T19:50:03+02:00';
+    const localHour = String(new Date(timestamp).getHours()).padStart(2, '0');
+    ok('intel columns read SQLite UTC and an explicit ISO offset as the same instant',
+        SC.fmtIntelDate(sqliteTimestamp) === SC.fmtIntelDate(timestamp)
+        && SC.fmtIntelDate(offsetTimestamp) === SC.fmtIntelDate(timestamp));
+    ok('intel columns use the viewer clock in 24-hour form',
+        SC.fmtIntelDate(sqliteTimestamp).includes(`${localHour}:50`)
+        && !/\b(?:AM|PM)\b/.test(SC.fmtIntelDate(sqliteTimestamp)));
+    ok('invalid intel dates keep the existing missing-value marker', SC.fmtIntelDate('not a date') === '-');
+    ok('intel freshness changes only after 24 elapsed hours for either stored date format',
+        [sqliteTimestamp, timestamp, offsetTimestamp].every(value =>
+            !SC.isIntelStale(value, Date.parse(timestamp) + 24 * 3600000)
+            && SC.isIntelStale(value, Date.parse(timestamp) + 24 * 3600000 + 1)));
+    const intelTooltip = tables.warRoom.columns.find(column => column.key === 'intel_updated_at').render({ intel_updated_at: offsetTimestamp });
+    ok('war-room tooltip accepts offset timestamps and shows the local 24-hour time',
+        intelTooltip.includes(`${localHour}:50:03`) && !/\b(?:AM|PM)\b|never/.test(intelTooltip));
+
     const ORIGINAL = {
         players: ['name', 'alliance_tag', 'level', 'science_level', 'culture_level', 'points', 'planet_count', 'total_population', 'cv',
             'race_growth', 'race_science', 'race_culture', 'race_production', 'race_speed', 'race_attack', 'race_defense', 'race_trader',

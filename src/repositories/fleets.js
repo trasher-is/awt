@@ -7,6 +7,7 @@ function countFleets() {
 
 const getFleetsForSystemStmt = db.prepare(`
     SELECT f.planet_index, f.transports, f.colony_ships, f.destroyers, f.cruisers, f.battleships,
+           f.arrival_at, f.arrival_time,
            u.name as owner_name, a.tag as alliance_tag
     FROM fleets f
     LEFT JOIN players u ON f.owner_id = u.id

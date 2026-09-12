@@ -16,6 +16,7 @@ router.use(require('./admin'));
 router.use(require('./intel'));
 router.use(require('./battleRace'));
 router.use(require('./trade'));
+router.use(require('./roadToTa'));
 router.use(require('./search'));
 router.use(require('./incoming'));
 router.use(require('./routes'));
