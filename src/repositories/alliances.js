@@ -61,8 +61,17 @@ function upsertAllianceBasic(id, tag, name) {
 
 // Player-profile-scan upsert: does NOT touch updated_at on conflict. NOT the same
 // statement as upsertAllianceBasic above — see Global Constraints.
+//
+// tag=COALESCE(excluded.tag, alliances.tag) (2026-09-12): both callers (sync.js's single-
+// player and player-list syncs) pass `player.alliance_tag ?? null` — a player payload
+// whose source data happens to lack a tag for this sync (confirmed possible: aw-api.js's
+// mapper sends alliance_tag: null whenever the API's allianceTag isn't a string, even
+// while alliance_id is present) used to silently WIPE a previously-known tag to null on
+// every such call, discovered via the Various Changes resigned-enemy feature depending on
+// alliance_tag staying populated across syncs that don't happen to carry it.
 const upsertAllianceTagOnlyStmt = db.prepare(`
-    INSERT INTO alliances (id, tag, name) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET tag=excluded.tag
+    INSERT INTO alliances (id, tag, name) VALUES (?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET tag=COALESCE(excluded.tag, alliances.tag)
 `);
 function upsertAllianceTagOnly(id, tag, name) {
     upsertAllianceTagOnlyStmt.run(id, tag, name);

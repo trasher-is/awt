@@ -203,6 +203,30 @@ function initDatabase() {
         )
     `);
 
+    // Which Best Guarded entries were last known to be "in the area" (owned by, or within
+    // a few systems of, friendly territory) — wholesale-replaced each best_guarded sync so
+    // the Various Changes channel can diff old-vs-new and announce only what actually
+    // entered or left the area, not the whole top-50 every time (2026-09-12).
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS best_guarded_area_watch (
+            game_planet_id INTEGER PRIMARY KEY
+        )
+    `);
+
+    // Best Planets ranking watch (2026-09-12, Various Changes): the current /Ranking/
+    // BestPlanets snapshot, wholesale-replaced on every re-scrape — same pattern as
+    // best_guarded. Only rank + game_planet_id are stored; ownership is resolved live via
+    // the planets/players/alliances tables (our own synced truth), never from the ranking
+    // page's own owner text, so "how many of these are ours" always reflects the freshest
+    // ownership data the hub has, not a snapshot-moment owner name.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS best_planets_snapshot (
+            game_planet_id INTEGER PRIMARY KEY,
+            rank INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    `);
+
     db.exec(`
         CREATE TABLE IF NOT EXISTS planets (
             game_planet_id INTEGER UNIQUE,

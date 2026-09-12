@@ -29,6 +29,13 @@ const afterTagOnly = db.prepare('SELECT tag, updated_at FROM alliances WHERE id 
 ok('upsertAllianceTagOnly updates the tag', afterTagOnly.tag === 'RAID2');
 ok('upsertAllianceTagOnly does not touch updated_at, unlike upsertAllianceBasic', afterTagOnly.updated_at === afterBasic);
 
+// 2026-09-12: a sync payload lacking a tag for this call (aw-api.js sends alliance_tag:
+// null whenever the API's own allianceTag isn't a string, even with alliance_id present)
+// must never wipe a previously-known real tag.
+alliances.upsertAllianceTagOnly(1, null, '');
+ok('upsertAllianceTagOnly with a null tag preserves the previously-known real tag, not wiping it',
+    db.prepare('SELECT tag FROM alliances WHERE id = ?').get(1).tag === 'RAID2');
+
 alliances.upsertAllianceFull({ id: 2, name: 'Allied Ops', tag: 'AO', leader_id: null, ranking: 5, points: 1000 });
 ok('upsertAllianceFull created the alliance', alliances.countAlliances() === 2);
 ok('upsertAllianceFull set points_current', db.prepare('SELECT points_current FROM alliances WHERE id = ?').get(2).points_current === 1000);

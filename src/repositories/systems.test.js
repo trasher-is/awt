@@ -142,6 +142,55 @@ db.prepare(`UPDATE planets SET owner_id = NULL WHERE game_planet_id IN (90001, 9
 ok('a system with zero real owners is never "secured" (nothing has actually been claimed)',
     systems.checkAndUpdateSystemSecured(900, friendly) === 'lost');
 
+// getBestGuardedInArea / diffAndReplaceBestGuardedAreaWatch (2026-09-12): "all top50 in
+// the area", not just #1/top10 — filters the FULL Best Guarded snapshot down to planets
+// owned by a friendly tag, or within a flat radius (systemDistance <= radiusSystems) of
+// one. Friendly ownership restored on system 900 (RAID) as the one reference point.
+db.prepare(`UPDATE planets SET owner_id = 901 WHERE game_planet_id = 90001`).run();
+systems.upsertSystemFull(910, 'Nearby System', 7, 1); // distance from (1,1) = 6 — exactly at the radius
+systems.upsertSystemFull(920, 'Far System', 100, 100); // way outside any reasonable radius
+db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (904, 'Neighbor1', 3), (905, 'Stranger1', 3)`).run();
+systems.upsertPlanet(91001, 910, 1, 904, 6, 3, 0, 0);
+systems.upsertPlanet(92001, 920, 1, 905, 8, 2, 0, 0);
+systems.insertBestGuarded(90001, '5K', '2026-09-12'); // in-area: our own system
+systems.insertBestGuarded(91001, '12K', '2026-09-12'); // in-area: exactly at radius 6
+systems.insertBestGuarded(92001, '30K', '2026-09-12'); // out of area
+
+const inArea = systems.getBestGuardedInArea(friendly, 6);
+const inAreaIds = inArea.map(r => r.game_planet_id).sort();
+ok('in-area includes our own system\'s guarded planet', inAreaIds.includes(90001), inAreaIds);
+ok('in-area includes a planet exactly at the radius boundary (inclusive)', inAreaIds.includes(91001), inAreaIds);
+ok('the far planet is excluded', !inAreaIds.includes(92001), inAreaIds);
+ok('exactly two planets are in area', inAreaIds.length === 2, inAreaIds);
+
+const firstDiff = systems.diffAndReplaceBestGuardedAreaWatch(inAreaIds);
+ok('a fresh watch (nothing stored before) reports everything as newly entered', firstDiff.entered.sort().join(',') === inAreaIds.join(','), firstDiff);
+ok('nothing has left on the very first diff', firstDiff.left.length === 0, firstDiff);
+
+const secondDiff = systems.diffAndReplaceBestGuardedAreaWatch(inAreaIds);
+ok('re-checking the same set entered/left nothing (no repeat announcements)',
+    secondDiff.entered.length === 0 && secondDiff.left.length === 0, secondDiff);
+
+const thirdDiff = systems.diffAndReplaceBestGuardedAreaWatch([90001]); // 91001 dropped, nothing new
+ok('a planet dropping off the guarded list in the area is reported as "left"', thirdDiff.left.join(',') === '91001', thirdDiff);
+ok('nothing new entered on that same check', thirdDiff.entered.length === 0, thirdDiff);
+
+// getBestPlanetsFriendlyCoverage (2026-09-12): resolves ownership from the planets/players/
+// alliances tables (our own synced truth), never from the ranking page's own owner text.
+systems.insertBestPlanetsSnapshot(90001, 1, '2026-09-12'); // owned by RAID (player 901)
+systems.insertBestPlanetsSnapshot(91001, 2, '2026-09-12'); // owned by FOE (player 904)
+systems.insertBestPlanetsSnapshot(92001, 3, '2026-09-12'); // owned by FOE (player 905)
+
+const coverage = systems.getBestPlanetsFriendlyCoverage(friendly);
+ok('friendly coverage counts only the RAID/NAP1-owned planet', coverage.friendly === 1, coverage);
+ok('total reflects the whole snapshot regardless of ownership', coverage.total === 3, coverage);
+
+const noFriendly = systems.getBestPlanetsFriendlyCoverage(new Set());
+ok('an empty friendly-tags set counts zero friendly, but still reports the real total', noFriendly.friendly === 0 && noFriendly.total === 3, noFriendly);
+
+systems.clearBestPlanetsSnapshot();
+ok('clearBestPlanetsSnapshot empties it', systems.getBestPlanetsFriendlyCoverage(friendly).total === 0);
+
 systems.deleteAllPlanets();
 ok('deleteAllPlanets empties planets', systems.countPlanets() === 0);
 systems.deleteAllSystems();

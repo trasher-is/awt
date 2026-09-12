@@ -161,6 +161,19 @@ function getPlayerNameWithTag(id) {
     return getPlayerNameWithTagStmt.get(id);
 }
 
+// Various Changes: resigned/returned enemy (2026-09-12) — the roster sync reads this
+// BEFORE upsertPlayerFromApiList overwrites `joined`, so it can compare old vs new and
+// catch the 'N/A' transition either direction. name is included for the alert wording.
+const getPlayerJoinedWithTagStmt = db.prepare(`
+    SELECT p.name, p.joined, a.tag AS alliance_tag
+    FROM players p
+    LEFT JOIN alliances a ON p.alliance_id = a.id
+    WHERE p.id = ?
+`);
+function getPlayerJoinedWithTag(id) {
+    return getPlayerJoinedWithTagStmt.get(id);
+}
+
 const getPlayerRestartCheckStmt = db.prepare(`SELECT logins, points, origin_system FROM players WHERE id = ?`);
 function getPlayerRestartCheck(id) {
     return getPlayerRestartCheckStmt.get(id);
@@ -859,7 +872,7 @@ module.exports = {
     getWarRoomPlayers, getAllianceIntelPlayerIds, countPlayers, listPlayerIds, getFullPlayersDb, getJoinedDates,
     getAllianceTagForMembers, getVisionObservers, getPlayerWithPlanetCount,
     getPlayerLoginHistory, getPlayerLoginHeatmap, recordLoginSample, getPlayerLoginSamples,
-    upsertPlayerBasic, getPlayerNameWithTag, getPlayerRestartCheck, playerExistsById, resetPlayerOnRestart,
+    upsertPlayerBasic, getPlayerNameWithTag, getPlayerJoinedWithTag, getPlayerRestartCheck, playerExistsById, resetPlayerOnRestart,
     upsertPlayerFull, insertPlayerLogin, upsertAllianceMemberBasic, upsertPlayerNameOnly,
     BIO_THREAT_MARGIN,
     getPlayerBiologyByName, getThreatPlayersByBiology, getThreatPlayersByScience,

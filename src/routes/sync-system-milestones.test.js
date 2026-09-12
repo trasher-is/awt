@@ -24,6 +24,7 @@ delete process.env.DISCORD_TOKEN;
 
 const express = require('express');
 const db = require('../database');
+const systemsRepo = require('../repositories/systems');
 const syncRouter = require('./sync');
 
 let failed = 0;
@@ -102,6 +103,8 @@ function request(server, method, urlPath, body) {
         const securedRow = db.prepare(`SELECT is_secured FROM systems WHERE id = 950`).get();
         ok('the system is now marked secured — every real owner (just RAID) is friendly',
             securedRow.is_secured === 1, securedRow);
+        ok('countSecuredSystems (feeds the Various Changes aggregate milestone) reflects it',
+            systemsRepo.countSecuredSystems() === 1, systemsRepo.countSecuredSystems());
 
         console.log('\n── Losing it again clears the secured flag, silently ' + '─'.repeat(20));
         const loseRes = await request(server, 'POST', '/hub-api/sync/system', {
@@ -111,6 +114,7 @@ function request(server, method, urlPath, body) {
         ok('the enemy retaking it succeeds', loseRes.status === 200 && loseRes.body.success, loseRes.body);
         const unsecuredRow = db.prepare(`SELECT is_secured FROM systems WHERE id = 950`).get();
         ok('is_secured is cleared back to 0', unsecuredRow.is_secured === 0, unsecuredRow);
+        ok('countSecuredSystems drops back to 0', systemsRepo.countSecuredSystems() === 0, systemsRepo.countSecuredSystems());
     } finally {
         server.close();
     }
