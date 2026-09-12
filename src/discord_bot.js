@@ -1952,12 +1952,26 @@ async function announceSystemChanges(system, events) {
 // "phact-41"), so this only trusts the trailing number, not the name part (robust to a
 // renamed system, a typo, or any prefix style — see the design discussion, 2026-09-12).
 // Cheap: channels.cache is already populated from the gateway, no API call per lookup.
+//
+// Skips any channel sitting under a category whose name contains "archive" (2026-09-12c —
+// confirmed live: a real Discord server accumulates one such category per past game round,
+// e.g. "Archive (Beta 3)", "Archive (Beta 4)"). Trailing-number channel naming isn't unique
+// across rounds — a past round's own system channel (game system ids reset each round, so
+// "zujj-al-nushshabah-38" from an old archived round collides with THIS round's system 38)
+// would otherwise silently receive a live alert instead of the intended current channel,
+// with no error at all. This also incidentally fixed a real "Missing Access" error: two
+// unrelated round-planning channels the bot can't even view ("final-race-for-beta-4",
+// "random-thoughts-concerning-beta-5") happened to end in a number too and both live under
+// an Archive category.
 function findSystemChannel(systemId) {
     for (const [, guild] of client.guilds.cache) {
         for (const [, channel] of guild.channels.cache) {
             if (!channel || typeof channel.name !== 'string' || typeof channel.send !== 'function') continue;
             const m = channel.name.match(/-(\d+)$/);
-            if (m && parseInt(m[1], 10) === systemId) return channel;
+            if (!m || parseInt(m[1], 10) !== systemId) continue;
+            const category = channel.parent;
+            if (category && typeof category.name === 'string' && /archive/i.test(category.name)) continue;
+            return channel;
         }
     }
     return null;
@@ -1993,7 +2007,11 @@ async function announceSystemMilestones(system, events) {
     try {
         await channel.send({ embeds: [embed] });
     } catch (err) {
-        console.error('[Discord] Failed to send system-milestone announcement:', err.message);
+        // Named the system, channel and matched name (2026-09-12c) — a bare err.message
+        // gave no way to tell which of possibly several trailing-number matches actually
+        // failed, or why (e.g. a stale/decoy channel this system id's real channel doesn't
+        // even own).
+        console.error(`[Discord] Failed to send system-milestone announcement for system #${system.id} to #${channel.name} (${channel.id}):`, err.message);
     }
 }
 
