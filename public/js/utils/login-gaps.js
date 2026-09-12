@@ -18,7 +18,8 @@
 // coincidence and a pattern needs a second look.
 //
 // The samples are UTC (SQLite CURRENT_TIMESTAMP); the grid is in the VIEWER's local time,
-// so the rotation is done here with an explicit offset rather than by the server.
+// so browser callers use local calendar boundaries, including daylight-saving changes.
+// The explicit-offset mode remains available for callers analyzing a fixed UTC offset.
 //
 // LOADING: same dual Node/browser pattern as column-prefs.js.
 //   • Node:    require('../../public/js/utils/login-gaps.js')
@@ -66,32 +67,65 @@
         return out;
     }
 
-    // `days` rows (oldest first, today last) × 24 local hours. tzOffsetMin is the number of
-    // minutes to ADD to UTC to get the viewer's clock (-new Date().getTimezoneOffset()).
+    // A clock hour can disappear or occur in separated intervals (e.g. Troll's two-hour
+    // rollback). Walk the actual local day by minutes and merge adjacent minutes of the
+    // same hour. Modern timezone changes occur on minute boundaries, including Chatham's
+    // :45 and Lord Howe's half-hour transitions. This costs at most ~11k Date reads for
+    // a seven-day grid; scan-band comparisons still happen once per merged interval.
+    function localHourRanges(year, month, day) {
+        const start = new Date(year, month, day).getTime();
+        const end = new Date(year, month, day + 1).getTime();
+        const ranges = Array.from({ length: 24 }, () => []);
+        for (let cursor = start; cursor < end;) {
+            const next = Math.min(end, cursor + 60000);
+            const hour = new Date(cursor).getHours();
+            const list = ranges[hour];
+            const previous = list[list.length - 1];
+            if (previous && previous.end === cursor) previous.end = next;
+            else list.push({ start: cursor, end: next });
+            cursor = next;
+        }
+        return { start, ranges };
+    }
+
+    // `days` rows (oldest first, today last) × 24 clock-hour labels. With localTime:true,
+    // every occurrence must be covered before a repeated hour is quiet. Skipped hours
+    // stay unknown and cannot prove quiet windows. Fixed tzOffsetMin remains the number
+    // of minutes to ADD to UTC for callers analyzing an explicit offset.
     // Cell values: 'quiet' | 'active' | 'unknown' | 'future'.
-    function grid(bandList, { now, tzOffsetMin = 0, days = 7 }) {
+    function grid(bandList, { now, tzOffsetMin = 0, days = 7, localTime = false }) {
         const shift = tzOffsetMin * 60 * 1000;
         const todayStartLocal = Math.floor((now + shift) / DAY) * DAY;
+        const localNow = localTime ? new Date(now) : null;
         const rows = [];
         for (let d = 0; d < days; d++) {
             const dayStartLocal = todayStartLocal - (days - 1 - d) * DAY;
+            const local = localTime ? localHourRanges(localNow.getFullYear(), localNow.getMonth(),
+                localNow.getDate() - (days - 1 - d)) : null;
             const cells = [];
+            const hourDurations = [];
             for (let h = 0; h < 24; h++) {
-                const cellStart = dayStartLocal + h * HOUR - shift;
-                const cellEnd = cellStart + HOUR;
-                if (cellStart >= now) { cells.push('future'); continue; }
-                let active = 0, quiet = 0;
-                for (const b of bandList) {
-                    const overlap = Math.min(b.end, cellEnd) - Math.max(b.start, cellStart);
-                    if (overlap <= 0) continue;
-                    if (b.kind === 'active') active += overlap; else quiet += overlap;
+                const start = dayStartLocal + h * HOUR - shift;
+                const ranges = local ? local.ranges[h] : [{ start, end: start + HOUR }];
+                hourDurations.push(ranges.reduce((n, r) => n + r.end - r.start, 0));
+                if (!ranges.length) { cells.push('unknown'); continue; }
+                if (ranges.every(r => r.start >= now)) { cells.push('future'); continue; }
+                let active = 0, quiet = 0, span = 0;
+                for (const range of ranges) {
+                    const end = Math.min(range.end, now);
+                    span += Math.max(0, end - range.start);
+                    for (const b of bandList) {
+                        const overlap = Math.min(b.end, end) - Math.max(b.start, range.start);
+                        if (overlap <= 0) continue;
+                        if (b.kind === 'active') active += overlap; else quiet += overlap;
+                    }
                 }
-                // The current hour only runs up to `now`; a second of slack absorbs clock
-                // rounding in the sample timestamps.
-                const span = Math.min(cellEnd, now) - cellStart;
+                // The current hour only runs up to now; one second of slack absorbs
+                // rounding in observation timestamps.
                 cells.push(active > 0 ? 'active' : quiet >= span - 1000 ? 'quiet' : 'unknown');
             }
-            rows.push({ dayStartUtc: dayStartLocal - shift, cells });
+            rows.push({ dayStartUtc: local ? local.start : dayStartLocal - shift,
+                cells, ...(localTime ? { hourDurations } : {}) });
         }
         return rows;
     }
@@ -151,13 +185,13 @@
         return { at: lastChange.t, unchangedScans, lastScanAt, confirmedQuietMs: lastScanAt - lastChange.t };
     }
 
-    function analyze(samples, { now = Date.now(), tzOffsetMin = 0, days = 7 } = {}) {
+    function analyze(samples, { now = Date.now(), tzOffsetMin = 0, days = 7, localTime = false } = {}) {
         const from = now - days * DAY;
         const s = normalise(samples);
         const bandList = bands(s, from, now);
-        const rows = grid(bandList, { now, tzOffsetMin, days });
+        const rows = grid(bandList, { now, tzOffsetMin, days, localTime });
         const observed = rows.reduce((n, r) => n + r.cells.filter(c => c === 'quiet' || c === 'active').length, 0);
-        const past = rows.reduce((n, r) => n + r.cells.filter(c => c !== 'future').length, 0);
+        const past = rows.reduce((n, r) => n + r.cells.filter((c, h) => c !== 'future' && (!r.hourDurations || r.hourDurations[h] > 0)).length, 0);
         return {
             from, now,
             sampleCount: s.filter(x => x.t >= from && x.t <= now).length,

@@ -79,13 +79,15 @@ async function main() {
         process.env.TZ = 'Europe/Warsaw';
         const h = harness();
         h.run("scheduleInput.setMode('arrival')");
-        h.get('rp-start').value = '2026-09-09T18:00:23';
+        h.get('rp-start').value = '2026-09-09';
+        h.get('rp-start-time').value = '18:00:23';
         const firstPreview = h.run('preview()');
         const body = JSON.parse(h.requests[0].options.body);
         ok('preview sends the active arrival anchor with seconds and a null start', body.targetArrivalAt === '2026-09-09T16:00:23.000Z' && body.plannedStartAt === null, body);
 
         // The input changes while the first fetch is still pending, before debounce fires.
-        h.get('rp-start').value = '2026-03-29T02:30';
+        h.get('rp-start').value = '2026-03-29';
+        h.get('rp-start-time').value = '02:30';
         h.run('scheduleInput.edit(); schedulePreview()');
         h.requests[0].resolve(schedule('2026-09-09T15:00:23Z', '2026-09-09T16:00:23Z'));
         await firstPreview;
@@ -101,7 +103,23 @@ async function main() {
         ok('a partially entered native date is invalid rather than treated as unscheduled', h.requests.length === count && h.get('rp-error').textContent.includes('valid local date'));
         h.get('rp-start').validity.valid = true;
 
-        h.get('rp-start').value = '2000-01-01T18:00:23';
+        h.get('rp-start-time').value = '18:00:23';
+        await h.run('preview()');
+        ok('a time without a date never becomes an unscheduled route', h.requests.length === count && h.get('rp-error').textContent.includes('leave both empty'));
+        h.get('rp-start').value = '2026-09-09';
+        h.get('rp-start-time').value = '';
+        await h.run('preview()');
+        ok('a date without a time never silently schedules at midnight', h.requests.length === count && h.get('rp-error').textContent.includes('leave both empty'));
+        for (const value of ['6:00 PM', '24:00:00', '18:60:00']) {
+            h.get('rp-start-time').value = value;
+            await h.run('preview()');
+            ok(`invalid 24-hour input never reaches the API: ${value}`, h.requests.length === count);
+        }
+        h.get('rp-start-time').value = '00:00';
+        ok('minute-only midnight stays on the selected local date', h.run('currentPayload().targetArrivalAt') === '2026-09-08T22:00:00.000Z');
+
+        h.get('rp-start').value = '2000-01-01';
+        h.get('rp-start-time').value = '18:00:23';
         const pastPreview = h.run('preview()');
         h.requests.at(-1).resolve(schedule('2000-01-01T16:00:23Z', '2000-01-01T17:00:23Z'));
         await pastPreview;
@@ -116,7 +134,7 @@ async function main() {
         saved.legs[0].isAllianceMove = true;
         const beforeOpen = h.requests.length;
         h.run(`loadIntoForm(${JSON.stringify(saved)})`);
-        ok('opening a saved route restores arrival mode and input seconds', h.get('rp-schedule-mode').value === 'arrival' && h.get('rp-start').value === '2026-10-25T02:30:23');
+        ok('opening a saved route restores arrival mode, local date and 24-hour seconds', h.get('rp-schedule-mode').value === 'arrival' && h.get('rp-start').value === '2026-10-25' && h.get('rp-start-time').value === '02:30:23');
         ok('opening renders the saved schedule snapshot without recalculating it', h.requests.length === beforeOpen && h.get('rp-total').textContent === saved.totalTime && h.get('rp-departure').innerHTML.includes('10-25 00:30:23Z'));
         ok('saved allied modifier does not invent a manual override', h.get('rp-legs').innerHTML.includes('Saved alliance/own-destination travel modifier') && !h.get('rp-legs').textContent.includes('allied (forced)'));
 
@@ -162,7 +180,7 @@ async function main() {
         h.get('rp-start').validity.valid = true;
 
         h.run('resetForm()');
-        ok('New resets arrival mode and both timing anchors', h.get('rp-schedule-mode').value === 'start' && h.get('rp-start').value === '' && h.run('currentPayload().targetArrivalAt') === null && h.run('currentPayload().plannedStartAt') === null);
+        ok('New resets arrival mode, both input fields and both timing anchors', h.get('rp-schedule-mode').value === 'start' && h.get('rp-start').value === '' && h.get('rp-start-time').value === '' && h.run('currentPayload().targetArrivalAt') === null && h.run('currentPayload().plannedStartAt') === null);
         h.requests.at(-1).resolve(schedule(null, null));
     } finally {
         if (originalTz === undefined) delete process.env.TZ;

@@ -2,7 +2,7 @@ import { esc } from '../utils/escape.js';
 import '../utils/battle-model.js';   // side-effect import: puts the model on globalThis
 import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
 
-const { formatSqliteUtc } = globalThis.AWSqliteTime;
+const { formatSqliteUtc, formatLocalDateTime } = globalThis.AWSqliteTime;
 
 let localSystemId = null;
 
@@ -59,7 +59,12 @@ export async function loadPlans(sysId) {
 
         document.getElementById('intel-fleets-list').innerHTML = data.fleets.length ? data.fleets.map(f => {
             const cv = globalThis.AWBattleModel.cvOf(f);
-            const statBadge = (f.arrival_time && f.arrival_time !== '-') ? `<span class="text-s bg-red-500/20 text-red-400 px-1 rounded ml-1">Transit: ${esc(f.arrival_time)}</span>` : '';
+            // A stored display label cannot establish the viewer's local arrival time.
+            const sourceArrival = f.arrival_time && f.arrival_time !== '-' ? f.arrival_time : '';
+            const canonicalArrival = formatLocalDateTime(f.arrival_at, undefined, '');
+            const arrival = canonicalArrival || (sourceArrival ? 'Time unknown' : '');
+            const arrivalTitle = !canonicalArrival && sourceArrival ? `Recorded source time (timezone unknown): ${sourceArrival}` : '';
+            const statBadge = arrival ? `<span title="${esc(arrivalTitle)}" class="text-s bg-red-500/20 text-red-400 px-1 rounded ml-1">Transit: ${esc(arrival)}</span>` : '';
             return `
                 <div class="flex justify-between items-center py-0.5 text-s">
                     <span class="text-muted-foreground">At #${f.planet_index} ${statBadge}</span>

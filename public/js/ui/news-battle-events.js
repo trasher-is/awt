@@ -6,6 +6,7 @@
 // conquest announcements stay complete. See docs/superpowers/specs/2026-08-30-battle-
 // challenge-tracker-design.md section 3 for the full design.
 import '../utils/game-rate-limit.js';
+import { readUtcTimestamp } from '../utils/fleet-time.js';
 const { gameFetch } = globalThis.AWGameRate;
 
 const MAX_PAGES_PER_VISIT = 20;
@@ -95,8 +96,9 @@ function collectEntriesFromDoc(doc, now) {
         if (!msgCell || tr.getAttribute('data-aw-newsbattle') === '1') return;
 
         const type = NEWS_TYPES.find(t => msgCell.classList.contains(t));
-        const timeText = (msgCell.textContent || '').trim().split('\n')[0].trim();
-        const occurred_at = parseNewsTimestamp(timeText, now);
+        const timestamp = readUtcTimestamp(msgCell);
+        const occurred_at = timestamp !== undefined ? (timestamp ? timestamp.toISOString() : null)
+            : parseNewsTimestamp((msgCell.textContent || '').trim().split('\n')[0].trim(), now);
         if (!occurred_at) return;
 
         const parsed = type === 'battle-bombard' ? parseBombardmentRow(tr) : parseConquestRow(tr);

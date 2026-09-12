@@ -1,0 +1,78 @@
+<div id="road-to-ta-panel" aria-labelledby="rta-title" class="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden">
+    <style>
+        #road-to-ta-panel .rta-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px }
+        #road-to-ta-panel .rta-range { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px }
+        #road-to-ta-panel label { display:flex; flex-direction:column; gap:5px; color:#a1a1aa; font-size:12px }
+        #road-to-ta-panel input:not([type=checkbox]), #road-to-ta-panel select { min-width:0; width:100%; height:36px; border:1px solid #3f3f46; border-radius:5px; background:#09090b; color:#fafafa; padding:0 8px; font-size:13px }
+        #road-to-ta-panel input:focus-visible, #road-to-ta-panel select:focus-visible, #road-to-ta-panel button:focus-visible { outline:2px solid #a1a1aa; outline-offset:2px }
+        #road-to-ta-panel button:disabled { opacity:.45; cursor:default }
+        #road-to-ta-panel .rta-table { width:100%; border-collapse:collapse; font-size:12px; text-align:left }
+        #road-to-ta-panel .rta-table th, #road-to-ta-panel .rta-table td { padding:9px; border-bottom:1px solid #27272a; vertical-align:top }
+        #road-to-ta-panel .rta-table th { color:#a1a1aa; font-weight:500 }
+        #road-to-ta-panel .rta-table input:not([type=checkbox]) { min-width:72px }
+        #road-to-ta-panel .rta-help { font-size:12px; line-height:1.6; color:#a1a1aa }
+        #road-to-ta-panel .rta-box { border:1px solid #27272a; border-radius:8px; padding:16px; background:#09090b }
+        #road-to-ta-panel .rta-strategies { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px }
+        @media(max-width:650px) { #road-to-ta-panel .rta-strategies { grid-template-columns:1fr } #road-to-ta-panel .rta-grid { grid-template-columns:repeat(2,minmax(0,1fr)) } }
+    </style>
+    <div class="flex-1 min-h-0 overflow-auto p-4 md:p-6 space-y-5">
+        <div class="space-y-1">
+            <h3 id="rta-title" class="font-semibold text-foreground">Road to TA</h3>
+            <p class="rta-help">Compare how to build, grow and save for your next agreements. Use Board and Schedule to coordinate them with your alliance.</p>
+        </div>
+        <div class="flex flex-wrap items-end gap-3">
+            <label class="flex-1 min-w-[160px]">Player<select id="rta-player"><option value="">Loading members…</option></select></label>
+            <button id="rta-reload" type="button" class="h-9 px-3 rounded-md border border-border text-xs hover:bg-accent">Reload intel &amp; reset inputs</button>
+        </div>
+        <p id="rta-status" role="status" aria-live="polite" class="rta-help">Loading saved intelligence…</p>
+        <form id="rta-form" class="space-y-5">
+            <fieldset id="rta-inputs" disabled class="space-y-5 min-w-0">
+                <section class="rta-box space-y-3">
+                    <h3 class="font-semibold text-sm">Budget &amp; market</h3>
+                    <p class="rta-help">Each TA costs <strong class="text-foreground">20,000 A$ per side</strong>. Prices below are A$ received for selling one PP. The forecast holds your chosen price constant and compares ±20% price scenarios.</p>
+                    <div class="rta-grid">
+                        <label>Sale price (A$ / PP)<input id="rta-price" type="number" min="0.000001" step="any" required></label>
+                        <label>Available A$<input id="rta-cash" type="number" min="0" step="any" required></label>
+                        <label>Completed TAs (0–5)<input id="rta-completed" type="number" min="0" max="5" step="1" required></label>
+                        <label>Player Level<input id="rta-level" type="number" min="0" max="100" step="1" required></label>
+                        <label>Forecast horizon (days)<input id="rta-horizon" type="number" min="1" max="180" value="60" required></label>
+                    </div>
+                    <label style="flex-direction:row;align-items:center"><input id="rta-trader" type="checkbox"> Trader accepting offers (waives only your accept fee)</label>
+                    <p id="rta-market-stamp" class="rta-help"></p>
+                    <p id="rta-conversion" class="text-sm font-mono"></p>
+                </section>
+                <section class="rta-box space-y-3">
+                    <h3 class="font-semibold text-sm">Current development</h3>
+                    <p class="rta-help">Use current effective output, including race, artifact and existing trade bonuses. Science continues independently of PP spending. When Social is below 10, the plan researches it first to unlock population 10.</p>
+                    <div class="rta-grid">
+                        <label>Social level<input id="rta-social" type="number" min="0" max="100" step="1" required></label>
+                        <label>Science / hour<input id="rta-science-rate" type="number" min="0" step="any" required></label>
+                        <label>PP / hour (for auto multiplier)<input id="rta-production-rate" type="number" min="0" step="any"></label>
+                        <label>Culture / hour (optional)<input id="rta-culture-rate" type="number" min="0" step="any"></label>
+                        <label>Current trade revenue (%)<input id="rta-trade-bonus" type="number" min="0" step="any" required></label>
+                        <label>Economy bonus (%)<input id="rta-eco-bonus" type="number" min="0" max="5" step="5" placeholder="Confirm 0 or 5" required></label>
+                        <label>Growth multiplier (e.g. 1.25)<input id="rta-growth" type="number" min="0.01" step="any" required></label>
+                        <label>Production multiplier<input id="rta-production" type="number" min="0.01" step="any" placeholder="Auto from PP/h and planets"></label>
+                        <label>Science multiplier<input id="rta-science" type="number" min="0.01" step="any" placeholder="Auto from science/h and planets"></label>
+                    </div>
+                    <button id="rta-use-bio" type="button" class="h-8 px-3 rounded border border-border text-xs hover:bg-accent">Calculate growth from saved bio &amp; artifact</button>
+                    <p id="rta-development-stamp" class="rta-help"></p>
+                </section>
+                <section class="rta-box space-y-3">
+                    <div class="flex flex-wrap gap-3 justify-between items-center"><h3 class="font-semibold text-sm">Your current planets</h3><button id="rta-add-planet" type="button" class="h-8 px-3 rounded border border-border text-xs hover:bg-accent">Add missing planet</button></div>
+                    <p class="rta-help">Population and locations come from saved observations. Enter each planet's actual building levels and local PP; blanks are unknown, not zero. HF = farms, RF = factories, RL = labs, GC = cybernets. Optional growth points default to zero, giving a conservative estimate.</p>
+                    <p id="rta-coverage" class="rta-help"></p>
+                    <div class="overflow-x-auto"><table class="rta-table"><thead><tr><th>Planet / last seen</th><th>Pop</th><th>HF</th><th>RF</th><th>RL</th><th>GC</th><th>Local PP</th><th>Growth points</th><th>Sieged</th><th></th></tr></thead><tbody id="rta-planets"></tbody></table></div>
+                </section>
+                <details class="rta-box space-y-3" open>
+                    <summary class="cursor-pointer font-semibold text-sm">Partners &amp; future bonus ranges</summary>
+                    <p class="rta-help">Each partner contributes 1% per planet at population 10+. Added bonuses accumulate with current TR. Default planning assumptions are TA 1: 3–4%, TA 2: 5–6%, TA 3: 6–7%, TA 4: 8–9%, TA 5: 10%; edit both bounds. A confirmed board partner with observed qualified planets replaces that assumption with its current count. Existing effective output already includes current race, artifact, TR and economy bonuses. Dates assume each partner is ready to accept; coordinate pairings on Board.</p>
+                    <div id="rta-partners" class="rta-grid"></div>
+                </details>
+                <button id="rta-calculate" type="submit" class="h-10 px-5 rounded-md bg-white text-black font-semibold text-sm hover:bg-zinc-200">Compare strategies</button>
+                <p class="rta-help">These are planning scenarios for the standard round. No building, sale or TA is executed. Inputs stay in this tab only.</p>
+            </fieldset>
+        </form>
+        <div id="rta-results" aria-live="polite"></div>
+    </div>
+</div>

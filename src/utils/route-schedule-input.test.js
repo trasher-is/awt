@@ -1,4 +1,4 @@
-// The saved UTC instant must survive a datetime-local round trip, including the second
+// The saved UTC instant must survive a local date/time round trip, including the second
 // occurrence of an autumn clock change. Fixtures are synthetic; no game data is used.
 const { localInputToIso, isoToLocalInput, createScheduleInput } = require('../../public/js/utils/route-schedule-input');
 

@@ -7,11 +7,22 @@
         <div class="flex flex-wrap justify-between items-center gap-3">
             <div class="flex items-center gap-2 flex-1 min-w-[200px] max-w-sm">
                 <i class="fa-solid fa-magnifying-glass text-muted-foreground text-xs"></i>
-                <input id="battle-reports-search-input" type="text" placeholder="Search player, alliance, or system…"
+                <input id="battle-reports-search-input" type="text" maxlength="200" placeholder="Search player, alliance, or system…"
                        class="flex-1 bg-input border border-border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
             <div class="text-xs text-muted-foreground hidden md:block">Battles link to the game's own report. A population drop with no matching report shows without a link. Click a column to sort.</div>
             <div class="text-sm text-muted-foreground font-mono whitespace-nowrap">Showing <span id="battle-reports-result-count" class="text-foreground font-bold">0</span> of <span id="battle-reports-total-count" class="text-foreground font-bold">0</span></div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <label for="battle-reports-export-format" class="text-xs text-muted-foreground">Export format</label>
+            <select id="battle-reports-export-format" class="bg-input border border-border rounded px-2 py-1.5 text-sm" aria-label="Battle report export format">
+                <option value="csv">CSV</option>
+                <option value="json">JSON</option>
+            </select>
+            <button id="battle-reports-export-all" type="button" class="border border-border rounded px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed">Export all reports</button>
+            <button id="battle-reports-export-filtered" type="button" disabled class="border border-border rounded px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed">Export filtered results</button>
+            <span id="battle-reports-export-status" role="status" aria-live="polite" class="text-xs text-muted-foreground"></span>
+            <p class="w-full text-xs text-muted-foreground">All reports includes every stored report, even without a known location. Filtered results includes all matches in the current sort order, including population drops, beyond the displayed rows.</p>
         </div>
         <div class="flex-1 overflow-auto border border-border rounded-lg bg-card relative shadow-sm">
             <table class="w-full md:w-auto text-left text-sm whitespace-nowrap">

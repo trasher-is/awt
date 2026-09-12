@@ -117,7 +117,7 @@ async function main() {
         process.env.TZ = 'Europe/Warsaw';
         const h = harness();
         const loaded = h.run(`scheduleInput.load({ targetArrivalAt: '${target}' })`);
-        h.get('rp-start').value = loaded.value;
+        [h.get('rp-start').value, h.get('rp-start-time').value] = loaded.value.split('T');
         const before = h.run('currentPayload()');
         const buttons = await search(h, [airport, { ...airport, savedSeconds: -120, totalSeconds: 3720, totalTime: '01:02:00' }, { ...airport, savedSeconds: 0, outOfReach: true, bioNeeded: 13 }]);
         const request = h.requests[0];
@@ -222,7 +222,8 @@ async function main() {
         const handoff = harness();
         handoff.run(`editingId = 27; scheduleInput.load({ targetArrivalAt: '${target}' }); wirePlayerSearch()`);
         handoff.get('rp-schedule-mode').value = 'arrival';
-        handoff.get('rp-start').value = '2026-10-25T02:30:23';
+        handoff.get('rp-start').value = '2026-10-25';
+        handoff.get('rp-start-time').value = '02:30:23';
         handoff.get('rp-player-input').value = 'Old player';
         const oldPlayerSearch = handoff.get('rp-player-input').fire('input');
         const oldPlayerRequest = handoff.requests.at(-1);
@@ -235,7 +236,7 @@ async function main() {
         const draftRequest = handoff.requests.at(-1);
         const draftBody = JSON.parse(draftRequest.options.body);
         ok('Travel Calculator handoff starts a new route and seeds both waypoint labels and planets', handoff.run('editingId') === null && JSON.stringify(handoff.testStops) === JSON.stringify(draft.waypoints));
-        ok('handoff clears both saved anchors and defaults to planned-start mode', draftBody.plannedStartAt === null && draftBody.targetArrivalAt === null && handoff.get('rp-schedule-mode').value === 'start' && handoff.get('rp-start').value === '');
+        ok('handoff clears both saved anchors and input fields and defaults to planned-start mode', draftBody.plannedStartAt === null && draftBody.targetArrivalAt === null && handoff.get('rp-schedule-mode').value === 'start' && handoff.get('rp-start').value === '' && handoff.get('rp-start-time').value === '');
         ok('handoff copies fleet settings but resets biology and old route metadata', draftBody.energy === 12 && draftBody.raceSpeed === -2 && draftBody.isAllianceMove === true && draftBody.biology === 0 && draftBody.title === '' && draftBody.note === '');
         ok('handoff only previews the new flight and never writes a saved route', handoff.requests.length === countBeforeDraft + 1 && draftRequest.url === '/hub-api/routes/preview' && draftRequest.options.method === 'POST');
         oldPlayerRequest.resolve({ success: true, players: [{ name: 'Old player match', energy: 99 }] });

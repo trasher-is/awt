@@ -25,6 +25,12 @@ ok('countFleets is 1 after insert', fleets.countFleets() === 1);
 
 const forSystem = fleets.getFleetsForSystem(10);
 ok('getFleetsForSystem returns the fleet', forSystem.length === 1 && forSystem[0].owner_name === 'caveman');
+db.prepare('UPDATE fleets SET arrival_at = ?, arrival_time = ? WHERE owner_id = 1')
+    .run('2026-09-12T18:30:00Z', 'Sep 12 8:30 PM');
+const arriving = fleets.getFleetsForSystem(10)[0];
+ok('system intel exposes the canonical instant for viewer-local arrival display',
+    arriving.arrival_at === '2026-09-12T18:30:00Z');
+ok('legacy arrival text remains available without guessing its timezone', arriving.arrival_time === 'Sep 12 8:30 PM');
 
 const upd = fleets.updateFleetGameId(999, 1, 10, 1);
 ok('updateFleetGameId updates one row', upd.changes === 1);

@@ -175,7 +175,7 @@ function getAllianceMemberStatIds() {
 }
 
 const getTradeAnalysisRowsStmt = db.prepare(`
-    SELECT p.name,
+    SELECT p.id, p.name,
            ams.production_rate,
            ams.astro_dollars,
            ams.production_points,
