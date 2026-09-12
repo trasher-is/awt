@@ -374,6 +374,24 @@ export async function refreshAllianceStatsData() {
 // ever exists at a time (see the singleton `panel` lookup in openBattleReportsPanel).
 const battleReportsState = { q: '', sort: 'occurred_at', dir: 'desc' };
 let battleReportsSearchTimer = null;
+let battleReportsSearchController = null;
+let battleReportsSearchVersion = 0;
+let battleReportsAppliedFilters = null;
+let battleReportsExporting = false;
+
+function updateBattleReportExportButtons() {
+    const all = document.getElementById('battle-reports-export-all');
+    const filtered = document.getElementById('battle-reports-export-filtered');
+    if (all) all.disabled = battleReportsExporting;
+    if (filtered) filtered.disabled = battleReportsExporting || !battleReportsAppliedFilters;
+}
+
+function invalidateBattleReportsSearch() {
+    battleReportsSearchVersion++;
+    battleReportsSearchController?.abort();
+    battleReportsAppliedFilters = null;
+    updateBattleReportExportButtons();
+}
 
 export async function openBattleReportsPanel() {
     let panel = document.getElementById('battle-reports-panel');
@@ -388,9 +406,12 @@ export async function openBattleReportsPanel() {
         // currently on screen), unlike the other panels' instant client-side filters.
         panel.querySelector('#battle-reports-search-input')?.addEventListener('input', (e) => {
             battleReportsState.q = e.target.value;
+            invalidateBattleReportsSearch();
             clearTimeout(battleReportsSearchTimer);
             battleReportsSearchTimer = setTimeout(loadBattleReportsTable, 300);
         });
+        panel.querySelector('#battle-reports-export-all')?.addEventListener('click', () => exportBattleReports('all'));
+        panel.querySelector('#battle-reports-export-filtered')?.addEventListener('click', () => exportBattleReports('filtered'));
         panel.querySelectorAll('[data-sort-key]').forEach(th => {
             th.addEventListener('click', () => {
                 const key = th.getAttribute('data-sort-key');
@@ -400,6 +421,7 @@ export async function openBattleReportsPanel() {
                     battleReportsState.sort = key;
                     battleReportsState.dir = 'desc';
                 }
+                clearTimeout(battleReportsSearchTimer);
                 loadBattleReportsTable();
             });
         });
@@ -413,16 +435,71 @@ export async function openBattleReportsPanel() {
 }
 
 async function loadBattleReportsTable() {
+    clearTimeout(battleReportsSearchTimer);
+    invalidateBattleReportsSearch();
+    const version = battleReportsSearchVersion;
+    const filters = { ...battleReportsState };
+    const controller = new AbortController();
+    battleReportsSearchController = controller;
     updateSortArrows();
+    document.getElementById('battle-reports-result-count').textContent = '…';
+    document.getElementById('battle-reports-total-count').textContent = '…';
     document.getElementById('battle-reports-table-body').innerHTML = '<tr><td colspan="7" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading battle reports...</td></tr>';
     try {
-        const params = new URLSearchParams({ q: battleReportsState.q, sort: battleReportsState.sort, dir: battleReportsState.dir, limit: '150' });
-        const res = await fetch(`/hub-api/intel/battle-reports-search?${params}`);
+        const params = new URLSearchParams({ ...filters, limit: '150' });
+        const res = await fetch(`/hub-api/intel/battle-reports-search?${params}`, { signal: controller.signal });
         const data = await res.json();
-        if (data.success) renderBattleReportsTable(data.feed, data.total);
-        else throw new Error(data.error || 'unknown error');
+        if (version !== battleReportsSearchVersion) return;
+        if (!res.ok || !data.success) throw new Error(data.error || 'Failed to load battle reports');
+        renderBattleReportsTable(data.feed, data.total);
+        battleReportsAppliedFilters = filters;
+        updateBattleReportExportButtons();
     } catch (err) {
+        if (version !== battleReportsSearchVersion || err.name === 'AbortError') return;
+        document.getElementById('battle-reports-result-count').textContent = '0';
+        document.getElementById('battle-reports-total-count').textContent = '—';
         document.getElementById('battle-reports-table-body').innerHTML = '<tr><td colspan="7" class="text-center py-8 text-red-500">Failed to load data.</td></tr>';
+    }
+}
+
+async function exportBattleReports(scope) {
+    if (battleReportsExporting || (scope === 'filtered' && !battleReportsAppliedFilters)) return;
+    const format = document.getElementById('battle-reports-export-format').value;
+    // Snapshot the completed search, so typing/sorting during the download cannot
+    // silently change which results the button was referring to when clicked.
+    const filters = scope === 'filtered' ? { ...battleReportsAppliedFilters } : {};
+    const status = document.getElementById('battle-reports-export-status');
+    battleReportsExporting = true;
+    updateBattleReportExportButtons();
+    status.textContent = 'Preparing download…';
+    try {
+        const params = new URLSearchParams({ scope, format, ...filters });
+        const response = await fetch(`/hub-api/intel/battle-reports-export?${params}`);
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || 'Failed to export battle reports');
+        }
+        const expectedType = format === 'csv' ? 'text/csv' : 'application/json';
+        if (!response.headers.get('Content-Type')?.includes(expectedType)) {
+            throw new Error('Unexpected export response. Please sign in again and retry.');
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const filename = response.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1];
+        link.href = url;
+        link.download = filename || `battle-reports-${scope}.${format}`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        // Give browsers time to start consuming the download before releasing its URL.
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+        status.textContent = 'Download ready.';
+    } catch (err) {
+        status.textContent = err.message || 'Failed to export battle reports';
+    } finally {
+        battleReportsExporting = false;
+        updateBattleReportExportButtons();
     }
 }
 

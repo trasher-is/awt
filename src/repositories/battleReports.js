@@ -333,33 +333,28 @@ function getBattleReportsFeed(limit = 50) {
 // it always sorts last regardless of direction — same treatment as a null population on a
 // pop sort.
 //
-// Fetches a generous cap from EACH source before merging (SEARCH_FETCH_CAP) and sorts the
-// merged array in JS, same as the plain feed already does for its own chronological
-// merge — correct at this hub's actual scale (low thousands of rows per round) without a
-// UNION across two differently-shaped tables. If a round's battle history ever grows past
-// the cap, a search could miss older matches — the same class of accepted tradeoff as
-// battle-sync.js's TAKE cap on the game API pull itself.
-const SEARCH_FETCH_CAP = 5000;
+// Search and export share the complete matching set before sorting/pagination. A source
+// cap could silently omit older matches and make a "filtered" export incomplete.
+const battleReportColumns = db.prepare('PRAGMA table_info(battle_reports)').all().map(column => column.name);
 
-const battleReportsSearchStmt = db.prepare(`
-    SELECT br.id AS battle_report_id, datetime(br.started_at) AS occurred_at,
-           br.system_id, br.planet_index, s.name AS system_name,
-           br.att_player_name, br.att_alliance_tag, br.att_has_won,
-           br.att_combat_value, br.att_survived_cv,
-           br.def_player_name, br.def_alliance_tag, br.def_has_won,
-           br.def_combat_value, br.def_survived_cv,
-           br.killed_population, br.winner,
+const battleReportsSearchSelect = `
+    SELECT br.*, br.id AS battle_report_id, datetime(br.started_at) AS occurred_at,
+           s.name AS system_name,
            (COALESCE(br.att_lost_cv, 0) + COALESCE(br.def_lost_cv, 0)) AS total_cv_lost
     FROM battle_reports br
     LEFT JOIN systems s ON s.id = br.system_id
+`;
+const battleReportsSearchStmt = db.prepare(`${battleReportsSearchSelect}
     WHERE br.system_id IS NOT NULL
       AND (
-          br.att_player_name LIKE @q OR br.def_player_name LIKE @q
+          @q = '%' OR br.att_player_name LIKE @q OR br.def_player_name LIKE @q
           OR br.att_alliance_tag LIKE @q OR br.def_alliance_tag LIKE @q
           OR s.name LIKE @q
       )
-    ORDER BY br.started_at DESC
-    LIMIT @limit
+    ORDER BY datetime(br.started_at) DESC, br.id DESC
+`);
+const allBattleReportsExportStmt = db.prepare(`${battleReportsSearchSelect}
+    ORDER BY datetime(br.started_at) DESC, br.id DESC
 `);
 
 const unmatchedPopDropsSearchStmt = db.prepare(`
@@ -389,11 +384,12 @@ const SORT_KEYS = {
     att_cv: 'attacker_combat_value', def_cv: 'defender_combat_value',
 };
 
-function searchBattleReportsFeed({ q = '', sort = 'occurred_at', dir = 'desc', limit = 50, offset = 0 } = {}) {
-    const trimmed = (q || '').trim();
-    const likeTerm = trimmed ? `%${trimmed}%` : '%';
-
-    const battles = battleReportsSearchStmt.all({ q: likeTerm, limit: SEARCH_FETCH_CAP }).map(row => ({
+function battleReportFeedRow(row, includeDetails = false) {
+    return {
+        ...(includeDetails ? {
+            record_type: 'battle_report',
+            ...Object.fromEntries(battleReportColumns.map(column => [column, row[column]])),
+        } : {}),
         occurred_at: row.occurred_at,
         battle_report_id: row.battle_report_id,
         system_id: row.system_id, planet_index: row.planet_index, system_name: row.system_name,
@@ -409,13 +405,25 @@ function searchBattleReportsFeed({ q = '', sort = 'occurred_at', dir = 'desc', l
         killed_population: row.killed_population, winner: row.winner,
         total_cv_lost: row.total_cv_lost,
         old_population: null, new_population: null,
-    }));
+    };
+}
+
+function searchBattleReportsFeed({ q = '', sort = 'occurred_at', dir = 'desc', limit = 50, offset = 0, includeDetails = false } = {}) {
+    const trimmed = (q || '').trim();
+    const likeTerm = trimmed ? `%${trimmed}%` : '%';
+
+    const battles = battleReportsSearchStmt.all({ q: likeTerm }).map(row => battleReportFeedRow(row, includeDetails));
+
     // A bare population-drop row has no attacker/defender name of its own to match
     // against — skip the query entirely (same shape as the plain feed's unfiltered pull)
     // when there's nothing to search for, since @q would just be the neutral '%' anyway.
     const dropRows = (trimmed ? unmatchedPopDropsSearchStmt : unmatchedPopDropsStmt)
-        .all({ q: likeTerm, window: POP_DROP_MATCH_WINDOW_MINUTES, limit: SEARCH_FETCH_CAP })
+        .all({ q: likeTerm, window: POP_DROP_MATCH_WINDOW_MINUTES, limit: -1 })
         .map(row => ({
+            ...(includeDetails ? {
+                record_type: 'population_drop',
+                ...Object.fromEntries(battleReportColumns.map(column => [column, null])),
+            } : {}),
             occurred_at: row.occurred_at,
             battle_report_id: null,
             system_id: row.system_id, planet_index: row.planet_index, system_name: row.system_name,
@@ -431,20 +439,33 @@ function searchBattleReportsFeed({ q = '', sort = 'occurred_at', dir = 'desc', l
             old_population: row.old_population, new_population: row.new_population,
         }));
 
-    const merged = [...battles, ...dropRows];
+    const merged = sortBattleReportRows([...battles, ...dropRows], sort, dir);
+    return { total: merged.length, rows: merged.slice(offset, offset + limit) };
+}
+
+function sortBattleReportRows(rows, sort, dir) {
     const key = SORT_KEYS[sort] || 'occurred_at';
     const direction = dir === 'asc' ? 1 : -1;
-    merged.sort((a, b) => {
+    return rows.sort((a, b) => {
         const av = a[key], bv = b[key];
         if (av == null && bv == null) return 0;
-        if (av == null) return 1;  // nulls (no CV / no population figure) always sort last
+        if (av == null) return 1;
         if (bv == null) return -1;
         if (av < bv) return -1 * direction;
         if (av > bv) return 1 * direction;
         return 0;
     });
+}
 
-    return { total: merged.length, rows: merged.slice(offset, offset + limit) };
+function getBattleReportsExport({ scope = 'all', q = '', sort = 'occurred_at', dir = 'desc' } = {}) {
+    const rows = scope === 'filtered'
+        ? searchBattleReportsFeed({ q, sort, dir, limit: Infinity, includeDetails: true }).rows
+        : sortBattleReportRows(allBattleReportsExportStmt.all().map(row => battleReportFeedRow(row, true)), sort, dir);
+    // Derive stored columns from SQLite so a later additive migration cannot disappear
+    // from exports. Include headers even when there are no matching records.
+    const columns = [...new Set(['record_type', ...battleReportColumns,
+        ...Object.keys(battleReportFeedRow({}, false))])];
+    return { columns, rows };
 }
 
 module.exports = {
@@ -463,4 +484,5 @@ module.exports = {
     hasAnyBattleHistory,
     getBattleReportsFeed,
     searchBattleReportsFeed,
+    getBattleReportsExport,
 };

@@ -5,6 +5,9 @@ A private tool for an alliance in the browser strategy game
 reverse proxy in front of the game, collects what members see into a shared SQLite
 database, and exposes that back through a dashboard and a Discord bot.
 
+The dashboard can [export battle reports and estimate race ranges from stored
+battles](docs/battle-report-tools.md), with confirmed bio intelligence always taking precedence.
+
 ## How it fits together
 
 Members reach the game *through* this server rather than directly. The proxy injects a

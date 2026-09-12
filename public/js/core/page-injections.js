@@ -1,4 +1,5 @@
 import { esc } from '../utils/escape.js';
+import { mountBattleRaceIntel } from '../ui/battle-race-intel.js';
 import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
 import '../utils/game-rate-limit.js';
 import '../utils/game-tables.js';    // side-effect import: empire-model.js's own dependency
@@ -1120,6 +1121,7 @@ export async function initProfileHubIntel() {
             <div class="col-lg-6">${buildBuildingsCard(p)}</div>
         </div>`;
     anchor.parentNode.insertBefore(wrap, anchor);
+    mountBattleRaceIntel(wrap, { playerId, hasBio: !!p.has_intel, hasLiveIntel });
 
     // Without live intel, the game renders the player-info card as a single col-12 instead
     // of its usual col-lg-6 paired with an Intelligence Report column — there is no "top

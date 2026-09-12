@@ -946,6 +946,15 @@ function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_bonus_goal_active_targets_location ON bonus_goal_active_targets(system_id, planet_index, claimed_award_id);
     `);
 
+    // Battle-derived candidates are deliberately separate from confirmed bio/race intel.
+    // They disappear with the player at a round reset and never enter race snapshots.
+    addColumn('players', 'battle_race_inference', 'TEXT');
+    addColumn('players', 'battle_race_not_before', 'TEXT');
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_battle_reports_att_player ON battle_reports(att_player_id);
+        CREATE INDEX IF NOT EXISTS idx_battle_reports_def_player ON battle_reports(def_player_id);
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

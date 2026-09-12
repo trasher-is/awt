@@ -6,6 +6,7 @@ const plansRepo = require('../repositories/plans');
 const playersRepo = require('../repositories/players');
 const alliancesRepo = require('../repositories/alliances');
 const battleReportsRepo = require('../repositories/battleReports');
+const { parseBattleReportFilters, serializeBattleReportExport } = require('../utils/battle-report-export');
 const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
 const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
@@ -501,9 +502,7 @@ router.get('/intel/battle-reports-feed', requireAuth, (req, res) => {
 // pagination, for "Showing X of Y".
 router.get('/intel/battle-reports-search', requireAuth, (req, res) => {
     try {
-        const q = typeof req.query.q === 'string' ? req.query.q.slice(0, 200) : '';
-        const sort = ['occurred_at', 'cv', 'pop', 'att_cv', 'def_cv'].includes(req.query.sort) ? req.query.sort : 'occurred_at';
-        const dir = req.query.dir === 'asc' ? 'asc' : 'desc';
+        const { q, sort, dir } = parseBattleReportFilters(req.query);
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
         const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
         const { total, rows } = battleReportsRepo.searchBattleReportsFeed({ q, sort, dir, limit, offset });
@@ -511,6 +510,30 @@ router.get('/intel/battle-reports-search', requireAuth, (req, res) => {
     } catch (err) {
         console.error('[DB Error] Failed to search battle reports:', err);
         res.status(500).json({ error: 'Failed to search battle reports' });
+    }
+});
+
+// All means every stored battle report, including reports whose location is unknown.
+// Filtered means the whole matching feed, including unlinked population drops, without
+// the table's pagination limit. record_type makes these two evidence sources explicit.
+router.get('/intel/battle-reports-export', requireAuth, (req, res) => {
+    const { scope, format } = req.query;
+    if (!['all', 'filtered'].includes(scope) || !['csv', 'json'].includes(format)) {
+        return res.status(400).json({ error: 'Choose an export scope (all or filtered) and format (csv or json)' });
+    }
+    try {
+        const filters = parseBattleReportFilters(req.query);
+        const exportedAt = new Date().toISOString();
+        const { columns, rows } = battleReportsRepo.getBattleReportsExport({ scope, ...filters });
+        const body = serializeBattleReportExport({ columns, rows, format, scope, filters, exportedAt });
+        const filename = `battle-reports-${scope}-${exportedAt.replace(/[:.]/g, '-')}.${format}`;
+        res.set('Cache-Control', 'private, no-store');
+        res.set('Content-Disposition', `attachment; filename="${filename}"`);
+        res.type(format === 'csv' ? 'text/csv; charset=utf-8' : 'application/json; charset=utf-8');
+        res.send(body);
+    } catch (err) {
+        console.error('[DB Error] Failed to export battle reports:', err);
+        res.status(500).json({ error: 'Failed to export battle reports' });
     }
 });
 

@@ -205,7 +205,8 @@ const resetPlayerOnRestartStmt = db.prepare(`
         origin_system=NULL,
         home_planet_id=NULL, home_system_id=NULL, home_planet_index=NULL, possible_homes='[]',
         total_planets=0, total_population=0, total_farms=0, total_factories=0, total_labs=0, total_cybernetics=0, cv_used=0, cv_limit=0,
-        stats_scraped_at=NULL
+        stats_scraped_at=NULL,
+        battle_race_inference=NULL, battle_race_not_before=CURRENT_TIMESTAMP
     WHERE id = ?
 `);
 function resetPlayerOnRestart(id) {
