@@ -11,9 +11,11 @@
 import '../utils/game-rate-limit.js';
 import '../utils/aw-api.js';
 import '../utils/capture-freshness.js'; // side-effect import: puts the model on globalThis
+import '../utils/daily-reset.js';
 
 const AWApi = globalThis.AWApi;
 const { isStaleCapture } = globalThis.AWCaptureFreshness;
+const AWDailyReset = globalThis.AWDailyReset;
 
 const SECTOR_BOUNDS = { x1: -40, y1: -40, x2: 40, y2: 40 }; // known map bounds ~-32..32, padded
 
@@ -117,52 +119,86 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
     return { ok: true, systemsIndexed: indexPayload.length, alliancesIndexed: alliancePayload.length, systemsProcessed, planetsProcessed };
 }
 
-// Automatic background seeding — same pattern as player-api-sync.js: a localStorage lock
-// for cross-tab dedup, a plain setInterval, silent (no onProgress consumer). Previously
-// this whole function only ran from a manual button click, so "how fresh is the galaxy"
-// depended entirely on someone remembering to press it. This makes that the default
-// instead of the exception, using the same spare game-API headroom the player sweep does
-// (ONE Map/sectors call per run — everything after that is POSTs to this hub's own
-// server, not the game, so it costs nothing against the agreed budget).
+// Automatic background seeding — once a day, shortly after the reset, not a poll.
+// Previously this ran every 5 minutes all day long, on the assumption that re-asking more
+// often kept in-vision systems more current. Confirmed against how the game actually
+// behaves (2026-09-12): outside your own bio-range vision (vision-model.js), the galaxy
+// only gets a fresh snapshot once a day, at the 00:00 CET/CEST reset — Map/sectors doesn't
+// hand back new data between resets no matter how often it's asked, so the old 5-min
+// interval was spending API budget to re-read the exact same snapshot, all day, for
+// nothing. RESET_BUFFER_MINUTES gives the reset a few minutes to actually land before
+// pulling. Real live vision (bio-range) is a wholly separate concept handled elsewhere —
+// see vision-model.js — and is unaffected by this schedule change.
 //
-// IMPORTANT — what this does NOT fix: the game's own Map/sectors response only reports
-// live data for systems currently isInVision (see the isInVision/vision_uncertain
-// handling above and capture-freshness.js). Running this every few minutes instead of
-// once a day makes IN-VISION systems as current as possible; it cannot pull fresh data
-// for systems nobody has vision on right now — no amount of re-asking changes what the
-// game is willing to say about them. Getting THOSE current still needs either real vision
-// (scouting/holding territory) or a member's browser physically visiting that system's
-// page (spy.js's live DOM scrape, see issue #168 for the fuller writeup).
-const AUTO_SEED_LOCK_KEY = 'awt.galaxyAutoSeed.lock.v1';
-const AUTO_SEED_LOCK_TTL_MS = 4 * 60 * 1000; // shorter than AUTO_SEED_INTERVAL_MS
-const AUTO_SEED_INTERVAL_MS = 5 * 60 * 1000;
+// IMPORTANT — what this still does NOT fix: pulling right after the reset gets the
+// freshest possible read of whatever Map/sectors is willing to say, but it still only
+// reports live data for systems currently isInVision (see the isInVision/vision_uncertain
+// handling above and capture-freshness.js). It cannot produce fresh data for systems
+// nobody has vision on — no amount of asking changes what the game will say about them.
+// Getting THOSE current still needs either real vision (scouting/holding territory) or a
+// member's browser physically visiting that system's page (spy.js's live DOM scrape, see
+// issue #168 for the fuller writeup).
+const RESET_BUFFER_MINUTES = 5; // pull at 00:05 Europe/Berlin — a few minutes after the reset lands
+const DAY_LOCK_KEY = 'awt.galaxyAutoSeed.lastPullDay.v2'; // Berlin-date of the last SUCCESSFUL seed
+const ATTEMPT_LOCK_KEY = 'awt.galaxyAutoSeed.attemptLock.v2'; // short cross-tab mutex, not a daily gate
+const ATTEMPT_LOCK_TTL_MS = 5 * 60 * 1000;
+const RETRY_DELAY_MS = 30 * 60 * 1000; // a failed attempt retries in 30 min, not a full day later
+const CATCHUP_DELAY_MS = 10 * 1000; // let the page settle before the very first check
 
-function claimAutoSeedLock() {
+function getLastPulledDay() {
+    try { return localStorage.getItem(DAY_LOCK_KEY); } catch (err) { return null; }
+}
+function setLastPulledDay(day) {
+    try { localStorage.setItem(DAY_LOCK_KEY, day); } catch (err) { console.warn('[GalaxyAutoSeed] could not persist last-pulled day:', err.message); }
+}
+function claimAttemptLock() {
     try {
-        const raw = localStorage.getItem(AUTO_SEED_LOCK_KEY);
+        const raw = localStorage.getItem(ATTEMPT_LOCK_KEY);
         const now = Date.now();
-        if (raw && now - parseInt(raw, 10) < AUTO_SEED_LOCK_TTL_MS) return false;
-        localStorage.setItem(AUTO_SEED_LOCK_KEY, String(now));
+        if (raw && now - parseInt(raw, 10) < ATTEMPT_LOCK_TTL_MS) return false;
+        localStorage.setItem(ATTEMPT_LOCK_KEY, String(now));
         return true;
     } catch (err) {
         return true; // no localStorage — degrade to "always run", same as player-api-sync.js
     }
 }
 
-async function runAutoSeedTick() {
-    if (!claimAutoSeedLock()) return;
+function scheduleWake(when) {
+    const delay = Math.max(1000, when.getTime() - Date.now());
+    setTimeout(tick, delay);
+}
+
+// Always checks "did today's pull already succeed" first (across tabs and reloads, via
+// the Berlin-date day-lock) rather than assuming a fixed clock tick means work is due —
+// that's what makes this safe to call from a catch-up timer, a fresh page load at any
+// time of day, or the recurring wake, without ever double-pulling the same day.
+async function tick() {
+    const today = AWDailyReset.berlinDateKey();
+    if (getLastPulledDay() === today) {
+        scheduleWake(AWDailyReset.nextDailyWindow(RESET_BUFFER_MINUTES));
+        return;
+    }
+    if (!claimAttemptLock()) {
+        // Another tab is already attempting this (or just did) — check back shortly rather
+        // than spin; if it succeeded, the day-lock check above picks that up next time.
+        scheduleWake(new Date(Date.now() + RETRY_DELAY_MS));
+        return;
+    }
     try {
         const result = await seedGalaxyFromApi();
-        if (!result.ok) console.warn('[GalaxyAutoSeed] tick failed:', result.error);
+        if (result.ok) setLastPulledDay(today);
+        else console.warn('[GalaxyAutoSeed] tick failed:', result.error);
     } catch (err) {
         console.warn('[GalaxyAutoSeed] tick failed:', err.message);
     }
+    scheduleWake(getLastPulledDay() === today
+        ? AWDailyReset.nextDailyWindow(RESET_BUFFER_MINUTES)
+        : new Date(Date.now() + RETRY_DELAY_MS));
 }
 
 let started = false;
 export function startAutoGalaxySeed() {
     if (started) return;
     started = true;
-    runAutoSeedTick();
-    setInterval(runAutoSeedTick, AUTO_SEED_INTERVAL_MS);
+    setTimeout(tick, CATCHUP_DELAY_MS);
 }
