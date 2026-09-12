@@ -114,6 +114,34 @@ ok('countBestGuardedAt finds the inserted row', systems.countBestGuardedAt('2026
 systems.clearBestGuarded();
 ok('clearBestGuarded empties the table', systems.countBestGuardedAt('2026-08-27') === 0);
 
+// checkAndUpdateSystemSecured (2026-09-12): fires the "system closed" Discord milestone
+// only on the 0->1 transition. own alliance [RAID] and ally [NAP1] both count as friendly.
+db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (1, 'RAID', 'Raiders'), (2, 'NAP1', 'Allies'), (3, 'FOE', 'Enemies')`).run();
+db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (901, 'Raider1', 1), (902, 'Ally1', 2), (903, 'Enemy1', 3)`).run();
+systems.upsertSystemFull(900, 'Secured Test System', 1, 1);
+const friendly = new Set(['RAID', 'NAP1']);
+
+systems.upsertPlanet(90001, 900, 1, 901, 5, 0, 0, 0); // RAID-owned
+systems.upsertPlanet(90002, 900, 2, null, 0, 0, 0, 0); // Free — must not block "secured"
+ok('an untouched-by-enemies system with only friendly/free planets is secured',
+    systems.checkAndUpdateSystemSecured(900, friendly) === 'secured');
+ok('re-checking an already-secured system with no change returns null (no re-announce)',
+    systems.checkAndUpdateSystemSecured(900, friendly) === null);
+
+systems.upsertPlanet(90003, 900, 3, 903, 4, 0, 0, 0); // FOE takes a planet
+ok('an enemy taking a planet loses the secured status, silently ("lost", not "secured")',
+    systems.checkAndUpdateSystemSecured(900, friendly) === 'lost');
+ok('re-checking the now-lost system with no further change returns null',
+    systems.checkAndUpdateSystemSecured(900, friendly) === null);
+
+systems.upsertPlanet(90003, 900, 3, 902, 4, 0, 0, 0); // NAP1 retakes it — re-secured
+ok('re-securing after a loss announces again (a fresh 0->1 transition)',
+    systems.checkAndUpdateSystemSecured(900, friendly) === 'secured');
+
+db.prepare(`UPDATE planets SET owner_id = NULL WHERE game_planet_id IN (90001, 90002, 90003)`).run();
+ok('a system with zero real owners is never "secured" (nothing has actually been claimed)',
+    systems.checkAndUpdateSystemSecured(900, friendly) === 'lost');
+
 systems.deleteAllPlanets();
 ok('deleteAllPlanets empties planets', systems.countPlanets() === 0);
 systems.deleteAllSystems();

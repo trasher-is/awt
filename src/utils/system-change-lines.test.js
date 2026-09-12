@@ -8,7 +8,7 @@
 // has been matched to yet.
 
 const path = require('path');
-const { ownerChangeKind, buildSystemChangeLines } = require(path.join(__dirname, 'system-change-lines.js'));
+const { ownerChangeKind, buildSystemChangeLines, buildSystemMilestoneLines } = require(path.join(__dirname, 'system-change-lines.js'));
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail) => {
@@ -68,6 +68,37 @@ ok('a bombardment with a matched battle report names the attacker',
 ok('a bombardment with no matched report says the attacker is not visible, instead of guessing',
     pop[2] === '📉 **Planet 9**: Holder lost 2 population (5 → 3) — attacker not visible from a system scan', pop[2]);
 ok('an unclassified drop keeps the old wording', pop[3] === '📉 **Planet 10**: population 5 → 3', pop[3]);
+
+console.log('\n── Per-system milestone channel ' + '─'.repeat(45));
+{
+    const friendly = new Set(['RAID', 'NAP1']);
+
+    const siege = { planet_index: 3, type: 'SIEGE_STARTED', owner: '[RAID] Holder' };
+    const friendlyTakeover = { planet_index: 4, type: 'OWNER_CHANGE', kind: 'conquered', old_owner: 'Foe', new_owner: '[NAP1] Ally', new_owner_alliance_tag: 'NAP1' };
+    const enemyConquest = { planet_index: 5, type: 'OWNER_CHANGE', kind: 'conquered', old_owner: '[RAID] Holder', new_owner: '[FOE] Raider', new_owner_alliance_tag: 'FOE' };
+    const enemyColonization = { planet_index: 6, type: 'OWNER_CHANGE', kind: 'colonized', old_owner: null, new_owner: 'Unaffiliated', new_owner_alliance_tag: null };
+    const lostToUnknown = { planet_index: 7, type: 'OWNER_CHANGE', kind: 'lost_unknown', old_owner: '[RAID] Holder', new_owner: null, new_owner_alliance_tag: null };
+    const secured = { type: 'SYSTEM_SECURED' };
+    const unrelatedPopDrop = { planet_index: 8, type: 'POP_DROP', kind: 'bombardment', old_pop: 5, new_pop: 3, owner: 'Holder', attacker: null };
+
+    const lines = buildSystemMilestoneLines(
+        [siege, friendlyTakeover, enemyConquest, enemyColonization, lostToUnknown, secured, unrelatedPopDrop],
+        friendly,
+    );
+
+    ok('exactly four lines survive (siege, enemy conquest, enemy colonization, secured)', lines.length === 4, lines);
+    ok('a siege always shows, naming the besieged owner', lines.some(l => l.includes('Planet 3') && l.includes('[RAID] Holder') && l.includes('under siege')), lines);
+    ok('a friendly (NAP) takeover is NOT flagged as enemy activity', !lines.some(l => l.includes('Planet 4')), lines);
+    ok('an enemy conquest is flagged', lines.some(l => l.includes('Planet 5') && l.includes('[FOE] Raider')), lines);
+    ok('an unaffiliated (no-tag) colonization still counts as non-friendly', lines.some(l => l.includes('Planet 6')), lines);
+    ok('losing a planet to Unknown (no new owner) is not "enemy entered" — nothing to attribute it to', !lines.some(l => l.includes('Planet 7')), lines);
+    ok('a plain population drop never reaches the milestone feed', !lines.some(l => l.includes('Planet 8')), lines);
+    ok('SYSTEM_SECURED shows its own celebration line', lines.some(l => l.includes('secured')), lines);
+
+    ok('no friendlyTagsUpper set still works (defaults to nothing friendly)',
+        buildSystemMilestoneLines([enemyConquest], undefined).length === 1);
+    ok('no events -> no lines', buildSystemMilestoneLines([], friendly).length === 0);
+}
 
 console.log('\n── Routing ' + '─'.repeat(66));
 const mixed = buildSystemChangeLines([{ type: 'OWNER_CHANGE', planet_index: 1, kind: 'lost' }, { type: 'POP_DROP', planet_index: 1, kind: 'bombardment', old_pop: 2, new_pop: 1 }, null]);

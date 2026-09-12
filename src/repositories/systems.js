@@ -182,6 +182,33 @@ function getSystemPlanetsForBot(sysId) {
     return getSystemPlanetsForBotStmt.all(sysId);
 }
 
+// A system is "fully friendly" once every REAL owner in it (own alliance or an admin-
+// configured NAP/ally — see friendly-alliance-tags.js) is friendly, AND at least one
+// planet is actually owned by someone — an untouched or all-Free system is not "ours",
+// so it never counts as secured just for having no enemies in it either.
+function isSystemFullyFriendly(sysId, friendlyTagsUpper) {
+    const rows = getSystemPlanetsForBotStmt.all(sysId);
+    const owned = rows.filter(p => p.owner_id != null);
+    if (!owned.length) return false;
+    return owned.every(p => p.ally_tag && friendlyTagsUpper.has(String(p.ally_tag).toUpperCase()));
+}
+
+const getSystemSecuredStmt = db.prepare(`SELECT is_secured FROM systems WHERE id = ?`);
+const setSystemSecuredStmt = db.prepare(`UPDATE systems SET is_secured = ? WHERE id = ?`);
+
+// Recomputes "secured" for a system and persists any change. Returns 'secured' only on
+// the 0->1 transition (the moment worth celebrating — see discord_bot.js's
+// announceSystemMilestones), 'lost' on a silent 1->0 (no announcement for that, so a
+// system can be re-secured and celebrated again later), or null when nothing changed.
+function checkAndUpdateSystemSecured(sysId, friendlyTagsUpper) {
+    const row = getSystemSecuredStmt.get(sysId);
+    const wasSecured = !!(row && row.is_secured);
+    const isSecuredNow = isSystemFullyFriendly(sysId, friendlyTagsUpper);
+    if (isSecuredNow === wasSecured) return null;
+    setSystemSecuredStmt.run(isSecuredNow ? 1 : 0, sysId);
+    return isSecuredNow ? 'secured' : 'lost';
+}
+
 const getPlanetsFullDbStmt = db.prepare(`
     SELECT p.system_id, p.planet_index, p.population, p.starbase, p.is_sieged, p.updated_at,
            s.name as system_name, s.x, s.y,
@@ -487,7 +514,7 @@ module.exports = {
     listSystemsWithCoordsLimited, searchSystemsByQueryPrefix, searchSystemsByNameOrId,
     getSystemsDbSummary, getGalaxyMapSystems, getGalaxyMapOwnership, upsertSystemStub,
     upsertSystemFull, setSystemInVision, deleteAllSystems, countBestGuardedAt, clearBestGuarded, insertBestGuarded,
-    getSystemPlanetsWithIntel, getSystemPlanetsForBot, getPlanetsFullDb,
+    getSystemPlanetsWithIntel, getSystemPlanetsForBot, getPlanetsFullDb, checkAndUpdateSystemSecured,
     getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getPlanetsByOwner, getOldPlanet, upsertPlanet,
     getPlanetsForAllianceTag, getPlanetOwnerName, getPlanetOwnersByLocations, getRoutePlanetIntelByLocations,
     getFriendlyRouteAirports, getPlanetNameByLocation, getPlanetNameByGameId, getPlanetLocationByGameId,

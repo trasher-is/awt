@@ -10,6 +10,7 @@ const announcements = [];
 const botPath = require.resolve('../discord_bot');
 require.cache[botPath] = { id: botPath, filename: botPath, loaded: true, exports: {
     announceSystemChanges: async (system, events) => announcements.push({ system, events }),
+    announceSystemMilestones: async () => {},
 } };
 const express = require('express');
 const db = require('../database');
