@@ -79,6 +79,11 @@ function assessThreat(row, viewer) {
     const required = bioNeededFor(systemDistance(origin.x, origin.y, viewerX, viewerY));
     return {
         reaches: radius >= required,
+        // How many biology levels short they are. The single most dangerous player on the
+        // map is the one parked ONE level outside your radius: they see you the moment they
+        // finish a research tick, and they choose when that happens. A plain yes/no gate
+        // hides them until it is already too late to matter.
+        levelsAway: Math.max(0, required - radius),
         estimated: origin.source === SOURCE_ESTIMATED,
         unknown: null,
         radius,
@@ -96,4 +101,55 @@ function filterThreatsInRange(rows, viewer) {
     }).filter(Boolean);
 }
 
-module.exports = { resolveThreatOrigin, assessThreat, filterThreatsInRange, SOURCE_GAME, SOURCE_ESTIMATED };
+// Someone this close to reaching you is news even though they cannot see you yet.
+const DEFAULT_CLOSING_LEVELS = 2;
+
+// Sorts candidates into the two pills.
+//
+//   RED    confirmed biology a decisive margin above yours AND able to see you right now
+//   YELLOW everything else still worth watching: a smaller confirmed gap, an unscanned
+//          player whose science ceiling clears the lower bar, or anyone — however large
+//          their gap — who is merely CLOSING rather than already watching
+//
+// Why closing belongs in yellow rather than red: it is a warning, not a sighting, and the
+// two should not look alike. Before this, both gates flipped on the same research tick — a
+// player at biology 15, sixteen systems out, cleared neither the +6 bar nor the vision check,
+// then cleared both at once on reaching 16. The list went from silent to "already watching
+// you" with nothing in between, which is precisely the moment warning is worth having.
+//
+// `myBio` is the viewer's own biology; confirmedMargin is the red bar's gap.
+function classifyThreat(row, viewer, { myBio, confirmedMargin, closingLevels = DEFAULT_CLOSING_LEVELS }) {
+    const vision = assessThreat(row, viewer);
+    const closing = !vision.reaches
+        && Number.isFinite(vision.levelsAway)
+        && vision.levelsAway > 0
+        && vision.levelsAway <= closingLevels;
+
+    if (!vision.reaches && !closing) return { band: null, vision };
+
+    const bio = Number(row && row.biology);
+    const confirmedGap = row && row.has_intel && Number.isFinite(bio) ? bio - Number(myBio) : null;
+    const decisive = confirmedGap !== null && confirmedGap >= confirmedMargin;
+
+    return { band: (vision.reaches && decisive) ? 'red' : 'yellow', vision, closing };
+}
+
+// rows: every candidate already past the LOWER bar — confirmed and unscanned alike. Which
+// pill each lands in is decided here, not by the query, so a player cannot fall between the
+// two bars and vanish from both (which is exactly what a confirmed +5 did when the single
+// margin was split in two).
+function splitThreats(rows, viewer, options) {
+    const red = [], yellow = [];
+    for (const row of Array.isArray(rows) ? rows : []) {
+        const { band, vision, closing } = classifyThreat(row, viewer, options);
+        if (!band) continue;
+        (band === 'red' ? red : yellow).push({ ...row, vision, closing: !!closing });
+    }
+    return { red, yellow };
+}
+
+module.exports = {
+    resolveThreatOrigin, assessThreat, filterThreatsInRange,
+    classifyThreat, splitThreats, DEFAULT_CLOSING_LEVELS,
+    SOURCE_GAME, SOURCE_ESTIMATED,
+};

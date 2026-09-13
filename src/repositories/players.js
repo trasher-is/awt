@@ -410,6 +410,7 @@ const THREAT_ORIGIN_JOINS = `
 
 const getThreatPlayersByBiologyStmt = db.prepare(`
     SELECT p.id as player_id, p.name, p.biology, p.science_level, a.tag as ally_tag,
+           p.has_intel,
            ${THREAT_ORIGIN_COLUMNS}
     FROM players p
     LEFT JOIN alliances a ON p.alliance_id = a.id
@@ -424,6 +425,7 @@ function getThreatPlayersByBiology(threshold, excludeId) {
 
 const getThreatPlayersByScienceStmt = db.prepare(`
     SELECT p.id as player_id, p.name, p.biology, p.science_level, a.tag as ally_tag,
+           p.has_intel,
            ${THREAT_ORIGIN_COLUMNS}
     FROM players p
     LEFT JOIN alliances a ON p.alliance_id = a.id

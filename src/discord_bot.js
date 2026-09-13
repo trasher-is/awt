@@ -11,7 +11,7 @@ const incomingRepo = require('./repositories/incoming');
 const { buildSystemChangeLines, buildSystemMilestoneLines } = require('./utils/system-change-lines');
 const { friendlyAllianceTags } = require('./utils/friendly-alliance-tags');
 const { bestSystemForChannel } = require('./utils/system-channel-match');
-const { filterThreatsInRange } = require('./utils/threat-vision');
+const { splitThreats } = require('./utils/threat-vision');
 const settingsRepo = require('./repositories/settings');
 const battlePointsRepo = require('./repositories/battlePoints');
 const battleReportsRepo = require('./repositories/battleReports');
@@ -689,14 +689,19 @@ async function handleMessage(message) {
         const confirmedThreshold = myBio + playersRepo.BIO_THREAT_MARGIN_CONFIRMED;
         const suspectedThreshold = myBio + playersRepo.BIO_THREAT_MARGIN_SUSPECTED;
 
-        // Only those whose vision actually reaches your origin — a biology advantage on the
-        // far side of the map is a statistic, not a threat. Anyone we cannot place is kept
-        // and flagged rather than dropped. See threat-vision.js.
-        // 1. Confirmed High Biology (has_intel = 1) -> Match bio directly
-        const confirmedThreats = filterThreatsInRange(playersRepo.getThreatPlayersByBiology(confirmedThreshold, me.id), me);
-
-        // 2. Suspected High Biology (has_intel = 0) -> Match science level as proxy ceiling
-        const suspectedThreats = filterThreatsInRange(playersRepo.getThreatPlayersByScience(suspectedThreshold, me.id), me);
+        // Only those whose vision reaches your origin, or who are about to — a biology
+        // advantage on the far side of the map is a statistic, not a threat, but somebody one
+        // level short of seeing you is the most dangerous player on the board, because they
+        // pick the moment. Both queries run at the LOWER bar and the band is decided after,
+        // so nobody falls between the two thresholds. See threat-vision.js.
+        const candidates = [
+            ...playersRepo.getThreatPlayersByBiology(suspectedThreshold, me.id),
+            ...playersRepo.getThreatPlayersByScience(suspectedThreshold, me.id),
+        ];
+        const { red: confirmedThreats, yellow: suspectedThreats } = splitThreats(candidates, me, {
+            myBio,
+            confirmedMargin: playersRepo.BIO_THREAT_MARGIN_CONFIRMED,
+        });
 
         const embed = new EmbedBuilder()
             .setTitle(`🧬 Biology Threat Matrix (Your Bio: ${myBio})`)
