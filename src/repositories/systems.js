@@ -29,6 +29,16 @@ function listSystemIds() {
     return listSystemIdsStmt.all();
 }
 
+// Every system we know a name for — the lookup table behind matching a Discord channel to
+// the system it is about (see system-channel-match.js). Unnamed rows are stubs the galaxy
+// index created but nobody has observed yet; they can never match a channel name.
+const listNamedSystemsStmt = db.prepare(`
+    SELECT id, name FROM systems WHERE name IS NOT NULL AND TRIM(name) != '' ORDER BY id ASC
+`);
+function listNamedSystems() {
+    return listNamedSystemsStmt.all();
+}
+
 // Arity varies per call, so this statement is prepared fresh each call (matches the
 // original behavior in routes/routes.js) rather than cached at module load.
 // Minor addition: the empty-array early return below wasn't in the original inline
@@ -652,7 +662,7 @@ function deleteAllTakeovers() {
 }
 
 module.exports = {
-    countSystems, countPlanets, getSystemCoords, getFullSystem, listSystemIds, getSystemsByIds,
+    countSystems, countPlanets, getSystemCoords, getFullSystem, listSystemIds, listNamedSystems, getSystemsByIds,
     listSystemsWithCoordsLimited, searchSystemsByQueryPrefix, searchSystemsByNameOrId,
     getSystemsDbSummary, getGalaxyMapSystems, getGalaxyMapOwnership, upsertSystemStub,
     upsertSystemFull, setSystemInVision, getSystemObservedAt, advanceSystemObservedAt,

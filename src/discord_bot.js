@@ -10,6 +10,7 @@ const discordTimersRepo = require('./repositories/discordTimers');
 const incomingRepo = require('./repositories/incoming');
 const { buildSystemChangeLines, buildSystemMilestoneLines } = require('./utils/system-change-lines');
 const { friendlyAllianceTags } = require('./utils/friendly-alliance-tags');
+const { bestSystemForChannel } = require('./utils/system-channel-match');
 const settingsRepo = require('./repositories/settings');
 const battlePointsRepo = require('./repositories/battlePoints');
 const battleReportsRepo = require('./repositories/battleReports');
@@ -1948,30 +1949,32 @@ async function announceSystemChanges(system, events) {
 }
 
 // Finds a channel a member already created for a specific system — matched by name, not
-// admin config. Screenshots confirm the convention: "<system name>-<system id>" (e.g.
-// "phact-41"), so this only trusts the trailing number, not the name part (robust to a
-// renamed system, a typo, or any prefix style — see the design discussion, 2026-09-12).
-// Cheap: channels.cache is already populated from the gateway, no API call per lookup.
+// admin config. Cheap: channels.cache is already populated from the gateway, no API call
+// per lookup.
+//
+// Matching is by the system's NAME, with any id in the channel name used only as
+// confirmation (2026-09-13 — see system-channel-match.js for the full reasoning and the
+// real-world channel lists that forced it). This began as "trust the trailing number",
+// which fit RAID's own "phact-41" and nothing else: against 25 real channel names from two
+// other alliances it got 0 right, 19 no-matches, and 6 confidently WRONG, because in
+// "29-praepes-3-9" the trailing number is a COORDINATE and reads as system 9.
 //
 // Skips any channel sitting under a category whose name contains "archive" (2026-09-12c —
 // confirmed live: a real Discord server accumulates one such category per past game round,
-// e.g. "Archive (Beta 3)", "Archive (Beta 4)"). Trailing-number channel naming isn't unique
-// across rounds — a past round's own system channel (game system ids reset each round, so
-// "zujj-al-nushshabah-38" from an old archived round collides with THIS round's system 38)
-// would otherwise silently receive a live alert instead of the intended current channel,
-// with no error at all. This also incidentally fixed a real "Missing Access" error: two
-// unrelated round-planning channels the bot can't even view ("final-race-for-beta-4",
-// "random-thoughts-concerning-beta-5") happened to end in a number too and both live under
-// an Archive category.
+// e.g. "Archive (Beta 3)", "Archive (Beta 4)"). System names do not identify a ROUND — an
+// old round's "zujj-al-nushshabah-38" names the same system this round's does — so without
+// this an archived channel would silently receive a live alert, with no error at all. It
+// also fixed a real "Missing Access": two round-planning channels the bot cannot even view
+// ("final-race-for-beta-4") matched the old rule purely on their trailing digit.
 function findSystemChannel(systemId) {
+    const systems = systemsRepo.listNamedSystems();
     for (const [, guild] of client.guilds.cache) {
         for (const [, channel] of guild.channels.cache) {
             if (!channel || typeof channel.name !== 'string' || typeof channel.send !== 'function') continue;
-            const m = channel.name.match(/-(\d+)$/);
-            if (!m || parseInt(m[1], 10) !== systemId) continue;
             const category = channel.parent;
             if (category && typeof category.name === 'string' && /archive/i.test(category.name)) continue;
-            return channel;
+            const match = bestSystemForChannel(channel.name, systems);
+            if (match && match.id === systemId) return channel;
         }
     }
     return null;
