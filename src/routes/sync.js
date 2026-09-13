@@ -860,8 +860,11 @@ router.post('/sync/player-detail', requireAuth, (req, res) => {
     // profile scrape that used to be the only source only fires for a player someone has
     // opened by hand. Never overwritten with null: losing vision of a system does not
     // un-know where somebody started.
+    // Always bound, even when unresolved: better-sqlite3 requires every named parameter the
+    // statement mentions to be present, and the upsert COALESCEs a null away rather than
+    // letting it erase an origin we already know.
     const originSystemId = systemsRepo.getSystemIdByCoords(Number(p.origin_x), Number(p.origin_y));
-    if (Number.isInteger(originSystemId)) detail.origin_system = originSystemId;
+    detail.origin_system = Number.isInteger(originSystemId) ? originSystemId : null;
 
     try {
         playersRepo.upsertPlayerFromApiDetail(detail);

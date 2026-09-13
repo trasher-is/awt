@@ -188,6 +188,28 @@ function postJson(server, urlPath, body) {
         await sync(520, true);
         await sync(520, true);
         ok('steady visibility says nothing, pass after pass', variousChanges.length === 0, titles());
+
+        // ORIGIN from the API sweep (2026-09-13). The game reveals a player's origin only
+        // for a system WE have vision of, and it arrives as coordinates. This nearly shipped
+        // broken: the assignment was made but the API upsert had no origin_system column, and
+        // better-sqlite3 silently ignores a named parameter the statement does not mention —
+        // so every origin would have been dropped on the floor while looking like "the API
+        // just doesn't expose any".
+        console.log('\n-- Origin captured from the sweep ' + '-'.repeat(36));
+        db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (640, 'Sceptrum', -9, 12)`).run();
+        await sync(521, false, { origin_x: -9, origin_y: 12 });
+        const stored = db.prepare('SELECT origin_system FROM players WHERE id = 521').get();
+        ok('coordinates resolve to the system id and are stored', stored.origin_system === 640, stored);
+
+        await sync(521, false, { origin_x: null, origin_y: null });
+        const afterBlind = db.prepare('SELECT origin_system FROM players WHERE id = 521').get();
+        ok('a later sync with no origin does NOT erase it — losing vision of a system does not\n     un-know where somebody started',
+            afterBlind.origin_system === 640, afterBlind);
+
+        await sync(522, false, { origin_x: 999, origin_y: 999 });
+        const unmapped = db.prepare('SELECT origin_system FROM players WHERE id = 522').get();
+        ok('coordinates matching no known system leave the origin unset rather than guessing',
+            unmapped.origin_system === null, unmapped);
     } finally {
         server.close();
     }

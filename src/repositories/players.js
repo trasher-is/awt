@@ -768,7 +768,7 @@ const upsertPlayerFromApiDetailStmt = db.prepare(`
         has_supporter_badge, supporter_type,
         biology, economy, energy, mathematics, physics, social, trade_revenue, artefact,
         race_growth, race_science, race_culture, race_production, race_speed, race_attack,
-        race_defense, race_trader, race_sul, has_intel, intel_updated_at
+        race_defense, race_trader, race_sul, has_intel, intel_updated_at, origin_system
     ) VALUES (
         @id, @name, @alliance_id, @level, @points, @ranking, @country,
         @is_active_player, @joined, @logins, @last_activity_at, @last_login_at, @resigned_at,
@@ -777,7 +777,8 @@ const upsertPlayerFromApiDetailStmt = db.prepare(`
         @biology, @economy, @energy, @mathematics, @physics, @social, @trade_revenue, @artefact,
         @race_growth, @race_science, @race_culture, @race_production, @race_speed, @race_attack,
         @race_defense, @race_trader, @race_sul, @has_intel,
-        CASE WHEN @has_intel = 1 THEN CURRENT_TIMESTAMP ELSE NULL END
+        CASE WHEN @has_intel = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
+        @origin_system
     ) ON CONFLICT(id) DO UPDATE SET
         name=excluded.name, alliance_id=excluded.alliance_id, level=excluded.level,
         points=excluded.points, ranking=excluded.ranking, country=excluded.country,
@@ -788,6 +789,10 @@ const upsertPlayerFromApiDetailStmt = db.prepare(`
         is_top_permanent_ranker=excluded.is_top_permanent_ranker,
         has_supporter_badge=excluded.has_supporter_badge, supporter_type=excluded.supporter_type,
         updated_at=CURRENT_TIMESTAMP,
+        -- COALESCE, never a plain overwrite: the game only reveals an origin for a system we
+        -- currently have vision of, so it goes absent again the moment a fleet drifts out of
+        -- range. Losing sight of somebody does not un-know where they started.
+        origin_system = COALESCE(excluded.origin_system, players.origin_system),
 
         biology = CASE WHEN excluded.has_intel = 1 THEN excluded.biology ELSE players.biology END,
         economy = CASE WHEN excluded.has_intel = 1 THEN excluded.economy ELSE players.economy END,
@@ -810,7 +815,12 @@ const upsertPlayerFromApiDetailStmt = db.prepare(`
         has_intel = CASE WHEN excluded.has_intel = 1 THEN 1 ELSE players.has_intel END
 `);
 function upsertPlayerFromApiDetail(player) {
-    upsertPlayerFromApiDetailStmt.run(player);
+    // origin_system defaulted here rather than demanded of every caller: better-sqlite3
+    // throws "Missing named parameter" when a key the statement mentions is merely absent
+    // (the same trap that once crashed every detail sync over race_growth — see the
+    // statement's own note), and a caller that has no origin to report should not have to
+    // know that. A null is COALESCEd away in the upsert, so it never erases a known origin.
+    upsertPlayerFromApiDetailStmt.run({ origin_system: null, ...player });
 }
 
 // When is a player's Player/{id} detail stale enough to re-scan? ONE predicate, shared by
