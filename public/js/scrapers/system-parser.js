@@ -199,7 +199,7 @@ export async function scrapeSystemById(systemId) {
         const r = await fetch('/hub-api/sync/system', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ system_id: parseInt(systemId, 10), planets, fleets })
+            body: JSON.stringify({ system_id: parseInt(systemId, 10), planets, fleets, observation_live: true })
         });
         return r.ok;
     } catch (err) {
@@ -224,7 +224,7 @@ export async function scrapeSystem(systemId) {
         const response = await fetch('/hub-api/sync/system', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ system_id: parseInt(systemId, 10), planets, fleets })
+            body: JSON.stringify({ system_id: parseInt(systemId, 10), planets, fleets, observation_live: true })
         });
         
         if (response.ok) {
