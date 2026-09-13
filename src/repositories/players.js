@@ -161,6 +161,37 @@ function getPlayerNameWithTag(id) {
     return getPlayerNameWithTagStmt.get(id);
 }
 
+// --- alliance-wide intel visibility (Various Changes, 2026-09-13) ---
+// Read BEFORE upsertPlayerFull, which latches has_intel to 1 and would erase the very
+// distinction between "first ever" and "regained". See /sync/player-detail.
+const getIntelVisibilityStmt = db.prepare(`
+    SELECT has_intel, intel_visible, intel_seen_raw,
+           intel_lost_announced_at, intel_regained_announced_at
+    FROM players WHERE id = ?
+`);
+function getIntelVisibility(id) {
+    return getIntelVisibilityStmt.get(id) || null;
+}
+
+// Kept out of upsertPlayerFull deliberately: that statement's whole design is the has_intel
+// CASE guard, which exists so a sightless sync can never erase hard-won values. These
+// columns need the exact opposite — they must record the zeros, because a zero IS the
+// observation being tracked.
+const setIntelVisibilityStmt = db.prepare(`
+    UPDATE players SET intel_visible = @intel_visible, intel_seen_raw = @intel_seen_raw
+    WHERE id = @id
+`);
+function setIntelVisibility(id, { intelVisible, intelSeenRaw }) {
+    setIntelVisibilityStmt.run({ id, intel_visible: intelVisible, intel_seen_raw: intelSeenRaw });
+}
+
+const markIntelLostAnnouncedStmt = db.prepare(`UPDATE players SET intel_lost_announced_at = CURRENT_TIMESTAMP WHERE id = ?`);
+const markIntelRegainedAnnouncedStmt = db.prepare(`UPDATE players SET intel_regained_announced_at = CURRENT_TIMESTAMP WHERE id = ?`);
+function markIntelAnnounced(id, direction) {
+    if (direction === 'lost') markIntelLostAnnouncedStmt.run(id);
+    else if (direction === 'regained') markIntelRegainedAnnouncedStmt.run(id);
+}
+
 // Various Changes: resigned/returned enemy (2026-09-12) — the roster sync reads this
 // BEFORE upsertPlayerFromApiList overwrites `joined`, so it can compare old vs new and
 // catch the 'N/A' transition either direction. name is included for the alert wording.
@@ -874,6 +905,7 @@ module.exports = {
     getAllianceTagForMembers, getVisionObservers, getPlayerWithPlanetCount,
     getPlayerLoginHistory, getPlayerLoginHeatmap, recordLoginSample, getPlayerLoginSamples,
     upsertPlayerBasic, getPlayerNameWithTag, getPlayerJoinedWithTag, getPlayerRestartCheck, playerExistsById, resetPlayerOnRestart,
+    getIntelVisibility, setIntelVisibility, markIntelAnnounced,
     upsertPlayerFull, insertPlayerLogin, upsertAllianceMemberBasic, upsertPlayerNameOnly,
     BIO_THREAT_MARGIN,
     getPlayerBiologyByName, getThreatPlayersByBiology, getThreatPlayersByScience,
