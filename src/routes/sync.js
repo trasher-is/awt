@@ -852,6 +852,17 @@ router.post('/sync/player-detail', requireAuth, (req, res) => {
     // open. See intel-visibility.js for why a single changed observation is not yet news.
     const priorIntel = playersRepo.getIntelVisibility(p.id);
 
+    // ORIGIN: the system a player started in, which is where the game measures their vision
+    // radius from — so it decides who can see whom. The API hands it back as coordinates
+    // (all 381 system coordinates are distinct, so this resolves exactly), and only for a
+    // system we ourselves have vision of; it is simply absent for everyone further out.
+    // Worth capturing here because this sweep walks the WHOLE roster every pass, whereas the
+    // profile scrape that used to be the only source only fires for a player someone has
+    // opened by hand. Never overwritten with null: losing vision of a system does not
+    // un-know where somebody started.
+    const originSystemId = systemsRepo.getSystemIdByCoords(Number(p.origin_x), Number(p.origin_y));
+    if (Number.isInteger(originSystemId)) detail.origin_system = originSystemId;
+
     try {
         playersRepo.upsertPlayerFromApiDetail(detail);
         announceIntelVisibility(p, detail, priorIntel);

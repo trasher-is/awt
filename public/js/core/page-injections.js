@@ -624,8 +624,16 @@ function showBioThreatModal(title, players, levelKey, color) {
     list.innerHTML = players.length
         ? players.map(p => {
             const tag = p.ally_tag ? `[${esc(p.ally_tag)}] ` : '';
+            // Say which entries rest on a guessed origin. The game only reveals an origin
+            // for a system we can see, so for distant players their biggest planet stands in
+            // — right on every case we could check, but still an inference, and a list that
+            // hides which rows are inferred invites more trust than it has earned.
+            const v = p.vision || {};
+            let note = '';
+            if (v.unknown) note = `<span title="${esc(v.unknown)}" style="color:#888;font-size:10px;margin-left:6px;">position unknown</span>`;
+            else if (v.estimated) note = `<span title="Origin estimated from their largest planet — the game only shows a real origin for systems you can see" style="color:#888;font-size:10px;margin-left:6px;">~origin</span>`;
             return `<a href="/Game/Players/Profile/${p.player_id}" style="color:${color};text-decoration:none;display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #333;">
-                <span>${tag}${esc(p.name)}</span><span style="font-weight:bold;">${p[levelKey]}</span>
+                <span>${tag}${esc(p.name)}${note}</span><span style="font-weight:bold;">${p[levelKey]}</span>
             </a>`;
         }).join('')
         : '<div style="color:#888;">None on record right now.</div>';
@@ -658,20 +666,20 @@ export async function initBioThreatPills() {
 
     let html = '';
     if (data.confirmedCount > 0) {
-        html += `<span class="aw-bio-pill-red" style="cursor:pointer;background:#dc2626;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:bold;margin-right:4px;" title="Confirmed: biology ${data.threshold}+ (yours is ${data.myBio})">${data.confirmedCount}</span>`;
+        html += `<span class="aw-bio-pill-red" style="cursor:pointer;background:#dc2626;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:bold;margin-right:4px;" title="Confirmed biology ${data.confirmedThreshold}+ (yours is ${data.myBio}) — and whose vision reaches your origin">${data.confirmedCount}</span>`;
     }
     if (data.suspectedCount > 0) {
-        html += `<span class="aw-bio-pill-yellow" style="cursor:pointer;background:#eab308;color:#1a1a1a;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:bold;" title="Unscanned: science level ${data.threshold}+ (yours is ${data.myBio}) — biology could be up to that, not confirmed">${data.suspectedCount}</span>`;
+        html += `<span class="aw-bio-pill-yellow" style="cursor:pointer;background:#eab308;color:#1a1a1a;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:bold;" title="Unscanned: science level ${data.suspectedThreshold}+ (yours is ${data.myBio}) — biology could be up to that, not confirmed — and whose vision reaches your origin">${data.suspectedCount}</span>`;
     }
     pillBox.innerHTML = html;
 
     pillBox.querySelector('.aw-bio-pill-red')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        showBioThreatModal(`Confirmed biology ${data.threshold}+ over you`, data.confirmed, 'biology', '#f87171');
+        showBioThreatModal(`Confirmed biology ${data.confirmedThreshold}+ over you`, data.confirmed, 'biology', '#f87171');
     });
     pillBox.querySelector('.aw-bio-pill-yellow')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        showBioThreatModal(`Unscanned — science ${data.threshold}+ over your biology`, data.suspected, 'science_level', '#facc15');
+        showBioThreatModal(`Unscanned — science ${data.suspectedThreshold}+ over your biology`, data.suspected, 'science_level', '#facc15');
     });
 }
 
