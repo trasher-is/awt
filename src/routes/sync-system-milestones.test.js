@@ -103,15 +103,19 @@ function request(server, method, urlPath, body) {
         ok('is_sieged is stored as 1', sieged.is_sieged === 1, sieged);
         ok('allegiance is left unknown (NULL) — the API cannot tell us', sieged.siege_is_friendly === null, sieged);
         ok('no siege alert is raised on an unattributed siege', siegeEvents().length === 0, siegeEvents());
+        // The seed's cue to spend one DOM page fetch here and settle whose siege it is.
+        ok('the response flags the siege as needing DOM confirmation', siegeRes.body.siege_unconfirmed === true, siegeRes.body);
 
         console.log('\n── A DOM scrape confirming the siege is FRIENDLY still stays quiet ' + '─'.repeat(8));
-        await request(server, 'POST', '/hub-api/sync/system', {
+        const friendlyRes = await request(server, 'POST', '/hub-api/sync/system', {
             system_id: 950,
             planets: [{ game_planet_id: 95001, planet_index: 1, owner: { id: 701, name: 'Holder', alliance_tag: 'RAID' }, population: 5, starbase: 0, is_sieged: 1, siege_is_friendly: true, siege_attacker_name: 'AllyRunner' }],
         });
         const friendlySiege = db.prepare(`SELECT siege_is_friendly FROM planets WHERE game_planet_id = 95001`).get();
         ok('the DOM verdict is persisted (friendly)', friendlySiege.siege_is_friendly === 1, friendlySiege);
         ok('an allied fleet in orbit raises no "enemy entered" alert', siegeEvents().length === 0, siegeEvents());
+        ok('and the siege stops asking to be confirmed — one page fetch settles it for good',
+            friendlyRes.body.siege_unconfirmed === false, friendlyRes.body);
 
         // The whole point of persisting allegiance: a siege first seen through the API is
         // already is_sieged=1 by the time the DOM confirms it hostile, so keying the alert

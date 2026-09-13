@@ -11,6 +11,7 @@
 import '../utils/game-rate-limit.js';
 import '../utils/aw-api.js';
 import '../utils/capture-freshness.js'; // side-effect import: puts the model on globalThis
+import { scrapeSystemById } from './system-parser.js';
 
 const AWApi = globalThis.AWApi;
 const { isStaleCapture } = globalThis.AWCaptureFreshness;
@@ -65,6 +66,7 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
     let systemsProcessed = 0;
     let planetsProcessed = 0;
     const visionFlags = [];
+    const siegeConfirmQueue = [];
     for (const sys of allSystems) {
         if (!sys || !Number.isInteger(sys.id)) continue;
         // isInVision alone isn't enough — see capture-freshness.js: the API can say
@@ -103,6 +105,13 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
         if (syncRes.ok) {
             systemsProcessed++;
             planetsProcessed += payload.planets.length;
+            // The API reported a siege here that nobody has been able to attribute yet. Its
+            // hasSiege flag is a bare boolean, equally true for a friendly fleet in orbit,
+            // so acting on it alone once had the bot announcing an allied transit as an
+            // enemy attack. The live system page DOES say whose siege it is, so queue one
+            // page fetch to settle it (see the confirm pass after this loop).
+            const body = await syncRes.json().catch(() => null);
+            if (body && body.siege_unconfirmed && isInVision) siegeConfirmQueue.push(sys.id);
         }
         onProgress(`Seeding planets… ${systemsProcessed}/${allSystems.length} systems (${planetsProcessed} planets)`, systemsProcessed, allSystems.length);
     }
@@ -115,7 +124,32 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
         });
     }
 
-    return { ok: true, systemsIndexed: indexPayload.length, alliancesIndexed: alliancePayload.length, systemsProcessed, planetsProcessed };
+    // SIEGE CONFIRM PASS: the only way to tell an enemy siege from an allied fleet parked in
+    // orbit is the live system page, which labels the row and names the besieger — the API
+    // cannot (see siege-indicator-parser.js). One page fetch per unattributed siege settles
+    // it, and the answer is then remembered server-side, so a siege costs exactly one
+    // confirm for as long as it lasts rather than one per tick. Cheap on purpose: page
+    // fetches are not charged against the game's 200-per-5min API budget, only the shared
+    // 5/sec gate, and only systems THIS account can actually see are queued (out of vision
+    // the hub serves a synthetic page whose rows are script-rendered, so a scrape of one
+    // parses to nothing and posts nothing — harmless, but a wasted request).
+    //
+    // Run after the main loop rather than inline so a slow page never stalls the seed, and
+    // sequentially so a burst of new sieges cannot monopolise the shared request gate.
+    let siegesConfirmed = 0;
+    for (const systemId of siegeConfirmQueue) {
+        onProgress(`Confirming siege in system ${systemId}…`, systemsProcessed, allSystems.length);
+        try {
+            if (await scrapeSystemById(systemId)) siegesConfirmed++;
+        } catch (err) {
+            console.warn('[GalaxySeed] siege confirm scrape failed for system', systemId, err.message);
+        }
+    }
+
+    return {
+        ok: true, systemsIndexed: indexPayload.length, alliancesIndexed: alliancePayload.length,
+        systemsProcessed, planetsProcessed, siegesConfirmed,
+    };
 }
 
 // Automatic background seeding — a frequent poll, not once a day.

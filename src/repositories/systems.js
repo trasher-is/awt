@@ -320,6 +320,18 @@ function isSystemFullyFriendly(sysId, friendlyTagsUpper, ownTagsUpper) {
     return rows.some(p => p.ally_tag && own.has(String(p.ally_tag).toUpperCase()));
 }
 
+// Sieges we know about but cannot attribute: the API's hasSiege is a bare boolean that is
+// equally true for a friendly fleet in orbit, so a siege only seen through the bulk seed
+// has no allegiance. The seed uses this to decide whether a one-off DOM confirm-scrape of
+// that system is worth making (see api-galaxy-seed.js) — the live page names the besieger
+// and says whose side they're on, which is the only way to tell.
+const countUnconfirmedSiegesStmt = db.prepare(`
+    SELECT COUNT(*) AS n FROM planets WHERE system_id = ? AND is_sieged = 1 AND siege_is_friendly IS NULL
+`);
+function countUnconfirmedSieges(systemId) {
+    return countUnconfirmedSiegesStmt.get(systemId).n;
+}
+
 const getSystemSecuredStmt = db.prepare(`SELECT is_secured FROM systems WHERE id = ?`);
 const setSystemSecuredStmt = db.prepare(`UPDATE systems SET is_secured = ? WHERE id = ?`);
 
@@ -646,6 +658,7 @@ module.exports = {
     upsertSystemFull, setSystemInVision, getSystemObservedAt, advanceSystemObservedAt,
     deleteAllSystems, countBestGuardedAt, clearBestGuarded, insertBestGuarded,
     getSystemPlanetsWithIntel, getSystemPlanetsForBot, getPlanetsFullDb, checkAndUpdateSystemSecured,
+    countUnconfirmedSieges,
     getBestGuardedInArea, diffAndReplaceBestGuardedAreaWatch,
     clearBestPlanetsSnapshot, insertBestPlanetsSnapshot, getBestPlanetsFriendlyCoverage, countSecuredSystems,
     getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getPlanetsByOwner, getOldPlanet, upsertPlanet,

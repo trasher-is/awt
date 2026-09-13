@@ -427,7 +427,15 @@ router.post('/sync/system', requireAuth, (req, res) => {
             }
         }
 
-        res.json({ success: true, synced_count: planets.length });
+        // siege_unconfirmed tells the bulk seed "there's a siege here the API can't explain"
+        // — its cue to spend one DOM page fetch on this system and settle whose it is (see
+        // api-galaxy-seed.js). Page fetches are not charged against the game's 200-per-5min
+        // API budget, only the shared 5/sec gate, so a confirm-scrape is genuinely cheap.
+        res.json({
+            success: true,
+            synced_count: planets.length,
+            siege_unconfirmed: systemsRepo.countUnconfirmedSieges(system_id) > 0,
+        });
     } catch (err) {
         console.error(`[DB Error] Failed to sync system ${system_id}:`, err);
         res.status(500).json({ error: 'Database sync failed' });
