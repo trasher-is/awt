@@ -208,8 +208,19 @@ export function initSpy() {
                 try {
                     if (typeof window.parent.toggleSidebar === 'function') {
                         const sidebar = window.parent.document.getElementById('sidebar');
-                        if (sidebar && !sidebar.classList.contains('expanded')) window.parent.toggleSidebar();
-                        
+                        // Opening the sidebar for you is a convenience on a desktop, where it
+                        // sits ALONGSIDE the system you just clicked. On a phone it is an
+                        // overlay: it covers the very thing you opened, so every tap on the
+                        // map had to be followed by dismissing it (2026-09-13). Below 768px
+                        // — the same breakpoint dashboard.js uses for the mobile trigger —
+                        // the sidebar only ever opens because someone pressed the button.
+                        // Measured on the PARENT: this code runs inside the game frame, and
+                        // it is the wrapper's width that decides whether the sidebar overlays.
+                        const viewportWidth = window.parent.innerWidth || window.innerWidth;
+                        if (viewportWidth >= 768 && sidebar && !sidebar.classList.contains('expanded')) {
+                            window.parent.toggleSidebar();
+                        }
+
                         if (typeof window.parent.closeSystemDatabasePanel === 'function') window.parent.closeSystemDatabasePanel();
                         if (typeof window.parent.closePlanetDatabasePanel === 'function') window.parent.closePlanetDatabasePanel();
                         if (typeof window.parent.closeFleetDatabasePanel === 'function') window.parent.closeFleetDatabasePanel();
