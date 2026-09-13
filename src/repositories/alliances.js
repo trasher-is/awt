@@ -25,8 +25,14 @@ function countAlliances() {
     return countAlliancesStmt.get().count;
 }
 
+// intel_members_count rides along (2026-09-13) so a caller can say how much of an alliance
+// it actually has intel on, rather than hiding the ones it has none for — see !intels, which
+// used to list only alliances with at least one scanned member and so showed 4 of the 20
+// alliances in the game, omitting the four largest.
 const getWarRoomAlliancesStmt = db.prepare(`
-    SELECT a.id, a.tag, a.name, COUNT(p.id) as active_members_count, MAX(p.updated_at) as last_scan_time
+    SELECT a.id, a.tag, a.name, COUNT(p.id) as active_members_count,
+           SUM(CASE WHEN p.has_intel = 1 THEN 1 ELSE 0 END) as intel_members_count,
+           MAX(p.updated_at) as last_scan_time
     FROM alliances a
     JOIN players p ON p.alliance_id = a.id
     GROUP BY a.id, a.tag, a.name
