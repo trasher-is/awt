@@ -675,11 +675,11 @@ export async function initBioThreatPills() {
 
     pillBox.querySelector('.aw-bio-pill-red')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        showBioThreatModal(`Confirmed biology ${data.confirmedThreshold}+ over you`, data.confirmed, 'biology', '#f87171');
+        showBioThreatModal(`Confirmed biology ${data.confirmedThreshold}+ — at least +${data.confirmedThreshold - data.myBio} over your ${data.myBio}`, data.confirmed, 'biology', '#f87171');
     });
     pillBox.querySelector('.aw-bio-pill-yellow')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        showBioThreatModal(`Unscanned — science ${data.suspectedThreshold}+ over your biology`, data.suspected, 'science_level', '#facc15');
+        showBioThreatModal(`Unscanned — science ${data.suspectedThreshold}+ — at least +${data.suspectedThreshold - data.myBio} over your biology ${data.myBio}`, data.suspected, 'science_level', '#facc15');
     });
 }
 
