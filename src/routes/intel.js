@@ -12,7 +12,7 @@ const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
 const { observedNumber, positiveMachineNumber } = require('../utils/observed-number');
 const { parseTimestamp } = require('../../public/js/utils/sqlite-time.js');
-const { filterThreatsInRange } = require('../utils/threat-vision');
+const { splitThreats } = require('../utils/threat-vision');
 const { previousNames, findByFormerName } = require('../utils/round-archive');
 const { friendlyAllianceTags } = require('../utils/friendly-alliance-tags');
 const { truePowerForAllianceRow } = require('../utils/true-power');
@@ -615,8 +615,19 @@ router.get('/intel/bio-threats', requireAuth, (req, res) => {
         // kept and flagged rather than dropped: a threat nobody told you about is worse than
         // one you can dismiss. Counts come from the filtered lists so the pill and the modal
         // can never disagree.
-        const confirmed = filterThreatsInRange(playersRepo.getThreatPlayersByBiology(confirmedThreshold, me.id), me);
-        const suspected = filterThreatsInRange(playersRepo.getThreatPlayersByScience(suspectedThreshold, me.id), me);
+        // BOTH queries run at the LOWER bar and the pill is decided afterwards. Querying
+        // each at its own bar left a confirmed player between the two — above +4, below +6 —
+        // in neither list: too small a gap for red, and yellow only ever looked at unscanned
+        // players. Classifying after the fetch closes that, and lets someone who is merely
+        // CLOSING land in yellow whatever their gap.
+        const candidates = [
+            ...playersRepo.getThreatPlayersByBiology(suspectedThreshold, me.id),
+            ...playersRepo.getThreatPlayersByScience(suspectedThreshold, me.id),
+        ];
+        const { red, yellow } = splitThreats(candidates, me, {
+            myBio,
+            confirmedMargin: playersRepo.BIO_THREAT_MARGIN_CONFIRMED,
+        });
         res.json({
             success: true,
             myBio,
@@ -624,10 +635,10 @@ router.get('/intel/bio-threats', requireAuth, (req, res) => {
             confirmedThreshold,
             suspectedThreshold,
             myOriginKnown: Number.isFinite(Number(me.origin_x)) && Number.isFinite(Number(me.origin_y)),
-            confirmed,
-            suspected,
-            confirmedCount: confirmed.length,
-            suspectedCount: suspected.length,
+            confirmed: red,
+            suspected: yellow,
+            confirmedCount: red.length,
+            suspectedCount: yellow.length,
         });
     } catch (err) {
         console.error('[DB Error] Failed to fetch bio threat matrix:', err);

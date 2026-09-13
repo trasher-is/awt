@@ -88,12 +88,16 @@ db.prepare(`INSERT INTO players (id, name, biology, science_level, has_intel) VA
         ok('confirmed list has exactly BioGiant and ScannedAndStrong (real bio >= threshold, has_intel=1)',
             JSON.stringify(confirmedNames) === JSON.stringify(['BioGiant', 'ScannedAndStrong']), confirmedNames);
         ok('confirmedCount matches the list length (2)', res.body.confirmedCount === 2, res.body.confirmedCount);
-        ok('JustUnder (bio one below threshold) is excluded', !confirmedNames.includes('JustUnder'));
+        ok('JustUnder (one below the RED bar) is not red', !confirmedNames.includes('JustUnder'));
 
-        const suspectedNames = (res.body.suspected || []).map(p => p.name);
-        ok('suspected list has exactly MysteryScientist (has_intel=0, science >= threshold)',
-            JSON.stringify(suspectedNames) === JSON.stringify(['MysteryScientist']), suspectedNames);
-        ok('suspectedCount matches (1)', res.body.suspectedCount === 1, res.body.suspectedCount);
+        const suspectedNames = (res.body.suspected || []).map(p => p.name).sort();
+        // Yellow catches BOTH kinds of "worth watching": an unscanned player whose science
+        // ceiling clears the lower bar, AND a CONFIRMED player above that bar but below the
+        // red one. Splitting one margin into two originally left the latter in neither list
+        // — JustUnder, at +5, matched no query at all — so this pins the hole shut.
+        ok('yellow holds the unscanned player AND the confirmed one between the two bars',
+            JSON.stringify(suspectedNames) === JSON.stringify(['JustUnder', 'MysteryScientist']), suspectedNames);
+        ok('suspectedCount matches (2)', res.body.suspectedCount === 2, res.body.suspectedCount);
         ok('LowScience (science below threshold) is excluded', !suspectedNames.includes('LowScience'));
         ok('ScannedAndStrong never appears in suspected despite high science (has_intel=1, so it is CONFIRMED not suspected)',
             !suspectedNames.includes('ScannedAndStrong'), suspectedNames);

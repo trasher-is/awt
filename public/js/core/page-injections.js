@@ -632,6 +632,12 @@ function showBioThreatModal(title, players, levelKey, color) {
             let note = '';
             if (v.unknown) note = `<span title="${esc(v.unknown)}" style="color:#888;font-size:10px;margin-left:6px;">position unknown</span>`;
             else if (v.estimated) note = `<span title="Origin estimated from their largest planet — the game only shows a real origin for systems you can see" style="color:#888;font-size:10px;margin-left:6px;">~origin</span>`;
+            // "About to see you" must not read the same as "is watching you" — the whole
+            // point of showing them early is that there is still time to act.
+            if (p.closing && v.levelsAway > 0) {
+                const lvl = v.levelsAway === 1 ? '1 level' : `${v.levelsAway} levels`;
+                note += `<span title="Cannot see you yet — needs biology ${v.required}, has ${v.radius}" style="color:#fb923c;font-size:10px;margin-left:6px;">${lvl} from seeing you</span>`;
+            }
             return `<a href="/Game/Players/Profile/${p.player_id}" style="color:${color};text-decoration:none;display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #333;">
                 <span>${tag}${esc(p.name)}${note}</span><span style="font-weight:bold;">${p[levelKey]}</span>
             </a>`;
