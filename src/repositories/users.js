@@ -132,11 +132,13 @@ function touchUserLastSeen(id) {
 
 // Raw rows only — online/inactive is a display threshold, not a database fact, and lives
 // with the one widget that renders it (public/js/ui/awt-presence.js) instead of being
-// duplicated here.
+// duplicated here. The bootstrap 'admin' account is excluded the same way
+// getActiveRecipientsExcludingAdmin already does — it's the setup account, not a member,
+// and would otherwise sit in "hasn't opened AWT" forever.
 const getUserPresenceStmt = db.prepare(`
     SELECT id, game_name, role, discord_name, last_seen_at
     FROM app_users
-    WHERE is_active = 1
+    WHERE is_active = 1 AND LOWER(game_name) != 'admin'
     ORDER BY game_name COLLATE NOCASE
 `);
 function getUserPresence() {

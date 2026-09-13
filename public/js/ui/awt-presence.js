@@ -7,6 +7,10 @@
 // be deep in a battle on a stale tab (tool closed, still playing) or idling in-game with
 // the hub open and syncing in the background (tool open, not "active") — the two numbers
 // are expected to disagree.
+//
+// Rendered as a plain "name | name | name" line rather than one row per member — this is
+// a glance-at widget in a narrow sidebar, not a table; the exact last-seen time is still
+// available as a hover title per name.
 import '../utils/sqlite-time.js'; // side-effect import: puts AWSqliteTime on globalThis
 const { parseSqliteUtc, formatSqliteUtc } = globalThis.AWSqliteTime;
 
@@ -17,29 +21,20 @@ const ONLINE_WINDOW_MS = 5 * 60 * 1000;
 const INACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const POLL_INTERVAL_MS = 60 * 1000;
 
-function relativeAge(ms) {
-    const mins = Math.round(ms / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.round(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    return `${Math.round(hours / 24)}d ago`;
-}
-
-function row(user, detailText, dotClass) {
-    const div = document.createElement('div');
-    div.className = 'flex items-center gap-2';
-    div.title = formatSqliteUtc(user.last_seen_at, undefined, 'Never opened AWT');
-    const dot = document.createElement('span');
-    dot.className = `w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`;
-    const name = document.createElement('span');
-    name.className = 'truncate';
-    name.textContent = user.game_name;
-    const detail = document.createElement('span');
-    detail.className = 'ml-auto text-muted-foreground shrink-0';
-    detail.textContent = detailText;
-    div.append(dot, name, detail);
-    return div;
+function appendPipedNames(el, users, nameClass) {
+    users.forEach((user, i) => {
+        const span = document.createElement('span');
+        span.className = nameClass;
+        span.textContent = user.game_name;
+        span.title = formatSqliteUtc(user.last_seen_at, undefined, 'Never opened AWT');
+        el.appendChild(span);
+        if (i < users.length - 1) {
+            const sep = document.createElement('span');
+            sep.className = 'text-muted-foreground';
+            sep.textContent = ' | ';
+            el.appendChild(sep);
+        }
+    });
 }
 
 async function refreshPresence() {
@@ -64,7 +59,7 @@ async function refreshPresence() {
         else if (ageMs >= INACTIVE_WINDOW_MS) inactive.push({ user: u, ageMs });
     }
     online.sort((a, b) => a.user.game_name.localeCompare(b.user.game_name));
-    inactive.sort((a, b) => a.ageMs - b.ageMs);
+    inactive.sort((a, b) => a.ageMs - b.ageMs); // most-recently-seen-of-the-stale first
 
     el.replaceChildren();
 
@@ -72,16 +67,25 @@ async function refreshPresence() {
     onlineHeader.className = 'text-muted-foreground';
     onlineHeader.textContent = online.length ? `Online now (${online.length})` : 'Nobody online right now';
     el.appendChild(onlineHeader);
-    for (const { user } of online) el.appendChild(row(user, 'online', 'bg-green-500'));
+    if (online.length) {
+        // A plain (non-flex) container: the names and " | " separators are just inline
+        // spans that wrap like normal text. A flex/flex-wrap container blockifies each
+        // span into its own flex item, and a flex item's own leading/trailing space is
+        // then collapsed as line-edge whitespace — which is what made this look cramped
+        // ("caveman|h87" instead of "caveman | h87") the first time round.
+        const onlineLine = document.createElement('div');
+        appendPipedNames(onlineLine, online.map(o => o.user), 'text-green-400');
+        el.appendChild(onlineLine);
+    }
 
     if (inactive.length) {
         const inactiveHeader = document.createElement('div');
         inactiveHeader.className = 'text-muted-foreground mt-2';
         inactiveHeader.textContent = `Haven't opened AWT in 24h+ (${inactive.length})`;
         el.appendChild(inactiveHeader);
-        for (const { user, ageMs } of inactive) {
-            el.appendChild(row(user, Number.isFinite(ageMs) ? relativeAge(ageMs) : 'never', 'bg-zinc-600'));
-        }
+        const inactiveLine = document.createElement('div');
+        appendPipedNames(inactiveLine, inactive.map(i => i.user), 'text-muted-foreground');
+        el.appendChild(inactiveLine);
     }
 }
 

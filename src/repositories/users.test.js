@@ -110,6 +110,9 @@ ok('getUserPresence excludes deactivated accounts',
     !users.getUserPresence().some(u => u.id === presenceUser.id));
 users.deleteUser(presenceUser.id);
 
+ok('getUserPresence excludes the bootstrap admin account',
+    !users.getUserPresence().some(u => u.game_name.toLowerCase() === 'admin'));
+
 ok('getAdminPasswordHash finds the bootstrap admin', !!users.getAdminPasswordHash());
 
 users.banUser(caveman.id);
