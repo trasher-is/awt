@@ -19,6 +19,7 @@ import { runPlayerScan } from '../scrapers/mass-scanner.js';
 import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
 import '../utils/vision-model.js';   // side-effect import: the !vision rule, defined once
 import { initVersionWatch } from './version-watch.js';
+import { initAwtPresence } from './awt-presence.js';
 
 const { formatSqliteUtc, formatLocalDateTime } = globalThis.AWSqliteTime;
 
@@ -190,6 +191,8 @@ async function initWrapper() {
     // nothing (tab hidden, or nobody clicking here or in the game frame), so this only
     // ever announces the update; it never demands anything of the member.
     initVersionWatch(() => showToast('Hub updated — refreshing when you are idle'));
+
+    initAwtPresence();
 }
 
 // The Hub half of the Discord link challenge. You are already logged in here, which is

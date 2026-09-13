@@ -144,6 +144,11 @@ function initDatabase() {
     // Sessions created before this column existed carry no copy at all and are read as 0,
     // which matches the default here — nobody is logged out by the migration itself.
     addColumn('app_users', 'session_version', 'INTEGER NOT NULL DEFAULT 0');
+    // When this account last had AWT itself open (any authenticated request), touched by
+    // src/utils/presence-touch.js. Not the same thing as players.last_activity_at below,
+    // which is GAME activity from the API/DOM scrape — an account can be mid-battle in
+    // the game on a stale tab, or sitting idle in-game with the hub tab open and syncing.
+    addColumn('app_users', 'last_seen_at', 'DATETIME');
     addColumn('players', 'has_intel', 'INTEGER DEFAULT 0');
     // Alliance-wide intel VISIBILITY, as opposed to has_intel above, which latches to 1
     // forever the first time anyone captures a report and can therefore only ever answer

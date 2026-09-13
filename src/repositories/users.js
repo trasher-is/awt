@@ -114,6 +114,35 @@ function getActiveMemberNames() {
     return getActiveMemberNamesStmt.all();
 }
 
+// --- app_users: tool presence ---
+// "Is AWT itself open right now" — see database.js's comment on last_seen_at for why this
+// is kept separate from last_activity_at (players.js), which is game activity.
+
+// Throttled so a user clicking around the dashboard is one write per window, not one per
+// request. Idle members are the common case, so the WHERE clause makes an up-to-date row
+// a no-op UPDATE rather than a write.
+const PRESENCE_TOUCH_THROTTLE_SECONDS = 60;
+const touchUserLastSeenStmt = db.prepare(`
+    UPDATE app_users SET last_seen_at = CURRENT_TIMESTAMP
+    WHERE id = @id AND (last_seen_at IS NULL OR last_seen_at < datetime('now', '-' || @throttle || ' seconds'))
+`);
+function touchUserLastSeen(id) {
+    touchUserLastSeenStmt.run({ id, throttle: PRESENCE_TOUCH_THROTTLE_SECONDS });
+}
+
+// Raw rows only — online/inactive is a display threshold, not a database fact, and lives
+// with the one widget that renders it (public/js/ui/awt-presence.js) instead of being
+// duplicated here.
+const getUserPresenceStmt = db.prepare(`
+    SELECT id, game_name, role, discord_name, last_seen_at
+    FROM app_users
+    WHERE is_active = 1
+    ORDER BY game_name COLLATE NOCASE
+`);
+function getUserPresence() {
+    return getUserPresenceStmt.all();
+}
+
 // --- app_users: the account behind a session ---
 
 // Read on EVERY request that carries a logged-in session (src/utils/session-account.js),
@@ -242,7 +271,7 @@ module.exports = {
     getUserMentionByGameName, getActiveRecipientsExcludingAdmin, getValidActiveUserIds,
     getUserByGameName, getUserAllianceIdBridge, getUserById, getAllUsersWithIdle,
     getUserNameById, getUserDiscordInfoById, getUserActiveStatusById, getAdminPasswordHash,
-    getActiveMemberNames, getSessionAccountById, bumpSessionVersion,
+    getActiveMemberNames, touchUserLastSeen, getUserPresence, getSessionAccountById, bumpSessionVersion,
     updateUserGameName, deleteUser, createUser, updateUserDiscordName, clearUserDiscordFields,
     setUserActive, setUserRole, setUserPasswordHash, updateUserDiscordLink, banUser,
     deleteExpiredLinkCodes, getLinkCodeWithUser, markLinkCodeUsed, mintLinkCode,
