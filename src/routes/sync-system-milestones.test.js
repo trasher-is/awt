@@ -262,6 +262,35 @@ function request(server, method, urlPath, body) {
             db.prepare(`SELECT owner_id FROM planets WHERE game_planet_id = 95201`).get().owner_id === null);
         ok('observed_at moved forward to the DOM scrape, so older captures stay locked out',
             db.prepare(`SELECT observed_at FROM systems WHERE id = 952`).get().observed_at > fresh);
+
+        // The regression this guard caused on its first day: an unreadable captured_at was
+        // answered with a 400, and because the game stamps its captures in a format the
+        // hub's own parser does not accept, that silently blacklisted 274 of 381 systems.
+        // An optional ordering hint must never cost us a payload of real intel.
+        console.log('\n── An unreadable captured_at costs nothing ' + '─'.repeat(31));
+        db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (953, 'Odd Stamp System', 6, 6)`).run();
+        for (const stamp of ['13.09.2026 07:15:33', 'yesterday', '', '0', 'not-a-date']) {
+            const res = await request(server, 'POST', '/hub-api/sync/system', {
+                system_id: 953, captured_at: stamp,
+                planets: [{ game_planet_id: 95301, planet_index: 1, owner: { id: 701, name: 'Holder', alliance_tag: 'RAID' }, population: 7, starbase: 0 }],
+            });
+            ok(`captured_at ${JSON.stringify(stamp)} still syncs (no 400, no data lost)`,
+                res.status === 200 && res.body.success && !res.body.skipped, res.body);
+        }
+        ok('the planet really was stored despite the unusable stamp',
+            db.prepare(`SELECT population FROM planets WHERE game_planet_id = 95301`).get().population === 7);
+
+        // A stamp far from now is a misparse, not an observation — ordering by it would be
+        // worse than not ordering at all, so it is refused rather than believed.
+        const farFuture = await request(server, 'POST', '/hub-api/sync/system', {
+            system_id: 953, captured_at: '2099-01-01T00:00:00.000Z',
+            planets: [{ game_planet_id: 95301, planet_index: 1, owner: { id: 701, name: 'Holder', alliance_tag: 'RAID' }, population: 8, starbase: 0 }],
+        });
+        ok('an implausibly distant capture is not trusted as an ordering key, but still syncs',
+            farFuture.status === 200 && farFuture.body.success, farFuture.body);
+        ok('and it did not poison observed_at with a year-2099 watermark',
+            (db.prepare(`SELECT observed_at FROM systems WHERE id = 953`).get().observed_at || '') < '2099',
+            db.prepare(`SELECT observed_at FROM systems WHERE id = 953`).get());
     } finally {
         server.close();
     }
