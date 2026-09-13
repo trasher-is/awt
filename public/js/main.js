@@ -1,6 +1,18 @@
 import { initSpy } from './core/spy.js';
+import { reloadWrapperIfPreVersionWatch } from './core/stale-wrapper-reload.js';
 
 console.log("[Alliance Tools] Extension Core Engine Loaded.");
+
+// Before anything else: a wrapper too old to update itself cannot be rescued from inside
+// itself, only from here — this frame's code is re-fetched on every game page the member
+// opens, so it is always current however stale the tab around it is. One-time migration;
+// see stale-wrapper-reload.js. If it starts a reload the whole page is going away in a
+// moment, so the rest of this file is left to run rather than branched around: a few
+// hundred milliseconds of setup that gets discarded is cheaper than a conditional wrapping
+// the entire module.
+if (reloadWrapperIfPreVersionWatch()) {
+    console.log('[Alliance Tools] Hub wrapper predates self-updating — reloading it.');
+}
 
 initSpy();
 
