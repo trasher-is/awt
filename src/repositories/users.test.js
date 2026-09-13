@@ -76,6 +76,40 @@ ok('getAllUsersWithIdle joins in last_activity_at from the matching player row',
 
 ok('getActiveMemberNames lists active game names', users.getActiveMemberNames().some(u => u.game_name === 'Caveman2'));
 
+// touchUserLastSeen/getUserPresence: "is AWT open right now", separate from the game
+// activity tested above via last_activity_at. A fresh user, not caveman/idletester —
+// this section deliberately mutates last_seen_at by hand to test the throttle, and
+// caveman's is_active flips later in this file.
+users.createUser('presencetester', 'hash3', 'user', null);
+const presenceUser = users.getUserByGameName('presencetester');
+ok('a freshly-created user has no last_seen_at yet',
+    !users.getUserPresence().find(u => u.id === presenceUser.id).last_seen_at);
+
+users.touchUserLastSeen(presenceUser.id);
+const firstSeen = users.getUserPresence().find(u => u.id === presenceUser.id).last_seen_at;
+ok('touchUserLastSeen sets last_seen_at on a never-seen row', !!firstSeen, firstSeen);
+
+// Force it into the throttle window by hand (CURRENT_TIMESTAMP has 1s resolution, too
+// coarse to trust a real race between two calls) and confirm a call inside that window
+// is a no-op.
+db.prepare(`UPDATE app_users SET last_seen_at = datetime('now', '-10 seconds') WHERE id = ?`).run(presenceUser.id);
+const withinThrottle = users.getUserPresence().find(u => u.id === presenceUser.id).last_seen_at;
+users.touchUserLastSeen(presenceUser.id);
+ok('touchUserLastSeen is a no-op inside the throttle window',
+    users.getUserPresence().find(u => u.id === presenceUser.id).last_seen_at === withinThrottle);
+
+// Now push it stale (older than the throttle) and confirm a call DOES update.
+db.prepare(`UPDATE app_users SET last_seen_at = datetime('now', '-1 hour') WHERE id = ?`).run(presenceUser.id);
+users.touchUserLastSeen(presenceUser.id);
+ok('touchUserLastSeen updates once the previous value is outside the throttle window',
+    users.getUserPresence().find(u => u.id === presenceUser.id).last_seen_at !== null
+    && Date.now() - new Date(users.getUserPresence().find(u => u.id === presenceUser.id).last_seen_at.replace(' ', 'T') + 'Z').getTime() < 60000);
+
+users.setUserActive(presenceUser.id, 0);
+ok('getUserPresence excludes deactivated accounts',
+    !users.getUserPresence().some(u => u.id === presenceUser.id));
+users.deleteUser(presenceUser.id);
+
 ok('getAdminPasswordHash finds the bootstrap admin', !!users.getAdminPasswordHash());
 
 users.banUser(caveman.id);

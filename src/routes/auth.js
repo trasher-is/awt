@@ -99,6 +99,16 @@ router.get('/me', requireAuth, (req, res) => {
     });
 });
 
+// --- TOOL PRESENCE ---
+// Who has AWT itself open, not who's active in-game (that's players.last_activity_at,
+// served elsewhere). last_seen_at is touched on every authenticated request by
+// src/utils/presence-touch.js; classifying a row as "online" vs. "hasn't opened it in a
+// day" is a display threshold, so it's left to the widget (awt-presence.js) rather than
+// baked in here — one row shape, one place that decides what it means.
+router.get('/users/presence', requireAuth, (req, res) => {
+    res.json({ success: true, users: usersRepo.getUserPresence() });
+});
+
 // --- DISCORD LINK CODE ---
 // The Hub half of the account-linking challenge. The caller is already authenticated
 // here, which is exactly the proof `!link <name>` never had: it took a name and bound
