@@ -108,17 +108,15 @@ function isEnemyGain(e, friendlyTagsUpper) {
 // besieging an enemy, or two other parties fighting each other — which isn't a threat to
 // us and just floods the channel with noise). Unlike isEnemyGain, an unowned/unaffiliated
 // victim does NOT qualify — there's nothing of ours to alarm about.
-// AND the besieger itself isn't friendly, when that's actually known (2026-09-12b: the DOM
-// directly labels a siege's allegiance — see siege-indicator-parser.js — which owner-
-// friendliness alone can't rule out; a friendly fleet somehow shown sieging a friendly
-// planet isn't an enemy at all). attacker_is_friendly is null when only the API-sourced
-// boolean was available (no attacker identity), in which case a fresh siege on a friendly
-// planet is still assumed hostile, same as before.
+// The besieger's allegiance is no longer judged here (2026-09-13): /sync/system only emits
+// a SIEGE_STARTED once the live DOM has confirmed the siege is hostile, because the API's
+// hasSiege flag is equally true for a friendly fleet in orbit and briefly had this bot
+// announcing an allied transit as an enemy attack. So all that's left to check is that the
+// besieged planet is one of ours.
 function isEnemySiegeOnUs(e, friendlyTagsUpper) {
     if (!e || e.type !== 'SIEGE_STARTED') return false;
     const tag = e.owner_alliance_tag ? String(e.owner_alliance_tag).toUpperCase() : null;
-    if (!tag || !friendlyTagsUpper.has(tag)) return false;
-    return e.attacker_is_friendly !== true;
+    return !!tag && friendlyTagsUpper.has(tag);
 }
 
 function milestoneLine(e) {

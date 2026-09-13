@@ -257,7 +257,23 @@ function initDatabase() {
     // tracked so the "system closed" Discord celebration fires once, on the transition
     // into that state, rather than on every subsequent sync of an already-secure system.
     addColumn('systems', 'is_secured', 'INTEGER DEFAULT 0');
+    // observed_at (2026-09-13): the game's OWN capture time for the newest observation the
+    // hub has applied to this system (Map/sectors capturedAt; a live DOM scrape counts as
+    // "now"). Several members' tabs each sync the whole galaxy independently, from their
+    // own account's viewpoint, and their captures differ in age — without an ordering key
+    // it was last-write-wins, so an older snapshot kept overwriting a newer one and the two
+    // flip-flopped forever (confirmed live: a planet alternating Free/pop-0 and owned/pop-1
+    // every 5 minutes, logging an identical population-drop event each cycle). See
+    // /sync/system's stale-observation guard.
+    addColumn('systems', 'observed_at', 'DATETIME');
     addColumn('planets', 'name', 'TEXT');
+    // siege_is_friendly (2026-09-13): whose siege this is — 1 friendly, 0 hostile, NULL not
+    // known. The API's hasSiege flag (the only siege signal the bulk seed has) is a bare
+    // boolean that is ALSO true for a friendly fleet in orbit — confirmed live: an allied
+    // transit arriving at a RAID planet flipped hasSiege on and the bot cried "under siege"
+    // at its own alliance. Only the live DOM says which (see siege-indicator-parser.js), so
+    // its answer is persisted here rather than being used once and thrown away.
+    addColumn('planets', 'siege_is_friendly', 'INTEGER');
 
     // 4.5 Alliance Meta-Data (Planning)
     db.exec(`

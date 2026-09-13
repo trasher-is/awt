@@ -128,6 +128,27 @@ function setSystemInVision(id, isInVision) {
     return setSystemInVisionStmt.run(isInVision ? 1 : 0, id).changes;
 }
 
+// observed_at: the game's own capture time of the newest observation applied to this
+// system — the ordering key that stops an older snapshot from overwriting a newer one when
+// several members' tabs each sync the galaxy from their own account's viewpoint. See
+// database.js's column comment and /sync/system's stale-observation guard.
+const getSystemObservedAtStmt = db.prepare(`SELECT observed_at FROM systems WHERE id = ?`);
+function getSystemObservedAt(id) {
+    const row = getSystemObservedAtStmt.get(id);
+    return row ? row.observed_at : null;
+}
+// Never moves backwards: a sync that applied is by definition the newest thing we have, but
+// two payloads can race, and MAX keeps the winner.
+const advanceSystemObservedAtStmt = db.prepare(`
+    UPDATE systems SET observed_at = MAX(COALESCE(observed_at, ''), ?) WHERE id = ?
+`);
+// Callers MUST pass a normalized UTC ISO string (the comparison above is lexicographic,
+// which only equals chronological when every stored value has the same shape).
+function advanceSystemObservedAt(id, observedAtIso) {
+    if (!observedAtIso) return;
+    advanceSystemObservedAtStmt.run(observedAtIso, id);
+}
+
 const deleteAllSystemsStmt = db.prepare(`DELETE FROM systems`);
 function deleteAllSystems() {
     deleteAllSystemsStmt.run();
@@ -279,19 +300,36 @@ function getSystemPlanetsForBot(sysId) {
 // configured NAP/ally, see friendly-alliance-tags.js), AND at least one of those planets
 // is owned by our OWN alliance specifically, not NAP partners alone (2026-09-12e fix — a
 // system entirely held by an ally, with none of it ours, isn't "ours" to call closed). A
-// friendly-owned planet currently under active siege (is_sieged) does NOT count as secure
-// either — a hostile fleet mid-attack there means the system is actively contested, not
-// closed. (This tightened the original 2026-09-12 version, which only required every
-// OWNED planet to be friendly and let Free planets sit uncounted — confirmed live to
-// undercount how "closed" the maintainer actually meant.)
+// planet under siege does NOT count as secure either — a hostile fleet mid-attack there
+// means the system is actively contested, not closed — UNLESS the siege is known to be
+// friendly (2026-09-13: the API's hasSiege flag is also true for an allied fleet in orbit,
+// so "sieged" alone was blocking closure on our own allies parking at home; only the live
+// DOM knows which, hence siege_is_friendly). A siege of unknown allegiance still blocks:
+// if we can't tell, assume contested rather than celebrate early.
+// (This tightened the original 2026-09-12 version, which only required every OWNED planet
+// to be friendly and let Free planets sit uncounted — confirmed live to undercount how
+// "closed" the maintainer actually meant.)
 function isSystemFullyFriendly(sysId, friendlyTagsUpper, ownTagsUpper) {
     const rows = getSystemPlanetsForBotStmt.all(sysId);
     if (!rows.length) return false;
+    const contested = p => p.is_sieged && p.siege_is_friendly !== 1;
     const allOwnedAndFriendly = rows.every(p =>
-        p.owner_id != null && p.ally_tag && friendlyTagsUpper.has(String(p.ally_tag).toUpperCase()) && !p.is_sieged);
+        p.owner_id != null && p.ally_tag && friendlyTagsUpper.has(String(p.ally_tag).toUpperCase()) && !contested(p));
     if (!allOwnedAndFriendly) return false;
     const own = ownTagsUpper || new Set();
     return rows.some(p => p.ally_tag && own.has(String(p.ally_tag).toUpperCase()));
+}
+
+// Sieges we know about but cannot attribute: the API's hasSiege is a bare boolean that is
+// equally true for a friendly fleet in orbit, so a siege only seen through the bulk seed
+// has no allegiance. The seed uses this to decide whether a one-off DOM confirm-scrape of
+// that system is worth making (see api-galaxy-seed.js) — the live page names the besieger
+// and says whose side they're on, which is the only way to tell.
+const countUnconfirmedSiegesStmt = db.prepare(`
+    SELECT COUNT(*) AS n FROM planets WHERE system_id = ? AND is_sieged = 1 AND siege_is_friendly IS NULL
+`);
+function countUnconfirmedSieges(systemId) {
+    return countUnconfirmedSiegesStmt.get(systemId).n;
 }
 
 const getSystemSecuredStmt = db.prepare(`SELECT is_secured FROM systems WHERE id = ?`);
@@ -362,7 +400,7 @@ function getPlanetsByOwner(playerId) {
 // starbase/has_fleet/is_sieged are selected because the fog-of-war guard in sync.js
 // restores them: reading them off a row that never carried them bound `undefined`
 // (-> NULL) and quietly erased the very values the guard exists to preserve.
-const getOldPlanetStmt = db.prepare(`SELECT owner_id, population, starbase, has_fleet, is_sieged, updated_at FROM planets WHERE system_id = ? AND planet_index = ?`);
+const getOldPlanetStmt = db.prepare(`SELECT owner_id, population, starbase, has_fleet, is_sieged, siege_is_friendly, updated_at FROM planets WHERE system_id = ? AND planet_index = ?`);
 function getOldPlanet(systemId, planetIndex) {
     return getOldPlanetStmt.get(systemId, planetIndex);
 }
@@ -483,8 +521,8 @@ function getPlanetLocationByGameId(gamePlanetId) {
 }
 
 const upsertPlanetStmt = db.prepare(`
-    INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet, is_sieged, name)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet, is_sieged, name, siege_is_friendly)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(system_id, planet_index) DO UPDATE SET
         game_planet_id=excluded.game_planet_id,
         owner_id=excluded.owner_id,
@@ -492,11 +530,14 @@ const upsertPlanetStmt = db.prepare(`
         starbase=excluded.starbase,
         has_fleet=excluded.has_fleet,
         is_sieged=excluded.is_sieged,
+        siege_is_friendly=excluded.siege_is_friendly,
         name=COALESCE(excluded.name, planets.name),
         updated_at=CURRENT_TIMESTAMP
 `);
-function upsertPlanet(gamePlanetId, systemId, planetIndex, ownerId, population, starbase, hasFleet, isSieged, name = null) {
-    upsertPlanetStmt.run(gamePlanetId, systemId, planetIndex, ownerId, population, starbase, hasFleet, isSieged, name);
+// siegeIsFriendly is written verbatim (not COALESCEd): the caller resolves "keep what we
+// knew" vs "the siege lifted, forget it" before calling — see /sync/system.
+function upsertPlanet(gamePlanetId, systemId, planetIndex, ownerId, population, starbase, hasFleet, isSieged, name = null, siegeIsFriendly = null) {
+    upsertPlanetStmt.run(gamePlanetId, systemId, planetIndex, ownerId, population, starbase, hasFleet, isSieged, name, siegeIsFriendly);
 }
 
 // A planet's game_planet_id is globally UNIQUE, but it can show up at a new
@@ -614,8 +655,10 @@ module.exports = {
     countSystems, countPlanets, getSystemCoords, getFullSystem, listSystemIds, getSystemsByIds,
     listSystemsWithCoordsLimited, searchSystemsByQueryPrefix, searchSystemsByNameOrId,
     getSystemsDbSummary, getGalaxyMapSystems, getGalaxyMapOwnership, upsertSystemStub,
-    upsertSystemFull, setSystemInVision, deleteAllSystems, countBestGuardedAt, clearBestGuarded, insertBestGuarded,
+    upsertSystemFull, setSystemInVision, getSystemObservedAt, advanceSystemObservedAt,
+    deleteAllSystems, countBestGuardedAt, clearBestGuarded, insertBestGuarded,
     getSystemPlanetsWithIntel, getSystemPlanetsForBot, getPlanetsFullDb, checkAndUpdateSystemSecured,
+    countUnconfirmedSieges,
     getBestGuardedInArea, diffAndReplaceBestGuardedAreaWatch,
     clearBestPlanetsSnapshot, insertBestPlanetsSnapshot, getBestPlanetsFriendlyCoverage, countSecuredSystems,
     getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getPlanetsByOwner, getOldPlanet, upsertPlanet,

@@ -28,7 +28,12 @@ function fakeStorage() {
     };
 }
 
-function build({ pullResult = { ok: true, inserted: 0 }, berlinDay = '2026-09-12', nextWindow = new Date('2026-09-13T00:05:00Z') } = {}) {
+// nextWindow must stay RELATIVE to now (2026-09-13 fix): it used to be the fixed instant
+// 2026-09-13T00:05:00Z, so once real time passed that date the scheduler computed a
+// negative delay, clamped it to the 1s floor, and the "rescheduled for the next daily
+// window, not immediately" case started failing on wall-clock time rather than on anything
+// the code did.
+function build({ pullResult = { ok: true, inserted: 0 }, berlinDay = '2026-09-12', nextWindow = new Date(Date.now() + 6 * 60 * 60 * 1000) } = {}) {
     const calls = { pullOnce: 0 };
     const pullOnce = async () => { calls.pullOnce++; return pullResult; };
     const AWDailyReset = { berlinDateKey: () => berlinDay, nextDailyWindow: () => nextWindow };
