@@ -629,17 +629,37 @@ function showBioThreatModal(title, players, levelKey, color) {
             // — right on every case we could check, but still an inference, and a list that
             // hides which rows are inferred invites more trust than it has earned.
             const v = p.vision || {};
+            // Say which entries rest on a guessed origin. The game only reveals an origin
+            // for a system we can see, so for distant players their biggest planet stands in
+            // — right on every case we could check, but still an inference, and a list that
+            // hides which rows are inferred invites more trust than it has earned.
             let note = '';
-            if (v.unknown) note = `<span title="${esc(v.unknown)}" style="color:#888;font-size:10px;margin-left:6px;">position unknown</span>`;
-            else if (v.estimated) note = `<span title="Origin estimated from their largest planet — the game only shows a real origin for systems you can see" style="color:#888;font-size:10px;margin-left:6px;">~origin</span>`;
-            // "About to see you" must not read the same as "is watching you" — the whole
-            // point of showing them early is that there is still time to act.
-            if (p.closing && v.levelsAway > 0) {
-                const lvl = v.levelsAway === 1 ? '1 level' : `${v.levelsAway} levels`;
-                note += `<span title="Cannot see you yet — needs biology ${v.required}, has ${v.radius}" style="color:#fb923c;font-size:10px;margin-left:6px;">${lvl} from seeing you</span>`;
+            if (v.estimated) note = `<span title="Origin estimated from their largest planet — the game only shows a real origin for systems you can see" style="color:#888;font-size:10px;margin-left:6px;">~origin</span>`;
+
+            // How far they are from seeing YOUR origin, spelled out per row.
+            //
+            // The gap is only honest when we know their actual biology. For an UNSCANNED
+            // player we do not: the radius used above is their science level, which is the
+            // ceiling biology could be at, not a reading of it. Saying "needs 3 more bio"
+            // there would be inventing the one number we lack, so those rows state the
+            // REQUIREMENT instead and leave the judgement to a reader who knows more.
+            const knownBio = Number.isFinite(Number(p.biology)) && Number(p.biology) > 0 && p.has_intel;
+            let reach;
+            if (v.unknown) {
+                reach = `<span title="${esc(v.unknown)}">position unknown</span>`;
+            } else if (knownBio && v.levelsAway > 0) {
+                reach = `<span style="color:#fb923c;">needs ${v.levelsAway} more bio to see your origin</span>`;
+            } else if (knownBio) {
+                reach = 'can see your origin';
+            } else {
+                reach = `needs bio ${v.required} to see your origin`;
             }
-            return `<a href="/Game/Players/Profile/${p.player_id}" style="color:${color};text-decoration:none;display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #333;">
-                <span>${tag}${esc(p.name)}${note}</span><span style="font-weight:bold;">${p[levelKey]}</span>
+
+            return `<a href="/Game/Players/Profile/${p.player_id}" style="color:${color};text-decoration:none;display:block;padding:4px 0;border-bottom:1px solid #333;">
+                <span style="display:flex;justify-content:space-between;">
+                    <span>${tag}${esc(p.name)}${note}</span><span style="font-weight:bold;">${p[levelKey]}</span>
+                </span>
+                <span style="display:block;color:#9ca3af;font-size:10px;">${reach}</span>
             </a>`;
         }).join('')
         : '<div style="color:#888;">None on record right now.</div>';
@@ -681,11 +701,11 @@ export async function initBioThreatPills() {
 
     pillBox.querySelector('.aw-bio-pill-red')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        showBioThreatModal(`Confirmed biology ${data.confirmedThreshold}+ — at least +${data.confirmedThreshold - data.myBio} over your ${data.myBio}`, data.confirmed, 'biology', '#f87171');
+        showBioThreatModal(`These players have ${data.confirmedThreshold - data.myBio}+ confirmed biology over your bio (${data.myBio})`, data.confirmed, 'biology', '#f87171');
     });
     pillBox.querySelector('.aw-bio-pill-yellow')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        showBioThreatModal(`Unscanned — science ${data.suspectedThreshold}+ — at least +${data.suspectedThreshold - data.myBio} over your biology ${data.myBio}`, data.suspected, 'science_level', '#facc15');
+        showBioThreatModal(`These players have ${data.suspectedThreshold - data.myBio}+ science over your bio (${data.myBio})`, data.suspected, 'science_level', '#facc15');
     });
 }
 
