@@ -19,6 +19,15 @@ function getSystemCoords(id) {
     return getSystemCoordsStmt.get(id);
 }
 
+// Coordinates identify a system exactly — all 381 are distinct — which is how a player's
+// ORIGIN arrives from the API: as {x, y} rather than an id (see mapPlayerDetailToSyncPayload).
+const getSystemIdByCoordsStmt = db.prepare(`SELECT id FROM systems WHERE x = ? AND y = ?`);
+function getSystemIdByCoords(x, y) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const row = getSystemIdByCoordsStmt.get(x, y);
+    return row ? row.id : null;
+}
+
 const getFullSystemStmt = db.prepare(`SELECT * FROM systems WHERE id = ?`);
 function getFullSystem(id) {
     return getFullSystemStmt.get(id);
@@ -662,7 +671,7 @@ function deleteAllTakeovers() {
 }
 
 module.exports = {
-    countSystems, countPlanets, getSystemCoords, getFullSystem, listSystemIds, listNamedSystems, getSystemsByIds,
+    countSystems, countPlanets, getSystemCoords, getSystemIdByCoords, getFullSystem, listSystemIds, listNamedSystems, getSystemsByIds,
     listSystemsWithCoordsLimited, searchSystemsByQueryPrefix, searchSystemsByNameOrId,
     getSystemsDbSummary, getGalaxyMapSystems, getGalaxyMapOwnership, upsertSystemStub,
     upsertSystemFull, setSystemInVision, getSystemObservedAt, advanceSystemObservedAt,

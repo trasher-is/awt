@@ -364,21 +364,56 @@ function upsertPlayerNameOnly(id, name) {
 
 // --- players: read (discord_bot.js) ---
 
-const getPlayerBiologyByNameStmt = db.prepare(`SELECT id, biology FROM players WHERE LOWER(name) = ?`);
+// The caller's own origin rides along: a bio advantage only threatens you if the holder can
+// actually SEE you, and the game measures that from origin to origin (see vision-model.js).
+const getPlayerBiologyByNameStmt = db.prepare(`
+    SELECT p.id, p.biology, p.origin_system, s.x AS origin_x, s.y AS origin_y
+    FROM players p
+    LEFT JOIN systems s ON s.id = p.origin_system
+    WHERE LOWER(p.name) = ?
+`);
 function getPlayerBiologyByName(name) {
     return getPlayerBiologyByNameStmt.get(name);
 }
 
-// Shared "significant bio advantage" margin for both !bio (discord_bot.js) and the Science
-// page's threat pills (routes/intel.js) — one constant so the two can't quietly drift apart.
-// Lowered 6 -> 5 per member feedback: earlier warning that someone can already see you
-// (or soon will) is more useful than waiting for a full +6 gap.
-const BIO_THREAT_MARGIN = 5;
+// Shared "significant bio advantage" margins for both !bio (discord_bot.js) and the Science
+// page's threat pills (routes/intel.js) — kept here so the two can't quietly drift apart.
+//
+// Split in two (2026-09-13) because the red and yellow pills are answering different
+// questions and deserve different bars. Red is CONFIRMED biology, read from a real
+// intelligence report, so it can afford to wait for a decisive +6 gap. Yellow is a player
+// we have never scanned, where all we have is science level — the ceiling biology could be
+// at — so it is a suspicion rather than a finding, and a +4 bar gives useful warning while
+// the gap is still closable. Was a single margin of 5 serving both.
+const BIO_THREAT_MARGIN_CONFIRMED = 6;
+const BIO_THREAT_MARGIN_SUSPECTED = 4;
+
+// ORIGIN, and a fallback for when the game will not tell us. A player's vision is measured
+// from the system they started in, so the threat question is "can they reach you from
+// there" — but the game only reveals an origin for a system WE have vision of, which is
+// precisely not the distant, high-biology players who matter most. The fallback is their
+// biggest planet: measured against every player whose real origin the game did give us, it
+// picked the right system 34 times out of 34. It retires itself as biology grows and the
+// real origins arrive.
+const THREAT_ORIGIN_COLUMNS = `
+           p.origin_system,
+           os.x AS origin_x, os.y AS origin_y,
+           es.id AS est_origin_system, es.x AS est_origin_x, es.y AS est_origin_y`;
+const THREAT_ORIGIN_JOINS = `
+    LEFT JOIN systems os ON os.id = p.origin_system
+    LEFT JOIN systems es ON es.id = (
+        SELECT pl.system_id FROM planets pl
+        WHERE pl.owner_id = p.id
+        ORDER BY pl.population DESC, pl.planet_index ASC
+        LIMIT 1
+    )`;
 
 const getThreatPlayersByBiologyStmt = db.prepare(`
-    SELECT p.id as player_id, p.name, p.biology, a.tag as ally_tag
+    SELECT p.id as player_id, p.name, p.biology, p.science_level, a.tag as ally_tag,
+           ${THREAT_ORIGIN_COLUMNS}
     FROM players p
     LEFT JOIN alliances a ON p.alliance_id = a.id
+    ${THREAT_ORIGIN_JOINS}
     WHERE p.has_intel = 1 AND p.biology >= ? AND p.id != ?
     ORDER BY p.biology DESC, p.name ASC
     LIMIT 25
@@ -388,9 +423,11 @@ function getThreatPlayersByBiology(threshold, excludeId) {
 }
 
 const getThreatPlayersByScienceStmt = db.prepare(`
-    SELECT p.id as player_id, p.name, p.science_level, a.tag as ally_tag
+    SELECT p.id as player_id, p.name, p.biology, p.science_level, a.tag as ally_tag,
+           ${THREAT_ORIGIN_COLUMNS}
     FROM players p
     LEFT JOIN alliances a ON p.alliance_id = a.id
+    ${THREAT_ORIGIN_JOINS}
     WHERE p.has_intel = 0 AND p.science_level >= ? AND p.id != ?
     ORDER BY p.science_level DESC, p.name ASC
     LIMIT 25
@@ -907,7 +944,7 @@ module.exports = {
     upsertPlayerBasic, getPlayerNameWithTag, getPlayerJoinedWithTag, getPlayerRestartCheck, playerExistsById, resetPlayerOnRestart,
     getIntelVisibility, setIntelVisibility, markIntelAnnounced,
     upsertPlayerFull, insertPlayerLogin, upsertAllianceMemberBasic, upsertPlayerNameOnly,
-    BIO_THREAT_MARGIN,
+    BIO_THREAT_MARGIN_CONFIRMED, BIO_THREAT_MARGIN_SUSPECTED,
     getPlayerBiologyByName, getThreatPlayersByBiology, getThreatPlayersByScience,
     countThreatPlayersByBiology, countThreatPlayersByScience,
     getPlayerTravelStatsByName, countUnaffiliatedIntelPlayers, listUnaffiliatedIntelPlayers,

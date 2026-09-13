@@ -11,6 +11,7 @@ const incomingRepo = require('./repositories/incoming');
 const { buildSystemChangeLines, buildSystemMilestoneLines } = require('./utils/system-change-lines');
 const { friendlyAllianceTags } = require('./utils/friendly-alliance-tags');
 const { bestSystemForChannel } = require('./utils/system-channel-match');
+const { filterThreatsInRange } = require('./utils/threat-vision');
 const settingsRepo = require('./repositories/settings');
 const battlePointsRepo = require('./repositories/battlePoints');
 const battleReportsRepo = require('./repositories/battleReports');
@@ -389,7 +390,7 @@ async function handleMessage(message) {
                 { name: '`!holes [alliance_tag]`', value: 'Scans your alliance\'s territory for a per-system breakdown: your own holdings, free unplanned, 🟧 planned (!plan), 🟨 neutral, 🟩 ally, and 🟥 war-list presence, per the Alliance Relations tags set in Admin.\n*Example: `!holes RAID`*' },
                 { name: '`!tt <sysA> <plnA> <sysB> <plnB> <speed> <nrg>`', value: 'Calculates fleet travel time between two coordinates.\n*Example: `!tt 100 1 200 4 10 5`*\n*(You can also swap speed/energy for a player name: `!tt 100 1 200 4 PlayerOne`)*' },
                 { name: '`!ghosts <sys_id> <planet_num> <alliance_tag>`', value: 'Calculates the shortest/longest hidden fleet arrival window from hostile members with radar vision over a system.\n*Example: `!ghosts 1 10 AO`*' },
-                { name: '`!bio`', value: `Generates intelligence alerts highlighting players who possess a +${playersRepo.BIO_THREAT_MARGIN} biology or science advantage over your personal bio level.` },
+                { name: '`!bio`', value: `Players who can SEE your origin and hold a +${playersRepo.BIO_THREAT_MARGIN_CONFIRMED} confirmed biology, or a +${playersRepo.BIO_THREAT_MARGIN_SUSPECTED} science advantage if never scanned.` },
                 { name: '`!battle <D> <C> <B> vs <D> <C> <B>`', value: 'Simulates a battle. Flags: `--sb N` starbase (0-50), `--dp/--ap N` physics, `--dm/--am N` math, `--dra/--ara N` race atk, `--drd/--ard N` race def, `--dl/--al N` player level. Or `--def Name --atk Name` to auto-fill all stats from DB.\n*Example: `!battle 50 10 0 vs 40 8 2 --dp 5 --ap 3 --dl 12 --al 8`*' },
                 { name: '`!mortal` / `!mortalday` / `!mortalweek` `[all|<alliance_tag>]`', value: 'Shows the CV/population-killed battle leaderboards, each with a simple points column. All-time, last 24 hours, or last 7 days. Defaults to Hub tool users only; `all` lifts that; any alliance tag filters to that alliance (any alliance, not just your own).\n*Example: `!mortalweek nsa`*' },
                 { name: '`!cvkills` / `!cvkillsday` / `!cvkillsweek` `[all|<alliance_tag>]`', value: 'Pure CV-killed ranking — the raw number only, no points. Same scope rules as `!mortal`.\n*Example: `!cvkillsweek nsa`*' },
@@ -682,17 +683,24 @@ async function handleMessage(message) {
         }
 
         const myBio = me.biology || 0;
-        const threatThreshold = myBio + playersRepo.BIO_THREAT_MARGIN;
+        // Two bars (2026-09-13): confirmed biology can wait for a decisive +6, while an
+        // unscanned player's science level is only the ceiling biology COULD be at, so +4
+        // warns while the gap is still closable.
+        const confirmedThreshold = myBio + playersRepo.BIO_THREAT_MARGIN_CONFIRMED;
+        const suspectedThreshold = myBio + playersRepo.BIO_THREAT_MARGIN_SUSPECTED;
 
+        // Only those whose vision actually reaches your origin — a biology advantage on the
+        // far side of the map is a statistic, not a threat. Anyone we cannot place is kept
+        // and flagged rather than dropped. See threat-vision.js.
         // 1. Confirmed High Biology (has_intel = 1) -> Match bio directly
-        const confirmedThreats = playersRepo.getThreatPlayersByBiology(threatThreshold, me.id);
+        const confirmedThreats = filterThreatsInRange(playersRepo.getThreatPlayersByBiology(confirmedThreshold, me.id), me);
 
         // 2. Suspected High Biology (has_intel = 0) -> Match science level as proxy ceiling
-        const suspectedThreats = playersRepo.getThreatPlayersByScience(threatThreshold, me.id);
+        const suspectedThreats = filterThreatsInRange(playersRepo.getThreatPlayersByScience(suspectedThreshold, me.id), me);
 
         const embed = new EmbedBuilder()
             .setTitle(`🧬 Biology Threat Matrix (Your Bio: ${myBio})`)
-            .setDescription(`Scanning for active entities displaying an advantage of **+${playersRepo.BIO_THREAT_MARGIN}** levels or higher over your baseline radar coverage (Threshold: **${threatThreshold}+**):`)
+            .setDescription(`Players whose vision reaches your origin, at **+${playersRepo.BIO_THREAT_MARGIN_CONFIRMED}** confirmed biology (**${confirmedThreshold}+**) or **+${playersRepo.BIO_THREAT_MARGIN_SUSPECTED}** unscanned science level (**${suspectedThreshold}+**):`)
             .setColor('#10b981'); // Emerald green theme for bio profile metrics
 
         let confirmedStr = "";

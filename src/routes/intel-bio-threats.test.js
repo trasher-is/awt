@@ -19,7 +19,10 @@ const playersRepo = require('../repositories/players');
 const intelRouter = require('./intel');
 
 const MY_BIO = 10;
-const THRESHOLD = MY_BIO + playersRepo.BIO_THREAT_MARGIN; // computed, not hardcoded, so this
+const CONFIRMED_THRESHOLD = MY_BIO + playersRepo.BIO_THREAT_MARGIN_CONFIRMED;
+const SUSPECTED_THRESHOLD = MY_BIO + playersRepo.BIO_THREAT_MARGIN_SUSPECTED;
+// Two bars since 2026-09-13: confirmed biology waits for a decisive +6, while an unscanned
+// player's science level is only a ceiling, so +4 warns earlier. Computed, not hardcoded, so this
                                                             // test tracks the margin wherever
                                                             // it's set rather than assuming it
 
@@ -56,16 +59,16 @@ db.prepare(`INSERT INTO players (id, name, biology) VALUES (1, 'Caveman', ?)`).r
 db.prepare(`INSERT INTO alliances (id, name, tag) VALUES (50, 'Raiders', 'RAID')`).run();
 
 // Confirmed threat: real biology == threshold, has_intel = 1.
-db.prepare(`INSERT INTO players (id, name, biology, has_intel, alliance_id) VALUES (2, 'BioGiant', ?, 1, 50)`).run(THRESHOLD);
+db.prepare(`INSERT INTO players (id, name, biology, has_intel, alliance_id) VALUES (2, 'BioGiant', ?, 1, 50)`).run(CONFIRMED_THRESHOLD);
 // Not a threat: real biology one below threshold.
-db.prepare(`INSERT INTO players (id, name, biology, has_intel) VALUES (3, 'JustUnder', ?, 1)`).run(THRESHOLD - 1);
+db.prepare(`INSERT INTO players (id, name, biology, has_intel) VALUES (3, 'JustUnder', ?, 1)`).run(CONFIRMED_THRESHOLD - 1);
 // Suspected threat: never had biology scraped (has_intel = 0), but public science level >= threshold.
-db.prepare(`INSERT INTO players (id, name, science_level, has_intel) VALUES (4, 'MysteryScientist', ?, 0)`).run(THRESHOLD + 4);
+db.prepare(`INSERT INTO players (id, name, science_level, has_intel) VALUES (4, 'MysteryScientist', ?, 0)`).run(SUSPECTED_THRESHOLD + 4);
 // Not a threat: has_intel = 0 but science level below threshold.
-db.prepare(`INSERT INTO players (id, name, science_level, has_intel) VALUES (5, 'LowScience', ?, 0)`).run(THRESHOLD - 5);
+db.prepare(`INSERT INTO players (id, name, science_level, has_intel) VALUES (5, 'LowScience', ?, 0)`).run(SUSPECTED_THRESHOLD - 5);
 // Confirmed AND high science, but has_intel = 1 — must land in "confirmed" only, never
 // double-counted into "suspected" too (suspected is has_intel = 0 exclusively).
-db.prepare(`INSERT INTO players (id, name, biology, science_level, has_intel) VALUES (6, 'ScannedAndStrong', ?, ?, 1)`).run(THRESHOLD, THRESHOLD + 14);
+db.prepare(`INSERT INTO players (id, name, biology, science_level, has_intel) VALUES (6, 'ScannedAndStrong', ?, ?, 1)`).run(CONFIRMED_THRESHOLD, CONFIRMED_THRESHOLD + 14);
 
 (async () => {
     const server = app.listen(0);
@@ -76,7 +79,10 @@ db.prepare(`INSERT INTO players (id, name, biology, science_level, has_intel) VA
         const res = await getJson(server, '/hub-api/intel/bio-threats');
         ok('responds 200', res.status === 200, res);
         ok(`myBio resolves to the caller's own biology (${MY_BIO})`, res.body && res.body.myBio === MY_BIO, res.body);
-        ok(`threshold is myBio + BIO_THREAT_MARGIN (${playersRepo.BIO_THREAT_MARGIN}) = ${THRESHOLD}`, res.body && res.body.threshold === THRESHOLD, res.body);
+        ok(`confirmed bar is myBio + ${playersRepo.BIO_THREAT_MARGIN_CONFIRMED} = ${CONFIRMED_THRESHOLD}`,
+            res.body && res.body.confirmedThreshold === CONFIRMED_THRESHOLD, res.body);
+        ok(`suspected bar is LOWER — myBio + ${playersRepo.BIO_THREAT_MARGIN_SUSPECTED} = ${SUSPECTED_THRESHOLD} — because science level is only a ceiling`,
+            res.body && res.body.suspectedThreshold === SUSPECTED_THRESHOLD, res.body);
 
         const confirmedNames = (res.body.confirmed || []).map(p => p.name).sort();
         ok('confirmed list has exactly BioGiant and ScannedAndStrong (real bio >= threshold, has_intel=1)',

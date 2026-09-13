@@ -345,6 +345,18 @@
             // this is what makes "intel regained" actionable rather than merely true: it
             // says whose eyes to keep in range. Not stored; used only for the announcement.
             intel_captured_by: intel && typeof intel.capturedByPlayerName === 'string' ? intel.capturedByPlayerName : null,
+            // ORIGIN — the system a player started in, which is where the game measures
+            // their vision radius from, so it decides who can see whom. The game only
+            // reveals it for a system we ourselves have vision of, and it was being
+            // discarded entirely: the profile scrape picked it up only for the handful of
+            // players someone had opened by hand, while this sweep walks the whole roster
+            // every pass and had it in front of it the whole time.
+            //
+            // Sent as raw coordinates rather than parsed out of originName ("Sceptrum [72]
+            // (-9/12)"): all 381 system coordinates are distinct, so the server can resolve
+            // them exactly, and that does not quietly break if the name formatting changes.
+            origin_x: d.origin && Number.isFinite(d.origin.x) ? d.origin.x : null,
+            origin_y: d.origin && Number.isFinite(d.origin.y) ? d.origin.y : null,
             biology: intel ? (intel.biologyLevel ?? null) : null,
             economy: intel ? (intel.economyLevel ?? null) : null,
             energy: intel ? (intel.energyLevel ?? null) : null,

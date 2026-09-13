@@ -12,6 +12,7 @@ const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
 const { observedNumber, positiveMachineNumber } = require('../utils/observed-number');
 const { parseTimestamp } = require('../../public/js/utils/sqlite-time.js');
+const { filterThreatsInRange } = require('../utils/threat-vision');
 const { previousNames, findByFormerName } = require('../utils/round-archive');
 const { friendlyAllianceTags } = require('../utils/friendly-alliance-tags');
 const { truePowerForAllianceRow } = require('../utils/true-power');
@@ -602,15 +603,31 @@ router.get('/intel/bio-threats', requireAuth, (req, res) => {
         if (!me) return res.json({ success: true, myBio: null, confirmed: [], suspected: [], confirmedCount: 0, suspectedCount: 0 });
 
         const myBio = me.biology || 0;
-        const threshold = myBio + playersRepo.BIO_THREAT_MARGIN;
+        // Two bars, because the two pills answer different questions (2026-09-13): red is
+        // CONFIRMED biology from a real report and can wait for a decisive +6, yellow is an
+        // unscanned player where science level is only the ceiling biology could be at, so
+        // +4 warns while the gap is still closable.
+        const confirmedThreshold = myBio + playersRepo.BIO_THREAT_MARGIN_CONFIRMED;
+        const suspectedThreshold = myBio + playersRepo.BIO_THREAT_MARGIN_SUSPECTED;
+
+        // A biology advantage on the far side of the map is a statistic, not a threat — only
+        // count players whose vision actually reaches your origin. Anyone we cannot place is
+        // kept and flagged rather than dropped: a threat nobody told you about is worse than
+        // one you can dismiss. Counts come from the filtered lists so the pill and the modal
+        // can never disagree.
+        const confirmed = filterThreatsInRange(playersRepo.getThreatPlayersByBiology(confirmedThreshold, me.id), me);
+        const suspected = filterThreatsInRange(playersRepo.getThreatPlayersByScience(suspectedThreshold, me.id), me);
         res.json({
             success: true,
             myBio,
-            threshold,
-            confirmed: playersRepo.getThreatPlayersByBiology(threshold, me.id),
-            suspected: playersRepo.getThreatPlayersByScience(threshold, me.id),
-            confirmedCount: playersRepo.countThreatPlayersByBiology(threshold, me.id),
-            suspectedCount: playersRepo.countThreatPlayersByScience(threshold, me.id),
+            threshold: confirmedThreshold,
+            confirmedThreshold,
+            suspectedThreshold,
+            myOriginKnown: Number.isFinite(Number(me.origin_x)) && Number.isFinite(Number(me.origin_y)),
+            confirmed,
+            suspected,
+            confirmedCount: confirmed.length,
+            suspectedCount: suspected.length,
         });
     } catch (err) {
         console.error('[DB Error] Failed to fetch bio threat matrix:', err);
