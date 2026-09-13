@@ -210,6 +210,30 @@ function postJson(server, urlPath, body) {
         const unmapped = db.prepare('SELECT origin_system FROM players WHERE id = 522').get();
         ok('coordinates matching no known system leave the origin unset rather than guessing',
             unmapped.origin_system === null, unmapped);
+
+        // The bug this exists to prevent, which reached production: Number(null) is 0, and
+        // ZERO IS A REAL COORDINATE — a system sits at (0,0) — so an absent origin was
+        // silently recorded as "started at the grid origin". It looked entirely plausible
+        // and was wrong for 116 of 159 players.
+        db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (641, 'GridOrigin', 0, 0)`).run();
+        for (const [label, extra] of [
+            ['both null', { origin_x: null, origin_y: null }],
+            ['absent entirely', {}],
+            ['empty strings', { origin_x: '', origin_y: '' }],
+            ['one axis missing', { origin_x: 0, origin_y: null }],
+        ]) {
+            const id = 530 + label.length;
+            await sync(id, false, extra);
+            const row = db.prepare('SELECT origin_system FROM players WHERE id = ?').get(id);
+            ok(`no origin (${label}) is NOT recorded as the system at (0,0)`, row.origin_system === null, row);
+        }
+
+        // And the flip side: a player genuinely AT (0,0) must still resolve, or the guard
+        // would have traded one silent error for another.
+        await sync(540, false, { origin_x: 0, origin_y: 0 });
+        const atGridOrigin = db.prepare('SELECT origin_system FROM players WHERE id = 540').get();
+        ok('a real origin of exactly (0,0) still resolves — 0 is a coordinate, not a blank',
+            atGridOrigin.origin_system === 641, atGridOrigin);
     } finally {
         server.close();
     }

@@ -42,6 +42,15 @@ const MIN_HOURS_PER_POP_POINT_REGROWN = 4;
 // from now is a MISPARSE, not a real observation — a locale-flipped day/month, or a bare
 // time read as year zero — and ordering by it would be worse than not ordering at all, so
 // it is refused rather than trusted.
+// Absent must stay absent. Number(null) and Number('') are both 0, and 0 is a perfectly real
+// map coordinate, so coercing an absent value silently claims a position at the origin of
+// the grid instead of admitting there isn't one.
+function coordinateOrNull(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+
 const MAX_CAPTURE_SKEW_MS = 365 * 24 * 60 * 60 * 1000;
 function parseObservationTime(value) {
     if (!value) return null;
@@ -863,7 +872,18 @@ router.post('/sync/player-detail', requireAuth, (req, res) => {
     // Always bound, even when unresolved: better-sqlite3 requires every named parameter the
     // statement mentions to be present, and the upsert COALESCEs a null away rather than
     // letting it erase an origin we already know.
-    const originSystemId = systemsRepo.getSystemIdByCoords(Number(p.origin_x), Number(p.origin_y));
+    //
+    // Coordinates must survive as null rather than being coerced (2026-09-13b). Number(null)
+    // is 0 and ZERO IS A REAL COORDINATE — Rana sits at exactly (0,0) — so wrapping these in
+    // Number() turned "this player has no visible origin" into "this player started in
+    // Rana", and did it for 116 of 159 players before anyone noticed, because the resulting
+    // origin looked perfectly plausible. getSystemIdByCoords itself rejects null correctly
+    // (Number.isFinite does not coerce); it was the call site that destroyed the distinction.
+    const originX = coordinateOrNull(p.origin_x);
+    const originY = coordinateOrNull(p.origin_y);
+    const originSystemId = (originX === null || originY === null)
+        ? null
+        : systemsRepo.getSystemIdByCoords(originX, originY);
     detail.origin_system = Number.isInteger(originSystemId) ? originSystemId : null;
 
     try {
