@@ -485,6 +485,29 @@ const listAllianceIntelPlayersStmt = db.prepare(`
 function listAllianceIntelPlayers(allianceId) {
     return listAllianceIntelPlayersStmt.all(allianceId);
 }
+// The FULL roster, intel or not (2026-09-13). !intels used to list only scanned members,
+// which meant an alliance we have no intel on could not be opened at all — and the player
+// card it leads to already degrades gracefully, showing "--" for anything unscanned. A
+// directory that hides everything it does not fully know is not much of a directory.
+const listAlliancePlayersStmt = db.prepare(`
+    SELECT id, name, has_intel FROM players WHERE alliance_id = ? ORDER BY has_intel DESC, name COLLATE NOCASE
+`);
+function listAlliancePlayers(allianceId) {
+    return listAlliancePlayersStmt.all(allianceId);
+}
+
+const listUnaffiliatedPlayersStmt = db.prepare(`
+    SELECT id, name, has_intel FROM players WHERE alliance_id IS NULL ORDER BY has_intel DESC, name COLLATE NOCASE
+`);
+function listUnaffiliatedPlayers() {
+    return listUnaffiliatedPlayersStmt.all();
+}
+
+const countUnaffiliatedPlayersStmt = db.prepare(`SELECT COUNT(*) as count FROM players WHERE alliance_id IS NULL`);
+function countUnaffiliatedPlayers() {
+    return countUnaffiliatedPlayersStmt.get().count;
+}
+
 
 const getPlayerFullByIdStmt = db.prepare(`
     SELECT p.*, a.tag as ally_tag,
@@ -955,6 +978,7 @@ module.exports = {
     getPlayerLoginHistory, getPlayerLoginHeatmap, recordLoginSample, getPlayerLoginSamples,
     upsertPlayerBasic, getPlayerNameWithTag, getPlayerJoinedWithTag, getPlayerRestartCheck, playerExistsById, resetPlayerOnRestart,
     getIntelVisibility, setIntelVisibility, markIntelAnnounced,
+    listAlliancePlayers, listUnaffiliatedPlayers, countUnaffiliatedPlayers,
     upsertPlayerFull, insertPlayerLogin, upsertAllianceMemberBasic, upsertPlayerNameOnly,
     BIO_THREAT_MARGIN_CONFIRMED, BIO_THREAT_MARGIN_SUSPECTED,
     getPlayerBiologyByName, getThreatPlayersByBiology, getThreatPlayersByScience,

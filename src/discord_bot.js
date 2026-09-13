@@ -803,23 +803,35 @@ async function handleMessage(message) {
     // !intels - TEXT-BASED INTERACTIVE DRILLDOWN
     // ----------------------------------------------------
     if (command === 'intels') {
-        const alliancesWithIntel = alliancesRepo.getWarRoomAllianceIntelTags();
+        // EVERY alliance with members, the same list the War Room shows — not just the ones
+        // we happen to hold intel on (2026-09-13). That filter hid 16 of the 20 alliances in
+        // the game, including the four largest: PUNX with 20 members and no scans did not
+        // appear, while Mofo, a single scanned player, did. Coverage is shown per row instead,
+        // so where the intel is stays obvious without deciding what you may look at.
+        const alliances = alliancesRepo.getWarRoomAlliances();
+        const solosCount = playersRepo.countUnaffiliatedPlayers();
 
-        // FIXED: Added missing 'p' alias to prevent SQLITE_ERROR
-        const solosCount = playersRepo.countUnaffiliatedIntelPlayers();
-
-        if (alliancesWithIntel.length === 0 && solosCount === 0) {
-            return message.reply('📭 No intelligence records found with active intel in the database.');
+        if (alliances.length === 0 && solosCount === 0) {
+            return message.reply('📭 No player records found in the database.');
         }
 
-        const groups = alliancesWithIntel.map(a => ({ id: a.id, name: a.tag || `Alliance #${a.id}`, type: 'alliance' }));
+        const groups = alliances.map(a => ({
+            id: a.id,
+            name: a.tag || `Alliance #${a.id}`,
+            type: 'alliance',
+            members: a.active_members_count,
+            intel: a.intel_members_count || 0,
+        }));
         if (solosCount > 0) {
-            groups.push({ id: 'solos', name: 'Solos (No Alliance)', type: 'solos' });
+            groups.push({ id: 'solos', name: 'Solos (No Alliance)', type: 'solos', members: solosCount, intel: null });
         }
 
         let directoryStr = "";
         groups.forEach((g, idx) => {
-            directoryStr += `**[${idx + 1}]** ${g.name}\n`;
+            const coverage = g.members
+                ? ` — ${g.members} member${g.members === 1 ? '' : 's'}${g.intel === null ? '' : `, ${g.intel} scanned`}`
+                : '';
+            directoryStr += `**[${idx + 1}]** ${g.name}${coverage}\n`;
         });
 
         const embed = new EmbedBuilder()
@@ -855,10 +867,14 @@ async function handleMessage(message) {
 
                 chosenGroup = groups[idx];
                 
+                // Full roster, scanned or not. Listing only scanned members meant the
+                // directory could offer a group and then dead-end on "no profile records" —
+                // reachable today, since Solos was offered on a count of 28 unaffiliated
+                // players but would then list only the 3 with intel.
                 if (chosenGroup.type === 'solos') {
-                    groupPlayers = playersRepo.listUnaffiliatedIntelPlayers();
+                    groupPlayers = playersRepo.listUnaffiliatedPlayers();
                 } else {
-                    groupPlayers = playersRepo.listAllianceIntelPlayers(chosenGroup.id);
+                    groupPlayers = playersRepo.listAlliancePlayers(chosenGroup.id);
                 }
 
                 if (groupPlayers.length === 0) {
@@ -868,7 +884,7 @@ async function handleMessage(message) {
 
                 let playerStr = "";
                 groupPlayers.forEach((p, pIdx) => {
-                    playerStr += `**[${pIdx + 1}]** ${p.name}\n`;
+                    playerStr += `**[${pIdx + 1}]** ${p.name}${p.has_intel ? '' : ' *(unscanned)*'}\n`;
                 });
 
                 const playerEmbed = new EmbedBuilder()
