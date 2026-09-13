@@ -34,13 +34,13 @@ const POP_DROP_ATTACKER_WINDOW_MINUTES = 180;
 // than real growth — see the guard below, where this is used.
 const MIN_HOURS_PER_POP_POINT_REGROWN = 4;
 
-// A capture stamp is only useful if we can turn it into an instant we trust. The hub's own
-// timestamps are ISO/SQLite-shaped, but the game stamps its Map/sectors captures in its own
-// way (its responses carry a sibling `format` field describing it), so fall back to the
-// engine's own parser for anything parseSqliteUtc will not take. Anything that lands
-// implausibly far from now is a MISPARSE, not a real observation — a locale-flipped
-// day/month, or a bare time read as year zero — and ordering by it would be worse than not
-// ordering at all, so it is refused rather than trusted.
+// A capture stamp is only useful if we can turn it into an instant we trust. The game's own
+// stamps are plain ISO with an offset ("2026-09-13T00:00:00+02:00" — midnight at the daily
+// reset, confirmed live), which parseSqliteUtc takes as-is; the engine parser behind it is
+// only a fallback for a shape neither of us has seen yet. Anything landing implausibly far
+// from now is a MISPARSE, not a real observation — a locale-flipped day/month, or a bare
+// time read as year zero — and ordering by it would be worse than not ordering at all, so
+// it is refused rather than trusted.
 const MAX_CAPTURE_SKEW_MS = 365 * 24 * 60 * 60 * 1000;
 function parseObservationTime(value) {
     if (!value) return null;
@@ -55,7 +55,7 @@ function parseObservationTime(value) {
 
 // --- MAP SCRAPER DATA RECEIVER ---
 router.post('/sync/system', requireAuth, (req, res) => {
-    const { system_id, planets, fleets, captured_at } = req.body;
+    const { system_id, planets, fleets, captured_at, observation_live } = req.body;
     // Every detected change announces to Discord now (2026-09-12) — including from the
     // bulk galaxy auto-seed, which used to pass scan_mode: 'silent' to suppress this. That
     // guard is gone: event detection below only ever fires on a genuine transition against
@@ -86,9 +86,28 @@ router.post('/sync/system', requireAuth, (req, res) => {
     // the hub went blind to most of the galaxy while reporting success on the rest. An
     // optional ordering hint is not worth a single planet of intel. When it cannot be read,
     // the sync proceeds unordered, exactly as it did before this guard existed.
-    const observedAt = captured_at ? parseObservationTime(captured_at) : new Date();
+    //
+    // THREE cases, and conflating any two of them breaks this (2026-09-13c):
+    //   • captured_at set     — the game handed this account a CACHED picture and said how
+    //                           old it is (always the daily reset, e.g. midnight +02:00).
+    //   • observation_live    — the caller genuinely saw this system just now: a member with
+    //                           vision of it, or a rendered system page. Stamped with the
+    //                           SERVER's clock, not the browser's, so one member's wrong
+    //                           system clock cannot outrank everybody else forever.
+    //   • neither             — an older build that predates this field. Unordered: it
+    //                           applies, but must never set the watermark.
+    // The same system is live for one member and a midnight cache for another, so "live"
+    // has to outrank a real stamp rather than being absent from the ordering: otherwise the
+    // stale reader's midnight picture overwrites the live one every cycle, which is the
+    // flip-flop this exists to stop, merely running in the other direction. And "neither"
+    // cannot be treated as live, or an old build's payload manufactures a watermark newer
+    // than any real capture and locks out the clients doing the right thing — confirmed
+    // live, that is exactly what happened.
+    const observedAt = captured_at
+        ? parseObservationTime(captured_at)
+        : (observation_live ? new Date() : null);
     const observedAtIso = observedAt ? observedAt.toISOString() : null;
-    if (observedAtIso && captured_at) {
+    if (observedAtIso) {
         const applied = systemsRepo.getSystemObservedAt(system_id);
         if (applied && observedAtIso <= applied) {
             return res.json({ success: true, skipped: 'stale_observation', captured_at, applied });

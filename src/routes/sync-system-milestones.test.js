@@ -251,17 +251,63 @@ function request(server, method, urlPath, body) {
         ok('a capture equal to the one already applied is dropped too (same picture, nothing to learn)',
             sameRes.body.skipped === 'stale_observation', sameRes.body);
 
-        // A live DOM scrape sends no captured_at: you cannot render a system page without
-        // vision of it, so it is always "now" and must always win.
-        const domRes = await request(server, 'POST', '/hub-api/sync/system', {
+        // A payload with NO stamp is UNORDERED: it applies, but must never set the
+        // watermark. Treating it as "now" manufactured a watermark newer than any real
+        // capture could be — real captures are hours old by nature, stamped at the daily
+        // reset — so every genuinely-stamped payload was then rejected as stale against it.
+        const unstampedRes = await request(server, 'POST', '/hub-api/sync/system', {
             system_id: 952,
             planets: [{ game_planet_id: 95201, planet_index: 1, owner: null, population: 0, starbase: 0, is_unknown: true }],
         });
-        ok('a live DOM scrape (no captured_at) always applies', domRes.status === 200 && !domRes.body.skipped, domRes.body);
+        ok('an unstamped payload (a live DOM scrape, or an older client) always applies',
+            unstampedRes.status === 200 && !unstampedRes.body.skipped, unstampedRes.body);
         ok('and it really did apply',
             db.prepare(`SELECT owner_id FROM planets WHERE game_planet_id = 95201`).get().owner_id === null);
-        ok('observed_at moved forward to the DOM scrape, so older captures stay locked out',
-            db.prepare(`SELECT observed_at FROM systems WHERE id = 952`).get().observed_at > fresh);
+        ok('but it did NOT move the watermark — an unstamped payload cannot outrank a real capture',
+            db.prepare(`SELECT observed_at FROM systems WHERE id = 952`).get().observed_at === fresh);
+
+        // The exact production failure: an unstamped payload must not be able to lock a
+        // correctly-stamped client out of the system afterwards.
+        const laterStamp = '2026-09-13T06:30:00.000Z';
+        const afterUnstamped = await request(server, 'POST', '/hub-api/sync/system', {
+            system_id: 952, captured_at: laterStamp,
+            planets: [{ game_planet_id: 95201, planet_index: 1, owner: { id: 701, name: 'Holder', alliance_tag: 'RAID' }, population: 3, starbase: 0 }],
+        });
+        ok('a newer real capture still applies after an unstamped payload went through',
+            afterUnstamped.status === 200 && !afterUnstamped.body.skipped, afterUnstamped.body);
+        ok('and it advanced the watermark to the real capture time',
+            db.prepare(`SELECT observed_at FROM systems WHERE id = 952`).get().observed_at === laterStamp);
+
+        // The case that makes this whole mechanism necessary: the SAME system is live for a
+        // member who has vision of it and a midnight cache for everyone else. The live
+        // reader has to win, or the stale reader's day-old picture overwrites it on every
+        // cycle — the very flip-flop this exists to stop, merely running the other way.
+        console.log('\n── Live beats a cached stamp; the cache cannot overwrite it back ' + '─'.repeat(10));
+        db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (954, 'Shared Vision System', 8, 8)`).run();
+        const midnight = '2026-09-13T00:00:00+02:00'; // the real shape the game sends
+
+        const cached = await request(server, 'POST', '/hub-api/sync/system', {
+            system_id: 954, captured_at: midnight,
+            planets: [{ game_planet_id: 95401, planet_index: 1, owner: null, population: 0, starbase: 0 }],
+        });
+        ok('a member with no vision syncs the midnight cache', cached.status === 200 && !cached.body.skipped, cached.body);
+
+        const liveRes = await request(server, 'POST', '/hub-api/sync/system', {
+            system_id: 954, observation_live: true,
+            planets: [{ game_planet_id: 95401, planet_index: 1, owner: { id: 701, name: 'Holder', alliance_tag: 'RAID' }, population: 4, starbase: 0 }],
+        });
+        ok('a member who can actually SEE it overrides that cache', liveRes.status === 200 && !liveRes.body.skipped, liveRes.body);
+        ok('the live picture is what got stored',
+            db.prepare(`SELECT owner_id, population FROM planets WHERE game_planet_id = 95401`).get().population === 4);
+
+        const cachedAgain = await request(server, 'POST', '/hub-api/sync/system', {
+            system_id: 954, captured_at: midnight,
+            planets: [{ game_planet_id: 95401, planet_index: 1, owner: null, population: 0, starbase: 0 }],
+        });
+        ok('and the stale member\'s next cycle can no longer undo it — no flip-flop',
+            cachedAgain.body.skipped === 'stale_observation', cachedAgain.body);
+        ok('the live picture survived untouched',
+            db.prepare(`SELECT population FROM planets WHERE game_planet_id = 95401`).get().population === 4);
 
         // The regression this guard caused on its first day: an unreadable captured_at was
         // answered with a 400, and because the game stamps its captures in a format the

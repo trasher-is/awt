@@ -77,7 +77,13 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
         visionFlags.push({ id: sys.id, is_in_vision: isInVision });
 
         const planets = Array.isArray(sys.planets) ? sys.planets : [];
-        const payload = AWApi.mapPlanetsToSyncPayload(sys.id, planets, sys.capturedAt);
+        // A system this account can actually see comes back live, with no capturedAt at all
+        // — the stamp only appears when the game is handing back a CACHED picture (always
+        // the daily reset). The same system is live for a member with vision of it and a
+        // midnight cache for everyone else, so saying which this is decides whose picture
+        // wins server-side. Out of vision with no stamp, we simply do not know: send
+        // neither and let the payload be unordered.
+        const payload = AWApi.mapPlanetsToSyncPayload(sys.id, planets, sys.capturedAt, isInVision);
         if (!isInVision) {
             // Out-of-vision (or in-vision but stale, see isStaleCapture above): the data may
             // not reflect reality right now. This is a SEPARATE concept from is_unknown

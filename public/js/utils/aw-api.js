@@ -207,11 +207,14 @@
     function stripTrailingAllianceTag(name) {
         return typeof name === 'string' ? name.replace(/\s*\[[^\]]*\]\s*$/, '') : name;
     }
-    // capturedAt (the game's own "as of when" for this system, present on Map/sectors
-    // entries) rides along as captured_at so the server can order two members' conflicting
-    // snapshots instead of last-write-wins — see /sync/system's stale-observation guard.
-    // Omitted for callers that have no such stamp; the server then treats it as live.
-    function mapPlanetsToSyncPayload(systemId, apiPlanets, capturedAt = null) {
+    // How old this picture is, so the server can order two members' conflicting snapshots
+    // instead of last-write-wins (see /sync/system's stale-observation guard). Exactly one
+    // of these should be given: capturedAt when the game handed back a CACHED view and said
+    // how old it is, observationLive when the caller genuinely has vision and is seeing the
+    // system right now. The same system is live for one member and a day-old cache for
+    // another, so saying which is the whole point — an unstamped payload is treated as
+    // unordered and never wins.
+    function mapPlanetsToSyncPayload(systemId, apiPlanets, capturedAt = null, observationLive = false) {
         const planets = (Array.isArray(apiPlanets) ? apiPlanets : [])
             .filter(p => p && typeof p === 'object')
             .map(p => ({
@@ -234,6 +237,7 @@
             }));
         const payload = { system_id: parseInt(systemId, 10), planets, fleets: [] };
         if (capturedAt) payload.captured_at = capturedAt;
+        else if (observationLive) payload.observation_live = true;
         return payload;
     }
 
