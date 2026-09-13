@@ -75,7 +75,7 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
         visionFlags.push({ id: sys.id, is_in_vision: isInVision });
 
         const planets = Array.isArray(sys.planets) ? sys.planets : [];
-        const payload = AWApi.mapPlanetsToSyncPayload(sys.id, planets);
+        const payload = AWApi.mapPlanetsToSyncPayload(sys.id, planets, sys.capturedAt);
         if (!isInVision) {
             // Out-of-vision (or in-vision but stale, see isStaleCapture above): the data may
             // not reflect reality right now. This is a SEPARATE concept from is_unknown

@@ -207,7 +207,11 @@
     function stripTrailingAllianceTag(name) {
         return typeof name === 'string' ? name.replace(/\s*\[[^\]]*\]\s*$/, '') : name;
     }
-    function mapPlanetsToSyncPayload(systemId, apiPlanets) {
+    // capturedAt (the game's own "as of when" for this system, present on Map/sectors
+    // entries) rides along as captured_at so the server can order two members' conflicting
+    // snapshots instead of last-write-wins — see /sync/system's stale-observation guard.
+    // Omitted for callers that have no such stamp; the server then treats it as live.
+    function mapPlanetsToSyncPayload(systemId, apiPlanets, capturedAt = null) {
         const planets = (Array.isArray(apiPlanets) ? apiPlanets : [])
             .filter(p => p && typeof p === 'object')
             .map(p => ({
@@ -228,7 +232,9 @@
                 is_unknown: !!p.isUnknownOwner,
                 is_sieged: p.hasSiege ? 1 : 0,
             }));
-        return { system_id: parseInt(systemId, 10), planets, fleets: [] };
+        const payload = { system_id: parseInt(systemId, 10), planets, fleets: [] };
+        if (capturedAt) payload.captured_at = capturedAt;
+        return payload;
     }
 
     // API system objects (getSolarSystems/searchSolarSystems/Map-sectors shape) -> the

@@ -186,6 +186,14 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
     ok('a non-array planets answer maps to an empty, well-formed body',
         degenerate.system_id === 5 && Array.isArray(degenerate.planets) && degenerate.planets.length === 0, degenerate);
 
+    // captured_at (2026-09-13): the game's own "as of when" for this system, so the server
+    // can order two members' conflicting snapshots instead of last-write-wins.
+    ok('captured_at is omitted when the caller has no such stamp (server treats it as live)',
+        !('captured_at' in payload), payload);
+    const stamped = AWApi.mapPlanetsToSyncPayload(731, [], '2026-09-13T04:05:06+02:00');
+    ok('captured_at rides along verbatim when supplied',
+        stamped.captured_at === '2026-09-13T04:05:06+02:00', stamped);
+
     console.log('\n── Regression: name/ownerName are NOT bare in the real API ' + '─'.repeat(15));
     // Confirmed against a real /api/v1/Map/sectors response (2026-08-30): p.name is
     // "Rasaben #10" (bare name + the SAME index this row already carries separately as

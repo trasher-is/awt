@@ -36,7 +36,7 @@ const MIN_HOURS_PER_POP_POINT_REGROWN = 4;
 
 // --- MAP SCRAPER DATA RECEIVER ---
 router.post('/sync/system', requireAuth, (req, res) => {
-    const { system_id, planets, fleets } = req.body;
+    const { system_id, planets, fleets, captured_at } = req.body;
     // Every detected change announces to Discord now (2026-09-12) — including from the
     // bulk galaxy auto-seed, which used to pass scan_mode: 'silent' to suppress this. That
     // guard is gone: event detection below only ever fires on a genuine transition against
@@ -47,6 +47,27 @@ router.post('/sync/system', requireAuth, (req, res) => {
 
     if (!system_id || !Array.isArray(planets)) {
         return res.status(400).json({ error: 'Invalid payload' });
+    }
+
+    // STALE-OBSERVATION GUARD (2026-09-13): several members' tabs each sync the whole
+    // galaxy every few minutes, independently, each from their OWN account's viewpoint —
+    // and the game's Map/sectors response carries its own capturedAt per system, which is
+    // how old THAT account's picture is. Without an ordering key this was last-write-wins,
+    // so a member whose capture was an hour stale kept overwriting a fresher one and the
+    // two ping-ponged forever: confirmed live on Ain #8 planet 12, alternating Free/pop-0
+    // and owned/pop-1 every five minutes, logging an identical population-drop event (and
+    // Discord alert) on each flip, indefinitely. A payload whose capture predates the
+    // newest one already applied teaches us nothing and is dropped whole. A live DOM scrape
+    // sends no captured_at at all — you cannot render a system page without vision of it,
+    // so it is always "now" and always wins.
+    const observedAt = captured_at ? parseSqliteUtc(captured_at) : new Date();
+    if (!observedAt) return res.status(400).json({ error: 'Invalid captured_at' });
+    const observedAtIso = observedAt.toISOString();
+    if (captured_at) {
+        const applied = systemsRepo.getSystemObservedAt(system_id);
+        if (applied && observedAtIso <= applied) {
+            return res.json({ success: true, skipped: 'stale_observation', captured_at, applied });
+        }
     }
 
     systemsRepo.upsertSystemStub(system_id);
@@ -111,6 +132,18 @@ router.post('/sync/system', requireAuth, (req, res) => {
             let finalIsSieged = (p.is_sieged === undefined || p.is_sieged === null)
                 ? (oldP ? oldP.is_sieged : 0)
                 : (p.is_sieged ? 1 : 0);
+            // WHOSE siege (2026-09-13): the API's hasSiege is ALSO true for a friendly fleet
+            // in orbit — confirmed live, an allied transit arriving at a RAID planet flipped
+            // it on and the bot announced "under siege" at its own alliance. Only the live
+            // DOM distinguishes the two, so its verdict is remembered here rather than used
+            // once and discarded; an API-only sync leaves whatever the DOM last established
+            // alone instead of overwriting it with a guess. Cleared when the siege lifts, so
+            // the NEXT siege on this planet starts out unknown again rather than inheriting
+            // the last one's allegiance.
+            let finalSiegeIsFriendly = (p.siege_is_friendly === true || p.siege_is_friendly === false)
+                ? (p.siege_is_friendly ? 1 : 0)
+                : (oldP ? oldP.siege_is_friendly : null);
+            if (!finalIsSieged) finalSiegeIsFriendly = null;
 
             // CRITICAL FOG OF WAR GUARD: protects historical stats from being nuked by a
             // payload the hub cannot currently trust. Gated on vision_uncertain, NOT
@@ -142,6 +175,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 finalStarbase = oldP ? oldP.starbase : finalStarbase;
                 finalHasFleet = oldP ? oldP.has_fleet : finalHasFleet;
                 finalIsSieged = oldP ? oldP.is_sieged : finalIsSieged;
+                finalSiegeIsFriendly = oldP ? oldP.siege_is_friendly : finalSiegeIsFriendly;
             }
 
             // SOFT-UNKNOWN GUARD: a scan can fail to pick up the owner link while the
@@ -227,23 +261,23 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 // THEM, or two other parties fighting — which isn't an "enemy entered"
                 // event for us at all (2026-09-12 fix: this used to fire for every siege in
                 // a watched system regardless of who owned the planet).
-                // attacker_is_friendly/attacker_name (2026-09-12b) ride along too, whenever
-                // the DOM scraper actually saw this siege (see siege-indicator-parser.js) —
-                // it directly tells us the BESIEGER's allegiance instead of assuming one
-                // from the owner, which matters for the rare case a friendly fleet somehow
-                // shows sieging a friendly-owned planet (not an enemy at all, so not this
-                // channel's concern) and lets the alert name the actual attacker. When only
-                // the API-sourced boolean is available (no attacker identity at all),
-                // attacker_is_friendly is left null and the milestone filter falls back to
-                // the old assumption: a fresh siege on a friendly planet can only be hostile.
-                if (!oldP.is_sieged && finalIsSieged) {
+                // 2026-09-13: this used to fire on the raw is_sieged 0->1 edge, assuming any
+                // fresh siege on a friendly planet had to be hostile. It does not: the API's
+                // hasSiege is true for a friendly fleet in orbit too, and the bot duly
+                // announced an allied transit as an enemy attack on its own alliance's
+                // planet. So the edge that matters is "we now KNOW an enemy is besieging
+                // this", which only the live DOM can establish. That also means a siege
+                // first seen through the API (allegiance unknown) still alerts later, at the
+                // moment a DOM scrape confirms it hostile — rather than being lost because
+                // is_sieged was already 1 by then and the old edge never fired again.
+                const wasConfirmedEnemySiege = !!(oldP.is_sieged && oldP.siege_is_friendly === 0);
+                const isConfirmedEnemySiege = !!(finalIsSieged && finalSiegeIsFriendly === 0);
+                if (!wasConfirmedEnemySiege && isConfirmedEnemySiege) {
                     announceEvents.push({
                         planet_index: p.planet_index,
                         type: 'SIEGE_STARTED',
                         owner: oldOwnerLabel,
                         owner_alliance_tag: tagOf(oldP.owner_id),
-                        attacker_is_friendly: (p.siege_is_friendly === true || p.siege_is_friendly === false)
-                            ? p.siege_is_friendly : null,
                         attacker_name: p.siege_attacker_name || null,
                     });
                 }
@@ -326,7 +360,8 @@ router.post('/sync/system', requireAuth, (req, res) => {
             systemsRepo.upsertPlanet(
                 p.game_planet_id, system_id, p.planet_index, finalOwnerId, finalPopulation,
                 finalStarbase, finalHasFleet, finalIsSieged,
-                typeof p.name === 'string' ? p.name : null
+                typeof p.name === 'string' ? p.name : null,
+                finalSiegeIsFriendly
             );
         }
 
@@ -339,6 +374,9 @@ router.post('/sync/system', requireAuth, (req, res) => {
 
     try {
         syncTransaction(planets, fleets || []);
+        // Applied — this is now the newest observation of this system, and anything captured
+        // before it is stale (see the stale-observation guard above).
+        systemsRepo.advanceSystemObservedAt(system_id, observedAtIso);
 
         const sys = systemsRepo.getSystemCoords(system_id) || { id: system_id };
 
