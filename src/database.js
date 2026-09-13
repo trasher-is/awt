@@ -145,6 +145,21 @@ function initDatabase() {
     // which matches the default here — nobody is logged out by the migration itself.
     addColumn('app_users', 'session_version', 'INTEGER NOT NULL DEFAULT 0');
     addColumn('players', 'has_intel', 'INTEGER DEFAULT 0');
+    // Alliance-wide intel VISIBILITY, as opposed to has_intel above, which latches to 1
+    // forever the first time anyone captures a report and can therefore only ever answer
+    // "have we ever seen them" (2026-09-13). The game's Player detail carries an
+    // intelligenceReport whenever ANY member has vision — it names the capturer, e.g.
+    // capturedByPlayerName: "Moardin25" — and null when nobody does, so the sweep already
+    // observes the real thing every pass; we were simply discarding the zeros.
+    //   intel_visible   the CONFIRMED state, NULL until a baseline is established
+    //   intel_seen_raw  the most recent raw observation, which is what lets a change be
+    //                   required to hold across two consecutive passes before it counts
+    // Vision flickers as fleets drift in and out of range (confirmed live: a report
+    // captured at 14:10:33 was gone again minutes later), so a raw edge is not yet news.
+    addColumn('players', 'intel_visible', 'INTEGER');
+    addColumn('players', 'intel_seen_raw', 'INTEGER');
+    addColumn('players', 'intel_lost_announced_at', 'DATETIME');
+    addColumn('players', 'intel_regained_announced_at', 'DATETIME');
     addColumn('players', 'intel_updated_at', 'TEXT');
     // Set only by upsertPlayerFull (the deep profile/Statistics-page scrape) — unlike
     // updated_at, which every player-touching sync bumps (system scans, the API roster

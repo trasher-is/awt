@@ -4,6 +4,7 @@ const { requireAuth } = require('./_middleware');
 const { announceSystemChanges, announceSystemMilestones, sendVariousChangeEmbed } = require('../discord_bot');
 const { friendlyAllianceTags, ownAllianceTags } = require('../utils/friendly-alliance-tags');
 const { parseSqliteUtc } = require('../../public/js/utils/sqlite-time.js');
+const { decideIntelVisibilityChange } = require('../utils/intel-visibility');
 
 // Best Guarded / various-changes: "close by" means within this many straight-line systems
 // of friendly territory (2026-09-12 — a flat radius, not per-player biology).
@@ -602,7 +603,6 @@ router.post('/sync/player', requireAuth, (req, res) => {
             // alliances.name is NOT NULL and the tag may be missing.
             alliancesRepo.upsertAllianceTagOnly(player.alliance_id, player.alliance_tag ?? null, player.alliance_tag ?? '');
         }
-
         playersRepo.upsertPlayerFull(player);
 
         if (player.logins > 0 && (!oldPlayer || oldPlayer.logins !== player.logins)) {
@@ -775,6 +775,34 @@ function hasCompleteIntel(p) {
 }
 
 // --- PLAYER DETAIL RECEIVER (Player/{id} sync) ---
+// Records this sync's alliance-wide intel visibility and posts to Various Changes when it
+// amounts to real news. `detail.has_intel` rather than the raw payload's, so the same
+// hasCompleteIntel validation that protects the stat columns also decides what counts as
+// "we can see them" — a half-arrived report is not vision.
+function announceIntelVisibility(raw, detail, priorIntel) {
+    const change = decideIntelVisibilityChange({ prior: priorIntel, observedVisible: !!detail.has_intel });
+    playersRepo.setIntelVisibility(detail.id, {
+        intelVisible: change.confirmedVisible,
+        intelSeenRaw: change.seenRaw,
+    });
+    if (!change.announce) return;
+
+    const label = raw.alliance_tag ? `[${raw.alliance_tag}] ${detail.name || raw.name}` : (detail.name || raw.name);
+    // Names the member the alliance is seeing them THROUGH, which is what makes this
+    // actionable rather than merely true: it says whose eyes to keep in range.
+    const capturedBy = typeof raw.intel_captured_by === 'string' && raw.intel_captured_by
+        ? ` (seen by **${raw.intel_captured_by}**)` : '';
+    const embed = {
+        first_ever: ['🔍 First intel captured', `We have never had eyes on ${label} before — the alliance can now see their report${capturedBy}.`],
+        regained: ['🔭 Intel regained', `The alliance can see ${label}'s report again${capturedBy}.`],
+        lost: ['🌑 Intel lost', `Nobody in the alliance can see ${label}'s report any more — we are working from last known values.`],
+    }[change.announce];
+    playersRepo.markIntelAnnounced(detail.id, change.announce);
+    sendVariousChangeEmbed(embed[0], embed[1]).catch(err =>
+        console.error('[Discord] intel-visibility announce error:', err.message)
+    );
+}
+
 router.post('/sync/player-detail', requireAuth, (req, res) => {
     const p = req.body && req.body.player;
     if (!p || !Number.isInteger(p.id) || p.id <= 0) {
@@ -816,8 +844,17 @@ router.post('/sync/player-detail', requireAuth, (req, res) => {
         }
     }
 
+    // Alliance-wide intel visibility (2026-09-13). Read BEFORE the upsert: has_intel latches
+    // to 1 in there, and that latch is the only thing separating a first-ever capture from a
+    // regain — afterwards the difference is gone. Hooked onto THIS route rather than the
+    // profile scrape because the API sweep walks the whole roster continuously, so it
+    // observes visibility for every player rather than only whoever someone happened to
+    // open. See intel-visibility.js for why a single changed observation is not yet news.
+    const priorIntel = playersRepo.getIntelVisibility(p.id);
+
     try {
         playersRepo.upsertPlayerFromApiDetail(detail);
+        announceIntelVisibility(p, detail, priorIntel);
         // Issue #137: the API detail carries the same login counter the profile scrape does,
         // and the background sweep reaches far more players — so it is the denser source of
         // "counter unchanged at time T" observations for the profile's quiet-window analysis.

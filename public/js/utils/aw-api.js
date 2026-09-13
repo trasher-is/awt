@@ -340,6 +340,11 @@
             has_supporter_badge: d.hasSupporterBadge ? 1 : 0,
             supporter_type: typeof d.supporterType === 'string' ? d.supporterType : null,
             has_intel: intel ? 1 : 0,
+            // Who the alliance is seeing them THROUGH. The report is alliance-wide — it
+            // arrives whenever any member has vision, naming the one who captured it — so
+            // this is what makes "intel regained" actionable rather than merely true: it
+            // says whose eyes to keep in range. Not stored; used only for the announcement.
+            intel_captured_by: intel && typeof intel.capturedByPlayerName === 'string' ? intel.capturedByPlayerName : null,
             biology: intel ? (intel.biologyLevel ?? null) : null,
             economy: intel ? (intel.economyLevel ?? null) : null,
             energy: intel ? (intel.energyLevel ?? null) : null,

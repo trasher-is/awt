@@ -21,6 +21,17 @@ const tmpDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'awt-sync-player-d
 process.env.AWT_DB_PATH = tmpDb;
 delete process.env.DISCORD_TOKEN;
 
+// Mock the bot so the intel-visibility announcements are observable (2026-09-13): with
+// DISCORD_TOKEN unset the real sender no-ops silently, which cannot tell "correctly stayed
+// quiet" apart from "never got there".
+const variousChanges = [];
+const botPath = require.resolve('../discord_bot');
+require.cache[botPath] = { id: botPath, filename: botPath, loaded: true, exports: {
+    announceSystemChanges: async () => {},
+    announceSystemMilestones: async () => {},
+    sendVariousChangeEmbed: async (title, description) => { variousChanges.push({ title, description }); },
+} };
+
 const express = require('express');
 const db = require('../database');
 const syncRouter = require('./sync');
@@ -115,6 +126,68 @@ function postJson(server, urlPath, body) {
         const rowB = db.prepare('SELECT has_intel, race_growth FROM players WHERE id = ?').get(414);
         ok('has_intel correctly demoted to 0 (incomplete intel), race_growth left at default',
             rowB && rowB.has_intel === 0, rowB);
+
+        // Alliance-wide intel visibility (2026-09-13). The game's Player detail carries an
+        // intelligenceReport whenever ANY member has vision, so the sweep observes real
+        // alliance-wide visibility on every pass — but vision flickers as fleets drift, so
+        // a change only counts once it has held across two consecutive passes.
+        console.log('\n-- Intel visibility announcements, end to end ' + '-'.repeat(24));
+        const intelPayload = (id, visible, extra = {}) => JSON.parse(JSON.stringify({
+            player: {
+                id, name: 'Watched', alliance_id: null, alliance_tag: 'FOE', level: 2, points: 2,
+                ranking: null, country: null, is_active_player: 1, joined: null,
+                logins: null, last_activity_at: null, last_login_at: null, resigned_at: null,
+                number_of_battles: null, battle_luckiness: null, multi_status: null,
+                is_top_permanent_ranker: 0, has_supporter_badge: 0, supporter_type: null,
+                has_intel: visible ? 1 : 0,
+                biology: visible ? 3 : null, economy: visible ? 6 : null, energy: visible ? 8 : null,
+                mathematics: visible ? 6 : null, physics: visible ? 3 : null, social: visible ? 3 : null,
+                trade_revenue: visible ? 0 : null, artefact: null,
+                race_growth: 0, race_science: 0, race_culture: 0, race_production: 0,
+                race_speed: 0, race_attack: 0, race_defense: 0, race_trader: 0, race_sul: 0,
+                ...extra,
+            },
+        }));
+        const titles = () => variousChanges.map(c => c.title);
+        const sync = (id, visible, extra) => postJson(server, '/hub-api/sync/player-detail', intelPayload(id, visible, extra));
+
+        variousChanges.length = 0;
+        await sync(520, false);
+        ok('the very first sync of an unknown player is silent — it only sets a baseline',
+            variousChanges.length === 0, titles());
+
+        await sync(520, true, { intel_captured_by: 'Moardin25' });
+        const firstEver = variousChanges.filter(c => c.title.includes('First intel'));
+        ok('the first ever capture announces immediately, without waiting for a second pass',
+            firstEver.length === 1, titles());
+        ok('and it names who the alliance is seeing them through',
+            firstEver[0] && firstEver[0].description.includes('Moardin25'), firstEver[0]);
+
+        variousChanges.length = 0;
+        await sync(520, false);
+        ok('one missed sighting stays quiet — a fleet drifting out of range is not news',
+            variousChanges.length === 0, titles());
+        ok('and the confirmed state has not moved yet',
+            db.prepare('SELECT intel_visible FROM players WHERE id = 520').get().intel_visible === 1);
+
+        await sync(520, false);
+        ok('a second consecutive miss announces the loss',
+            titles().some(t => t.includes('Intel lost')), titles());
+        ok('and the confirmed state follows',
+            db.prepare('SELECT intel_visible FROM players WHERE id = 520').get().intel_visible === 0);
+
+        variousChanges.length = 0;
+        await sync(520, true, { intel_captured_by: 'Harpyie' });
+        ok('one sighting back is not yet a regain', variousChanges.length === 0, titles());
+        await sync(520, true, { intel_captured_by: 'Harpyie' });
+        const regained = variousChanges.filter(c => c.title.includes('Intel regained'));
+        ok('two in a row announces the regain, naming the new pair of eyes',
+            regained.length === 1 && regained[0].description.includes('Harpyie'), titles());
+
+        variousChanges.length = 0;
+        await sync(520, true);
+        await sync(520, true);
+        ok('steady visibility says nothing, pass after pass', variousChanges.length === 0, titles());
     } finally {
         server.close();
     }
