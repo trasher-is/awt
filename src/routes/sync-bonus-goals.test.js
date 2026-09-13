@@ -128,8 +128,20 @@ function request(server, method, urlPath, body) {
             config: { points: 25 },
             enabled: true,
         });
-        db.prepare(`INSERT INTO bonus_goal_active_targets (goal_id, system_id, planet_index) VALUES (?, ?, ?)`)
+        // A target only counts while its own Berlin day is still running (2026-09-13) — an
+        // unclaimed one used to sit there forever, putting the bottle on the same planet
+        // day after day. A row with NO expiry predates that column and is treated as
+        // already over: there is no honest deadline to invent for it, and a stale one
+        // lingering is the exact bug being fixed.
+        const legacyNoExpiry = db.prepare(`INSERT INTO bonus_goal_active_targets (goal_id, system_id, planet_index) VALUES (?, ?, ?)`)
             .run(targetGoal.id, 700, 1);
+        const legacyOnly = await request(server, 'GET', '/hub-api/sync/bonus-goals/active-target');
+        ok('a pre-expiry row is not served — yesterday\'s bottle does not survive the upgrade',
+            legacyOnly.body.targets.length === 0, legacyOnly.body);
+        db.prepare(`DELETE FROM bonus_goal_active_targets WHERE id = ?`).run(legacyNoExpiry.lastInsertRowid);
+
+        db.prepare(`INSERT INTO bonus_goal_active_targets (goal_id, system_id, planet_index, expires_at) VALUES (?, ?, ?, ?)`)
+            .run(targetGoal.id, 700, 1, new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString());
 
         const withActive = await request(server, 'GET', '/hub-api/sync/bonus-goals/active-target');
         ok('an active unclaimed target shows up with its point value',

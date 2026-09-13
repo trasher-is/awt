@@ -186,11 +186,15 @@ ok('the only eligible planet (hostile-owned, population > 0) is the one picked',
 console.log('\n── ensureTodayRolled / maybeActivateRandomTarget: the daily schedule ' + '─'.repeat(6));
 const targetGoal = bonusGoals.createGoal({
     type: 'random_target', name: 'target test',
-    config: { points: 50, daily_probability: 1, active_hour_start: 0, active_hour_end: 24 },
+    // Window confined to the first Berlin hour so the random scheduled_at is deterministically
+    // in the past for the `now` values below — the schedule is anchored to 00:00 Europe/Berlin
+    // (2026-09-13), not to the server's own midnight, so "late in the day" has to mean late in
+    // the BERLIN day or the roll can legitimately still be in the future.
+    config: { points: 50, daily_probability: 1, active_hour_start: 0, active_hour_end: 1 },
     enabled: true,
 });
 
-const day1 = new Date('2026-09-15T23:59:00');
+const day1 = new Date('2026-09-15T21:59:00Z'); // 23:59 Europe/Berlin
 const roll1 = bonusGoals.ensureTodayRolled(targetGoal.id, targetGoal.config, day1);
 ok('probability=1 always schedules a time for today', roll1.scheduled_at != null, roll1);
 const roll1Again = bonusGoals.ensureTodayRolled(targetGoal.id, targetGoal.config, day1);
@@ -205,19 +209,19 @@ const zeroProbGoal = bonusGoals.createGoal({
 const zeroRoll = bonusGoals.ensureTodayRolled(zeroProbGoal.id, zeroProbGoal.config, day1);
 ok('probability=0 never schedules an event today', zeroRoll.scheduled_at === null, zeroRoll);
 
-// day1 is 23:59, so the random scheduled_at (somewhere in 00:00-24:00) is guaranteed <= now
+// day1 is 23:59 Berlin and the window closes at 01:00 Berlin, so scheduled_at is certainly past
 const activation = bonusGoals.maybeActivateRandomTarget(targetGoal.id, targetGoal.config, day1);
 ok('activation creates a target once the scheduled time has passed',
     activation && activation.system_id === 800 && activation.planet_index === 3, activation);
 
-const activeAfter = bonusGoals.getActiveTarget(targetGoal.id);
+const activeAfter = bonusGoals.getActiveTarget(targetGoal.id, day1);
 ok('getActiveTarget now returns the freshly-activated target', activeAfter && activeAfter.id === activation.id, activeAfter);
 
 const secondCheckSameDay = bonusGoals.maybeActivateRandomTarget(targetGoal.id, targetGoal.config, day1);
 ok('a second check the same day, with one already active, does nothing (null)', secondCheckSameDay === null, secondCheckSameDay);
 
 console.log('\n── getActiveTargetsForDisplay: what the client marker/highlight reads ' + '─'.repeat(4));
-const display = bonusGoals.getActiveTargetsForDisplay();
+const display = bonusGoals.getActiveTargetsForDisplay(day1);
 const displayed = display.find(t => t.system_id === 800 && t.planet_index === 3);
 ok('the active target is exposed with its point value and names for display',
     displayed && displayed.points === 50 && displayed.system_name === 'Target Test System' && displayed.planet_name === 'HostilePlanet',
@@ -258,10 +262,31 @@ ok('hitting the same planet again after it was already claimed awards nothing ne
 // eligibility pool (planets.population/owner tag — claiming a target doesn't remove the
 // planet itself from future rolls, only that one bonus_goal_active_targets row): the only
 // eligible candidate here is still HostilePlanet, so it's picked again.
-const day2 = new Date('2026-09-16T23:59:00');
+const day2 = new Date('2026-09-16T21:59:00Z'); // 23:59 Europe/Berlin, the next game day
 const day2Activation = bonusGoals.maybeActivateRandomTarget(targetGoal.id, targetGoal.config, day2);
 ok('day 2 rolls a fresh target — the only eligible planet (HostilePlanet) can be re-picked',
     day2Activation && day2Activation.system_id === 800 && day2Activation.planet_index === 3, day2Activation);
+
+console.log('\n── An UNCLAIMED target expires at the Berlin midnight after it appeared ' + '─'.repeat(2));
+// The bug this fixes: an unfound target used to sit there indefinitely, so the bottle
+// showed on the same planet day after day until somebody happened to hit it — the opposite
+// of a daily hunt. Nobody claims day 2's target below.
+const stillDay2 = new Date('2026-09-16T22:30:00Z'); // 00:30 Berlin on the 17th — past the boundary
+ok('the day-2 target is live while its own Berlin day is still running',
+    bonusGoals.getActiveTarget(targetGoal.id, day2) !== null);
+ok('and is gone once the Berlin day rolls over, still unclaimed',
+    bonusGoals.getActiveTarget(targetGoal.id, stillDay2) === null,
+    bonusGoals.getActiveTarget(targetGoal.id, stillDay2));
+ok('so the map marker stops showing it too, rather than pointing at yesterday\'s planet',
+    bonusGoals.getActiveTargetsForDisplay(stillDay2).length === 0,
+    bonusGoals.getActiveTargetsForDisplay(stillDay2));
+
+// And with the old one expired rather than lingering, the next day is free to place a new
+// one — which is the whole point of the expiry.
+const day3 = new Date('2026-09-17T21:59:00Z'); // 23:59 Berlin
+const day3Activation = bonusGoals.maybeActivateRandomTarget(targetGoal.id, targetGoal.config, day3);
+ok('day 3 places a new target instead of being blocked by the stale unclaimed one',
+    day3Activation && day3Activation.id !== day2Activation.id, { day2Activation, day3Activation });
 
 console.log('\n── evaluatePlayerStatsForGoals: first past the post on a stat threshold ' + '─'.repeat(2));
 const milestoneGoal = bonusGoals.createGoal({

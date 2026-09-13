@@ -83,14 +83,20 @@ console.log('\n── Per-system milestone channel ' + '─'.repeat(45));
     // 2026-09-12 fix cases: a siege only belongs in the milestone feed when the BESIEGED
     // planet is friendly — us besieging an enemy, or an enemy/unowned planet caught in
     // someone else's siege, is not an "enemy entered" event for us.
+    // 2026-09-13d: a hostile siege anywhere in a watched system counts, whoever holds the
+    // planet. The narrower "must be OUR planet" rule left a hole — an enemy COLONIZING a
+    // free planet in one of our systems was announced, while the enemy SIEGE of that same
+    // planet, the step immediately before and the only one there is still time to answer,
+    // was silent.
     const siegeOnEnemy = { planet_index: 9, type: 'SIEGE_STARTED', owner: '[FOE] Raider', owner_alliance_tag: 'FOE' };
     const siegeOnUnaffiliated = { planet_index: 10, type: 'SIEGE_STARTED', owner: 'Nomad', owner_alliance_tag: null };
+    const siegeOnFreePlanet = { planet_index: 11, type: 'SIEGE_STARTED', owner: null, owner_alliance_tag: null, attacker_name: 'Encroacher' };
     const lines = buildSystemMilestoneLines(
-        [siege, friendlyTakeover, enemyConquest, enemyColonization, lostToUnknown, secured, unrelatedPopDrop, siegeOnEnemy, siegeOnUnaffiliated],
+        [siege, friendlyTakeover, enemyConquest, enemyColonization, lostToUnknown, secured, unrelatedPopDrop, siegeOnEnemy, siegeOnUnaffiliated, siegeOnFreePlanet],
         friendly,
     );
 
-    ok('exactly four lines survive (siege on us, enemy conquest, enemy colonization, secured)', lines.length === 4, lines);
+    ok('exactly seven lines survive (four sieges, enemy conquest, enemy colonization, secured)', lines.length === 7, lines);
     ok('a siege on a FRIENDLY planet shows, naming the besieged owner and the attacker',
         lines.some(l => l.includes('Planet 3') && l.includes('[RAID] Holder') && l.includes('under siege') && l.includes('Raider1')), lines);
     ok('a friendly (NAP) takeover is NOT flagged as enemy activity', !lines.some(l => l.includes('Planet 4')), lines);
@@ -99,8 +105,14 @@ console.log('\n── Per-system milestone channel ' + '─'.repeat(45));
     ok('losing a planet to Unknown (no new owner) is not "enemy entered" — nothing to attribute it to', !lines.some(l => l.includes('Planet 7')), lines);
     ok('a plain population drop never reaches the milestone feed', !lines.some(l => l.includes('Planet 8')), lines);
     ok('SYSTEM_SECURED shows its own celebration line', lines.some(l => l.includes('secured')), lines);
-    ok('a siege on an ENEMY-owned planet is not our "enemy entered" — we\'re the one attacking', !lines.some(l => l.includes('Planet 9')), lines);
-    ok('a siege on an unaffiliated/unowned planet is not ours to alarm about either', !lines.some(l => l.includes('Planet 10')), lines);
+    // A channel exists because someone is watching that system; a hostile fleet arriving in
+    // it is the news, whoever happens to hold the rock it is parked over.
+    ok('a hostile siege on an ENEMY-held planet in the system is reported too', lines.some(l => l.includes('Planet 9')), lines);
+    ok('so is one on an unaffiliated player\'s planet', lines.some(l => l.includes('Planet 10')), lines);
+    ok('and one on a FREE planet — the enemy staking a claim inside our system, while it can still be answered',
+        lines.some(l => l.includes('Planet 11') && l.includes('Encroacher')), lines);
+    ok('an ownerless planet reads naturally rather than naming nobody',
+        lines.some(l => l.includes('Planet 11') && l.includes('this planet is under siege')), lines);
     // Whose siege it is is settled upstream now (2026-09-13): /sync/system only emits a
     // SIEGE_STARTED once the live DOM has confirmed the besieger is hostile, because the
     // API's hasSiege is equally true for a friendly fleet in orbit. So a SIEGE_STARTED that
