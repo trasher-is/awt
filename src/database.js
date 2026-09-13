@@ -961,6 +961,12 @@ function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_bonus_goal_active_targets_goal ON bonus_goal_active_targets(goal_id, claimed_award_id);
         CREATE INDEX IF NOT EXISTS idx_bonus_goal_active_targets_location ON bonus_goal_active_targets(system_id, planet_index, claimed_award_id);
     `);
+    // expires_at (2026-09-13): a random_target dies at the next 00:00 CET/CEST whether or
+    // not anyone found it. It used to sit there indefinitely until claimed, so an unclaimed
+    // one stayed on the same planet day after day — the opposite of a daily hunt. Added
+    // here rather than with the other addColumn calls above, which run before this table
+    // exists. See bonusGoals.js's maybeActivateRandomTarget.
+    addColumn('bonus_goal_active_targets', 'expires_at', 'DATETIME');
 
     // Battle-derived candidates are deliberately separate from confirmed bio/race intel.
     // They disappear with the player at a round reset and never enter race snapshots.

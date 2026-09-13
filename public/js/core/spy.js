@@ -637,18 +637,33 @@ export function initSpy() {
                 document.head.appendChild(faLink);
             }
 
-            // One-time style for the bottle-target row highlight below — a shifting
-            // rainbow gradient, unmistakable against every other indicator on this page.
+            // One-time style for the bottle-target row highlight below — a slow gold sweep,
+            // unmistakable against every other indicator on this page.
+            //
+            // The gradient goes on the ROW, with the cells forced transparent (2026-09-13).
+            // Painting `> td` instead gave every cell its own full copy of the gradient, so
+            // a twelve-column row read as twelve repeating smears rather than one band. A
+            // table row paints its background across the whole row, and cells sit over it,
+            // so transparent cells let the single sweep show through unbroken.
+            //
+            // Dark text, because gold is a light background and the game's own row text is
+            // white: scoped to the row's own cells and links so the hub's injected badges,
+            // which set their own colours with !important, keep theirs.
             if (!document.getElementById('awt-bottle-target-style')) {
                 const style = document.createElement('style');
                 style.id = 'awt-bottle-target-style';
                 style.textContent = `
-                    @keyframes awt-rainbow-shift { to { background-position: 400% 0; } }
-                    .awt-bottle-target-row > td {
-                        background: linear-gradient(90deg, #ff3b3b, #ff9d3b, #ffe93b, #3bff6e, #3bd0ff, #7a3bff, #ff3bd0, #ff3b3b) !important;
-                        background-size: 400% 100% !important;
-                        animation: awt-rainbow-shift 3s linear infinite;
+                    @keyframes awt-gold-shift { to { background-position: 200% 0; } }
+                    tr.awt-bottle-target-row {
+                        background-image: linear-gradient(90deg, #b8860b, #ffd700, #fff3b0, #ffd700, #b8860b) !important;
+                        background-size: 200% 100% !important;
+                        animation: awt-gold-shift 6s linear infinite;
                     }
+                    tr.awt-bottle-target-row > td {
+                        background: transparent !important;
+                        color: #241a00 !important;
+                    }
+                    tr.awt-bottle-target-row > td a { color: #3d2b00 !important; }
                 `;
                 document.head.appendChild(style);
             }

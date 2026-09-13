@@ -108,15 +108,19 @@ function isEnemyGain(e, friendlyTagsUpper) {
 // besieging an enemy, or two other parties fighting each other — which isn't a threat to
 // us and just floods the channel with noise). Unlike isEnemyGain, an unowned/unaffiliated
 // victim does NOT qualify — there's nothing of ours to alarm about.
-// The besieger's allegiance is no longer judged here (2026-09-13): /sync/system only emits
-// a SIEGE_STARTED once the live DOM has confirmed the siege is hostile, because the API's
+// The besieger's allegiance is not judged here (2026-09-13): /sync/system only emits a
+// SIEGE_STARTED once the live DOM has confirmed the siege is hostile, because the API's
 // hasSiege flag is equally true for a friendly fleet in orbit and briefly had this bot
-// announcing an allied transit as an enemy attack. So all that's left to check is that the
-// besieged planet is one of ours.
-function isEnemySiegeOnUs(e, friendlyTagsUpper) {
-    if (!e || e.type !== 'SIEGE_STARTED') return false;
-    const tag = e.owner_alliance_tag ? String(e.owner_alliance_tag).toUpperCase() : null;
-    return !!tag && friendlyTagsUpper.has(tag);
+// announcing an allied transit as an enemy attack.
+//
+// Nor is the besieged planet's owner (2026-09-13d). This used to require the planet to be
+// ours, which left a hole the maintainer spotted: an enemy COLONIZING a free planet in one
+// of our systems was announced, but the enemy SIEGE of that same free planet — the step
+// immediately before, and the only one there is still time to answer — was silent. A
+// channel exists because someone is watching that system; a hostile fleet arriving in it is
+// the news, whoever happens to hold the rock it is parked over.
+function isEnemySiege(e) {
+    return !!e && e.type === 'SIEGE_STARTED';
 }
 
 function milestoneLine(e) {
@@ -141,7 +145,7 @@ function buildSystemMilestoneLines(events, friendlyTagsUpper) {
     const list = Array.isArray(events) ? events : [];
     const tags = friendlyTagsUpper || new Set();
     return list
-        .filter(e => e && (isEnemySiegeOnUs(e, tags) || e.type === 'SYSTEM_SECURED' || isEnemyGain(e, tags)))
+        .filter(e => e && (isEnemySiege(e) || e.type === 'SYSTEM_SECURED' || isEnemyGain(e, tags)))
         .map(milestoneLine)
         .filter(Boolean);
 }

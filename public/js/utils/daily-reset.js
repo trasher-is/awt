@@ -56,5 +56,15 @@
         return `${get('year')}-${get('month')}-${get('day')}`;
     }
 
-    return { nextDailyWindow, berlinDateKey };
+    // How far into the current Europe/Berlin day it is, in seconds. Subtracting this from
+    // `now` gives the exact instant of today's 00:00 CET/CEST, which is what anything
+    // scheduling "at hour N, Berlin time, today" needs as its origin — computing it from
+    // the server's own midnight would place the whole window in whatever zone the box
+    // happens to run in (UTC here, so an hour or two out all year).
+    function berlinSecondsSinceMidnight(now) {
+        const { hour, minute, second } = berlinParts(now === undefined ? new Date() : now);
+        return hour * 3600 + minute * 60 + second;
+    }
+
+    return { nextDailyWindow, berlinDateKey, berlinSecondsSinceMidnight };
 });

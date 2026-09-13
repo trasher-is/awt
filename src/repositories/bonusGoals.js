@@ -274,11 +274,15 @@ function evaluatePlayerStatsForGoals(playerId) {
 
 // --- random_target: scheduling + picking ---
 
+// Everything about this goal type runs on the GAME's day, 00:00-00:00 Europe/Berlin
+// (2026-09-13) — the same boundary as the daily reset, and the same helper the battle-report
+// and galaxy schedulers already use. It previously used the server's own calendar day and
+// clock hours, which on a UTC box put the whole active window an hour or two off the day the
+// players actually live in, and shifted it again at every DST changeover.
+const { berlinDateKey, nextDailyWindow, berlinSecondsSinceMidnight } = require('../../public/js/utils/daily-reset.js');
+
 function dateKeyFor(date) {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    return berlinDateKey(date);
 }
 
 // Any populated planet, anywhere — except our own alliance and its NAP partners (see
@@ -301,14 +305,21 @@ function pickRandomTargetPlanet() {
 }
 
 const insertActiveTargetStmt = db.prepare(`
-    INSERT INTO bonus_goal_active_targets (goal_id, system_id, planet_index) VALUES (?, ?, ?)
+    INSERT INTO bonus_goal_active_targets (goal_id, system_id, planet_index, expires_at) VALUES (?, ?, ?, ?)
 `);
+// Unclaimed AND not yet expired. The expiry is what makes this a DAILY hunt (2026-09-13):
+// an unfound target used to sit on the same planet indefinitely, so the bottle appeared on
+// the same system day after day until somebody happened to hit it. Rows written before the
+// column existed have a NULL expiry and are treated as already over — there is no honest
+// deadline to give them, and a stale one lingering is the exact bug being fixed.
 const activeTargetStmt = db.prepare(`
-    SELECT * FROM bonus_goal_active_targets WHERE goal_id = ? AND claimed_award_id IS NULL
+    SELECT * FROM bonus_goal_active_targets
+    WHERE goal_id = ? AND claimed_award_id IS NULL
+      AND expires_at IS NOT NULL AND expires_at > ?
     ORDER BY activated_at DESC LIMIT 1
 `);
-function getActiveTarget(goalId) {
-    return activeTargetStmt.get(goalId) || null;
+function getActiveTarget(goalId, now = new Date()) {
+    return activeTargetStmt.get(goalId, now.toISOString()) || null;
 }
 const claimActiveTargetStmt = db.prepare(`UPDATE bonus_goal_active_targets SET claimed_award_id = ? WHERE id = ?`);
 
@@ -335,9 +346,12 @@ function ensureTodayRolled(goalId, config, now) {
 
     let scheduledAt = null;
     if (Math.random() < p) {
-        const start = new Date(now); start.setHours(startHour, 0, 0, 0);
-        const end = new Date(now); end.setHours(endHour, 0, 0, 0);
-        scheduledAt = new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime())).toISOString();
+        // Anchored to today's 00:00 Europe/Berlin, not the server's midnight, so
+        // active_hour_start/end mean the hours the players are actually looking at.
+        const berlinMidnightMs = now.getTime() - berlinSecondsSinceMidnight(now) * 1000;
+        const startMs = berlinMidnightMs + startHour * 3600 * 1000;
+        const endMs = berlinMidnightMs + endHour * 3600 * 1000;
+        scheduledAt = new Date(startMs + Math.random() * (endMs - startMs)).toISOString();
     }
     insertRollStmt.run({ goal_id: goalId, roll_date: rollDate, scheduled_at: scheduledAt });
     return todayRollStmt.get(goalId, rollDate);
@@ -353,12 +367,14 @@ function maybeActivateRandomTarget(goalId, config, now = new Date()) {
     const roll = ensureTodayRolled(goalId, config, now);
     if (!roll.scheduled_at || roll.activated_at) return null;
     if (new Date(roll.scheduled_at).getTime() > now.getTime()) return null;
-    if (getActiveTarget(goalId)) return null;
+    if (getActiveTarget(goalId, now)) return null;
 
     const planet = pickRandomTargetPlanet();
     if (!planet) return null; // nothing eligible yet (e.g. very early in the round) — try again on the next roll
 
-    const info = insertActiveTargetStmt.run(goalId, planet.system_id, planet.planet_index);
+    // Dies at the next 00:00 CET/CEST, found or not, so tomorrow starts somewhere new.
+    const expiresAt = nextDailyWindow(0, now).toISOString();
+    const info = insertActiveTargetStmt.run(goalId, planet.system_id, planet.planet_index, expiresAt);
     markRollActivatedStmt.run(now.toISOString(), goalId, dateKeyFor(now));
     return { id: info.lastInsertRowid, system_id: planet.system_id, planet_index: planet.planet_index };
 }
@@ -373,9 +389,10 @@ const activeTargetsForDisplayStmt = db.prepare(`
     LEFT JOIN systems s ON s.id = t.system_id
     LEFT JOIN planets p ON p.system_id = t.system_id AND p.planet_index = t.planet_index
     WHERE t.claimed_award_id IS NULL
+      AND t.expires_at IS NOT NULL AND t.expires_at > ?
 `);
-function getActiveTargetsForDisplay() {
-    return activeTargetsForDisplayStmt.all().map(r => {
+function getActiveTargetsForDisplay(now = new Date()) {
+    return activeTargetsForDisplayStmt.all(now.toISOString()).map(r => {
         let config;
         try { config = JSON.parse(r.config); } catch (err) { config = {}; }
         return {
