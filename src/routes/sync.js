@@ -34,6 +34,25 @@ const POP_DROP_ATTACKER_WINDOW_MINUTES = 180;
 // than real growth — see the guard below, where this is used.
 const MIN_HOURS_PER_POP_POINT_REGROWN = 4;
 
+// A capture stamp is only useful if we can turn it into an instant we trust. The hub's own
+// timestamps are ISO/SQLite-shaped, but the game stamps its Map/sectors captures in its own
+// way (its responses carry a sibling `format` field describing it), so fall back to the
+// engine's own parser for anything parseSqliteUtc will not take. Anything that lands
+// implausibly far from now is a MISPARSE, not a real observation — a locale-flipped
+// day/month, or a bare time read as year zero — and ordering by it would be worse than not
+// ordering at all, so it is refused rather than trusted.
+const MAX_CAPTURE_SKEW_MS = 365 * 24 * 60 * 60 * 1000;
+function parseObservationTime(value) {
+    if (!value) return null;
+    let parsed = parseSqliteUtc(value);
+    if (!parsed) {
+        const ms = Date.parse(value);
+        parsed = Number.isFinite(ms) ? new Date(ms) : null;
+    }
+    if (!parsed) return null;
+    return Math.abs(parsed.getTime() - Date.now()) > MAX_CAPTURE_SKEW_MS ? null : parsed;
+}
+
 // --- MAP SCRAPER DATA RECEIVER ---
 router.post('/sync/system', requireAuth, (req, res) => {
     const { system_id, planets, fleets, captured_at } = req.body;
@@ -60,10 +79,16 @@ router.post('/sync/system', requireAuth, (req, res) => {
     // newest one already applied teaches us nothing and is dropped whole. A live DOM scrape
     // sends no captured_at at all — you cannot render a system page without vision of it,
     // so it is always "now" and always wins.
-    const observedAt = captured_at ? parseSqliteUtc(captured_at) : new Date();
-    if (!observedAt) return res.status(400).json({ error: 'Invalid captured_at' });
-    const observedAtIso = observedAt.toISOString();
-    if (captured_at) {
+    //
+    // An unreadable captured_at must NEVER cost us the payload (2026-09-13b): this first
+    // rejected the whole sync with a 400, and because the game stamps its captures in a
+    // format parseSqliteUtc does not accept, that silently blacklisted 274 of 381 systems —
+    // the hub went blind to most of the galaxy while reporting success on the rest. An
+    // optional ordering hint is not worth a single planet of intel. When it cannot be read,
+    // the sync proceeds unordered, exactly as it did before this guard existed.
+    const observedAt = captured_at ? parseObservationTime(captured_at) : new Date();
+    const observedAtIso = observedAt ? observedAt.toISOString() : null;
+    if (observedAtIso && captured_at) {
         const applied = systemsRepo.getSystemObservedAt(system_id);
         if (applied && observedAtIso <= applied) {
             return res.json({ success: true, skipped: 'stale_observation', captured_at, applied });
