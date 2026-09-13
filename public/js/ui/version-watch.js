@@ -90,7 +90,14 @@ export function initVersionWatch(onNotice = () => {}) {
     const check = async () => {
         const version = await fetchVersion();
         if (!version) return;
-        if (bootVersion === null) { bootVersion = version; return; }
+        if (bootVersion === null) {
+            bootVersion = version;
+            // Announce to the game frame that this wrapper is new enough to update itself.
+            // A wrapper that says nothing predates this file entirely and cannot notice a
+            // deploy on its own, so the frame reloads it once — see stale-wrapper-reload.js.
+            try { window.__hubBuildVersion = version; } catch (err) { /* not fatal */ }
+            return;
+        }
         if (version === bootVersion || version === pendingVersion) return;
         pendingVersion = version;
         try { onNotice(version); } catch (err) { /* a failed toast must not block the reload */ }
