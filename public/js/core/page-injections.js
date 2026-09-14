@@ -10,6 +10,8 @@ import '../utils/aw-api.js';         // side-effect import: getTravelTime, for i
 import '../utils/login-gaps.js';     // side-effect import: AWLoginGaps, the profile's quiet-window analysis
 import '../utils/social-hint.js';    // side-effect import: AWSocialHint, the Science page's Social marker (needs game-tables above)
 import '../utils/research-time.js';  // side-effect import: AWResearch, research time shared by the calculator and the Economy countdown
+import '../utils/fleet-launch-target-dossier.js'; // side-effect import: AWTargetDossier, the launch-form target-info render logic
+import { scrapeSystemById } from '../scrapers/system-parser.js';
 const { gameFetch } = globalThis.AWGameRate;
 const { formatSqliteUtc, formatLocalDateTime, parseTimestamp } = globalThis.AWSqliteTime;
 const LoginGaps = globalThis.AWLoginGaps;
@@ -18,6 +20,7 @@ const Research = globalThis.AWResearch;
 const Tables = globalThis.AWTables;
 const { TRAIT_PCT } = globalThis.AWEmpire.constants;
 const { getTravelTime } = globalThis.AWApi;
+const { buildTargetDossierHtml } = globalThis.AWTargetDossier;
 
 // The game's UTC-backed ranking timestamps expose their source in data-utc. Only
 // normalize leaf timestamp spans already displaying a clock: date-only labels, native
@@ -1725,6 +1728,80 @@ export function initFleetLaunchModalETA() {
             span.querySelector('.aw-fleet-eta-t').textContent = fmtFleetRemaining(Number(ms) - Date.now());
         });
     });
+}
+
+// ---------------------------------------------------------------
+// FLEET LAUNCH TARGET DOSSIER — /Game/Fleets/Launch/{id}
+// Once BOTH System and Planet # are picked, shows what the hub knows about that one
+// destination: owner/pop/Starbase/siege/Best-Guarded, who has a fleet there right now
+// (ours flagged separately), and any recent battle nearby — right on the launch form, so
+// nobody has to alt-tab to the dashboard before committing a fleet.
+//
+// Triggers a live DOM scan of the destination system first (scrapeSystemById — DOM-only,
+// no API budget cost, same call the dashboard's "Update" button already uses), so this
+// syncs fresh intel for the WHOLE alliance, not just whoever opened the form. Out of
+// vision, the scan is a safe no-op and the dossier falls back to whatever's already on
+// file (see fleet-launch-target-dossier.js's own freshness note for how that reads).
+//
+// No manual change listeners: like every other init function here, this runs on each
+// settled view-hook pass (spy.js) and is itself cheap to skip — re-render only happens
+// when the (systemId, planetIndex) pair actually changed since the last pass, tracked via
+// a data attribute on the injected row itself rather than module state, so a page
+// navigation away and back starts clean.
+// ---------------------------------------------------------------
+let dossierFetchInFlight = false;
+
+export async function initFleetLaunchTargetDossier() {
+    if (!window.location.pathname.toLowerCase().includes('/game/fleets/launch/')) return;
+    const systemSel = document.getElementById('System');
+    const planetSel = document.getElementById('PlanetIndex');
+    if (!systemSel || !planetSel) return;
+
+    const systemId = parseInt(systemSel.value, 10);
+    const planetIndex = parseInt(planetSel.value, 10);
+    if (!Number.isInteger(systemId) || systemId <= 0
+        || !Number.isInteger(planetIndex) || planetIndex < 1 || planetIndex > 12) {
+        return; // nothing usable picked yet
+    }
+    const key = `${systemId}:${planetIndex}`;
+
+    let container = document.getElementById('aw-target-dossier');
+    if (container && container.getAttribute('data-key') === key) return; // already showing this exact target
+    if (dossierFetchInFlight) return; // next settled view-hook pass retries; avoids overlapping fetches
+
+    if (!container) {
+        const planetRow = planetSel.closest('tr');
+        if (!planetRow) return;
+        container = document.createElement('tr');
+        container.id = 'aw-target-dossier';
+        const cell = document.createElement('td');
+        cell.colSpan = 4;
+        cell.style.cssText = 'padding-top:6px;';
+        container.appendChild(cell);
+        planetRow.insertAdjacentElement('afterend', container);
+    }
+    container.setAttribute('data-key', key);
+    container.querySelector('td').innerHTML = '<div style="color:#888">🎯 Scanning target…</div>';
+
+    dossierFetchInFlight = true;
+    try {
+        await scrapeSystemById(systemId); // best-effort; a stale/no-vision scan just leaves the fallback in place
+        const res = await fetch(`/hub-api/intel/target-dossier?systemId=${systemId}&planetIndex=${planetIndex}`);
+        const data = await res.json();
+        // The target may have changed again while this was in flight — a stale response
+        // must not overwrite whatever the user is looking at now.
+        if (container.getAttribute('data-key') !== key) return;
+        const cell = container.querySelector('td');
+        if (!data || !data.success) { cell.innerHTML = '<div style="color:#e88">Could not load target intel.</div>'; return; }
+        cell.innerHTML = buildTargetDossierHtml(data);
+    } catch (err) {
+        console.warn('[Spy] fleet-launch target dossier failed:', err.message);
+        if (container.getAttribute('data-key') === key) {
+            container.querySelector('td').innerHTML = '<div style="color:#e88">Could not load target intel.</div>';
+        }
+    } finally {
+        dossierFetchInFlight = false;
+    }
 }
 
 // ---------------------------------------------------------------

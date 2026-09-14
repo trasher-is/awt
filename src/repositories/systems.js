@@ -288,7 +288,8 @@ function getBestPlanetsFriendlyCoverage(friendlyTagsUpper) {
 // --- planets ---
 
 const getSystemPlanetsWithIntelStmt = db.prepare(`
-    SELECT p.planet_index, p.population, p.starbase, p.has_fleet, p.is_sieged, p.game_planet_id,
+    SELECT p.planet_index, p.population, p.starbase, p.has_fleet, p.is_sieged, p.siege_is_friendly,
+           p.game_planet_id,
            u.name as owner_name, u.home_system_id, u.home_planet_index, u.possible_homes,
            a.tag as alliance_tag,
            bg.cv as guard_cv

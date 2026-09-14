@@ -234,6 +234,29 @@ function findRecentAttackerAtPlanet(systemId, planetIndex, windowMinutes, { defe
     return reports[0];
 }
 
+// A plain recency lookup for the fleet-launch target dossier — "has anyone fought here
+// lately", not the strict same-attacker/same-defender/kill-count reconciliation
+// findRecentAttackerAtPlanet needs for population-drop attribution. Exact planet first
+// (most relevant to "should I launch here"), then the wider system as context — a fight
+// two planets over in the same system still says something about how contested it is.
+const getRecentBattlesAtPlanetStmt = db.prepare(`
+    SELECT id, started_at, winner, conquered_planet, killed_population, planet_index,
+           att_player_name, att_alliance_tag, def_player_name, def_alliance_tag
+    FROM battle_reports
+    WHERE system_id = @systemId
+      AND julianday('now') - julianday(started_at) <= @sinceDays
+    ORDER BY (planet_index = @planetIndex) DESC, julianday(started_at) DESC
+    LIMIT @limit
+`);
+function getRecentBattlesAtPlanet(systemId, planetIndex, { sinceDays = 3, limit = 5 } = {}) {
+    if (!Number.isInteger(systemId) || systemId <= 0) return [];
+    return getRecentBattlesAtPlanetStmt.all({
+        systemId, planetIndex: Number.isInteger(planetIndex) ? planetIndex : -1,
+        sinceDays: Math.min(30, Math.max(0.1, Number(sinceDays) || 3)),
+        limit: Math.min(20, Math.max(1, Math.round(Number(limit) || 5))),
+    });
+}
+
 // --- Battle Reports page: a unified, alliance-wide "what happened" feed ---
 // Two very different signal sources merged into one chronological list:
 //   1. battle_reports rows — a real combat encounter the game reported. Always "linked":
@@ -480,6 +503,7 @@ module.exports = {
     updateShipDetail,
     findByPlayerPairNear,
     findRecentAttackerAtPlanet,
+    getRecentBattlesAtPlanet,
     getRecentPlanets,
     hasAnyBattleHistory,
     getBattleReportsFeed,
