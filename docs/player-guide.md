@@ -23,6 +23,14 @@ are yours to colonize with Colony Ships once you're ready. See
 [Colonizing and conquering](game-rules.md#colonizing-and-conquering) for how the wider galaxy
 opens up as more players join.
 
+If your starting position looks bad — surrounded by a strong established alliance, far from
+your own alliance-mates — you have roughly your **first 30 minutes** to relog and reroll a
+better one. After that window closes you're stuck there until the game opens the next block
+of systems and the spawn point drifts back around, which can take days. If you're joining as
+a group, starting together on **day 2-3** of a round tends to land everyone closer together
+than day 0-1 (the map hasn't had time to spread out yet) or day 5+ (you're pushed to the
+rim, further from everyone and from the more-developed core).
+
 ### Your home planet: population and growth
 
 Population is your most basic resource — more population means more production and more
@@ -61,6 +69,13 @@ in short:
 - **Physics** means a better chance of winning when you attack.
 - **Social** raises how much population each of your planets can hold.
 
+Energy's travel-time bonus has steep diminishing returns: each level only gets you to 91% of
+the previous level's flight time, so the gains shrink fast the higher you go. On the standard
+server, Energy 35 gets you down to roughly 3.7% of unmodified flight time, 40 to about 2.3%,
+and 45 to about 1.4% — pushing past ~40 mostly buys you a few extra seconds per hop, not
+minutes. **RZ:** Energy scales more gently there (95% per level instead of 91%), so higher
+levels keep paying off for longer — see the [RedZone rounds](#redzone-rounds) table.
+
 ### Culture and expansion
 
 Your **culture level determines how many planets you're allowed to own** — see
@@ -84,6 +99,15 @@ attack/defense/combat-value profile, see [Ship types](game-rules.md#ship-types).
 Transports have two jobs: capturing a planet that already has population (you need at least
 as many transports as the target's population level), or bombing a planet to kill its
 population and randomly damage its buildings.
+
+A planet keeps growing population while your fleet is still in flight, so size your transport
+count for what it'll have **on arrival**, not when you launched — especially against an
+empty planet you're racing to colonize before someone else's Farms outgrow you. As a rough
+guide: 2 transports is usually enough for a short hop landing before the next daily update,
+3 if it lands after one; for a longer direct flight, send 3-4, since a fast-growing opponent
+can add several population levels during the trip. And don't send colonization or transport
+fleets unescorted through contested space — losing them to interception costs the ships and
+the time both.
 
 A battle's outcome depends on your fleet's combat value versus the defender's, modified by
 your race picks and by your Mathematics/Physics science relative to theirs. Small fleets (under
@@ -111,14 +135,27 @@ without warning ("backstabbing") will follow you. See
 [Non-aggression pacts](game-rules.md#non-aggression-pacts) for the related "Friendly
 Attack/Fire" and "Friendly Siege" tactics some players use even while at peace.
 
+If you need to fight a NAP partner's alliance without ending the NAP outright, scoping the
+fight to a single contested system rather than declaring war on the whole alliance tends to
+be read as "we're clearing a system," not "we're at war with you" — it's a real diplomatic
+distinction other alliances make, not just a technicality.
+
 ### Scoring and winning
 
 Your score comes from population levels above 10, your player level, and science levels
 above 20 — see [Score](game-rules.md#score) for the exact formula. A player wins a round by
 holding 400+ points for 5 straight days; an alliance wins by averaging 300+ points across its
-top members for 3 straight days, with at least 3 members counted (**RZ:** the alliance
-target was 750 points for 3 days in round 7 — see [RedZone rounds](#redzone-rounds)). See
+top members for 3 straight days (**RZ:** the alliance target was 750 points for 3 days in
+round 7 — see [RedZone rounds](#redzone-rounds)). See
 [Win conditions](game-rules.md#win-conditions).
+
+"Top members" isn't literally the top 3 — it's roughly your **best three-quarters** of the
+roster (`CountingMembers = totalPlayers - totalPlayers/4`, minimum 3), sorted by score. This
+matters for planning: a handful of low-scoring accounts (a dedicated Trader, say) can sit
+outside the counted group without dragging the average down, but you can't stack an alliance
+with them — past a certain ratio they start getting counted anyway. See
+[Alliance ranking and points](game-rules.md#alliance-ranking-and-points) for the exact
+formula.
 
 ### RedZone rounds
 
@@ -168,6 +205,21 @@ to play. A few archetypes that come up often — see
   real edge on the attacking side of combat.
 - **Farmers** trade away speed and both combat traits to maximize growth, science and
   production — a builder who isn't trying to fight, just to develop fast.
+- **Interceptors** stay flexible rather than optimizing one stat hard, and treat their own
+  availability as the real resource — willing to get up at odd hours to catch an incoming
+  attack or jump on an opening the moment it appears. Suits whoever in the alliance keeps the
+  least predictable schedule.
+- **Hive-mums** (support traders) skip speed and combat entirely and focus on Trade
+  Agreements, feeding trade-rate bonus to the alliance's fighters instead of fighting
+  themselves. Because they're not racing anyone anywhere, they can afford to take longer to
+  develop and still be useful once TAs land.
+- **Spies** push Science, and Biology in particular, hard and early to keep vision on
+  opponents before they get vision back — **+4 Science is close to a floor for this role**;
+  much less and you risk getting scanned back within days instead of the other way around.
+  Doesn't need Speed, since the job is watching, not arriving first.
+- **Rolling deathballs** go aggressive early but keep Defense at 0 or better (rather than
+  deep negative) on purpose, so a loss doesn't wipe the fleet out — the plan is to keep
+  fighting and growing the fleet off of wins, not to gamble everything on one battle.
 
 This list will grow as more archetypes get documented — it's not exhaustive.
 
@@ -177,12 +229,16 @@ If you don't know your preferred playstyle yet, the safe default is **no picks a
 (`0/0/0/0/0/0/0`) — every trait at its baseline. It's a fine way to learn the game without
 committing to a playstyle you might regret once you understand your options better.
 
-Two mistakes worth avoiding even as a beginner:
+A few mistakes worth avoiding even as a beginner:
 
 - **Taking -4 Production.** It stalls your buildings, ships, and colony expansion right when
   you need production points the most.
 - **Taking -4 Attack.** Weak attack makes you an easy target — other players will notice you
   can't retaliate effectively and pick on you accordingly.
+- **Taking -4 Defense.** It's playable once you have a large fleet to absorb losses with, but
+  as a beginner it makes every fight (including Friendly Fire practice) worse than it needs
+  to be. -1 to -3 Defense is fine if you need those points elsewhere; -4 specifically is the
+  one to avoid.
 
 ### Early build order
 
@@ -204,3 +260,30 @@ rather than buying whatever's available. Early game, prioritize a **culture** ar
 planet count. Later, switch priority to **production** (Charcoal Diamond is production-only;
 Memory Jar combines it with science) once you have enough planets and need to fund a bigger
 build queue.
+
+### Taking contested territory
+
+A few tactics that come up often once you're fighting over shared space rather than
+uncontested Free planets:
+
+- **Concentrate on one target.** Two attackers hitting the same lone defender at once forces
+  them to choose which planet to actually defend — the other one falls almost regardless of
+  the fight's outcome. Split your attention across many systems instead, and you both lose
+  that guarantee.
+- **Hit a growing enemy before it finishes growing.** A player or alliance that's farming
+  quietly (building up rather than fighting) is at its weakest exactly then — once that fleet
+  is fully built, only a coordinated mass attack does real damage. The earlier you strike a
+  farmer, the cheaper the fight.
+- **The Starbase (SB) trap.** Deliberately build up one planet's Starbase and defenses well
+  past what it looks like it needs, so an opponent commits a fleet expecting an easy kill and
+  loses it instead. Costs production and a planet you're not otherwise developing, so it's
+  usually set up in parallel with — not instead of — normal growth.
+- **A forward planet is worth more than its own loot** if it shortens everyone else's route
+  — landing on a planet you or an ally control always halves flight time (see
+  [Science fields — effects](game-rules.md#science-fields--effects)), so a captured "airport"
+  near the frontier lets your whole alliance jump through it and reach further than any single
+  fleet's range would otherwise allow. Prioritize taking and holding one over a richer planet
+  further from the action, and keep at least one alliance culture slot dedicated to grabbing
+  airports as they open up rather than assuming someone will get to it. The same logic makes
+  a well-placed border system worth cutting an enemy's territory in half over: it's not about
+  the planets in it, it's about what falls out of everyone's reach once you hold it.
