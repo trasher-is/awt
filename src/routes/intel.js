@@ -14,7 +14,7 @@ const { observedNumber, positiveMachineNumber } = require('../utils/observed-num
 const { parseTimestamp } = require('../../public/js/utils/sqlite-time.js');
 const { splitThreats } = require('../utils/threat-vision');
 const { previousNames, findByFormerName } = require('../utils/round-archive');
-const { friendlyAllianceTags } = require('../utils/friendly-alliance-tags');
+const { friendlyAllianceTags, ownAllianceTags } = require('../utils/friendly-alliance-tags');
 const { truePowerForAllianceRow } = require('../utils/true-power');
 const settingsRepo = require('../repositories/settings');
 const systemClaimsRepo = require('../repositories/systemClaims');
@@ -128,6 +128,46 @@ router.get('/intel/system/:id', requireAuth, (req, res) => {
     } catch (err) {
         console.error("[DB Error] Failed to fetch system intel:", err);
         res.status(500).json({ error: 'Failed to fetch intel' });
+    }
+});
+
+// --- FLEET LAUNCH TARGET DOSSIER ---
+// Everything the hub knows about ONE destination planet, for the launch-form injection
+// (public/js/core/page-injections.js's initFleetLaunchTargetDossier). The client already
+// triggered a live DOM scan (scrapeSystemById) and its sync landed before this is called,
+// so "system.observed_at" here is as fresh as vision of the target allows — this route
+// itself never scans anything, it only reads back whatever's on file.
+router.get('/intel/target-dossier', requireAuth, (req, res) => {
+    try {
+        const systemId = parseInt(req.query.systemId, 10);
+        const planetIndex = parseInt(req.query.planetIndex, 10);
+        if (!Number.isInteger(systemId) || systemId <= 0
+            || !Number.isInteger(planetIndex) || planetIndex < 1 || planetIndex > 12) {
+            return res.status(400).json({ error: 'systemId and planetIndex (1-12) are required' });
+        }
+
+        const systemRow = systemsRepo.getFullSystem(systemId);
+        const system = systemRow
+            ? { id: systemRow.id, name: systemRow.name, x: systemRow.x, y: systemRow.y, observed_at: systemRow.observed_at }
+            : null;
+
+        const planet = systemsRepo.getSystemPlanetsWithIntel(systemId)
+            .find(p => p.planet_index === planetIndex) || null;
+
+        // "Ally" per the launch-form dossier means a RAID teammate specifically (so you know
+        // someone else is already headed to your exact target) — the narrower ownAllianceTags,
+        // not the friendly/NAP-inclusive set the closed-system checks use elsewhere.
+        const ownTags = ownAllianceTags();
+        const fleets = fleetsRepo.getFleetsForSystem(systemId)
+            .filter(f => f.planet_index === planetIndex)
+            .map(f => ({ ...f, is_own_alliance: !!(f.alliance_tag && ownTags.has(String(f.alliance_tag).toUpperCase())) }));
+
+        const recentBattles = battleReportsRepo.getRecentBattlesAtPlanet(systemId, planetIndex, { sinceDays: 3, limit: 5 });
+
+        res.json({ success: true, system, planet, fleets, recentBattles });
+    } catch (err) {
+        console.error('[DB Error] Failed to fetch target dossier:', err);
+        res.status(500).json({ error: 'Failed to fetch target dossier' });
     }
 });
 

@@ -1,4 +1,4 @@
-import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates, initColonizeLaunchWindows, initAllianceRelationIcons, initEcoBonusJoinDates, initFleetLaunchModalETA, initSocialHint, initEconomyMilestone, initBioThreatPills } from './page-injections.js';
+import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates, initColonizeLaunchWindows, initAllianceRelationIcons, initEcoBonusJoinDates, initFleetLaunchModalETA, initSocialHint, initEconomyMilestone, initBioThreatPills, initFleetLaunchTargetDossier } from './page-injections.js';
 import { initNewsIncomingTools } from '../ui/news-incoming.js';
 import { initLocalGameTimestamps } from './page-injections.js';
 import { initNewsBattleEvents } from '../ui/news-battle-events.js';
@@ -553,6 +553,9 @@ export function initSpy() {
             }
 	    if (pathLower.includes('/game/fleets')) {
                 initFleetTimers();
+            }
+            if (pathLower.includes('/game/fleets/launch/')) {
+                initFleetLaunchTargetDossier().catch(err => console.error('[Spy] fleet-launch target dossier failed:', err.message));
             }
             if (pathLower.includes('/game/players/profile/')) {
                 initProfilePLGrowth();
