@@ -248,11 +248,11 @@ const getRecentBattlesAtPlanetStmt = db.prepare(`
     ORDER BY (planet_index = @planetIndex) DESC, julianday(started_at) DESC
     LIMIT @limit
 `);
-function getRecentBattlesAtPlanet(systemId, planetIndex, { sinceDays = 3, limit = 5 } = {}) {
+function getRecentBattlesAtPlanet(systemId, planetIndex, { sinceDays = 1, limit = 5 } = {}) {
     if (!Number.isInteger(systemId) || systemId <= 0) return [];
     return getRecentBattlesAtPlanetStmt.all({
         systemId, planetIndex: Number.isInteger(planetIndex) ? planetIndex : -1,
-        sinceDays: Math.min(30, Math.max(0.1, Number(sinceDays) || 3)),
+        sinceDays: Math.min(30, Math.max(0.1, Number(sinceDays) || 1)),
         limit: Math.min(20, Math.max(1, Math.round(Number(limit) || 5))),
     });
 }

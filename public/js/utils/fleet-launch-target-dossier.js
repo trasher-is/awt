@@ -48,6 +48,23 @@
         return `${Math.round(hours / 24)}d ago`;
     }
 
+    // Same bucketing as relativeAge, but for a duration still ahead — a fleet's landing
+    // countdown, not something that already happened. Negative/zero reads as "landing now"
+    // rather than a negative duration, since the countdown target can slip a few seconds
+    // behind by the time this renders.
+    function relativeCountdown(ms) {
+        if (!Number.isFinite(ms)) return null;
+        if (ms <= 0) return 'landing now';
+        const mins = Math.round(ms / 60000);
+        if (mins < 1) return 'under 1m';
+        if (mins < 60) return `${mins}m`;
+        const hours = Math.floor(mins / 60);
+        const remMins = mins % 60;
+        if (hours < 24) return `${hours}h ${remMins}m`;
+        const days = Math.floor(hours / 24);
+        return `${days}d ${hours % 24}h`;
+    }
+
     // Hub timestamps without a zone are UTC but carry no marker (see sqlite-time.js) —
     // this module stays import-free, so it normalizes the one shape it actually receives
     // ("YYYY-MM-DD HH:MM:SS", CURRENT_TIMESTAMP's format) the same way, rather than
@@ -59,25 +76,42 @@
         return Number.isFinite(d.getTime()) ? d.getTime() : NaN;
     }
 
-    function fleetLine(f) {
+    function fleetLine(f, now) {
         const cv = fleetCv(f);
         const tag = f.alliance_tag ? `[${esc(f.alliance_tag)}] ` : '';
         const color = f.is_own_alliance ? '#4ade80' : '#f87171';
-        const eta = f.arrival_at || f.arrival_time
-            ? ` — ETA ${esc(f.arrival_time || '')}`
-            : '';
+        // arrival_at is a real parsed timestamp — prefer a live countdown off it over the
+        // raw scraped string, which is frozen at whatever moment it was captured and only
+        // gets more wrong the longer this panel sits open. arrival_time alone (no parsed
+        // timestamp) falls back to that frozen text; neither present means no ETA data at
+        // all, which — since this row exists — means the fleet is already sitting in orbit.
+        const arrivalMs = toMs(f.arrival_at);
+        let status;
+        if (Number.isFinite(arrivalMs)) {
+            status = ` — lands in ${esc(relativeCountdown(arrivalMs - now))}`;
+        } else if (f.arrival_time && f.arrival_time !== '-') {
+            status = ` — ETA ${esc(f.arrival_time)}`;
+        } else {
+            status = ' — in orbit';
+        }
         const label = f.is_own_alliance ? ' (ally)' : '';
-        return `<div style="color:${color}">🚀 ${tag}${esc(f.owner_name || 'Unknown')} — ${cv.toLocaleString()} CV${eta}${label}</div>`;
+        return `<div style="color:${color}">🚀 ${tag}${esc(f.owner_name || 'Unknown')} — ${cv.toLocaleString()} CV${status}${label}</div>`;
     }
 
-    function battleLine(b, now) {
+    // targetPlanetIndex: the planet this whole dossier is about, so a battle can be
+    // labelled "here" (the exact target) rather than just a bare planet number — the
+    // point of showing planet_index at all is telling the two apart at a glance.
+    function battleLine(b, now, targetPlanetIndex) {
         const age = relativeAge(now - toMs(b.started_at));
         const winner = String(b.winner || '').toLowerCase();
         const outcome = winner === 'attacker' ? 'attacker won' : winner === 'defender' ? 'defender won' : 'outcome unknown';
         const conquered = b.conquered_planet ? ', planet conquered' : '';
         const attTag = b.att_alliance_tag ? ` [${esc(b.att_alliance_tag)}]` : '';
         const defTag = b.def_alliance_tag ? ` [${esc(b.def_alliance_tag)}]` : '';
-        return `<div style="color:#aaa">⚔️ ${age ? esc(age) : 'recently'} — `
+        const where = Number.isInteger(b.planet_index)
+            ? (b.planet_index === targetPlanetIndex ? 'here' : `#${b.planet_index}`)
+            : 'nearby';
+        return `<div style="color:#aaa">⚔️ ${esc(where)} · ${age ? esc(age) : 'recently'} — `
             + `${esc(b.att_player_name || '?')}${attTag} vs ${esc(b.def_player_name || '?')}${defTag} — ${outcome}${conquered}</div>`;
     }
 
@@ -116,17 +150,17 @@
         }
 
         if (safeFleets.length) {
-            lines.push(...safeFleets.map(fleetLine));
+            lines.push(...safeFleets.map(f => fleetLine(f, now)));
         } else {
             lines.push('<div style="color:#888">No fleets detected here.</div>');
         }
 
         if (safeBattles.length) {
-            lines.push(...safeBattles.map(b => battleLine(b, now)));
+            lines.push(...safeBattles.map(b => battleLine(b, now, planet.planet_index)));
         }
 
         return lines.join('');
     }
 
-    return { buildTargetDossierHtml, relativeAge, fleetCv, esc };
+    return { buildTargetDossierHtml, relativeAge, relativeCountdown, fleetCv, esc };
 });

@@ -162,7 +162,7 @@ router.get('/intel/target-dossier', requireAuth, (req, res) => {
             .filter(f => f.planet_index === planetIndex)
             .map(f => ({ ...f, is_own_alliance: !!(f.alliance_tag && ownTags.has(String(f.alliance_tag).toUpperCase())) }));
 
-        const recentBattles = battleReportsRepo.getRecentBattlesAtPlanet(systemId, planetIndex, { sinceDays: 3, limit: 5 });
+        const recentBattles = battleReportsRepo.getRecentBattlesAtPlanet(systemId, planetIndex, { sinceDays: 1, limit: 5 });
 
         res.json({ success: true, system, planet, fleets, recentBattles });
     } catch (err) {
