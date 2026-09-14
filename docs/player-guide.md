@@ -116,6 +116,12 @@ fleet is ever perfectly safe. See [Fleet and combat notes](game-rules.md#fleet-a
 for more of these edge cases, and [awt's Battle Calculator](../public/js/ui/battle-calc.js) if
 you want to estimate a specific fight before committing.
 
+**Don't split your fleet.** It's a cliché for a reason — dividing one fleet into several
+smaller ones to cover more ground (or to intercept from multiple directions) usually just
+means several fights you individually lose instead of one you'd have won. Keep it together,
+and only commit to a fight the Battle Calculator says you're confident in; a target that
+slips away is a better outcome than a fight you didn't need to take.
+
 ### Trade agreements, alliances, and NAPs
 
 **Trade agreements** boost your economy-related bonuses and cost 20,000 A$ to both send and
@@ -240,6 +246,14 @@ A few mistakes worth avoiding even as a beginner:
   to be. -1 to -3 Defense is fine if you need those points elsewhere; -4 specifically is the
   one to avoid.
 
+One stat that's fine to dump if you know you won't need it: **Growth**. Unlike Attack (a
+direct multiplier) or Social (unlocks population you'd otherwise cap out on), Growth only
+speeds up how fast you *approach* a level you'll eventually reach anyway — its payoff is slow
+and compounding rather than immediate. That makes it the standard place to take -4 if you're
+one of the alliance's members who won't count toward the alliance's score (see
+[Scoring and winning](#scoring-and-winning) for why an alliance always has a few of those) —
+put the points into Attack, Speed, or Culture instead.
+
 ### Early build order
 
 A common early building order: **Robotic Factory → Galactic Cybernet → Hydroponic Farm →
@@ -277,7 +291,13 @@ uncontested Free planets:
 - **The Starbase (SB) trap.** Deliberately build up one planet's Starbase and defenses well
   past what it looks like it needs, so an opponent commits a fleet expecting an easy kill and
   loses it instead. Costs production and a planet you're not otherwise developing, so it's
-  usually set up in parallel with — not instead of — normal growth.
+  usually set up in parallel with — not instead of — normal growth. It's a one-shot: it can
+  only catch whichever single fleet actually attacks that planet, so an opponent who commits
+  several fleets at once only sacrifices one or two of them, not the whole attack.
+- **Position as a "road bump," not just a defender.** Rather than only reacting once you're
+  attacked, put a fleet somewhere the enemy is likely to pass through on their way to a
+  softer target — it costs them a fight (or a detour) even if that fleet was never the
+  actual target.
 - **A forward planet is worth more than its own loot** if it shortens everyone else's route
   — landing on a planet you or an ally control always halves flight time (see
   [Science fields — effects](game-rules.md#science-fields--effects)), so a captured "airport"
