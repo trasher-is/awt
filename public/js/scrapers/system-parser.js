@@ -183,6 +183,14 @@ export function extractSystemData(doc = document, report = new ScrapeReport('sys
     return { planets, fleets, report };
 }
 
+// fleets_observed (2026-09-14): tells /sync/system this payload's `fleets` array is a
+// genuine "here is everyone visible right now" DOM read, not merely absent. Without it, the
+// API-sourced galaxy seed — which always sends fleets: [] because the API exposes no fleet
+// data at all (see aw-api.js's mapPlanetsToSyncPayload) — would look identical to a DOM scan
+// that genuinely saw zero fleets, and its frequent background runs would wipe out real
+// enemy-fleet sightings within minutes of them being captured. Only the two DOM-based
+// scrapers below set this; the API path never does.
+
 // Off-page refresh: fetch a system's map, parse it, and sync. Returns true on success.
 // Runs from the dashboard (e.g. travel-calc "Update" button); no game-page DOM needed.
 export async function scrapeSystemById(systemId) {
@@ -199,7 +207,7 @@ export async function scrapeSystemById(systemId) {
         const r = await fetch('/hub-api/sync/system', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ system_id: parseInt(systemId, 10), planets, fleets, observation_live: true })
+            body: JSON.stringify({ system_id: parseInt(systemId, 10), planets, fleets, observation_live: true, fleets_observed: true })
         });
         return r.ok;
     } catch (err) {
@@ -224,7 +232,7 @@ export async function scrapeSystem(systemId) {
         const response = await fetch('/hub-api/sync/system', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ system_id: parseInt(systemId, 10), planets, fleets, observation_live: true })
+            body: JSON.stringify({ system_id: parseInt(systemId, 10), planets, fleets, observation_live: true, fleets_observed: true })
         });
         
         if (response.ok) {

@@ -91,6 +91,46 @@ function updateFleetGameId(gameFleetId, ownerId, systemId, planetIndex) {
     return updateFleetGameIdStmt.run(gameFleetId, ownerId, systemId, planetIndex);
 }
 
+// Arity varies per call (tag count, usually 1) — prepared fresh each call, same reasoning
+// as systems.js's getSystemsByIds.
+function getMemberIdsForTags(tagsUpper) {
+    const tags = [...new Set((tagsUpper || []).filter(Boolean))];
+    if (!tags.length) return [];
+    const placeholders = tags.map(() => '?').join(',');
+    return db.prepare(`
+        SELECT p.id FROM players p JOIN alliances a ON p.alliance_id = a.id
+        WHERE UPPER(a.tag) IN (${placeholders})
+    `).all(...tags).map(r => r.id);
+}
+
+// Enemy/unknown fleets seen on a live system-map DOM view (2026-09-14) — the only source
+// of this intel there is. No alliance-page equivalent exists for anyone but our own
+// members, who stay covered separately and more completely by the alliance-scan path (see
+// insertFleetForAllianceStats's own comment on WHY that one exists) — this function is
+// scoped to explicitly exclude ownMemberIds so it can never step on those authoritative
+// rows. Replaces exactly "this system's non-own fleet rows" with exactly "what the DOM
+// just showed": a fleet that moved on or landed and is no longer listed correctly
+// disappears, the same way a planet's stale siege/ownership doesn't survive a fresh scan.
+function replaceEnemyFleetsForSystem(systemId, enemyFleets, ownMemberIds) {
+    const ownIds = [...new Set((ownMemberIds || []).filter(id => Number.isInteger(id)))];
+    if (ownIds.length) {
+        const placeholders = ownIds.map(() => '?').join(',');
+        db.prepare(`DELETE FROM fleets WHERE system_id = ? AND owner_id NOT IN (${placeholders})`).run(systemId, ...ownIds);
+    } else {
+        db.prepare(`DELETE FROM fleets WHERE system_id = ?`).run(systemId);
+    }
+    for (const f of enemyFleets) {
+        insertFleetForAllianceStatsStmt.run(
+            f.owner_id, systemId, f.planet_index,
+            f.transports || 0, f.colony_ships || 0, f.destroyers || 0, f.cruisers || 0, f.battleships || 0,
+            f.arrival_at || null
+        );
+        if (f.game_fleet_id) {
+            updateFleetGameIdStmt.run(f.game_fleet_id, f.owner_id, systemId, f.planet_index);
+        }
+    }
+}
+
 // Two fixed variants of interceptors.js's dynamic WHERE clause, so both stay
 // module-level prepared statements instead of being rebuilt from a string per call.
 const getInterceptFleetsByAllianceStmt = db.prepare(`
@@ -125,5 +165,6 @@ module.exports = {
     countFleets, getFleetsForSystem, getFleetsForSystemFull, getFleetsFullDb,
     getFleetsForTimeline, deleteFleetsOlderThan10Days, deleteAllFleets, deleteFleetsByOwner,
     insertFleetForAllianceStats, updateFleetGameId,
+    getMemberIdsForTags, replaceEnemyFleetsForSystem,
     getInterceptFleetsByAlliance, getInterceptFleetsByActiveUsers,
 };

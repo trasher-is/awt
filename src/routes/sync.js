@@ -65,7 +65,7 @@ function parseObservationTime(value) {
 
 // --- MAP SCRAPER DATA RECEIVER ---
 router.post('/sync/system', requireAuth, (req, res) => {
-    const { system_id, planets, fleets, captured_at, observation_live } = req.body;
+    const { system_id, planets, fleets, captured_at, observation_live, fleets_observed } = req.body;
     // Every detected change announces to Discord now (2026-09-12) — including from the
     // bulk galaxy auto-seed, which used to pass scan_mode: 'silent' to suppress this. That
     // guard is gone: event detection below only ever fires on a genuine transition against
@@ -154,7 +154,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
         }
     };
 
-    const syncTransaction = db.transaction((planetsData, fleetsData) => {
+    const syncTransaction = db.transaction((planetsData, fleetsData, ownMemberIds, fleetsObserved) => {
 
         // 1. Process Planets, Owners, and History
         for (const p of planetsData) {
@@ -430,15 +430,46 @@ router.post('/sync/system', requireAuth, (req, res) => {
             );
         }
 
-        // NOTE: Fleet positions are no longer derived from system scans. They are now
+        // OUR OWN fleet positions are still not derived from system scans — they are
         // sourced exclusively from the alliance scan (each member's own alliance page
-        // lists their stationed fleets), which gives complete, self-cleaning coverage —
-        // including offline members — instead of whatever happened to be visible in a
-        // browsed system. See /sync/alliance-stats. `fleetsData` is intentionally ignored.
+        // lists their stationed fleets), which gives complete, self-cleaning coverage
+        // including offline members, instead of whatever happened to be visible in
+        // whichever system someone last browsed. See /sync/alliance-stats.
+        //
+        // ENEMY fleets, though, have no alliance-page equivalent — a live system-map DOM
+        // view is the ONLY source of that intel there is, and until 2026-09-14 it was
+        // discarded entirely: confirmed live, a hostile inbound fleet plainly visible on
+        // the page (system 41 #1, Starius) never showed up anywhere in the hub, including
+        // the fleet-launch target dossier this exact page feeds. ownMemberIds excludes our
+        // own alliance so this can never step on the alliance-scan's authoritative rows —
+        // by construction the two writers can never share an owner_id.
+        //
+        // Gated on fleetsObserved (2026-09-14), NOT just "fleetsData is non-empty": the
+        // API-sourced galaxy seed always sends fleets: [] — it has no fleet visibility at
+        // all, not "zero fleets seen" — and that seed runs every few minutes in the
+        // background. Treating an empty-because-API array as authoritative would wipe out
+        // a real DOM sighting within minutes of it being captured. See
+        // system-parser.js's own comment on fleets_observed.
+        if (fleetsObserved) {
+            const ownIdSet = new Set(ownMemberIds);
+            const enemyFleets = fleetsData.filter(f =>
+                Number.isInteger(f.owner_id) && !ownIdSet.has(f.owner_id)
+                // A fleet whose owner we've never stored as a player would trip the
+                // FOREIGN KEY on fleets.owner_id and roll back this ENTIRE transaction —
+                // planet updates included — for the sake of one fleet row. Skip it
+                // instead; it's self-healing the moment that owner is seen anywhere else
+                // (they usually own a planet in the same payload this scan already
+                // processed above).
+                && playersRepo.playerExistsById(f.owner_id)
+                && Number.isInteger(f.planet_index)
+            );
+            fleetsRepo.replaceEnemyFleetsForSystem(system_id, enemyFleets, ownMemberIds);
+        }
     });
 
     try {
-        syncTransaction(planets, fleets || []);
+        const ownMemberIds = fleetsRepo.getMemberIdsForTags([...ownAllianceTags()]);
+        syncTransaction(planets, fleets || [], ownMemberIds, !!fleets_observed);
         // Applied — this is now the newest observation of this system, and anything captured
         // before it is stale (see the stale-observation guard above).
         systemsRepo.advanceSystemObservedAt(system_id, observedAtIso);
