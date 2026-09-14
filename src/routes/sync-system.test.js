@@ -303,6 +303,71 @@ function postJson(server, urlPath, body) {
         ok('colonizing a free (0 pop) planet logs an OWNER_CHANGE but no POP_DROP',
             db.prepare('SELECT COUNT(*) AS n FROM planet_events WHERE system_id = 400 AND planet_index = 3 AND event_type_id = 1').get().n === 1
             && db.prepare('SELECT COUNT(*) AS n FROM planet_events WHERE system_id = 400 AND planet_index = 3 AND event_type_id = 2').get().n === 0);
+
+        console.log('\n── (h) enemy fleets from a live DOM view (2026-09-14) ' + '─'.repeat(20));
+        // Confirmed live: a hostile inbound fleet plainly visible on a system-map page
+        // (system 41 #1, Starius) never showed up anywhere in the hub — fleetsData was
+        // discarded unconditionally. RAID + an enemy alliance, one RAID member (marks RAID
+        // as "own" via alliance_member_stats, same as intel-target-dossier's own test),
+        // one enemy player, one RAID player, for the own-vs-enemy exclusion checks below.
+        db.prepare(`INSERT INTO alliances (id, name, tag) VALUES (501, 'RAID Alliance', 'RAID')`).run();
+        db.prepare(`INSERT INTO alliances (id, name, tag) VALUES (502, 'Free Agents', 'FREE')`).run();
+        db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (601, 'caveman', 501)`).run();
+        db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (602, 'Tatankamon', 501)`).run();
+        db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (603, 'Starius', 502)`).run();
+        db.prepare(`INSERT INTO alliance_member_stats (player_id) VALUES (601)`).run();
+
+        const domPayload = {
+            system_id: 500,
+            planets: [{ planet_index: 1, owner: { id: 602, name: 'Tatankamon', alliance_id: 501, alliance_tag: 'RAID' }, population: 8, starbase: 0 }],
+            fleets: [
+                { owner_id: 603, planet_index: 1, destroyers: 3, arrival_at: '2026-09-15T04:55:31Z' }, // enemy, hostile inbound
+                { owner_id: 602, planet_index: 1, destroyers: 5, arrival_at: '2026-09-15T01:39:50Z' }, // RAID's own — must NOT be stored by this path
+                { owner_id: 999999, planet_index: 1, destroyers: 1 }, // no players row at all — must not crash the sync
+            ],
+            fleets_observed: true,
+        };
+        const domRes = await postJson(server, '/hub-api/sync/system', domPayload);
+        ok('the DOM payload succeeds (200), including the unresolvable-owner fleet', domRes.status === 200, domRes);
+
+        const storedFleets500 = db.prepare('SELECT owner_id FROM fleets WHERE system_id = 500').all().map(r => r.owner_id);
+        ok('the enemy fleet is stored', storedFleets500.includes(603), storedFleets500);
+        ok('the RAID fleet is NOT stored via this path (the alliance-scan owns those rows)',
+            !storedFleets500.includes(602), storedFleets500);
+        ok('the unresolvable-owner fleet is silently skipped, not stored and not a crash',
+            !storedFleets500.includes(999999), storedFleets500);
+        ok('exactly one fleet row landed', storedFleets500.length === 1, storedFleets500);
+
+        console.log('\n── (i) an API-sourced payload (fleets: [], no fleets_observed) must not wipe the DOM sighting ' + '─'.repeat(1));
+        // The bulk galaxy seed always sends fleets: [] because the API has no fleet
+        // visibility at all — that must read as "unknown", not "confirmed empty".
+        const apiPayload = {
+            system_id: 500,
+            planets: [{ planet_index: 1, owner: { id: 602, name: 'Tatankamon', alliance_id: 501, alliance_tag: 'RAID' }, population: 8, starbase: 0 }],
+            fleets: [],
+            observation_live: false,
+        };
+        const apiRes = await postJson(server, '/hub-api/sync/system', apiPayload);
+        ok('the API-style payload still succeeds', apiRes.status === 200, apiRes);
+        const afterApi500 = db.prepare('SELECT owner_id FROM fleets WHERE system_id = 500').all().map(r => r.owner_id);
+        ok('the earlier DOM-sourced enemy sighting survives an API-only sync',
+            afterApi500.includes(603), afterApi500);
+
+        console.log('\n── (j) a later DOM view replaces stale enemy sightings, not just adds to them ' + '─'.repeat(3));
+        // Starius moved on; a different enemy (id 604) is there now. The stale Starius row
+        // must be gone, not accumulating alongside the new one.
+        db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (604, 'GustavusSecondus', 502)`).run();
+        const domPayload2 = {
+            system_id: 500,
+            planets: [{ planet_index: 1, owner: { id: 602, name: 'Tatankamon', alliance_id: 501, alliance_tag: 'RAID' }, population: 8, starbase: 0 }],
+            fleets: [{ owner_id: 604, planet_index: 1, destroyers: 19 }],
+            fleets_observed: true,
+        };
+        await postJson(server, '/hub-api/sync/system', domPayload2);
+        const afterSecondDom500 = db.prepare('SELECT owner_id FROM fleets WHERE system_id = 500').all().map(r => r.owner_id);
+        ok('the stale enemy sighting (603) is gone', !afterSecondDom500.includes(603), afterSecondDom500);
+        ok('the new enemy sighting (604) is present', afterSecondDom500.includes(604), afterSecondDom500);
+        ok('still exactly one fleet row — no accumulation', afterSecondDom500.length === 1, afterSecondDom500);
     } finally {
         server.close();
     }
