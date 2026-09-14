@@ -254,13 +254,24 @@ router.post('/sync/system', requireAuth, (req, res) => {
             // the last known (lower) value is kept instead. Doesn't touch an owner change —
             // that wipes/replaces population through a completely different branch below,
             // never diffed against the previous owner's number.
+            //
+            // Timed off population_observed_at, NOT updated_at (2026-09-14 fix): updated_at
+            // advances on every sync regardless of whether this guard accepts or rejects the
+            // value, so timing off it made a single false-positive rejection PERMANENT — the
+            // very next scan (often minutes later, via the live-scan-on-launch-form-select
+            // or the auto-seed) saw an equally-tiny "hours since last update" and rejected
+            // again, forever, even though the real population kept climbing. Confirmed live:
+            // system 41 #7 stuck reporting population 1 while the DOM plainly showed 3, and
+            // re-stuck within a minute of every fresh scan. population_observed_at only
+            // moves when a value is actually accepted (see systems.js's upsertPlanetStmt),
+            // so a rejection now correctly leaves the guard's own clock right where it was.
             if (oldP && finalOwnerId === oldP.owner_id
                 && Number.isFinite(finalPopulation) && Number.isFinite(oldP.population)
                 && finalPopulation > oldP.population) {
-                const lastUpdate = parseSqliteUtc(oldP.updated_at);
-                const hoursSinceLastUpdate = lastUpdate ? (Date.now() - lastUpdate.getTime()) / 3600000 : Infinity;
+                const lastPopObserved = parseSqliteUtc(oldP.population_observed_at);
+                const hoursSinceLastPopObserved = lastPopObserved ? (Date.now() - lastPopObserved.getTime()) / 3600000 : Infinity;
                 const pointsGained = finalPopulation - oldP.population;
-                if (hoursSinceLastUpdate < pointsGained * MIN_HOURS_PER_POP_POINT_REGROWN) {
+                if (hoursSinceLastPopObserved < pointsGained * MIN_HOURS_PER_POP_POINT_REGROWN) {
                     finalPopulation = oldP.population;
                 }
             }

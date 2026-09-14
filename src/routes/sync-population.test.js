@@ -125,8 +125,14 @@ const insertReport = db.prepare(`INSERT INTO battle_reports
             const sysId = 4900;
             await sync(sysId, { owner: holder, population: 6 });
             await sync(sysId, { owner: holder, population: 5 }); // a real drop
-            const afterDrop = db.prepare('SELECT population FROM planets WHERE system_id=?').get(sysId);
+            const afterDrop = db.prepare('SELECT population, population_observed_at FROM planets WHERE system_id=?').get(sysId);
             ok('the real drop to 5 is recorded', afterDrop.population === 5, afterDrop);
+
+            // Force a gap ahead of the bounce-back below so the self-lock check further down
+            // cannot pass by coincidence (both writes landing in the same CURRENT_TIMESTAMP
+            // second would make even a broken always-bump implementation look correct).
+            db.prepare('UPDATE planets SET population_observed_at=? WHERE system_id=?').run(minutesAgo(1), sysId);
+            const observedAtBeforeBounce = db.prepare('SELECT population_observed_at FROM planets WHERE system_id=?').get(sysId).population_observed_at;
 
             // Real production bug: a stale/inconsistent sync claiming the population bounced
             // back up to 6, only moments later -- far too soon to be real regrowth (game rate
@@ -142,9 +148,24 @@ const insertReport = db.prepare(`INSERT INTO battle_reports
             ok('rejecting the bounce-back does not announce a phantom drop either (nothing changed, so nothing new to announce)',
                 announcements.length === announcementCountBeforeBounce, announcements.slice(announcementCountBeforeBounce));
 
-            // Backdate the last observation far enough that real regrowth becomes plausible --
-            // the same reported increase must then be accepted.
-            db.prepare('UPDATE planets SET updated_at=? WHERE system_id=?').run(minutesAgo(5 * 60 + 1), sysId);
+            // Self-lock regression (2026-09-14): the guard used to time itself off
+            // updated_at, which advances on EVERY sync regardless of accept/reject -- so a
+            // single rejection reset its own clock, and a same-owner planet whose true
+            // population outran the plausible-regrowth window got stuck FOREVER as long as
+            // frequent scans kept happening (confirmed live: system 41 #7, stuck at 1 while
+            // the DOM said 3, re-stuck within a minute of every scan). Proof the fix holds:
+            // the rejection just above must not have moved population_observed_at at all --
+            // rejecting a value is not a new observation of anything.
+            const afterRejection = db.prepare('SELECT population_observed_at FROM planets WHERE system_id=?').get(sysId);
+            ok('population_observed_at was set by the real drop, not left null',
+                afterDrop.population_observed_at !== null, afterDrop);
+            ok('rejecting the bounce-back leaves population_observed_at exactly where it was 1 minute earlier, not bumped to now',
+                afterRejection.population_observed_at === observedAtBeforeBounce, { observedAtBeforeBounce, afterRejection });
+
+            // Backdate population_observed_at (NOT updated_at, which the guard no longer
+            // reads) far enough that real regrowth becomes plausible -- the same reported
+            // increase must then be accepted.
+            db.prepare('UPDATE planets SET population_observed_at=? WHERE system_id=?').run(minutesAgo(5 * 60 + 1), sysId);
             await sync(sysId, { owner: holder, population: 6 });
             const afterRealGrowth = db.prepare('SELECT population FROM planets WHERE system_id=?').get(sysId);
             ok('the same increase IS accepted once enough time has passed for it to be plausible regrowth',

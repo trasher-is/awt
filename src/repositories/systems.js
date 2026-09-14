@@ -420,7 +420,7 @@ function getPlanetsByOwner(playerId) {
 // starbase/has_fleet/is_sieged are selected because the fog-of-war guard in sync.js
 // restores them: reading them off a row that never carried them bound `undefined`
 // (-> NULL) and quietly erased the very values the guard exists to preserve.
-const getOldPlanetStmt = db.prepare(`SELECT owner_id, population, starbase, has_fleet, is_sieged, siege_is_friendly, updated_at FROM planets WHERE system_id = ? AND planet_index = ?`);
+const getOldPlanetStmt = db.prepare(`SELECT owner_id, population, starbase, has_fleet, is_sieged, siege_is_friendly, updated_at, population_observed_at FROM planets WHERE system_id = ? AND planet_index = ?`);
 function getOldPlanet(systemId, planetIndex) {
     return getOldPlanetStmt.get(systemId, planetIndex);
 }
@@ -541,8 +541,8 @@ function getPlanetLocationByGameId(gamePlanetId) {
 }
 
 const upsertPlanetStmt = db.prepare(`
-    INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet, is_sieged, name, siege_is_friendly)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, has_fleet, is_sieged, name, siege_is_friendly, population_observed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(system_id, planet_index) DO UPDATE SET
         game_planet_id=excluded.game_planet_id,
         owner_id=excluded.owner_id,
@@ -552,6 +552,12 @@ const upsertPlanetStmt = db.prepare(`
         is_sieged=excluded.is_sieged,
         siege_is_friendly=excluded.siege_is_friendly,
         name=COALESCE(excluded.name, planets.name),
+        -- Only bumped when population actually changed (the caller already resolved
+        -- rejected-by-the-regrowth-guard back to the old value before calling, so a
+        -- rejection writes the SAME number and this correctly stays put) — see
+        -- database.js's addColumn comment for why sharing updated_at broke the guard.
+        population_observed_at = CASE WHEN excluded.population IS NOT planets.population
+            THEN CURRENT_TIMESTAMP ELSE planets.population_observed_at END,
         updated_at=CURRENT_TIMESTAMP
 `);
 // siegeIsFriendly is written verbatim (not COALESCEd): the caller resolves "keep what we

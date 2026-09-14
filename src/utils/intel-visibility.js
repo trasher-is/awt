@@ -38,6 +38,22 @@ function decideIntelVisibilityChange({ prior, observedVisible, now = new Date(),
     // Never stored: this sync is the first thing we know. Record, say nothing.
     if (!prior) return { announce: null, confirmedVisible: seenRaw, seenRaw };
 
+    // First capture ever. Checked against has_intel rather than the confirmed state,
+    // because that is the only field that distinguishes "never seen in this whole round"
+    // from "seen before, lost, and now back". Immediate: it cannot repeat.
+    //
+    // Deliberately BEFORE the "no baseline yet" check below (2026-09-14 fix): a genuinely
+    // brand-new player's row carries intel_visible: null right up until their first real
+    // detail sync, and if THAT sync is the one that captures them, the no-baseline branch
+    // used to intercept it first and record the capture silently — the exact case this
+    // comment already claimed was exempt from needing a baseline, but the code never
+    // actually reached this check to honor it. Confirmed live: Karmakazi's first-ever
+    // capture went unannounced this way. A first-ever capture cannot be a flap by
+    // definition, so it never needed a baseline to compare against in the first place.
+    if (!prior.has_intel && seenRaw === 1) {
+        return { announce: FIRST_EVER, confirmedVisible: 1, seenRaw };
+    }
+
     const confirmed = prior.intel_visible === null || prior.intel_visible === undefined
         ? null
         : (prior.intel_visible ? 1 : 0);
@@ -46,13 +62,6 @@ function decideIntelVisibilityChange({ prior, observedVisible, now = new Date(),
     // Establish it silently: announcing here would post a line for the entire roster at
     // once, describing nothing that actually changed.
     if (confirmed === null) return { announce: null, confirmedVisible: seenRaw, seenRaw };
-
-    // First capture ever. Checked against has_intel rather than the confirmed state,
-    // because that is the only field that distinguishes "never seen in this whole round"
-    // from "seen before, lost, and now back". Immediate: it cannot repeat.
-    if (!prior.has_intel && seenRaw === 1) {
-        return { announce: FIRST_EVER, confirmedVisible: 1, seenRaw };
-    }
 
     // Not yet two in a row, or nothing changed.
     const priorRaw = prior.intel_seen_raw === null || prior.intel_seen_raw === undefined

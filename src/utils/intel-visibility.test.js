@@ -52,6 +52,17 @@ console.log('\n── First capture ever ' + '─'.repeat(55));
     // Same observation again: has_intel is now 1, so this is no longer a first capture.
     const again = decide(row({ has_intel: 1, intel_visible: 1, intel_seen_raw: 1 }), true);
     ok('does not repeat on the next pass', again.announce === null, again);
+
+    // Karmakazi regression (2026-09-14): a genuinely brand-new player's row carries
+    // intel_visible: null right up until their first real detail sync — NOT the
+    // pre-established intel_visible: 0 the fixture above uses. If THAT very first sync is
+    // the one that captures them, this must still announce first_ever rather than being
+    // swallowed by the "establish baseline silently" branch, which used to run first.
+    const firstSyncEverAlreadyCaptured = decide(row({ has_intel: 0, intel_visible: null, intel_seen_raw: null }), true);
+    ok('a brand-new player captured on their very first-ever sync still announces first_ever',
+        firstSyncEverAlreadyCaptured.announce === 'first_ever', firstSyncEverAlreadyCaptured);
+    ok('and the confirmed state moves with it, same as the pre-established-baseline case',
+        firstSyncEverAlreadyCaptured.confirmedVisible === 1, firstSyncEverAlreadyCaptured);
 }
 
 console.log('\n── A change must hold across two consecutive passes ' + '─'.repeat(25));

@@ -294,6 +294,17 @@ function initDatabase() {
     // at its own alliance. Only the live DOM says which (see siege-indicator-parser.js), so
     // its answer is persisted here rather than being used once and thrown away.
     addColumn('planets', 'siege_is_friendly', 'INTEGER');
+    // population_observed_at (2026-09-14): when population last actually CHANGED, as
+    // opposed to updated_at, which advances on every sync regardless of whether the
+    // regrowth guard below accepted or rejected the new value. Sharing one timestamp for
+    // both meant a single false-positive rejection became a PERMANENT lock: the guard's
+    // own "how long has it been" check kept resetting to ~0 on every subsequent scan
+    // (confirmed live, system 41 #7 — stuck at population 1 while the DOM plainly showed
+    // 3, restuck within a minute of every scan). NULL for existing rows is intentional and
+    // self-healing: the guard in sync.js treats "never specifically tracked" as no
+    // constraint, so every currently-stuck planet corrects itself the next time it's
+    // scanned rather than needing a backfill.
+    addColumn('planets', 'population_observed_at', 'DATETIME');
 
     // 4.5 Alliance Meta-Data (Planning)
     db.exec(`
