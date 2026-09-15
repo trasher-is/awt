@@ -695,8 +695,8 @@ async function handleMessage(message) {
         // pick the moment. Both queries run at the LOWER bar and the band is decided after,
         // so nobody falls between the two thresholds. See threat-vision.js.
         const candidates = [
-            ...playersRepo.getThreatPlayersByBiology(suspectedThreshold, me.id),
-            ...playersRepo.getThreatPlayersByScience(suspectedThreshold, me.id),
+            ...playersRepo.getThreatPlayersByBiology(suspectedThreshold, me.id, me.alliance_id),
+            ...playersRepo.getThreatPlayersByScience(suspectedThreshold, me.id, me.alliance_id),
         ];
         const { red: confirmedThreats, yellow: suspectedThreats } = splitThreats(candidates, me, {
             myBio,

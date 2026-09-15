@@ -70,6 +70,16 @@ db.prepare(`INSERT INTO players (id, name, science_level, has_intel) VALUES (5, 
 // double-counted into "suspected" too (suspected is has_intel = 0 exclusively).
 db.prepare(`INSERT INTO players (id, name, biology, science_level, has_intel) VALUES (6, 'ScannedAndStrong', ?, ?, 1)`).run(CONFIRMED_THRESHOLD, CONFIRMED_THRESHOLD + 14);
 
+// A second caller, this one IN an alliance, for the own-alliance exclusion below. The
+// original caller above has no alliance at all, which is what keeps that whole section a
+// valid test of the unfiltered behaviour.
+db.prepare(`INSERT INTO alliances (id, name, tag) VALUES (60, 'Friends', 'FRND')`).run();
+db.prepare(`INSERT INTO players (id, name, biology, alliance_id) VALUES (10, 'AllyLeader', ?, 60)`).run(MY_BIO);
+db.prepare(`INSERT INTO players (id, name, biology, has_intel, alliance_id) VALUES (11, 'MateWithBio', ?, 1, 60)`).run(CONFIRMED_THRESHOLD);
+db.prepare(`INSERT INTO players (id, name, science_level, has_intel, alliance_id) VALUES (12, 'MateWithScience', ?, 0, 60)`).run(SUSPECTED_THRESHOLD + 4);
+db.prepare(`INSERT INTO players (id, name, biology, has_intel, alliance_id) VALUES (13, 'RivalWithBio', ?, 1, 50)`).run(CONFIRMED_THRESHOLD);
+db.prepare(`INSERT INTO players (id, name, science_level, has_intel) VALUES (14, 'LoneWolf', ?, 0)`).run(SUSPECTED_THRESHOLD + 4);
+
 (async () => {
     const server = app.listen(0);
     await new Promise((resolve) => server.once('listening', resolve));
@@ -85,9 +95,12 @@ db.prepare(`INSERT INTO players (id, name, biology, science_level, has_intel) VA
             res.body && res.body.suspectedThreshold === SUSPECTED_THRESHOLD, res.body);
 
         const confirmedNames = (res.body.confirmed || []).map(p => p.name).sort();
-        ok('confirmed list has exactly BioGiant and ScannedAndStrong (real bio >= threshold, has_intel=1)',
-            JSON.stringify(confirmedNames) === JSON.stringify(['BioGiant', 'ScannedAndStrong']), confirmedNames);
-        ok('confirmedCount matches the list length (2)', res.body.confirmedCount === 2, res.body.confirmedCount);
+        // This caller has NO alliance, so the own-alliance exclusion removes nobody — which
+        // is exactly what makes this section a test of the unfiltered classification. The
+        // mates/rival below belong to the alliance-caller section further down.
+        ok('confirmed list holds every player with real bio >= threshold and has_intel=1',
+            JSON.stringify(confirmedNames) === JSON.stringify(['BioGiant', 'MateWithBio', 'RivalWithBio', 'ScannedAndStrong']), confirmedNames);
+        ok('confirmedCount matches the list length (4)', res.body.confirmedCount === 4, res.body.confirmedCount);
         ok('JustUnder (one below the RED bar) is not red', !confirmedNames.includes('JustUnder'));
 
         const suspectedNames = (res.body.suspected || []).map(p => p.name).sort();
@@ -95,9 +108,9 @@ db.prepare(`INSERT INTO players (id, name, biology, science_level, has_intel) VA
         // ceiling clears the lower bar, AND a CONFIRMED player above that bar but below the
         // red one. Splitting one margin into two originally left the latter in neither list
         // — JustUnder, at +5, matched no query at all — so this pins the hole shut.
-        ok('yellow holds the unscanned player AND the confirmed one between the two bars',
-            JSON.stringify(suspectedNames) === JSON.stringify(['JustUnder', 'MysteryScientist']), suspectedNames);
-        ok('suspectedCount matches (2)', res.body.suspectedCount === 2, res.body.suspectedCount);
+        ok('yellow holds the unscanned players AND the confirmed one between the two bars',
+            JSON.stringify(suspectedNames) === JSON.stringify(['JustUnder', 'LoneWolf', 'MateWithScience', 'MysteryScientist']), suspectedNames);
+        ok('suspectedCount matches (4)', res.body.suspectedCount === 4, res.body.suspectedCount);
         ok('LowScience (science below threshold) is excluded', !suspectedNames.includes('LowScience'));
         ok('ScannedAndStrong never appears in suspected despite high science (has_intel=1, so it is CONFIRMED not suspected)',
             !suspectedNames.includes('ScannedAndStrong'), suspectedNames);
@@ -108,6 +121,36 @@ db.prepare(`INSERT INTO players (id, name, biology, science_level, has_intel) VA
         const bioGiant = res.body.confirmed.find(p => p.name === 'BioGiant');
         ok('a confirmed row carries player_id (for a clickable link) and the alliance tag',
             bioGiant && bioGiant.player_id === 2 && bioGiant.ally_tag === 'RAID', bioGiant);
+
+        // Requested by another alliance running the hub (2026-09-15): your own mates crowd
+        // the list without ever being the thing it is read for — they cannot attack you. The
+        // exclusion happens in SQL, before the queries' LIMIT 25, so it does not merely hide
+        // them but frees those rows for players who are actually a threat.
+        console.log('\n── your own alliance is not a threat to you ' + '─'.repeat(28));
+        const appAlly = express();
+        appAlly.use(express.json());
+        appAlly.use((req, res, next) => { req.session = { userId: 2, gameName: 'AllyLeader' }; next(); });
+        appAlly.use('/hub-api', intelRouter);
+        const serverAlly = appAlly.listen(0);
+        await new Promise((resolve) => serverAlly.once('listening', resolve));
+        try {
+            const resAlly = await getJson(serverAlly, '/hub-api/intel/bio-threats');
+            const names = [...(resAlly.body.confirmed || []), ...(resAlly.body.suspected || [])].map(p => p.name);
+            ok('an alliance mate with confirmed biology over the bar is not listed',
+                !names.includes('MateWithBio'), names);
+            ok('nor is an unscanned mate whose science level clears the bar',
+                !names.includes('MateWithScience'), names);
+            ok('a rival in another alliance at the very same biology still is',
+                names.includes('RivalWithBio'), names);
+            // The IFNULL guard in the SQL: an unaffiliated player's NULL alliance must not be
+            // read as "same alliance as me" and quietly swept out with the mates.
+            ok('and so is a player with no alliance at all', names.includes('LoneWolf'), names);
+            ok('the counts follow the filtered lists, so pill and modal cannot disagree',
+                resAlly.body.confirmedCount === (resAlly.body.confirmed || []).length
+                && resAlly.body.suspectedCount === (resAlly.body.suspected || []).length, resAlly.body);
+        } finally {
+            serverAlly.close();
+        }
 
         console.log('\n── an unrecognized/never-scanned session player degrades gracefully ' + '─'.repeat(4));
         const app2 = express();

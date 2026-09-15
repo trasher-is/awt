@@ -10,6 +10,10 @@
                 <i class="fa-solid fa-filter absolute right-3 top-2.5 text-muted-foreground text-sm pointer-events-none"></i>
             </div>
             <div class="flex items-center gap-3">
+                <label id="db-hide-own-ally-wrap" class="hidden items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none" title="Hide players in your own alliance — they cannot attack you, so they are rarely what this list is being read for">
+                    <input type="checkbox" id="db-hide-own-ally" class="accent-primary cursor-pointer">
+                    <span>Hide own alliance</span>
+                </label>
                 <div class="text-sm text-muted-foreground font-mono">Showing <span id="db-result-count" class="text-foreground font-bold">0</span> records</div>
                 <!-- Column picker (public/js/ui/column-picker.js) mounts here -->
                 <div id="players-db-columns"></div>
