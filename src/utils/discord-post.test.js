@@ -4,6 +4,16 @@
 delete process.env.DISCORD_TOKEN;
 delete process.env.BATTLE_DISCORD_TOKEN;
 
+// discord-post reads its channel ids from app_settings, so requiring it opens the database.
+// Point that somewhere disposable BEFORE the require: database.js reads AWT_DB_PATH once, at
+// require time, and otherwise falls through to the real awt.db. See test-db-isolation.test.js
+// for the production migration a test run fired by connecting to it.
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+process.env.AWT_DB_PATH = path.join(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'awt-discord-post-test-')), 'test.db');
+
 const { postBattleEmbed } = require('./discord-post');
 
 let failed = 0;

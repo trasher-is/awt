@@ -40,14 +40,17 @@ function run(script) {
     return marked.length ? JSON.parse(marked[marked.length - 1].slice('RESULT:'.length)) : null;
 }
 
-const MARKER = 'intel_visibility_baseline_reset_at';
+// Matched by prefix rather than pinned to an exact key: the marker is versioned so a reset
+// can be deliberately re-run (see database.js), and a test that hardcoded v1 would quietly
+// stop exercising anything the moment v2 shipped — passing while covering nothing.
+const MARKER_LIKE = 'intel_visibility_baseline_reset%';
 const seedPoisoned = `
     db.prepare("INSERT OR REPLACE INTO players (id, name, has_intel, intel_visible, intel_seen_raw) VALUES (900, 'Seen', 1, 0, 0)").run();
     db.prepare("INSERT OR REPLACE INTO players (id, name, has_intel, intel_visible, intel_seen_raw) VALUES (901, 'Unseen', 0, 0, 0)").run();
 `;
 const readBack = `
     const rows = db.prepare('SELECT id, has_intel, intel_visible, intel_seen_raw FROM players WHERE id IN (900, 901) ORDER BY id').all();
-    const marker = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(${JSON.stringify(MARKER)});
+    const marker = db.prepare('SELECT value FROM app_settings WHERE key LIKE ?').get(${JSON.stringify(MARKER_LIKE)});
     console.log('RESULT:' + JSON.stringify({ rows, marked: !!marker }));
 `;
 
@@ -57,7 +60,7 @@ console.log('intel-visibility-baseline-reset.test.js');
 // Deleting the marker is what makes this an upgrade rather than a fresh install; a brand-new
 // database has nothing to clear and would prove nothing.
 run(`${seedPoisoned}
-     db.prepare('DELETE FROM app_settings WHERE key = ?').run(${JSON.stringify(MARKER)});
+     db.prepare('DELETE FROM app_settings WHERE key LIKE ?').run(${JSON.stringify(MARKER_LIKE)});
      ${readBack}`);
 
 console.log('\n-- The upgrade clears the values the blind sweep wrote ' + '-'.repeat(15));

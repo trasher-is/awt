@@ -7,6 +7,18 @@
 // equivalent) runs against the database and plain objects.
 
 const path = require('path');
+// MUST be set before database.js is required: it reads AWT_DB_PATH once, at require time,
+// and falls back to the REAL awt.db. This file used to skip it, on the reasoning that its
+// fixtures are all 'test-%'/'zz-test-%' prefixed and cleaned up after themselves — true of
+// the rows, but it still meant every `npm test` opened production and ran whatever
+// require-time work database.js does. That came due on 2026-09-15: a one-shot migration
+// added that day fired against production from a test run eight minutes before the deploy
+// that was supposed to carry it, marked itself done, and so could not run again when the
+// code it belonged to actually shipped. Isolation is not about the rows a test writes.
+const fs = require('fs');
+const os = require('os');
+process.env.AWT_DB_PATH = path.join(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'awt-discord-test-')), 'test.db');
 const db = require(path.join(__dirname, '..', 'database.js'));
 const bot = require(path.join(__dirname, '..', 'discord_bot.js'));
 const { buildCommands, isEphemeral } = require(path.join(__dirname, '..', 'discord-commands.js'));
