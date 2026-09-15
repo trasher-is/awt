@@ -367,7 +367,7 @@ function upsertPlayerNameOnly(id, name) {
 // The caller's own origin rides along: a bio advantage only threatens you if the holder can
 // actually SEE you, and the game measures that from origin to origin (see vision-model.js).
 const getPlayerBiologyByNameStmt = db.prepare(`
-    SELECT p.id, p.biology, p.origin_system, s.x AS origin_x, s.y AS origin_y
+    SELECT p.id, p.biology, p.alliance_id, p.origin_system, s.x AS origin_x, s.y AS origin_y
     FROM players p
     LEFT JOIN systems s ON s.id = p.origin_system
     WHERE LOWER(p.name) = ?
@@ -408,6 +408,15 @@ const THREAT_ORIGIN_JOINS = `
         LIMIT 1
     )`;
 
+// Your own alliance is excluded from both queries (2026-09-15). A mate with more biology
+// than you is not a threat to you — they cannot attack you — so listing them only crowds
+// out the players who are, which matters here because the LIMIT below is what the pill
+// counts and the modal shows. Done in SQL rather than by filtering the results for exactly
+// that reason: dropping them afterwards would spend the 25 rows on people the reader is
+// about to ignore. @allyId is null for a viewer with no alliance, which excludes nobody;
+// IFNULL guards the unaffiliated, who must never be swept out by a null-vs-null comparison.
+const THREAT_EXCLUDE_OWN_ALLIANCE = `AND (@allyId IS NULL OR IFNULL(p.alliance_id, -1) != @allyId)`;
+
 const getThreatPlayersByBiologyStmt = db.prepare(`
     SELECT p.id as player_id, p.name, p.biology, p.science_level, a.tag as ally_tag,
            p.has_intel,
@@ -415,12 +424,15 @@ const getThreatPlayersByBiologyStmt = db.prepare(`
     FROM players p
     LEFT JOIN alliances a ON p.alliance_id = a.id
     ${THREAT_ORIGIN_JOINS}
-    WHERE p.has_intel = 1 AND p.biology >= ? AND p.id != ?
+    WHERE p.has_intel = 1 AND p.biology >= @threshold AND p.id != @excludeId
+    ${THREAT_EXCLUDE_OWN_ALLIANCE}
     ORDER BY p.biology DESC, p.name ASC
     LIMIT 25
 `);
-function getThreatPlayersByBiology(threshold, excludeId) {
-    return getThreatPlayersByBiologyStmt.all(threshold, excludeId);
+function getThreatPlayersByBiology(threshold, excludeId, excludeAllianceId = null) {
+    return getThreatPlayersByBiologyStmt.all({
+        threshold, excludeId, allyId: Number.isInteger(excludeAllianceId) ? excludeAllianceId : null,
+    });
 }
 
 const getThreatPlayersByScienceStmt = db.prepare(`
@@ -430,12 +442,15 @@ const getThreatPlayersByScienceStmt = db.prepare(`
     FROM players p
     LEFT JOIN alliances a ON p.alliance_id = a.id
     ${THREAT_ORIGIN_JOINS}
-    WHERE p.has_intel = 0 AND p.science_level >= ? AND p.id != ?
+    WHERE p.has_intel = 0 AND p.science_level >= @threshold AND p.id != @excludeId
+    ${THREAT_EXCLUDE_OWN_ALLIANCE}
     ORDER BY p.science_level DESC, p.name ASC
     LIMIT 25
 `);
-function getThreatPlayersByScience(threshold, excludeId) {
-    return getThreatPlayersByScienceStmt.all(threshold, excludeId);
+function getThreatPlayersByScience(threshold, excludeId, excludeAllianceId = null) {
+    return getThreatPlayersByScienceStmt.all({
+        threshold, excludeId, allyId: Number.isInteger(excludeAllianceId) ? excludeAllianceId : null,
+    });
 }
 
 // True counts, unbounded by the LIST queries' LIMIT 25 — issue #153's pill needs the real

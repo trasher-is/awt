@@ -16,6 +16,11 @@ const { cvOf } = globalThis.AWBattleModel;
 const { formatSqliteUtc, formatLocalDateTime, parseTimestamp } = globalThis.AWSqliteTime;
 
 let rawDbPlayers = [];
+// The viewer's own alliance, for the Player Archive's "Hide own alliance" toggle. Null until
+// /hub-api/me answers, and stays null for an account the player bridge cannot resolve — the
+// toggle stays hidden in that case rather than offering a filter that would hide nobody.
+let viewerAllianceId = null;
+const HIDE_OWN_ALLY_KEY = 'awt.playersDb.hideOwnAlliance';
 const playerSort = { col: 'points', asc: false };
 let rawDbSystems = [], sysDbSortCol = 'id', sysDbSortAsc = true;
 let rawDbPlanets = [], plnDbSortCol = 'system_id', plnDbSortAsc = true;
@@ -91,6 +96,23 @@ export async function openDatabasePanel() {
         // A new column always sorts descending first, as this table has always done.
         wireStatTable({ panel, table: STAT_TABLES.players, headRowId: 'players-db-head-row', pickerMountId: 'players-db-columns', tableId: 'playersDbTable', tableKey: 'players', sortState: playerSort, defaultAsc: () => false, render: renderPlayerTable });
         panel.querySelector('#db-search-input')?.addEventListener('input', renderPlayerTable);
+        const hideBox = panel.querySelector('#db-hide-own-ally');
+        if (hideBox) {
+            try { hideBox.checked = localStorage.getItem(HIDE_OWN_ALLY_KEY) === '1'; } catch (e) { /* private mode */ }
+            hideBox.addEventListener('change', () => {
+                try { localStorage.setItem(HIDE_OWN_ALLY_KEY, hideBox.checked ? '1' : '0'); } catch (e) { /* private mode */ }
+                renderPlayerTable();
+            });
+        }
+        // Resolved once per panel build, not per render. Failing to resolve leaves the toggle
+        // hidden, which is the honest outcome: with no alliance to compare against, ticking
+        // it would filter nothing and look broken.
+        fetch('/hub-api/me').then(r => r.json()).then(me => {
+            if (!Number.isInteger(me && me.allianceId)) return;
+            viewerAllianceId = me.allianceId;
+            panel.querySelector('#db-hide-own-ally-wrap')?.classList.replace('hidden', 'flex');
+            renderPlayerTable();
+        }).catch(() => {});
     }
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
     closeOtherPanels('database-panel');
@@ -694,7 +716,13 @@ export async function triggerAllianceStatsUpdate() {
 function renderPlayerTable() {
     const input = document.getElementById('db-search-input');
     const q = (input ? input.value : '').toLowerCase();
-    const f = rawDbPlayers.filter(p => (p.name && p.name.toLowerCase().includes(q)) || (p.id && p.id.toString().includes(q)) || (p.alliance_tag && p.alliance_tag.toLowerCase().includes(q)));
+    const hideOwn = document.getElementById('db-hide-own-ally')?.checked
+        && Number.isInteger(viewerAllianceId);
+    const f = rawDbPlayers
+        // Compared by alliance id, not tag: a tag is display text that two alliances can
+        // share and that changes when one renames itself, and the row already carries the id.
+        .filter(p => !hideOwn || p.alliance_id !== viewerAllianceId)
+        .filter(p => (p.name && p.name.toLowerCase().includes(q)) || (p.id && p.id.toString().includes(q)) || (p.alliance_tag && p.alliance_tag.toLowerCase().includes(q)));
     const table = STAT_TABLES.players;
     const sorted = sortRows(f, table.columns, playerSort.col, playerSort.asc);
     const countEl = document.getElementById('db-result-count'); if (countEl) countEl.innerText = sorted.length;

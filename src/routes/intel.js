@@ -661,8 +661,8 @@ router.get('/intel/bio-threats', requireAuth, (req, res) => {
         // players. Classifying after the fetch closes that, and lets someone who is merely
         // CLOSING land in yellow whatever their gap.
         const candidates = [
-            ...playersRepo.getThreatPlayersByBiology(suspectedThreshold, me.id),
-            ...playersRepo.getThreatPlayersByScience(suspectedThreshold, me.id),
+            ...playersRepo.getThreatPlayersByBiology(suspectedThreshold, me.id, me.alliance_id),
+            ...playersRepo.getThreatPlayersByScience(suspectedThreshold, me.id, me.alliance_id),
         ];
         const { red, yellow } = splitThreats(candidates, me, {
             myBio,
