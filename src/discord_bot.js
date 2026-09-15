@@ -22,7 +22,7 @@ const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require
 const battleModel = require('../public/js/utils/battle-model.js');
 const visionModel = require('../public/js/utils/vision-model.js');
 const { buildCommands, suggestPlayers, suggestSystems, isEphemeral } = require('./discord-commands');
-const { nextRetryDelayMs, shouldAttemptRelogin } = require('./utils/discord-connection');
+const { shouldRestartProcess, OFFLINE_CHECKS_BEFORE_RESTART } = require('./utils/discord-connection');
 
 const client = new Client({
     intents: [
@@ -57,9 +57,10 @@ client.on('clientReady', () => {
 // discord.js gives up for good on a session it cannot recover, and says so here. Without a
 // listener the client simply stops being a bot while the process carries on as if nothing
 // happened — which is exactly how this went unnoticed for an hour.
+// The gateway saying the session is gone for good. Nothing to do in-process (see
+// discord-connection.js); the watchdog below sees the client go not-ready and restarts.
 client.on('invalidated', () => {
-    console.error('[Discord] Session invalidated by the gateway — reconnecting.');
-    reconnectSoon();
+    console.error('[Discord] Session invalidated by the gateway — the watchdog will restart the process.');
 });
 client.on('error', (err) => console.error('[Discord] Client error:', err && err.message));
 client.on('shardDisconnect', (event, id) => {
@@ -1891,59 +1892,38 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// --- CONNECTION SUPERVISOR (2026-09-15) ---
-// Replaces a bare client.login().catch(log). See src/utils/discord-connection.js for the
-// outage this was written after: the bot was torn down mid-life and nothing retried, so the
-// hub went on running with every announcement silently going nowhere.
-let botToken = null;
-let loginInFlight = false;
-let loginFailures = 0;
+// --- CONNECTION WATCHDOG (2026-09-15) ---
+// Polls readiness and hands the process back to pm2 when the bot has been down long enough
+// that nothing in this process can fix it — which, in discord.js 14.26, is any failure at
+// all. See src/utils/discord-connection.js for the measurements behind that claim, and for
+// why the in-process reconnect this replaced could never have worked.
+//
+// Polling rather than listening: the original failure raised no event we had a handler for.
+// The client was simply not ready any more, and readiness is the one thing true of every
+// way this can break, including the ways nobody has seen yet.
 let consecutiveNotReady = 0;
-let retryTimer = null;
 
-async function attemptLogin(reason) {
-    if (!botToken || loginInFlight || client.isReady()) return;
-    loginInFlight = true;
-    try {
-        // A client discord.js has torn down still holds enough state that login() rejects
-        // with "Already logged in", so clear it first. Harmless on a client that never
-        // connected, which is why this is unconditional rather than guessing the state.
-        try { await client.destroy(); } catch (_) { /* nothing to tear down */ }
-        await client.login(botToken);
-        loginFailures = 0;
-        consecutiveNotReady = 0;
-    } catch (err) {
-        loginFailures++;
-        const delay = nextRetryDelayMs(loginFailures);
-        console.error(`[Discord] Failed to connect (attempt ${loginFailures}, ${reason}): ${err.message} — retrying in ${Math.round(delay / 1000)}s`);
-        reconnectSoon(delay);
-    } finally {
-        loginInFlight = false;
-    }
-}
-
-function reconnectSoon(delayMs = 0) {
-    if (retryTimer) clearTimeout(retryTimer);
-    retryTimer = setTimeout(() => {
-        retryTimer = null;
-        attemptLogin('retry');
-    }, delayMs);
-    // Never hold the process open just to wait for a reconnect.
-    if (typeof retryTimer.unref === 'function') retryTimer.unref();
-}
-
-// The backstop for everything the events above do not catch — including the actual observed
-// failure, where the client ended up tokenless with no event we were listening for. Polling
-// readiness needs no knowledge of HOW it broke, which is the point: the previous design only
-// handled the one failure mode someone had thought of.
-function startConnectionWatchdog(intervalMs = 60 * 1000) {
+// isReady/onGiveUp are injectable so the loop itself can be driven in a test — the previous
+// version of this file shipped broken precisely because only its helper was covered and the
+// part that did the work was taken on trust.
+function startConnectionWatchdog({
+    intervalMs = 60 * 1000,
+    isReady = () => client.isReady(),
+    onGiveUp = () => process.exit(1),
+} = {}) {
+    consecutiveNotReady = 0;
     const timer = setInterval(() => {
-        if (client.isReady()) { consecutiveNotReady = 0; return; }
+        if (isReady()) { consecutiveNotReady = 0; return; }
         consecutiveNotReady++;
-        if (shouldAttemptRelogin({ ready: false, loginInFlight, consecutiveNotReady })) {
-            console.error(`[Discord] Bot has been offline for ${consecutiveNotReady} checks — reconnecting.`);
-            attemptLogin('watchdog');
+        if (!shouldRestartProcess({ ready: false, consecutiveNotReady })) {
+            console.error(`[Discord] Bot offline (check ${consecutiveNotReady}/${OFFLINE_CHECKS_BEFORE_RESTART}) — waiting for discord.js to recover on its own.`);
+            return;
         }
+        // Deliberately loud, and deliberately fatal: this line is the whole explanation for
+        // an otherwise mysterious restart in the pm2 log.
+        console.error(`[Discord] Bot has been offline for ${consecutiveNotReady} checks and cannot be revived in place — exiting so pm2 restarts with a fresh client.`);
+        clearInterval(timer);
+        onGiveUp();
     }, intervalMs);
     if (typeof timer.unref === 'function') timer.unref();
     return timer;
@@ -1951,11 +1931,16 @@ function startConnectionWatchdog(intervalMs = 60 * 1000) {
 
 function initDiscordBot(token) {
     if (!token) {
+        // No watchdog either: a deployment that runs the hub without a bot must not restart
+        // itself every ten minutes forever.
         console.log('[Discord] No DISCORD_TOKEN found in environment. Bot disabled.');
         return;
     }
-    botToken = token;
-    attemptLogin('startup');
+    client.login(token).catch(err => {
+        // Nothing to retry against — a client whose login failed stays unusable, so the
+        // watchdog's restart is the recovery. Logged here so the cause is on record.
+        console.error(`[Discord] Failed to connect: ${err.message} — the watchdog will restart the process if this persists.`);
+    });
     startConnectionWatchdog();
     return client;
 }
@@ -2275,5 +2260,6 @@ module.exports = {
     // Exported for the tests: these are the pieces with real logic in them, and they run
     // without a Discord connection.
     handleTimer, checkDueTimers, handleLink, parseTimerInput, slashToPrefix, registerSlashCommands, handleMessage, interactionAsMessage,
+    startConnectionWatchdog,
     SYSTEM_OPTION_NAMES,
 };

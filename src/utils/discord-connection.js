@@ -1,53 +1,44 @@
-// When may the hub try to reconnect its Discord bot, and how long should it wait first.
+// When has the Discord bot been down long enough that only a fresh process will fix it.
 //
-// THE FAILURE THIS EXISTS FOR (2026-09-15): the bot connected normally at 14:41 and was
-// dead by 15:46 — `!bio` came back "Expected token to be set for this request, but none was
-// present", which is discord.js saying the client had been torn down underneath us. Discord's
-// gateway had been answering 503, and once discord.js gives up on a session it does not come
-// back on its own. The hub's entire reconnection strategy was one `.catch()` on the initial
-// login that printed a line and returned, so the process kept running, kept scraping, kept
-// serving the web UI, and quietly announced nothing at all. Nobody found out until someone
-// typed a command an hour later.
+// ─── WHY THERE IS NO IN-PROCESS RECONNECT ─────────────────────────────────────
+// There was one, for about an hour, and it did not work. A discord.js 14.26 Client cannot be
+// revived once its connection has failed — measured directly against the real gateway, twice:
 //
-// The logic lives here, apart from the client, because every rule below is a judgement call
-// worth being able to test: too eager a reconnect tears down a connection that was merely
-// still handshaking, and too slow a backoff leaves the alliance without incoming-attack
-// alerts during exactly the outage that makes them matter.
-
-// A gateway outage is usually seconds, occasionally an hour. Start fast enough to ride out a
-// blip unnoticed, give up trying quickly enough to not hammer Discord while it is down, and
-// never back off so far that recovery waits on a human.
-const RETRY_BASE_MS = 15 * 1000;
-const RETRY_MAX_MS = 5 * 60 * 1000;
-
-// How many consecutive "not ready" observations before the watchdog intervenes. Never 1:
-// a client that is merely still connecting reads exactly the same as a dead one from the
-// outside, and tearing down a handshake in progress would turn a slow start into a loop
-// that can never finish. At the default 60s tick this waits two minutes before acting.
-const NOT_READY_TICKS_BEFORE_RELOGIN = 2;
-
-// Exponential, capped. `failures` is the number of attempts that have already failed, so the
-// first retry (failures = 1) waits the base delay rather than zero.
-function nextRetryDelayMs(failures, { base = RETRY_BASE_MS, max = RETRY_MAX_MS } = {}) {
-    const n = Number.isFinite(failures) && failures > 0 ? Math.floor(failures) : 1;
-    // 2 ** 30 is already past any sane cap; clamping the exponent keeps this finite rather
-    // than relying on Math.min to rescue an Infinity.
-    return Math.min(base * Math.pow(2, Math.min(n - 1, 30)), max);
-}
-
-// The watchdog's one decision. Split out from the timer so the conditions are readable in
-// one place and provable in a test, rather than being three `&&`s inside a setInterval.
+//   login() -> READY -> destroy() -> login()      login() RESOLVES, never reaches READY
+//   login(bad) -> rejects -> login(good)          login() RESOLVES, never reaches READY
 //
-//   ready              client.isReady() — a live gateway session
-//   loginInFlight      an attempt is already running; a second login() throws
-//   consecutiveNotReady how many ticks in a row have seen ready === false
-function shouldAttemptRelogin({ ready, loginInFlight, consecutiveNotReady, ticksBeforeRelogin = NOT_READY_TICKS_BEFORE_RELOGIN }) {
+// Both leave a client that reports success and then sits there not ready, forever. That is
+// what the first attempt at this shipped: a watchdog that dutifully noticed the bot was down
+// every two minutes, called destroy() and login(), saw login() resolve, congratulated itself
+// by resetting its counters, and looped — which is exactly how the logs read, the same
+// "offline for 2 checks" line over and over with no connection ever coming back.
+//
+// The lesson worth keeping: that code was shipped on a probe that only ever exercised the
+// FAILURE path (destroy + login with an invalid token, which reaches token validation and
+// rejects). Watching the error arrive proved the call was reachable and proved nothing at all
+// about whether it works. The success path is the one that had to be tested.
+//
+// So recovery is a fresh process. pm2 has autorestart on, express-session is backed by
+// SQLite so nobody is logged out by a restart, and a restart has recovered the bot every
+// single time it has been tried. Exiting is not a workaround here — it is the only mechanism
+// that actually reconnects.
+
+// How many consecutive 60s checks of "not ready" before handing the process back to pm2.
+// Generous on purpose. discord.js recovers from ordinary blips on its own within seconds, so
+// anything short-lived never gets here; ten minutes of continuous silence means it has truly
+// given up. It is also the restart rate during a long Discord outage — roughly six an hour,
+// a few seconds of downtime each — so making it much smaller trades a dead bot for a hub
+// that keeps interrupting its own scraping.
+const OFFLINE_CHECKS_BEFORE_RESTART = 10;
+
+// The watchdog's one decision, kept out of the timer so it is readable and testable rather
+// than three conditions buried in a setInterval.
+//
+//   ready               client.isReady() — a live gateway session
+//   consecutiveNotReady how many checks in a row have seen ready === false
+function shouldRestartProcess({ ready, consecutiveNotReady, ticksBeforeRestart = OFFLINE_CHECKS_BEFORE_RESTART }) {
     if (ready) return false;
-    if (loginInFlight) return false;
-    return consecutiveNotReady >= ticksBeforeRelogin;
+    return consecutiveNotReady >= ticksBeforeRestart;
 }
 
-module.exports = {
-    nextRetryDelayMs, shouldAttemptRelogin,
-    RETRY_BASE_MS, RETRY_MAX_MS, NOT_READY_TICKS_BEFORE_RELOGIN,
-};
+module.exports = { shouldRestartProcess, OFFLINE_CHECKS_BEFORE_RESTART };

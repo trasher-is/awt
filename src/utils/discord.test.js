@@ -280,6 +280,43 @@ const capture = () => { const out = []; return { out, reply: (t) => { out.push(t
     ok('every other autocompleted option is a player field, so the fallback is correct',
         playerish.every(n => /player/.test(n)), playerish);
 
+    // ─── THE CONNECTION WATCHDOG'S ACTUAL LOOP ────────────────────────────────
+    // Not just its decision helper. The previous version of this shipped broken because only
+    // the helper was covered and the loop around it was taken on trust — it called a recovery
+    // that could never work, saw it "succeed", reset its own counters and span forever. So
+    // this drives the real exported function with a fake clock and a fake client.
+    console.log('\n── Connection watchdog ' + '─'.repeat(52));
+    {
+        const tick = 5; // ms, so the whole thing runs in well under a second
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+        let gaveUp = 0;
+        const healthy = bot.startConnectionWatchdog({ intervalMs: tick, isReady: () => true, onGiveUp: () => gaveUp++ });
+        await sleep(tick * 25);
+        clearInterval(healthy);
+        ok('a connected bot is never restarted, however long it runs', gaveUp === 0, gaveUp);
+
+        // Down the whole time: must give up exactly once, not once per tick thereafter.
+        gaveUp = 0;
+        bot.startConnectionWatchdog({ intervalMs: tick, isReady: () => false, onGiveUp: () => gaveUp++ });
+        await sleep(tick * 40);
+        ok('a bot that never comes back triggers exactly one restart', gaveUp === 1, gaveUp);
+
+        // The real-world shape: it flaps, recovering before the window elapses each time.
+        // A restart here would mean the hub reboots itself over blips discord.js handles.
+        gaveUp = 0;
+        let n = 0;
+        const flapping = bot.startConnectionWatchdog({
+            intervalMs: tick,
+            isReady: () => (++n % 3 !== 0),   // down one check in every three
+            onGiveUp: () => gaveUp++,
+        });
+        await sleep(tick * 60);
+        clearInterval(flapping);
+        ok('a bot that keeps flickering back is left alone — the counter resets on recovery',
+            gaveUp === 0, gaveUp);
+    }
+
     // cleanup
     db.exec(`DELETE FROM discord_timers WHERE discord_user_id LIKE 'test-%'`);
     db.exec(`DELETE FROM discord_link_codes WHERE code LIKE 'TEST%' OR code = 'NOSUCHCODE'`);
