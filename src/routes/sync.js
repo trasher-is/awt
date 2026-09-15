@@ -613,6 +613,11 @@ router.post('/sync/player', requireAuth, (req, res) => {
 
     const oldPlayer = playersRepo.getPlayerRestartCheck(p.id);
 
+    // Alliance-wide intel visibility. Read BEFORE the upsert: upsertPlayerFull latches
+    // has_intel to 1 and that latch is the only thing separating a first-ever capture from
+    // a regain. See announceIntelVisibility for why this lives on the SCRAPE path.
+    const priorIntel = playersRepo.getIntelVisibility(p.id);
+
     playersRepo.recordNameChangeIfDifferent(p.id, safePlayer.name);
 
     const syncTransaction = db.transaction((player) => {
@@ -670,6 +675,7 @@ router.post('/sync/player', requireAuth, (req, res) => {
 
     try {
         syncTransaction(safePlayer);
+        announceIntelVisibility(p, safePlayer, priorIntel);
         res.json({ success: true });
     } catch (err) {
         console.error(`[DB Error] Failed to sync player ${p.id}:`, err);
@@ -825,11 +831,29 @@ function hasCompleteIntel(p) {
     return true;
 }
 
-// --- PLAYER DETAIL RECEIVER (Player/{id} sync) ---
 // Records this sync's alliance-wide intel visibility and posts to Various Changes when it
-// amounts to real news. `detail.has_intel` rather than the raw payload's, so the same
-// hasCompleteIntel validation that protects the stat columns also decides what counts as
-// "we can see them" — a half-arrived report is not vision.
+// amounts to real news. `detail.has_intel` is the normalized flag, so whatever validation
+// the calling route applies to protect the stat columns also decides what counts as "we can
+// see them" — a half-arrived report is not vision.
+//
+// WHY THIS RUNS ON THE PROFILE SCRAPE, NOT THE API SWEEP (2026-09-15): it was originally
+// hooked onto /sync/player-detail, because that sweep walks the whole roster continuously
+// and so observes every player rather than only whoever someone happened to open. That
+// reasoning was sound and the signal was not: the API's Player/{id} response does not carry
+// an intelligenceReport for us AT ALL. Measured, not inferred — across two days and roughly
+// a hundred full sweep cycles, intel_visible was 0 or NULL for all 160 players and never
+// once 1, while 17 of them held intel the whole time; a probe on the receiving route then
+// caught a sweep of Kronic (has_intel = 1) arriving with has_intel falsy. So every zero that
+// path recorded meant "this source cannot see intel", not "the alliance cannot see them" —
+// the same absence-of-capability-as-observed-absence trap that fleets_observed exists to
+// close on /sync/system. Feeding those zeros in kept the confirmed state pinned at 0, which
+// is why no capture was ever announced, Karmakazi's included.
+//
+// The profile scrape is the honest observer: player-parser.js reads visibility off whether
+// the page actually rendered its table.ir-summary block. It only fires when a member opens
+// a profile, so it samples sparsely — but a sparse true signal beats a dense blind one, and
+// first_ever (the case that matters, and the one this bug swallowed) is exempt from the
+// two-consecutive-observations rule anyway, so a fresh capture announces on the spot.
 function announceIntelVisibility(raw, detail, priorIntel) {
     const change = decideIntelVisibilityChange({ prior: priorIntel, observedVisible: !!detail.has_intel });
     playersRepo.setIntelVisibility(detail.id, {
@@ -895,14 +919,6 @@ router.post('/sync/player-detail', requireAuth, (req, res) => {
         }
     }
 
-    // Alliance-wide intel visibility (2026-09-13). Read BEFORE the upsert: has_intel latches
-    // to 1 in there, and that latch is the only thing separating a first-ever capture from a
-    // regain — afterwards the difference is gone. Hooked onto THIS route rather than the
-    // profile scrape because the API sweep walks the whole roster continuously, so it
-    // observes visibility for every player rather than only whoever someone happened to
-    // open. See intel-visibility.js for why a single changed observation is not yet news.
-    const priorIntel = playersRepo.getIntelVisibility(p.id);
-
     // ORIGIN: the system a player started in, which is where the game measures their vision
     // radius from — so it decides who can see whom. The API hands it back as coordinates
     // (all 381 system coordinates are distinct, so this resolves exactly), and only for a
@@ -930,7 +946,9 @@ router.post('/sync/player-detail', requireAuth, (req, res) => {
 
     try {
         playersRepo.upsertPlayerFromApiDetail(detail);
-        announceIntelVisibility(p, detail, priorIntel);
+        // Deliberately does NOT touch intel visibility: this route's has_intel is always 0
+        // because the API carries no intelligenceReport, so recording it would only pin the
+        // confirmed state at "not visible" forever. See announceIntelVisibility.
         // Issue #137: the API detail carries the same login counter the profile scrape does,
         // and the background sweep reaches far more players — so it is the denser source of
         // "counter unchanged at time T" observations for the profile's quiet-window analysis.

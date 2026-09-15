@@ -1,19 +1,24 @@
 // Decides what, if anything, to announce when a player sync reports whether the alliance
 // can currently see that player's intelligence report.
 //
-// The game's Player detail carries an intelligenceReport whenever ANY alliance member has
-// vision — it names the capturer (capturedByPlayerName: "Moardin25") — and null when nobody
-// does. So the background sweep already observes real, alliance-wide visibility on every
-// pass; the hub was simply discarding the zeros, because players.has_intel latches to 1 the
-// first time anyone captures a report and can therefore only ever answer "have we ever seen
-// them", never "can we see them now".
+// A player's profile page renders its intelligence-report block (table.ir-summary) whenever
+// ANY alliance member has vision, and omits it when nobody does — so every profile scrape
+// observes real, alliance-wide visibility. players.has_intel could never express this: it
+// latches to 1 the first time anyone captures a report, so it only ever answers "have we
+// ever seen them", never "can we see them now".
+//
+// The observation comes from the profile scrape, NOT the API sweep. That was the original
+// wiring and it was measured dead in production on 2026-09-15: the API's Player/{id}
+// response carries no intelligenceReport at all, so it reported "not visible" for every
+// player forever, pinning the confirmed state at 0 and silencing every capture. See
+// sync.js's announceIntelVisibility for the evidence.
 //
 // WHY A RAW EDGE IS NOT NEWS: vision flickers as fleets drift in and out of range —
 // confirmed live, a report captured at 14:10:33 was gone again minutes later. Announcing
 // every flip would reproduce the population flip-flop in a different channel. So a change
-// has to hold across TWO CONSECUTIVE observations before it counts. At one sweep call per
-// 30s across ~160 players each player is revisited roughly every 80 minutes, so that alone
-// means a wobble shorter than a couple of hours never reaches the channel.
+// has to hold across TWO CONSECUTIVE observations before it counts — and since a scrape only
+// happens when a member opens that profile, two of them are rarely close together, which
+// makes a short wobble even less likely to reach the channel.
 //
 // The "first ever" case is exempt: has_intel can only go 0 -> 1 once in a player's life, so
 // there is nothing for it to flap against.

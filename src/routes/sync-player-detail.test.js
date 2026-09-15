@@ -127,67 +127,42 @@ function postJson(server, urlPath, body) {
         ok('has_intel correctly demoted to 0 (incomplete intel), race_growth left at default',
             rowB && rowB.has_intel === 0, rowB);
 
-        // Alliance-wide intel visibility (2026-09-13). The game's Player detail carries an
-        // intelligenceReport whenever ANY member has vision, so the sweep observes real
-        // alliance-wide visibility on every pass — but vision flickers as fleets drift, so
-        // a change only counts once it has held across two consecutive passes.
-        console.log('\n-- Intel visibility announcements, end to end ' + '-'.repeat(24));
-        const intelPayload = (id, visible, extra = {}) => JSON.parse(JSON.stringify({
+        // This route used to own the intel-visibility announcements. It no longer does, and
+        // the end-to-end coverage moved with them to sync-player-intel-visibility.test.js —
+        // see announceIntelVisibility in sync.js for the measurement behind that. What is
+        // left here is the guarantee that this route keeps its hands off: it reports
+        // has_intel: 0 for everyone because the API carries no intelligenceReport, and if it
+        // were ever re-wired to record that as an observation it would pin every player's
+        // confirmed state at "not visible" and silence the real signal all over again.
+        console.log('\n-- The sweep must not touch intel visibility ' + '-'.repeat(25));
+        // Mirrors what the API mapper really produces: has_intel 0 and every intel field
+        // null, for every player, because the response carries no intelligenceReport.
+        const sweepPayload = (id, extra = {}) => JSON.parse(JSON.stringify({
             player: {
-                id, name: 'Watched', alliance_id: null, alliance_tag: 'FOE', level: 2, points: 2,
+                id, name: 'Unwatched', alliance_id: null, alliance_tag: 'FOE', level: 2, points: 2,
                 ranking: null, country: null, is_active_player: 1, joined: null,
                 logins: null, last_activity_at: null, last_login_at: null, resigned_at: null,
                 number_of_battles: null, battle_luckiness: null, multi_status: null,
                 is_top_permanent_ranker: 0, has_supporter_badge: 0, supporter_type: null,
-                has_intel: visible ? 1 : 0,
-                biology: visible ? 3 : null, economy: visible ? 6 : null, energy: visible ? 8 : null,
-                mathematics: visible ? 6 : null, physics: visible ? 3 : null, social: visible ? 3 : null,
-                trade_revenue: visible ? 0 : null, artefact: null,
-                race_growth: 0, race_science: 0, race_culture: 0, race_production: 0,
-                race_speed: 0, race_attack: 0, race_defense: 0, race_trader: 0, race_sul: 0,
+                has_intel: 0, biology: null, economy: null, energy: null, mathematics: null,
+                physics: null, social: null, trade_revenue: null, artefact: null,
                 ...extra,
             },
         }));
-        const titles = () => variousChanges.map(c => c.title);
-        const sync = (id, visible, extra) => postJson(server, '/hub-api/sync/player-detail', intelPayload(id, visible, extra));
+        const sync = (id, _unusedVisible, extra) => postJson(server, '/hub-api/sync/player-detail', sweepPayload(id, extra));
 
         variousChanges.length = 0;
-        await sync(520, false);
-        ok('the very first sync of an unknown player is silent — it only sets a baseline',
-            variousChanges.length === 0, titles());
+        // A player the scrape has already confirmed we can see, exactly as production looked.
+        await sync(520);
+        db.prepare(`UPDATE players SET has_intel = 1, intel_visible = 1, intel_seen_raw = 1 WHERE id = 520`).run();
 
-        await sync(520, true, { intel_captured_by: 'Moardin25' });
-        const firstEver = variousChanges.filter(c => c.title.includes('First intel'));
-        ok('the first ever capture announces immediately, without waiting for a second pass',
-            firstEver.length === 1, titles());
-        ok('and it names who the alliance is seeing them through',
-            firstEver[0] && firstEver[0].description.includes('Moardin25'), firstEver[0]);
-
-        variousChanges.length = 0;
-        await sync(520, false);
-        ok('one missed sighting stays quiet — a fleet drifting out of range is not news',
-            variousChanges.length === 0, titles());
-        ok('and the confirmed state has not moved yet',
-            db.prepare('SELECT intel_visible FROM players WHERE id = 520').get().intel_visible === 1);
-
-        await sync(520, false);
-        ok('a second consecutive miss announces the loss',
-            titles().some(t => t.includes('Intel lost')), titles());
-        ok('and the confirmed state follows',
-            db.prepare('SELECT intel_visible FROM players WHERE id = 520').get().intel_visible === 0);
-
-        variousChanges.length = 0;
-        await sync(520, true, { intel_captured_by: 'Harpyie' });
-        ok('one sighting back is not yet a regain', variousChanges.length === 0, titles());
-        await sync(520, true, { intel_captured_by: 'Harpyie' });
-        const regained = variousChanges.filter(c => c.title.includes('Intel regained'));
-        ok('two in a row announces the regain, naming the new pair of eyes',
-            regained.length === 1 && regained[0].description.includes('Harpyie'), titles());
-
-        variousChanges.length = 0;
-        await sync(520, true);
-        await sync(520, true);
-        ok('steady visibility says nothing, pass after pass', variousChanges.length === 0, titles());
+        await sync(520);
+        await sync(520);
+        const afterSweeps = db.prepare('SELECT intel_visible, intel_seen_raw FROM players WHERE id = 520').get();
+        ok('two blind sweeps in a row leave the confirmed state untouched',
+            afterSweeps.intel_visible === 1 && afterSweeps.intel_seen_raw === 1, afterSweeps);
+        ok('and announce nothing — a source that cannot see is not evidence of not seeing',
+            variousChanges.length === 0, variousChanges.map(c => c.title));
 
         // ORIGIN from the API sweep (2026-09-13). The game reveals a player's origin only
         // for a system WE have vision of, and it arrives as coordinates. This nearly shipped
