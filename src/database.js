@@ -27,6 +27,28 @@ function addColumn(table, column, definition) {
     }
 }
 
+// One-shot (2026-09-15): every intel_visible/intel_seen_raw value on record was written by
+// the API sweep, which cannot see intel at all — measured, see sync.js's
+// announceIntelVisibility. So all 160 rows read "confirmed not visible" on no evidence.
+// Leaving them in place would not merely be untidy: the first profile scrape of a player we
+// really can see reads 0 -> 1 as a changed observation and the second confirms it, so the
+// channel would get an "Intel regained" line for every such player, none of which was ever
+// lost. NULL is the one value that means "no baseline yet", which the decision function
+// already handles by recording silently — and a genuine first-ever capture is keyed on
+// has_intel, checked before that branch, so resetting cannot swallow the case this whole
+// fix is about.
+const INTEL_BASELINE_RESET_KEY = 'intel_visibility_baseline_reset_at';
+function resetIntelVisibilityBaseline() {
+    const done = db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(INTEL_BASELINE_RESET_KEY);
+    if (done) return;
+    const r = db.prepare(`
+        UPDATE players SET intel_visible = NULL, intel_seen_raw = NULL
+        WHERE intel_visible IS NOT NULL OR intel_seen_raw IS NOT NULL
+    `).run();
+    db.prepare(`INSERT INTO app_settings (key, value) VALUES (?, CURRENT_TIMESTAMP)`).run(INTEL_BASELINE_RESET_KEY);
+    console.log(`[DB] Cleared blind-sweep intel visibility baseline for ${r.changes} player(s).`);
+}
+
 function initDatabase() {
     // 1. Admin Control
     db.exec(`
@@ -152,10 +174,10 @@ function initDatabase() {
     addColumn('players', 'has_intel', 'INTEGER DEFAULT 0');
     // Alliance-wide intel VISIBILITY, as opposed to has_intel above, which latches to 1
     // forever the first time anyone captures a report and can therefore only ever answer
-    // "have we ever seen them" (2026-09-13). The game's Player detail carries an
-    // intelligenceReport whenever ANY member has vision — it names the capturer, e.g.
-    // capturedByPlayerName: "Moardin25" — and null when nobody does, so the sweep already
-    // observes the real thing every pass; we were simply discarding the zeros.
+    // "have we ever seen them" (2026-09-13). A profile page renders its table.ir-summary
+    // block whenever ANY member has vision and omits it when nobody does, so every profile
+    // scrape observes the real thing. (Written by the API sweep until 2026-09-15, which
+    // turned out to be blind to intel entirely — see sync.js's announceIntelVisibility.)
     //   intel_visible   the CONFIRMED state, NULL until a baseline is established
     //   intel_seen_raw  the most recent raw observation, which is what lets a change be
     //                   required to hold across two consecutive passes before it counts
@@ -470,6 +492,10 @@ function initDatabase() {
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     `);
+
+    // Runs here rather than beside the intel_* migrations above because its one-shot
+    // marker lives in app_settings, which only exists as of the statement right above.
+    resetIntelVisibilityBaseline();
 
     // --- DISCORD INCOMING ALERT TRACKING ---
     // Maps a game attacking-fleet id to the Discord message announcing it, so the
