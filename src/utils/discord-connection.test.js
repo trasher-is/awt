@@ -1,19 +1,32 @@
-// The Discord reconnection rules.
+// The Discord watchdog's restart rule.
 //
-// Written after the bot died silently in production (2026-09-15): it connected normally at
-// 14:41 and by 15:46 `!bio` was answering "Expected token to be set for this request, but
-// none was present" — discord.js reporting that the client had been torn down underneath us
-// after the gateway spent a while returning 503. The hub's whole reconnection strategy was a
-// single `.catch()` on the initial login that printed one line and returned, so the process
-// kept scraping and serving pages while every announcement went nowhere. Nobody noticed for
-// an hour, and only then because somebody typed a command.
+// ─── TWO BUGS, AND THE ONE THAT MATTERS ───────────────────────────────────────
+// First the bot died silently (2026-09-15): the gateway spent a while answering 503, the
+// client was torn down, and the hub's entire reconnection strategy was one `.catch()` on the
+// initial login. The process kept scraping and serving pages while every announcement —
+// incoming attacks included — went nowhere for an hour.
+//
+// Then the fix for that did not work either, which is the more useful failure. It added an
+// in-process reconnect: on noticing the bot was down, destroy() the client and login() again.
+// login() resolved every time, so the code reset its counters and declared victory, and the
+// client was never actually ready. The logs read "offline for 2 checks — reconnecting" over
+// and over, forever, and the bot stayed dead until a human restarted it.
+//
+// The reason it shipped is worth more than the fix: it was verified with a probe that only
+// exercised the FAILURE path — destroy() then login() with an invalid token, which reaches
+// token validation and rejects. Seeing the expected error proved the call was reachable and
+// proved nothing whatever about whether reconnecting works. Measuring the success path
+// against the real gateway takes one minute and says the opposite:
+//
+//   login() -> READY -> destroy() -> login()   login() RESOLVES, never reaches READY
+//   login(bad) -> rejects -> login(good)       login() RESOLVES, never reaches READY
+//
+// A discord.js 14.26 client is single-use. So the only recovery is a fresh process, and the
+// rule below is simply "how long do we wait before asking pm2 for one".
 //
 // Run with: node src/utils/discord-connection.test.js
 
-const {
-    nextRetryDelayMs, shouldAttemptRelogin,
-    RETRY_BASE_MS, RETRY_MAX_MS, NOT_READY_TICKS_BEFORE_RELOGIN,
-} = require('./discord-connection');
+const { shouldRestartProcess, OFFLINE_CHECKS_BEFORE_RESTART } = require('./discord-connection');
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail) => {
@@ -23,61 +36,57 @@ const ok = (name, cond, detail) => {
 
 console.log('discord-connection.test.js');
 
-console.log('\n── Backoff climbs, then stops climbing ' + '─'.repeat(38));
+console.log('\n── A healthy bot is never restarted ' + '─'.repeat(41));
 {
-    ok('the first retry waits the base delay, not zero — a failure must never spin',
-        nextRetryDelayMs(1) === RETRY_BASE_MS, nextRetryDelayMs(1));
-    ok('each further failure doubles the wait',
-        nextRetryDelayMs(2) === RETRY_BASE_MS * 2 && nextRetryDelayMs(3) === RETRY_BASE_MS * 4,
-        [nextRetryDelayMs(2), nextRetryDelayMs(3)]);
-    ok('but it is capped, so recovery never waits on a human',
-        nextRetryDelayMs(50) === RETRY_MAX_MS, nextRetryDelayMs(50));
-    // 2 ** 1000 is Infinity, and Math.min(Infinity, max) happens to be right — but only by
-    // luck. A NaN or negative count reaching the timer would be a hang, not a slow retry.
-    ok('an absurd or nonsense failure count still yields a real, finite delay',
-        [1000, 0, -5, NaN, undefined].every(n => {
-            const d = nextRetryDelayMs(n);
-            return Number.isFinite(d) && d >= RETRY_BASE_MS && d <= RETRY_MAX_MS;
-        }), [1000, 0, -5, NaN, undefined].map(nextRetryDelayMs));
+    ok('ready wins over any amount of history',
+        shouldRestartProcess({ ready: true, consecutiveNotReady: 9999 }) === false);
+    // The counter is reset on every ready check by the caller, so a bot that flickers back
+    // for one check has to earn the full count again before anything drastic happens.
+    ok('a single ready check is enough to call it recovered',
+        shouldRestartProcess({ ready: true, consecutiveNotReady: OFFLINE_CHECKS_BEFORE_RESTART }) === false);
 }
 
-console.log('\n── The watchdog waits before it intervenes ' + '─'.repeat(34));
+console.log('\n── Restarting is a last resort, not a first response ' + '─'.repeat(24));
 {
-    const decide = (o) => shouldAttemptRelogin({ loginInFlight: false, consecutiveNotReady: 0, ...o });
+    // discord.js recovers from ordinary blips by itself within seconds. Restarting the whole
+    // hub over one of those would trade a self-healing hiccup for interrupted scraping.
+    ok('one missed check does nothing', shouldRestartProcess({ ready: false, consecutiveNotReady: 1 }) === false);
+    ok('nor does being down for half the window',
+        shouldRestartProcess({ ready: false, consecutiveNotReady: Math.floor(OFFLINE_CHECKS_BEFORE_RESTART / 2) }) === false);
+    ok('nor the check just before the threshold',
+        shouldRestartProcess({ ready: false, consecutiveNotReady: OFFLINE_CHECKS_BEFORE_RESTART - 1 }) === false);
+    ok(`but ${OFFLINE_CHECKS_BEFORE_RESTART} consecutive misses does`,
+        shouldRestartProcess({ ready: false, consecutiveNotReady: OFFLINE_CHECKS_BEFORE_RESTART }) === true);
+    ok('and it keeps saying so while it stays down',
+        shouldRestartProcess({ ready: false, consecutiveNotReady: OFFLINE_CHECKS_BEFORE_RESTART + 50 }) === true);
 
-    ok('a connected bot is left alone', decide({ ready: true, consecutiveNotReady: 99 }) === false);
-
-    // The whole reason this is not a one-tick trigger: a client still completing its
-    // handshake is indistinguishable from a dead one, and tearing that down would restart
-    // the handshake — forever.
-    ok('one missed check is not yet a problem — it may just be still connecting',
-        decide({ ready: false, consecutiveNotReady: 1 }) === false);
-    ok(`${NOT_READY_TICKS_BEFORE_RELOGIN} in a row is`,
-        decide({ ready: false, consecutiveNotReady: NOT_READY_TICKS_BEFORE_RELOGIN }) === true);
-    ok('and it keeps trying while it stays down',
-        decide({ ready: false, consecutiveNotReady: 17 }) === true);
-
-    // login() throws on a client that is already logging in, so a second attempt would turn
-    // one outage into a stream of errors that each look like a new failure.
-    ok('never while an attempt is already running',
-        decide({ ready: false, consecutiveNotReady: 17, loginInFlight: true }) === false);
+    // At one check a minute this is the restart rate during a full Discord outage. Too eager
+    // and the hub spends an outage restarting itself; too patient and the alliance goes
+    // without incoming-attack alerts during exactly the event that needs them.
+    ok('the window is measured in minutes, not seconds or hours',
+        OFFLINE_CHECKS_BEFORE_RESTART >= 5 && OFFLINE_CHECKS_BEFORE_RESTART <= 30,
+        OFFLINE_CHECKS_BEFORE_RESTART);
 }
 
-console.log('\n── The actual production failure ' + '─'.repeat(44));
+console.log('\n── Replaying the loop that shipped broken ' + '─'.repeat(35));
 {
-    // What made this one nasty: no event fired. The client was simply not ready any more,
-    // which is precisely what a readiness poll notices and an event listener cannot.
+    // The old rule fired at 2 checks and then "reconnected" in-process, which reset the
+    // counter without ever reaching ready — so it re-fired every 2 checks and never escaped.
+    // Nothing resets the counter now except the client genuinely coming back, so a bot that
+    // stays down walks all the way to a restart instead of circling.
     let notReady = 0;
-    let reconnected = false;
-    for (let tick = 0; tick < 5; tick++) {
+    let restarted = false;
+    for (let tick = 1; tick <= OFFLINE_CHECKS_BEFORE_RESTART * 3; tick++) {
         notReady++;
-        if (shouldAttemptRelogin({ ready: false, loginInFlight: false, consecutiveNotReady: notReady })) {
-            reconnected = true;
-            break;
-        }
+        if (shouldRestartProcess({ ready: false, consecutiveNotReady: notReady })) { restarted = true; break; }
     }
-    ok('a bot that goes quiet with no error at all is still picked up within a few ticks',
-        reconnected && notReady === NOT_READY_TICKS_BEFORE_RELOGIN, { reconnected, notReady });
+    ok('a bot that never comes back reaches a restart rather than looping forever',
+        restarted && notReady === OFFLINE_CHECKS_BEFORE_RESTART, { restarted, notReady });
+
+    // And the case the very first version missed entirely: no error, no event, the client
+    // just quietly stops being ready. Readiness is the only signal that catches that.
+    ok('a bot that goes quiet with no error at all is still caught',
+        shouldRestartProcess({ ready: false, consecutiveNotReady: OFFLINE_CHECKS_BEFORE_RESTART }) === true);
 }
 
 console.log('\n' + '─'.repeat(75));
