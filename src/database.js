@@ -37,7 +37,15 @@ function addColumn(table, column, definition) {
 // already handles by recording silently — and a genuine first-ever capture is keyed on
 // has_intel, checked before that branch, so resetting cannot swallow the case this whole
 // fix is about.
-const INTEL_BASELINE_RESET_KEY = 'intel_visibility_baseline_reset_at';
+// Versioned so a reset can be re-run deliberately. v2 (2026-09-15): v1 fired against
+// production from a test run — src/utils/discord.test.js required database.js without
+// pointing AWT_DB_PATH anywhere, now fixed — eight minutes before the deploy carrying it.
+// It cleared the baseline and marked itself done while the OLD blind sweep was still the
+// running code, so that sweep spent those eight minutes writing 43 fresh "confirmed not
+// visible" rows on no evidence, three of them for players we hold intel on. Those three are
+// exactly the false "Intel regained" this reset exists to prevent, and v1's marker meant it
+// could never clean them up itself.
+const INTEL_BASELINE_RESET_KEY = 'intel_visibility_baseline_reset_v2_at';
 function resetIntelVisibilityBaseline() {
     const done = db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(INTEL_BASELINE_RESET_KEY);
     if (done) return;
