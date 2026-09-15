@@ -75,6 +75,16 @@ export function fmtIntelDate(val) {
     return formatLocalDateTime(val, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }, '-');
 }
 
+// Has anything ever been captured for this player? The "Last Intel" column reads "-" when
+// nothing has, and the Player Archive's "Hide with intel" filter asks precisely that
+// question — so it goes through the same parse the column does, rather than a second rule
+// (has_intel, say) that could quietly disagree with what the reader is looking at. Some rows
+// scraped before intel_updated_at existed carry has_intel with no timestamp, and those show
+// a dash, so for this filter they are exactly what the reader means by "no intel yet".
+export function hasIntelTimestamp(val) {
+    return !!parseTimestamp(val);
+}
+
 // True if the intel timestamp is parseable and older than 24h (used to grey stale sciences).
 export function isIntelStale(val, now = Date.now()) {
     const d = parseTimestamp(val);

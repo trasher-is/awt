@@ -86,6 +86,17 @@ async function loadEsm(rel, tmp) {
         SC.fmtIntelDate(sqliteTimestamp).includes(`${localHour}:50`)
         && !/\b(?:AM|PM)\b/.test(SC.fmtIntelDate(sqliteTimestamp)));
     ok('invalid intel dates keep the existing missing-value marker', SC.fmtIntelDate('not a date') === '-');
+
+    // The Player Archive's "Hide with intel" filter leaves exactly the rows whose Last Intel
+    // column reads "-", so it must agree with that column on every value, not merely on the
+    // obvious ones. Asserted against fmtIntelDate itself rather than a second list of
+    // expectations, which is the only way the two cannot drift.
+    ok('hasIntelTimestamp agrees with what the Last Intel column actually prints',
+        [sqliteTimestamp, timestamp, offsetTimestamp, 'not a date', '', null, undefined, 0]
+            .every(value => SC.hasIntelTimestamp(value) === (SC.fmtIntelDate(value) !== '-')),
+        [sqliteTimestamp, 'not a date', '', null, undefined, 0].map(v => [v, SC.hasIntelTimestamp(v), SC.fmtIntelDate(v)]));
+    ok('a player who has never been scanned counts as having no intel',
+        SC.hasIntelTimestamp(null) === false && SC.hasIntelTimestamp(sqliteTimestamp) === true);
     ok('intel freshness changes only after 24 elapsed hours for either stored date format',
         [sqliteTimestamp, timestamp, offsetTimestamp].every(value =>
             !SC.isIntelStale(value, Date.parse(timestamp) + 24 * 3600000)

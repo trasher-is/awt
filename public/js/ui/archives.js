@@ -3,7 +3,7 @@ import { esc } from '../utils/escape.js';
 import { navToIframe } from './search.js';
 // The three player-stats tables (players archive, war room, alliance stats) are column-
 // driven: header, rows, sort and the column picker all come from one definition per column.
-import { STAT_TABLES, renderHeaderCells, renderRowCells, sortRows, enrichWarRoomRow } from './stat-columns.js';
+import { STAT_TABLES, renderHeaderCells, renderRowCells, sortRows, enrichWarRoomRow, hasIntelTimestamp } from './stat-columns.js';
 import { mountColumnPicker } from './column-picker.js';
 import '../utils/battle-model.js';   // side-effect import: cvOf, so CV is defined once
 import '../utils/parse-number.js';   // side-effect import: locale-aware sorting
@@ -21,6 +21,20 @@ let rawDbPlayers = [];
 // toggle stays hidden in that case rather than offering a filter that would hide nobody.
 let viewerAllianceId = null;
 const HIDE_OWN_ALLY_KEY = 'awt.playersDb.hideOwnAlliance';
+const HIDE_WITH_INTEL_KEY = 'awt.playersDb.hideWithIntel';
+
+// A filter checkbox that survives closing the panel. localStorage is wrapped because it
+// throws outright in a browser set to block site data, and a filter failing to be remembered
+// must never take the whole Player Archive down with it.
+function wireRememberedToggle(panel, selector, storageKey, render) {
+    const box = panel.querySelector(selector);
+    if (!box) return;
+    try { box.checked = localStorage.getItem(storageKey) === '1'; } catch (e) { /* blocked storage */ }
+    box.addEventListener('change', () => {
+        try { localStorage.setItem(storageKey, box.checked ? '1' : '0'); } catch (e) { /* blocked storage */ }
+        render();
+    });
+}
 const playerSort = { col: 'points', asc: false };
 let rawDbSystems = [], sysDbSortCol = 'id', sysDbSortAsc = true;
 let rawDbPlanets = [], plnDbSortCol = 'system_id', plnDbSortAsc = true;
@@ -96,14 +110,8 @@ export async function openDatabasePanel() {
         // A new column always sorts descending first, as this table has always done.
         wireStatTable({ panel, table: STAT_TABLES.players, headRowId: 'players-db-head-row', pickerMountId: 'players-db-columns', tableId: 'playersDbTable', tableKey: 'players', sortState: playerSort, defaultAsc: () => false, render: renderPlayerTable });
         panel.querySelector('#db-search-input')?.addEventListener('input', renderPlayerTable);
-        const hideBox = panel.querySelector('#db-hide-own-ally');
-        if (hideBox) {
-            try { hideBox.checked = localStorage.getItem(HIDE_OWN_ALLY_KEY) === '1'; } catch (e) { /* private mode */ }
-            hideBox.addEventListener('change', () => {
-                try { localStorage.setItem(HIDE_OWN_ALLY_KEY, hideBox.checked ? '1' : '0'); } catch (e) { /* private mode */ }
-                renderPlayerTable();
-            });
-        }
+        wireRememberedToggle(panel, '#db-hide-own-ally', HIDE_OWN_ALLY_KEY, renderPlayerTable);
+        wireRememberedToggle(panel, '#db-hide-with-intel', HIDE_WITH_INTEL_KEY, renderPlayerTable);
         // Resolved once per panel build, not per render. Failing to resolve leaves the toggle
         // hidden, which is the honest outcome: with no alliance to compare against, ticking
         // it would filter nothing and look broken.
@@ -718,10 +726,13 @@ function renderPlayerTable() {
     const q = (input ? input.value : '').toLowerCase();
     const hideOwn = document.getElementById('db-hide-own-ally')?.checked
         && Number.isInteger(viewerAllianceId);
+    const hideWithIntel = !!document.getElementById('db-hide-with-intel')?.checked;
     const f = rawDbPlayers
         // Compared by alliance id, not tag: a tag is display text that two alliances can
         // share and that changes when one renames itself, and the row already carries the id.
         .filter(p => !hideOwn || p.alliance_id !== viewerAllianceId)
+        // Leaves exactly the rows whose Last Intel column reads "-": the scanning to-do list.
+        .filter(p => !hideWithIntel || !hasIntelTimestamp(p.intel_updated_at))
         .filter(p => (p.name && p.name.toLowerCase().includes(q)) || (p.id && p.id.toString().includes(q)) || (p.alliance_tag && p.alliance_tag.toLowerCase().includes(q)));
     const table = STAT_TABLES.players;
     const sorted = sortRows(f, table.columns, playerSort.col, playerSort.asc);
