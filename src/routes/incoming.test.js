@@ -169,6 +169,30 @@ function reset() {
         ok('a timed announcement still adopts the legacy untimed alert', untimed.status === 200 && live.body.edited === true && calls[0].key === base && calls[1].key === base, live);
         const untimedAgain = await post(server, 'announce', report(0));
         ok('a genuinely untimed report still edits the known live wave', untimedAgain.status === 200 && untimedAgain.body.edited === true && calls.at(-1).key === base, untimedAgain);
+
+        // 2026-09-15: the alert named the attacker and the planet but never the player
+        // being attacked, so readers could not tell whose planet was in danger.
+        reset();
+        db.prepare('INSERT INTO systems (id, name, x, y) VALUES (?, ?, ?, ?)').run(4321, 'SyntheticTargetSystem', 2, 2);
+        db.prepare('INSERT INTO alliances (id, name, tag) VALUES (?, ?, ?)').run(77, 'SyntheticAlliance', 'SYN');
+        db.prepare('INSERT INTO players (id, name, alliance_id) VALUES (?, ?, ?)').run(9001, 'SyntheticDefender', 77);
+        db.prepare('INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id) VALUES (?, ?, ?, ?)').run(990001, 4321, 7, 9001);
+        db.prepare('INSERT INTO app_users (game_name, password_hash, discord_id) VALUES (?, ?, ?)').run('SyntheticDefender', 'synthetic', '424242');
+        const owned = await post(server, 'announce', {
+            attacker: { name: 'SyntheticAttacker' },
+            target: { systemId: 4321, planetIndex: 7, planetName: 'SyntheticTargetSystem #7' },
+            arrivalUnix: T1, cv: 100
+        });
+        const ownedMsg = messages.get(`4321:7:syntheticattacker:${T1}`);
+        ok('the alert names the attacked player', owned.status === 200 && /SyntheticDefender/.test(ownedMsg), ownedMsg);
+        ok('and their alliance tag', /\[SYN\]/.test(ownedMsg || ''), ownedMsg);
+        ok('and pings them — a defenceless owner never appears in the roster below',
+            /<@424242>/.test(ownedMsg || ''), ownedMsg);
+
+        reset();
+        const unowned = await post(server, 'announce', report(T1));
+        ok('a target whose owner we have never scanned still gets its alert, without a target line',
+            unowned.status === 200 && !/🎯/.test(messages.get(key1) || ''), messages.get(key1));
     } finally {
         Date.now = savedNow;
         await new Promise(resolve => server.close(resolve));
