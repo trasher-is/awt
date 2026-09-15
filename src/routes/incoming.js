@@ -2,6 +2,7 @@ const express = require('express');
 const systemsRepo = require('../repositories/systems');
 const playersRepo = require('../repositories/players');
 const incomingRepo = require('../repositories/incoming');
+const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
 const { sendOrEditIncoming, replyToIncoming, updateIncomingCover } = require('../discord_bot');
 const { formatTime } = require('../utils/travel-calc');
@@ -49,10 +50,35 @@ router.get('/incoming/stats', requireAuth, (req, res) => {
     }
 });
 
-function buildAnnounce(data, stats, result, alertKey) {
+// Who is being attacked. The game's incoming report names only the attacker and the
+// planet, so the defender is resolved from our own planet data — blank for a planet we
+// have never scanned, or one whose owner we don't know.
+function resolveTargetOwner(target) {
+    if (!target || target.systemId == null || target.planetIndex == null) return null;
+    try {
+        const row = systemsRepo.getPlanetOwnerName(target.systemId, target.planetIndex);
+        if (!row || !row.name) return null;
+        let mention = null;
+        try {
+            const u = usersRepo.getUserMentionByGameName(row.name.toLowerCase());
+            mention = u && u.discord_id ? `<@${u.discord_id}>` : null;
+        } catch (e) { /* no linked Discord account */ }
+        return { name: row.name, allianceTag: row.alliance_tag || null, mention };
+    } catch (e) {
+        return null;
+    }
+}
+
+function buildAnnounce(data, stats, result, alertKey, owner) {
     const L = [];
     const planet = data.target.planetName || 'Planet';
     L.push(`🚨 **Incoming Attack** — ${planet} \`[${data.target.systemId}] #${data.target.planetIndex}\``);
+
+    // The attacked player, mentioned so they are pinged even when they have no fleet of
+    // their own and so never appear in the defender roster below.
+    if (owner) {
+        L.push(`🎯 **${owner.name}**${owner.allianceTag ? ` [${owner.allianceTag}]` : ''}${owner.mention ? ' ' + owner.mention : ''}`);
+    }
 
     let atk = `⚔️ **${data.attacker.name}**`;
     if (data.attacker.tag) atk += ` [${data.attacker.tag}]`;
@@ -86,16 +112,12 @@ function buildAnnounce(data, stats, result, alertKey) {
 
 // Run the interceptor analysis for an announce payload. Returns the computeInterceptors
 // result (or null if the target system isn't mapped / has no coords).
-function computeDefenders(data) {
+function computeDefenders(data, owner) {
     if (!data.target || data.target.systemId == null || data.target.planetIndex == null) return null;
 
     // Defender = the targeted planet's current owner (an alliance member), so the
     // interceptor search is scoped to our alliance.
-    let defenderName = null;
-    try {
-        const row = systemsRepo.getPlanetOwnerName(data.target.systemId, data.target.planetIndex);
-        if (row) defenderName = row.name;
-    } catch (e) { /* fall back to active-users scope */ }
+    const defenderName = (owner === undefined ? resolveTargetOwner(data.target) : owner)?.name || null;
 
     const arr = parseInt(data.arrivalUnix, 10);
     const result = computeInterceptors({
@@ -268,8 +290,9 @@ async function announceIncoming(data) {
         if (row) stats = { ...row, statLine: statLine(row) };
     }
 
-    const defenders = computeDefenders(data);
-    const message = buildAnnounce(data, stats, defenders, alertKey);
+    const owner = resolveTargetOwner(data.target);
+    const defenders = computeDefenders(data, owner);
+    const message = buildAnnounce(data, stats, defenders, alertKey, owner);
 
     // A known row remains resolvable after landing for Cover/history. If arrival passed
     // during resolution or defender analysis, it still must not reach the Discord sender.
@@ -291,7 +314,7 @@ async function announceIncoming(data) {
         const newcomers = current.filter(n => !prevSet.has(n));
 
         if (sent.edited && newcomers.length > 0) {
-            const planetLabel = `${data.target.planetName || 'Planet'} [${data.target.systemId}] #${data.target.planetIndex}`;
+            const planetLabel = `${data.target.planetName || 'Planet'} [${data.target.systemId}] #${data.target.planetIndex}${owner ? ` (${owner.name})` : ''}`;
             const reply = buildReply(defenders, planetLabel, data.target);
             if (reply) replied = await replyToIncoming(sent.channelId, sent.messageId, reply);
         }

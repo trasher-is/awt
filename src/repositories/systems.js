@@ -444,8 +444,10 @@ function getPlanetsForAllianceTag(tag) {
 }
 
 const getPlanetOwnerNameStmt = db.prepare(`
-    SELECT pl.name FROM planets pn
+    SELECT pl.name, a.tag AS alliance_tag
+    FROM planets pn
     JOIN players pl ON pn.owner_id = pl.id
+    LEFT JOIN alliances a ON pl.alliance_id = a.id
     WHERE pn.system_id = ? AND pn.planet_index = ?
 `);
 function getPlanetOwnerName(systemId, planetIndex) {
