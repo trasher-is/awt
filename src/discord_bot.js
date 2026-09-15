@@ -22,6 +22,7 @@ const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require
 const battleModel = require('../public/js/utils/battle-model.js');
 const visionModel = require('../public/js/utils/vision-model.js');
 const { buildCommands, suggestPlayers, suggestSystems, isEphemeral } = require('./discord-commands');
+const { nextRetryDelayMs, shouldAttemptRelogin } = require('./utils/discord-connection');
 
 const client = new Client({
     intents: [
@@ -31,16 +32,38 @@ const client = new Client({
     ]
 });
 
+// clientReady fires again on every RECONNECT, not only the first connect (2026-09-15, when
+// reconnection became possible at all — see initDiscordBot). The timer interval below must
+// therefore be created once for the life of the process: without this guard each reconnect
+// would stack another 60s checkDueTimers loop on top of the last, and a bot that had
+// reconnected a few times would fire the same due timer several times over.
+let timerLoopStarted = false;
 client.on('clientReady', () => {
     console.log(`[Discord] Tactical Bot active and logged in as ${client.user.tag}`);
     // Run both checks immediately on connect: anything that came due while the process
-    // was down fires now rather than waiting for the first tick.
+    // was down — or while the gateway was unreachable — fires now rather than waiting for
+    // the first tick.
     const tick = () => {
         checkDueTimers().catch(err => console.error('[Discord] Timer check failed:', err.message));
     };
     tick();
-    setInterval(tick, 60 * 1000);
+    if (!timerLoopStarted) {
+        timerLoopStarted = true;
+        setInterval(tick, 60 * 1000);
+    }
     registerSlashCommands().catch(err => console.error('[Discord] Slash command registration failed:', err.message));
+});
+
+// discord.js gives up for good on a session it cannot recover, and says so here. Without a
+// listener the client simply stops being a bot while the process carries on as if nothing
+// happened — which is exactly how this went unnoticed for an hour.
+client.on('invalidated', () => {
+    console.error('[Discord] Session invalidated by the gateway — reconnecting.');
+    reconnectSoon();
+});
+client.on('error', (err) => console.error('[Discord] Client error:', err && err.message));
+client.on('shardDisconnect', (event, id) => {
+    console.error(`[Discord] Shard ${id} disconnected (code ${event && event.code}) — the watchdog will reconnect if it stays down.`);
 });
 
 // The "🛡️ I cover this" button attached to every incoming alert. customId carries the
@@ -1868,14 +1891,72 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
+// --- CONNECTION SUPERVISOR (2026-09-15) ---
+// Replaces a bare client.login().catch(log). See src/utils/discord-connection.js for the
+// outage this was written after: the bot was torn down mid-life and nothing retried, so the
+// hub went on running with every announcement silently going nowhere.
+let botToken = null;
+let loginInFlight = false;
+let loginFailures = 0;
+let consecutiveNotReady = 0;
+let retryTimer = null;
+
+async function attemptLogin(reason) {
+    if (!botToken || loginInFlight || client.isReady()) return;
+    loginInFlight = true;
+    try {
+        // A client discord.js has torn down still holds enough state that login() rejects
+        // with "Already logged in", so clear it first. Harmless on a client that never
+        // connected, which is why this is unconditional rather than guessing the state.
+        try { await client.destroy(); } catch (_) { /* nothing to tear down */ }
+        await client.login(botToken);
+        loginFailures = 0;
+        consecutiveNotReady = 0;
+    } catch (err) {
+        loginFailures++;
+        const delay = nextRetryDelayMs(loginFailures);
+        console.error(`[Discord] Failed to connect (attempt ${loginFailures}, ${reason}): ${err.message} — retrying in ${Math.round(delay / 1000)}s`);
+        reconnectSoon(delay);
+    } finally {
+        loginInFlight = false;
+    }
+}
+
+function reconnectSoon(delayMs = 0) {
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = setTimeout(() => {
+        retryTimer = null;
+        attemptLogin('retry');
+    }, delayMs);
+    // Never hold the process open just to wait for a reconnect.
+    if (typeof retryTimer.unref === 'function') retryTimer.unref();
+}
+
+// The backstop for everything the events above do not catch — including the actual observed
+// failure, where the client ended up tokenless with no event we were listening for. Polling
+// readiness needs no knowledge of HOW it broke, which is the point: the previous design only
+// handled the one failure mode someone had thought of.
+function startConnectionWatchdog(intervalMs = 60 * 1000) {
+    const timer = setInterval(() => {
+        if (client.isReady()) { consecutiveNotReady = 0; return; }
+        consecutiveNotReady++;
+        if (shouldAttemptRelogin({ ready: false, loginInFlight, consecutiveNotReady })) {
+            console.error(`[Discord] Bot has been offline for ${consecutiveNotReady} checks — reconnecting.`);
+            attemptLogin('watchdog');
+        }
+    }, intervalMs);
+    if (typeof timer.unref === 'function') timer.unref();
+    return timer;
+}
+
 function initDiscordBot(token) {
     if (!token) {
         console.log('[Discord] No DISCORD_TOKEN found in environment. Bot disabled.');
         return;
     }
-    client.login(token).catch(err => {
-        console.error('[Discord] Failed to connect:', err.message);
-    });
+    botToken = token;
+    attemptLogin('startup');
+    startConnectionWatchdog();
     return client;
 }
 
