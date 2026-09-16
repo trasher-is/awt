@@ -114,9 +114,9 @@ client.on('interactionCreate', async (interaction) => {
 // system_plans comment and the !splan command below for the full shape. This section is
 // the message/button/modal presentation; systemPlansRepo owns the data.
 
-// Discord's own cap on a Paragraph text input — the plain-text write path enforces the
-// same limit so nothing ever gets written that the Edit button couldn't later reopen.
-const SYSTEM_PLAN_MAX_LENGTH = 4000;
+// Shared with the web panel's own inline editor (routes/intel.js), via systemPlansRepo —
+// see that module's own comment for why this lives there now instead of as a local const.
+const { SYSTEM_PLAN_MAX_LENGTH } = systemPlansRepo;
 
 function systemPlansEnabled() {
     const row = settingsRepo.getSetting('system_plans_enabled');
