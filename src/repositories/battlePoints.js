@@ -183,87 +183,116 @@ function getLeaderboards(sinceIso, limit = 10, scope = 'members', allianceId = n
 // --- Dynamic (non-linear) points system ---
 // The flat getCvRatio()/getPopRatio() system above credits every CV/pop unit equally
 // regardless of kill size. This section is the opposite: a single bigger kill is worth
-// disproportionately more PER UNIT than a small one (design discussion, 2026-09-11 —
-// killing a 50k CV fleet late-round should not earn the same per-CV rate as a 300 CV
-// early skirmish). Deliberately evaluated PER BATTLE REPORT / PER BOMBARDMENT EVENT, never
-// on a player's running total — applying either curve to a cumulative total would make a
-// player's score for past fights keep shifting as new ones are added, and would reward
-// someone who's already scored a lot with a better rate on their next small kill too;
-// neither is the intent. Sum the per-event points instead.
-function getPopBandWidth() {
-    return Math.max(1, Math.round(settingNumber('battle_points_pop_band_width', 9)));
-}
-function getCvExponent() {
-    return settingNumber('battle_points_cv_exponent', 1.5);
-}
-function getCvAnchorCv() {
-    return settingNumber('battle_points_cv_anchor_cv', 5000);
-}
-function getCvAnchorPop() {
-    return settingNumber('battle_points_cv_anchor_pop', 20);
-}
-// Applied at the very end, after the curves and the CV/pop anchor calibration below, to
-// BOTH cv_points and pop_points identically — so it can never disturb the anchor
-// equivalence (cvDynamicPoints(anchorCv) === popDynamicPoints(anchorPop) holds at any
-// scale) or the relative fairness between a small and a huge kill of the same type.
+// disproportionately more PER UNIT than a small one. Deliberately evaluated PER BATTLE
+// REPORT / PER BOMBARDMENT EVENT, never on a player's running total — applying either
+// curve to a cumulative total would make a player's score for past fights keep shifting as
+// new ones are added, and would reward someone who's already scored a lot with a better
+// rate on their next small kill too; neither is the intent. Sum the per-event points
+// instead.
 //
-// 1, not 20 (2026-09-16c — live feedback: Moardin killed 3 population and !glory showed
-// 60 pop points, which read as wildly disproportionate against his own 3.3 CV points from
-// the same day). The user's own spec, verified against the formula rather than guessed:
-// "3 pop should give 3 points" AND "20 pop [should give] the same points as 5000 CV". Band
-// 1's rate is exactly 1 point per population (see popDynamicPoints below), so raw
-// popDynamicPoints(3) is already 3 — scale=1 is the one value that satisfies the first
-// requirement literally. The second requirement was never actually about scale: the
-// anchor equivalence is built into k below and holds at every scale, 20 included, so it
-// was never the source of the "too much" feeling — the FLAT ×20 on top of it was.
+// ─── HISTORY (2026-09-16d): this was originally a smooth curve, not a tiered one ─────────
+// popDynamicPoints was a marginal/progressive staircase (1 pt/pop for the first band width,
+// 2 for the next, etc. — like an income tax bracket, only the portion IN each band taxed at
+// that band's rate) and cvDynamicPoints was k*cv^exponent, a smooth power curve, with k
+// derived from one calibration anchor so the two curves crossed at a chosen point (20 pop
+// == 5000 CV). It went through a display-scale-only fix first (60 pop points for a 3-pop
+// kill, spotted live against Moardin's own 3.3 CV points the same day — see the prior
+// version of this file for that incident), and THAT fix then made the CV curve's smallest
+// kills round to near-zero (a 300 CV skirmish at ~0.05 points), which is what prompted this
+// rewrite rather than another scale tweak.
 //
-// Previously 20, "so early-round kills don't all round to fractions of a point" — a real
-// tradeoff this reverses: a 300 CV skirmish now shows as ~0.05 points instead of ~1, and a
-// player's total across many small fights will look smaller. That was accepted as the
-// right trade for population no longer scoring far above what a comparable CV kill would.
-function getDisplayScale() {
-    return settingNumber('battle_points_display_scale', 1);
-}
+// Both curves are now FLAT RATE PER TIER: the tier the total falls into decides ONE rate,
+// and the WHOLE amount is charged at that rate — not a marginal accumulation. Verified
+// against the user's own worked examples rather than guessed, exactly:
+//   pop:  4 -> 4pts, 8 -> 10pts, 13 -> 19.5pts, 19 -> 33.25pts
+//   cv: 100 -> 1pt, 1000 -> 15pts, 5000 -> 100pts, 10000 -> 300pts, 50000 -> 2000pts,
+//       100000 -> ~5556pts, 150000 -> ~13333pts, 200000 -> 30000pts
+// A single power curve could not fit the CV examples (log-log regression against them came
+// out ~40% short at the 200,000 CV end), which is why CV is tiered too now instead of
+// staying a smooth formula — the two curves are deliberately the same SHAPE of idea
+// (bigger tiers cost more per unit) even though their tier tables look different, because
+// population realistically tops out in the tens/low hundreds per hit while CV realistically
+// spans into the hundreds of thousands.
 
-function round1(n) {
-    return Math.round(n * 10) / 10;
+// --- population: flat rate per tier ---
+// tier 0 is [1, tier0Width] at rate 1.0; every tier after that is tierWidth wide and costs
+// tierStep more per point than the one before it. Defaults (4, 5, 0.25) reproduce the
+// user's exact worked examples above.
+function getPopTier0Width() {
+    return Math.max(1, Math.round(settingNumber('battle_points_pop_tier0_width', 4)));
 }
-
-// Population killed in ONE event: a fixed band width W, marginal rate = the band number —
-// 1 point/pop for the first W population, 2 points/pop for the next W, 3 for the next W,
-// and so on indefinitely. Killing further into a planet's population costs
-// disproportionately more per pop than the first few, matching how much longer the planet
-// takes to regrow. A single tunable width extends forever, unlike a hand-picked bracket
-// table (which couldn't be made to extend past its last manually-chosen boundary).
+function getPopTierWidth() {
+    return Math.max(1, Math.round(settingNumber('battle_points_pop_tier_width', 5)));
+}
+function getPopTierStep() {
+    return settingNumber('battle_points_pop_tier_step', 0.25);
+}
+function popTierRate(pop) {
+    const w0 = getPopTier0Width();
+    if (pop <= w0) return 1.0;
+    const w = getPopTierWidth();
+    const tier = 1 + Math.floor((pop - w0 - 1) / w);
+    return 1.0 + getPopTierStep() * tier;
+}
 function popDynamicPoints(pop) {
     if (!Number.isFinite(pop) || pop <= 0) return 0;
-    const w = getPopBandWidth();
-    let total = 0;
-    let remaining = Math.floor(pop);
-    let band = 1;
-    while (remaining > 0) {
-        const unitsInBand = Math.min(remaining, w);
-        total += unitsInBand * band;
-        remaining -= unitsInBand;
-        band++;
-    }
-    return total;
+    const p = Math.floor(pop);
+    return round2(p * popTierRate(p));
 }
 
-// CV killed in ONE event: points = k * cv^exponent, a smooth superlinear curve — CV spans
-// ~30 early-round to 100k+ late-round (3+ orders of magnitude), which a bracket table
-// would need constant retuning to cover. k is not a free constant: it is derived from ONE
-// calibration anchor ("cvAnchorPop population killed feels roughly equal to cvAnchorCv CV
-// killed"), expressed via popDynamicPoints itself so the two curves stay in sync if the
-// pop band width is ever retuned independently.
+// --- CV: flat rate per tier ---
+// Unlike population's evenly-spaced bands, these boundaries and rates were reverse-
+// engineered directly from the user's eight worked examples (six land exactly, two are off
+// by under a point — see the module header above) — there is no clean arithmetic formula
+// connecting them the way there is for population's +0.25-per-tier pattern, so the table is
+// explicit rather than generated. Admin-tunable as a whole via one JSON setting (same
+// pattern as rz_ta's JSON blob elsewhere in this app) rather than five separate scalar
+// settings, since the tiers only make sense adjusted together — moving one boundary without
+// its neighbors would reintroduce the exact "points go down as CV goes up" inversion this
+// design has to avoid (see below).
+const DEFAULT_CV_TIERS = [
+    { max: 999, rate: 0.01 },
+    { max: 4999, rate: 0.015 },
+    { max: 9999, rate: 0.02 },
+    { max: 49999, rate: 0.03 },
+    { max: 99999, rate: 0.04 },
+    { max: 149999, rate: 0.05556 },
+    { max: 199999, rate: 0.08889 },
+    { max: null, rate: 0.15 }, // null = no upper bound (the top/final tier)
+];
+function isValidCvTiers(tiers) {
+    if (!Array.isArray(tiers) || tiers.length === 0) return false;
+    return tiers.every((t, i) => t && typeof t.rate === 'number' && t.rate > 0
+        && (t.max === null ? i === tiers.length - 1 : (typeof t.max === 'number' && t.max > 0)));
+}
+function getCvTiers() {
+    const row = settingsRepo.getSetting('battle_points_cv_tiers');
+    if (row && row.value) {
+        try {
+            const parsed = JSON.parse(row.value);
+            if (isValidCvTiers(parsed)) return parsed;
+        } catch (err) { /* malformed setting — fall through to the built-in table */ }
+    }
+    return DEFAULT_CV_TIERS;
+}
+function cvTierRate(cv) {
+    const tiers = getCvTiers();
+    for (const tier of tiers) {
+        if (tier.max === null || cv <= tier.max) return tier.rate;
+    }
+    return tiers[tiers.length - 1].rate;
+}
 function cvDynamicPoints(cv) {
     if (!Number.isFinite(cv) || cv <= 0) return 0;
-    const exponent = getCvExponent();
-    const anchorCv = getCvAnchorCv();
-    const anchorPoints = popDynamicPoints(getCvAnchorPop());
-    if (anchorCv <= 0 || anchorPoints <= 0) return 0;
-    const k = anchorPoints / Math.pow(anchorCv, exponent);
-    return k * Math.pow(cv, exponent);
+    return round2(cv * cvTierRate(cv));
+}
+
+// Two decimals, not one: the population tier step defaults to a quarter-point (0.25), so
+// e.g. 19 pop at rate 1.75 is exactly 33.25 — a value round-to-1-decimal would misreport as
+// 33.3. Caught by the module's own regression test before shipping, against the exact
+// numbers the user worked out by hand.
+function round2(n) {
+    return Math.round(n * 100) / 100;
 }
 
 // Unaggregated per-event CV/pop credit rows — deliberately parallel to getCvLeaderboard's/
@@ -343,9 +372,9 @@ function getPopCreditRows(sinceIso, scope, allianceId) {
 function getDynamicLeaderboard(sinceIso, limit = 10, scope = 'members', allianceId = null) {
     const cvRows = getCvCreditRows(sinceIso, scope, allianceId);
     const popRows = getPopCreditRows(sinceIso, scope, allianceId);
-    // Already-final, already-scaled points from bonusGoals.js (e.g. a tiered bonus for
-    // hitting a currently-ranked planet) — added straight into the total below, AFTER the
-    // CV/pop side's own display scale, not run through any curve of its own.
+    // Already-final points from bonusGoals.js (e.g. a tiered bonus for hitting a
+    // currently-ranked planet) — added straight into the total below, not run through
+    // either tier table above.
     const bonusByPlayer = bonusGoalsRepo.getAwardedPointsByPlayer(sinceIso, scope, allianceId);
 
     const totals = new Map();
@@ -370,20 +399,19 @@ function getDynamicLeaderboard(sinceIso, limit = 10, scope = 'members', alliance
         if (!totals.has(playerId)) entryFor(playerId, bonus.player_name);
     }
 
-    const scale = getDisplayScale();
     const rows = [...totals.values()]
         .map(e => {
             const bonus = bonusByPlayer.get(e.player_id);
-            const bonusPoints = bonus ? round1(bonus.bonus_points) : 0;
-            const cvPoints = round1(e.cv_points * scale);
-            const popPoints = round1(e.pop_points * scale);
+            const bonusPoints = bonus ? round2(bonus.bonus_points) : 0;
+            const cvPoints = round2(e.cv_points);
+            const popPoints = round2(e.pop_points);
             return {
                 player_id: e.player_id,
                 player_name: e.player_name,
                 cv_points: cvPoints,
                 pop_points: popPoints,
                 bonus_points: bonusPoints,
-                points: round1(cvPoints + popPoints + bonusPoints),
+                points: round2(cvPoints + popPoints + bonusPoints),
             };
         })
         .filter(r => r.points > 0)
@@ -394,6 +422,7 @@ function getDynamicLeaderboard(sinceIso, limit = 10, scope = 'members', alliance
 module.exports = {
     getCvRatio, getPopRatio, getExcludedAllianceTags,
     getCvLeaderboard, getPopLeaderboard, getLeaderboards,
-    getPopBandWidth, getCvExponent, getCvAnchorCv, getCvAnchorPop, getDisplayScale,
+    getPopTier0Width, getPopTierWidth, getPopTierStep, popTierRate,
+    getCvTiers, cvTierRate, DEFAULT_CV_TIERS,
     popDynamicPoints, cvDynamicPoints, getDynamicLeaderboard,
 };

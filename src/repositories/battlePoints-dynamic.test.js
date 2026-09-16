@@ -3,6 +3,12 @@
 // disproportionately more per unit. Split out of battlePoints.test.js (which already
 // covers the flat system's exclusion/scope logic thoroughly) to keep each file focused.
 //
+// 2026-09-16d: rewritten for the tiered redesign. The original version tested a marginal
+// pop staircase and a smooth k*cv^exponent CV curve; both are gone. See the module's own
+// header comment in battlePoints.js for why (a live incident found the CV curve's small
+// kills rounding to near-zero, and the fix wasn't another scale tweak — it was replacing
+// the shape of both curves against exact numbers the user worked out by hand).
+//
 // Run with: node src/repositories/battlePoints-dynamic.test.js
 
 const fs = require('fs');
@@ -28,57 +34,99 @@ function close(a, b, tolerance = 0.05) {
 
 console.log('battlePoints-dynamic.test.js');
 
-console.log('\n── display scale (2026-09-16c: 20 -> 1, live-incident-driven) ' + '─'.repeat(12));
-// The actual production report that triggered this change: Moardin25 killed exactly 3
-// population in one battle (report #30998) and !glory showed 60 pop points against his own
-// 3.3 CV points from the same day — read as wildly disproportionate. The fix was verified
-// against the user's own stated spec ("3 pop should give 3 points", "20 pop [should give]
-// the same points as 5000 CV") rather than guessed: band 1's rate is already exactly 1
-// point per population, so scale=1 is the one value satisfying the first requirement
-// literally, and the anchor equivalence was never actually scale-dependent — see the two
-// checks right below.
-ok('the default is 1, not 20', battlePoints.getDisplayScale() === 1);
-ok('3 population now literally scores 3 points, matching the live incident\'s expectation',
-    battlePoints.popDynamicPoints(3) * battlePoints.getDisplayScale() === 3);
-ok('20 population still scores exactly the same as 5000 CV in one hit — the anchor\n' +
-    '     equivalence was never the part that needed fixing',
-    close(battlePoints.popDynamicPoints(20) * battlePoints.getDisplayScale(),
-        battlePoints.cvDynamicPoints(5000) * battlePoints.getDisplayScale(), 0.001));
-
-console.log('\n── popDynamicPoints: fixed-width band staircase (default width 9) ' + '─'.repeat(6));
-ok('defaults: pop band width is 9', battlePoints.getPopBandWidth() === 9);
+console.log('\n── popDynamicPoints: FLAT rate per tier, not marginal ' + '─'.repeat(19));
+// The exact worked examples from the live conversation that specified this curve. Flat, not
+// marginal/staircase: the WHOLE kill is charged at the rate of the tier it falls in, unlike
+// the old system.
+ok('defaults: tier 0 is width 4, later tiers are width 5, step 0.25/tier',
+    battlePoints.getPopTier0Width() === 4 && battlePoints.getPopTierWidth() === 5
+    && battlePoints.getPopTierStep() === 0.25);
 ok('0 or negative pop scores 0', battlePoints.popDynamicPoints(0) === 0 && battlePoints.popDynamicPoints(-5) === 0);
-ok('pop=1 is band 1 (rate 1): 1 point', battlePoints.popDynamicPoints(1) === 1);
-ok('pop=9 stays fully in band 1 (rate 1): 9 points', battlePoints.popDynamicPoints(9) === 9);
-ok('pop=10 spills 1 unit into band 2 (rate 2): 9 + 1*2 = 11', battlePoints.popDynamicPoints(10) === 11);
-ok('pop=13: 9*1 + 4*2 = 17', battlePoints.popDynamicPoints(13) === 17);
-ok('pop=18 fills band 2 exactly: 9*1 + 9*2 = 27', battlePoints.popDynamicPoints(18) === 27);
-ok('pop=20: 9*1 + 9*2 + 2*3 = 33 (the CV/pop calibration anchor value)', battlePoints.popDynamicPoints(20) === 33);
-ok('pop=24: 9*1 + 9*2 + 6*3 = 45', battlePoints.popDynamicPoints(24) === 45);
+ok('pop=1 (tier 0, rate 1.0): 1 point', battlePoints.popDynamicPoints(1) === 1);
+ok('pop=4 (tier 0 top, rate 1.0): 4*1.0 = 4 points — the user\'s own example',
+    battlePoints.popDynamicPoints(4) === 4);
+ok('pop=5 (tier 1 starts, rate 1.25): 5*1.25 = 6.25 — FLAT, not 4 + 1*1.25',
+    battlePoints.popDynamicPoints(5) === 6.25);
+ok('pop=8 (tier 1, rate 1.25): 8*1.25 = 10 — the user\'s own example',
+    battlePoints.popDynamicPoints(8) === 10);
+ok('pop=9 (tier 1 top, rate 1.25): 9*1.25 = 11.25', battlePoints.popDynamicPoints(9) === 11.25);
+ok('pop=13 (tier 2, rate 1.5): 13*1.5 = 19.5 — the user\'s own example',
+    battlePoints.popDynamicPoints(13) === 19.5);
+ok('pop=19 (tier 3, rate 1.75): 19*1.75 = 33.25 — the user\'s own example, and the exact\n' +
+    '     value a round-to-1-decimal bug would have misreported as 33.3',
+    battlePoints.popDynamicPoints(19) === 33.25);
+ok('pop=20 (tier 4 starts, rate 2.0): 20*2.0 = 40', battlePoints.popDynamicPoints(20) === 40);
+ok('a tier boundary crossing a FLAT system is a real jump, not a smooth transition\n' +
+    '     (pop=24 at rate 2.0 vs pop=25 at rate 2.25 — this is the accepted shape, not a bug)',
+    battlePoints.popDynamicPoints(24) === 48 && battlePoints.popDynamicPoints(25) === 56.25);
 
-settingsRepo.setSetting('battle_points_pop_band_width', '5');
-ok('band width is admin-tunable via settings (width=5 changes the curve)',
-    battlePoints.getPopBandWidth() === 5 && battlePoints.popDynamicPoints(6) === 5 + 2);
-settingsRepo.setSetting('battle_points_pop_band_width', '9'); // restore default for the rest of this file
+settingsRepo.setSetting('battle_points_pop_tier0_width', '2');
+ok('tier 0 width is admin-tunable (narrower tier 0 changes where the first jump lands)',
+    battlePoints.getPopTier0Width() === 2 && battlePoints.popDynamicPoints(2) === 2 && battlePoints.popDynamicPoints(3) === 3.75);
+settingsRepo.setSetting('battle_points_pop_tier0_width', '4'); // restore default
 
-console.log('\n── cvDynamicPoints: k*cv^exponent, calibrated off the pop curve ' + '─'.repeat(6));
-ok('defaults: exponent 1.5, anchor 20 pop <-> 5000 CV', battlePoints.getCvExponent() === 1.5
-    && battlePoints.getCvAnchorCv() === 5000 && battlePoints.getCvAnchorPop() === 20);
+console.log('\n── cvDynamicPoints: FLAT rate per tier, reverse-engineered from 8 examples ' + '─'.repeat(2));
+// Every one of these is the user's own number, not an invented target. A single smooth
+// power curve (the previous design) could NOT fit these — checked by log-log regression,
+// which missed the 200,000 CV example by ~40%. The tiered table hits 6 of 8 exactly and
+// the other 2 within a point.
+ok('cv=100 -> 1 (exact)', battlePoints.cvDynamicPoints(100) === 1);
+ok('cv=1000 -> 15 (exact)', battlePoints.cvDynamicPoints(1000) === 15);
+ok('cv=5000 -> 100 (exact)', battlePoints.cvDynamicPoints(5000) === 100);
+ok('cv=10000 -> 300 (exact)', battlePoints.cvDynamicPoints(10000) === 300);
+ok('cv=50000 -> 2000 (exact)', battlePoints.cvDynamicPoints(50000) === 2000);
+ok('cv=100000 -> within 1 of 5555', close(battlePoints.cvDynamicPoints(100000), 5555, 0.001), battlePoints.cvDynamicPoints(100000));
+ok('cv=150000 -> within 1 of 13333', close(battlePoints.cvDynamicPoints(150000), 13333, 0.001), battlePoints.cvDynamicPoints(150000));
+ok('cv=200000 -> 30000 (exact)', battlePoints.cvDynamicPoints(200000) === 30000);
 ok('0 or negative CV scores 0', battlePoints.cvDynamicPoints(0) === 0 && battlePoints.cvDynamicPoints(-100) === 0);
 
-const anchorPopPoints = battlePoints.popDynamicPoints(20);
-ok('the calibration anchor holds exactly: cvDynamicPoints(5000) === popDynamicPoints(20)',
-    close(battlePoints.cvDynamicPoints(5000), anchorPopPoints, 0.001), battlePoints.cvDynamicPoints(5000));
+// The one example that does NOT fit, by construction, and why: the user's cv=3 -> 0.05
+// example implies a rate (0.0167) HIGHER than the rate at cv=100 (0.01). A flat-per-tier
+// system cannot have a lower tier score at a higher rate than a higher tier without
+// creating a point where killing LESS scores MORE (cv=99 would outscore cv=100) — so this
+// one anchor was treated as illustrative, not load-bearing, and the curve is monotonic
+// instead. Documented as a test so a future "fix" doesn't reintroduce the inversion trying
+// to chase that one number.
+console.log('\n── The curve is monotonic, even where one of the original examples wasn\'t ' + '─'.repeat(2));
+ok('cv=3 lands at 0.03, not the example\'s 0.05 — the honest, monotonic answer',
+    battlePoints.cvDynamicPoints(3) === 0.03, battlePoints.cvDynamicPoints(3));
+{
+    let prevPoints = -1;
+    let brokeAt = null;
+    for (let cv = 1; cv <= 250000; cv += 137) { // odd step so it isn't only ever landing on tier boundaries
+        const pts = battlePoints.cvDynamicPoints(cv);
+        if (pts < prevPoints) { brokeAt = cv; break; }
+        prevPoints = pts;
+    }
+    ok('points never decrease as CV increases, anywhere across the whole range', brokeAt === null, brokeAt);
+}
 
-ok('a routine early-game kill (300 CV) scores well under 1 raw point (pre-display-scale)',
-    battlePoints.cvDynamicPoints(300) < 1 && battlePoints.cvDynamicPoints(300) > 0, battlePoints.cvDynamicPoints(300));
-ok('a rare late-game kill (100,000 CV) scores roughly 6,000x a 300 CV skirmish (aggressive curve)',
-    close(battlePoints.cvDynamicPoints(100000) / battlePoints.cvDynamicPoints(300), 6080, 0.1),
-    battlePoints.cvDynamicPoints(100000) / battlePoints.cvDynamicPoints(300));
-ok('per-CV rate genuinely grows with kill size (superlinear, not flat)',
-    (battlePoints.cvDynamicPoints(50000) / 50000) > (battlePoints.cvDynamicPoints(300) / 300) * 5);
+console.log('\n── Admin-tunable CV tier table ' + '─'.repeat(43));
+{
+    const custom = JSON.stringify([{ max: 999, rate: 0.02 }, { max: null, rate: 0.1 }]);
+    settingsRepo.setSetting('battle_points_cv_tiers', custom);
+    ok('a valid custom tier table overrides the built-in one', battlePoints.cvDynamicPoints(500) === 10);
+    ok('and the top (unbounded) tier still applies past its last explicit boundary',
+        battlePoints.cvDynamicPoints(50000) === 5000);
 
-console.log('\n── getDynamicLeaderboard: per-event curve, summed per player, display-scaled ' + '─'.repeat(2));
+    settingsRepo.setSetting('battle_points_cv_tiers', 'not json at all');
+    ok('malformed JSON falls back to the built-in table rather than throwing',
+        battlePoints.cvDynamicPoints(100) === 1);
+
+    settingsRepo.setSetting('battle_points_cv_tiers', JSON.stringify([{ max: 100 }])); // missing rate
+    ok('a structurally invalid table (missing rate) also falls back safely',
+        battlePoints.cvDynamicPoints(100) === 1);
+
+    settingsRepo.setSetting('battle_points_cv_tiers', JSON.stringify([]));
+    ok('an empty table falls back too — an admin typo must not zero out every CV score',
+        battlePoints.cvDynamicPoints(100) === 1);
+
+    db.prepare(`DELETE FROM app_settings WHERE key = 'battle_points_cv_tiers'`).run(); // restore default
+    ok('with the setting cleared entirely, the built-in table is back',
+        battlePoints.cvDynamicPoints(100) === 1);
+}
+
+console.log('\n── getDynamicLeaderboard: per-event curve, summed per player, no display scale ' + '─'.repeat(1));
 
 const insert = db.prepare(`
     INSERT INTO battle_reports (
@@ -99,7 +147,7 @@ insert.run({
     id: 1, started_at: '2026-09-01T00:00:00Z',
     att_player_id: 1, att_player_name: 'Wren', att_alliance_tag: 'RAID', att_lost_cv: 0,
     def_player_id: 2, def_player_name: 'Xoc', def_alliance_tag: 'ENEMY', def_lost_cv: 300,
-    killed_population: 9,
+    killed_population: 8,
 });
 insert.run({
     id: 2, started_at: '2026-09-02T00:00:00Z',
@@ -113,33 +161,17 @@ const wren = board.find(r => r.player_name === 'Wren');
 ok('Wren appears on the combined leaderboard', !!wren, board);
 
 const expectedCvPointsRaw = battlePoints.cvDynamicPoints(300) + battlePoints.cvDynamicPoints(50000);
-const expectedPopPointsRaw = battlePoints.popDynamicPoints(9) + battlePoints.popDynamicPoints(20);
-const scale = battlePoints.getDisplayScale();
+const expectedPopPointsRaw = battlePoints.popDynamicPoints(8) + battlePoints.popDynamicPoints(20);
 ok('cv_points is the SUM of each event\'s OWN curve applied separately, not curve(sum) — proves per-event evaluation',
-    close(wren.cv_points, Math.round(expectedCvPointsRaw * scale * 10) / 10, 0.02), wren);
-ok('pop_points likewise sums each event\'s own curve', close(wren.pop_points, Math.round(expectedPopPointsRaw * scale * 10) / 10, 0.02), wren);
-ok('points is cv_points + pop_points, both already display-scaled',
+    close(wren.cv_points, expectedCvPointsRaw, 0.02), wren);
+ok('pop_points likewise sums each event\'s own curve', close(wren.pop_points, expectedPopPointsRaw, 0.02), wren);
+ok('points is cv_points + pop_points, with no hidden multiplier applied on top',
     close(wren.points, wren.cv_points + wren.pop_points, 0.01), wren);
 ok('the 50,000 CV kill alone dwarfs the two population kills combined — reflects the curve\'s design intent',
     wren.cv_points > wren.pop_points * 10, wren);
 
 ok('Xoc (the loser both times, never credited) does not appear on the combined leaderboard',
     !board.some(r => r.player_name === 'Xoc'), board);
-
-console.log('\n── display scale is a pure multiplier, not a shape change ' + '─'.repeat(10));
-// 20 here is just "some OTHER scale to compare against the default with" — picked because
-// it used to BE the default (2026-09-16c: default dropped from 20 to 1, see getDisplayScale's
-// own comment for why) and so already had a name in this test; the property under test
-// (scale is a uniform multiplier) doesn't care what the two compared values are.
-settingsRepo.setSetting('battle_points_display_scale', '20');
-const otherScaleBoard = battlePoints.getDynamicLeaderboard(null, 10, 'all');
-const wrenOtherScale = otherScaleBoard.find(r => r.player_name === 'Wren');
-ok('going from the default scale to some other one changes the absolute number by exactly\n' +
-    '     that ratio, not the ratio between cv/pop',
-    close(wrenOtherScale.points / wren.points, 20 / scale, 0.02)
-    && close(wren.cv_points / wren.pop_points, wrenOtherScale.cv_points / wrenOtherScale.pop_points, 0.02),
-    { atDefault: wren, atTwenty: wrenOtherScale });
-settingsRepo.setSetting('battle_points_display_scale', String(scale)); // restore default
 
 console.log('\n── bonus-goal awards fold into the same leaderboard ' + '─'.repeat(19));
 // Wren also earned a bonus-goal award (e.g. a ranking_match hit — see bonusGoals.test.js
@@ -170,6 +202,21 @@ const bonusOnlyRow = boardWithBonusOnly.find(r => r.player_name === 'BonusOnly')
 ok('a player with ONLY a bonus award (no CV/pop credit at all) still appears on the leaderboard',
     !!bonusOnlyRow && bonusOnlyRow.points === 42 && bonusOnlyRow.cv_points === 0 && bonusOnlyRow.pop_points === 0,
     bonusOnlyRow);
+
+console.log('\n── The actual incident: Moardin killed 3 population, one clean event ' + '─'.repeat(6));
+{
+    db.prepare(`INSERT INTO players (id, name) VALUES (19, 'Moardin25')`).run();
+    insert.run({
+        id: 3, started_at: '2026-09-16T03:38:00Z',
+        att_player_id: 19, att_player_name: 'Moardin25', att_alliance_tag: 'RAID', att_lost_cv: 64,
+        def_player_id: 20, def_player_name: 'Starius', def_alliance_tag: 'FREE', def_lost_cv: 64,
+        killed_population: 3,
+    });
+    const withMoardin = battlePoints.getDynamicLeaderboard(null, 10, 'all');
+    const moardin = withMoardin.find(r => r.player_name === 'Moardin25');
+    ok('3 population now scores exactly 3 points — the number that started this whole redesign',
+        moardin.pop_points === 3, moardin);
+}
 
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
