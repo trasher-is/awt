@@ -23,7 +23,9 @@ import { esc } from '../utils/escape.js';
 import '../utils/parse-number.js';   // side-effect import: AWNumber.compareNumeric, one locale parser
 import '../utils/idle-parse.js';     // side-effect import: AWIdleParse.parseIdleStringToSeconds
 import '../utils/sqlite-time.js';
+import '../utils/max-combat-value.js'; // side-effect import: AWMaxCombatValue, the CV-ceiling formula
 const { compareNumeric } = globalThis.AWNumber;
+const { maxCombatValue, maxCombatValueForRow } = globalThis.AWMaxCombatValue;
 const { parseIdleStringToSeconds } = globalThis.AWIdleParse;
 const { parseTimestamp, formatLocalDateTime } = globalThis.AWSqliteTime;
 export { parseIdleStringToSeconds };
@@ -85,6 +87,24 @@ export function hasIntelTimestamp(val) {
     return !!parseTimestamp(val);
 }
 
+// The CV ceiling the game would let this player hold. Calculated, never scraped — the game
+// prints a CV limit only for you and your own alliance, which is why the scraped column has
+// been 0 for every player on record. Needs SocialLevel, so it reads "?" without intel for the
+// same reason every other intel-gated cell does: an unknown ceiling must not render as a
+// confident number. See public/js/utils/max-combat-value.js for the formula and its
+// verification against real scraped limits.
+function maxCvCell(row) {
+    const { value, source } = maxCombatValueForRow(row);
+    if (value == null) return Q;
+    // A ceiling computed from a four-day-old population is worth flagging as such, rather
+    // than letting it read as current alongside one built from last night's scan.
+    const stale = source === 'statistics';
+    const title = stale
+        ? 'Calculated from the game\'s Statistics population, which it publishes ~4 days behind — we have no planet scans for this player'
+        : 'Calculated from the planets we have scanned';
+    return `<span title="${title}"${stale ? ' class="text-zinc-500"' : ''}>${fmtInt(value)}${stale ? '*' : ''}</span>`;
+}
+
 // True if the intel timestamp is parseable and older than 24h (used to grey stale sciences).
 export function isIntelStale(val, now = Date.now()) {
     const d = parseTimestamp(val);
@@ -134,8 +154,10 @@ export function enrichWarRoomRow(p, now = Date.now()) {
     // for the strongest economies in the game.
     const costFor3CV = Math.max(1, 30 - Math.floor(eco * 0.3));
     const cvDay = Math.floor((dailyPP / costFor3CV) * 3);
-    // MaxCombatValue = Σpopulation × (social + 3) × 11. The factor is 11, not 10.
-    const maxCv = pop * (social + 3) * 11;
+    // MaxCombatValue lives in max-combat-value.js now and is applied at render time, so the
+    // column can prefer the LIVE planet-scan population over `pop` here — which is the game's
+    // Statistics figure, published ~4 days behind. Kept on the row for callers that still read
+    // it, computed through the one shared formula rather than a second copy of it.
     const idle = computeIdleDisplay(p, { now });
 
     // ~Science/h = (labs + population) base, scaled by the race science trait
@@ -150,7 +172,7 @@ export function enrichWarRoomRow(p, now = Date.now()) {
     const sciMult = 1 + (p.race_science || 0) * 0.08;
     const estimatedScience = sciBase * sciMult * trMult;
 
-    return { ...p, calculated_prod: estimatedProd, calculated_science: estimatedScience, cv_day: cvDay, max_cv: maxCv, idle_seconds: idle.secs, idle_display: idle.text };
+    return { ...p, calculated_prod: estimatedProd, calculated_science: estimatedScience, cv_day: cvDay, max_cv: maxCombatValue({ populationSum: pop, social }), idle_seconds: idle.secs, idle_display: idle.text };
 }
 
 // ─── CELL HELPERS ─────────────────────────────────────────────────────────────
@@ -264,6 +286,7 @@ export const PLAYER_COLUMNS = [
     col('total_planets', 'Planets*', { group: 'Empire', default: false, render: r => num(r.total_planets), title: 'Planet count from the profile page' }),
     col('total_population', 'Pop', { group: 'Empire', head: 'text-primary', cell: 'text-primary', render: r => fmtInt(r.total_population) }),
     col('cv', 'CV', { group: 'Empire', sortKey: 'cv_used', cell: 'whitespace-nowrap', render: r => (P_INTEL(r) ? `${fmtInt(r.cv_used)}/${fmtInt(r.cv_limit)}` : Q), title: 'CV used / CV limit' }),
+    col('max_cv', 'Max CV', { group: 'Empire', default: false, sort: 'numeric', sortValue: r => (maxCombatValueForRow(r).value || 0), cell: 'whitespace-nowrap text-amber-300', render: r => (P_INTEL(r) ? maxCvCell(r) : Q), title: 'Largest fleet this player could hold: total planet population x (Social + 3) x 11. Calculated, not scraped - the game never shows an enemy CV limit. Only as fresh as our planet populations.' }),
     ...buildingCols('', 'Empire', P_STATS),
 
     raceCol('race_growth', 'Gro', 'Race', 'has_intel', { head: 'text-emerald-300 border-l border-border', cell: 'border-l border-border' }),
@@ -325,7 +348,7 @@ export const WAR_ROOM_COLUMNS = [
     col('calculated_prod', '~Prod/h', { group: 'Estimates', cell: 'text-emerald-400 font-bold', render: r => fmtInt(Math.round(r.calculated_prod || 0)), title: '(factories + population) × race × trade × artefact' }),
     col('trade_revenue', 'TR%', { group: 'Economy', cell: 'text-teal-300', render: r => (W_INTEL(r) ? pct(r.trade_revenue) : Q) }),
     col('cv_day', '~CV/Day', { group: 'Estimates', cell: 'text-amber-400 font-bold', render: r => (W_INTEL(r) ? fmtInt(r.cv_day) : Q) }),
-    col('max_cv', 'Max CV', { group: 'Estimates', cell: 'text-cyan-400', render: r => (W_INTEL(r) ? fmtInt(r.max_cv) : Q), title: 'Σpopulation × (social + 3) × 11' }),
+    col('max_cv', 'Max CV', { group: 'Estimates', cell: 'text-cyan-400', sortValue: r => (maxCombatValueForRow(r).value || 0), render: r => (W_INTEL(r) ? maxCvCell(r) : Q), title: 'Σpopulation × (social + 3) × 11 — from scanned planets where we have them, since the Statistics population the game publishes runs ~4 days behind' }),
     raceCol('race_speed', 'Spd', 'Race', 'has_intel'),
     raceCol('race_attack', 'Att', 'Race', 'has_intel'),
     raceCol('race_defense', 'Def', 'Race', 'has_intel'),

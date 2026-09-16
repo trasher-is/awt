@@ -28,7 +28,11 @@ const getWarRoomPlayersStmt = db.prepare(`
            p.science_rate, p.culture_rate, p.production_rate, p.astro_dollars, p.production_points,
            p.eco_bonus, p.number_of_battles, p.battle_luckiness, p.country, p.joined, p.logins, p.last_login_at,
            a.tag as alliance_tag,
-           (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as total_planets
+           (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as total_planets,
+           -- Live population sum for the calculated Max CV (see max-combat-value.js). The
+           -- War Room is scoped to an enemy alliance, which is the only place the figure is
+           -- actually wanted: the game never prints an enemy's CV limit anywhere.
+           (SELECT COALESCE(SUM(population), 0) FROM planets WHERE owner_id = p.id) as owned_population
     FROM players p
     JOIN alliances a ON p.alliance_id = a.id
     WHERE p.alliance_id = ?
@@ -55,9 +59,14 @@ function listPlayerIds() {
     return listPlayerIdsStmt.all();
 }
 
+// owned_population is the LIVE sum from system scans, deliberately not players.total_population
+// (the Statistics page's own figure, which the game itself publishes ~4 days behind — see
+// buildBuildingsCard). It feeds the calculated Max CV, where using a four-day-old population
+// would quietly understate a ceiling people are deciding whether to attack into.
 const getFullPlayersDbStmt = db.prepare(`
     SELECT p.*, a.tag as alliance_tag,
-           (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as planet_count
+           (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as planet_count,
+           (SELECT COALESCE(SUM(population), 0) FROM planets WHERE owner_id = p.id) as owned_population
     FROM players p
     LEFT JOIN alliances a ON p.alliance_id = a.id
 `);
