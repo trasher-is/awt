@@ -987,7 +987,39 @@ function getCombatCeilings() {
     return ceilings;
 }
 
+// --- MANUAL INTEL ENTRY (2026-09-16) ---
+// Intel an ally handed us as a screenshot, typed in by a member. Writes the same columns a
+// real capture writes — they ARE the same facts, just obtained differently — plus the source
+// that says so, which is the whole reason this is a separate statement and not a reuse of
+// upsertPlayerFull: that one's has_intel CASE guard exists to stop a sightless sync erasing
+// intel, and this is the opposite situation, a deliberate write of values we cannot see.
+//
+// intel_updated_at is set to now, which is a claim about when the hub learned this, not when
+// the ally captured it. That is the honest reading of a value with no timestamp on it, and
+// it is why intel_source travels with it: a reader who knows the source can judge the age.
+// race_trader and race_sul are deliberately absent — the game's Race Summary does not show
+// them, so a screenshot cannot contain them, and writing 0 would be inventing data.
+const saveManualIntelStmt = db.prepare(`
+    UPDATE players SET
+        biology = @biology, economy = @economy, energy = @energy,
+        mathematics = @mathematics, physics = @physics, social = @social,
+        trade_revenue = @trade_revenue, artefact = @artefact,
+        race_growth = @race_growth, race_science = @race_science, race_culture = @race_culture,
+        race_production = @race_production, race_speed = @race_speed,
+        race_attack = @race_attack, race_defense = @race_defense,
+        has_intel = 1,
+        intel_updated_at = CURRENT_TIMESTAMP,
+        intel_source = @intel_source,
+        intel_entered_by = @intel_entered_by,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id
+`);
+function saveManualIntel(values) {
+    return saveManualIntelStmt.run(values).changes;
+}
+
 module.exports = {
+    saveManualIntel,
     getWarRoomPlayers, getAllianceIntelPlayerIds, countPlayers, listPlayerIds, getFullPlayersDb, getJoinedDates,
     getAllianceTagForMembers, getVisionObservers, getPlayerWithPlanetCount,
     getPlayerLoginHistory, getPlayerLoginHeatmap, recordLoginSample, getPlayerLoginSamples,

@@ -637,6 +637,71 @@ router.get('/intel/joined-dates', requireAuth, (req, res) => {
 // suspected are kept separate — the Science page shows them as a red pill (real, scanned
 // biology) and a yellow one (unscanned; science level is only an UPPER BOUND on what their
 // biology could be, per docs/game-rules.md, so it's a maybe, not a confirmed threat).
+// --- MANUAL INTEL ENTRY (2026-09-16) ---
+// An ally sends a screenshot of their own intelligence report on a player we cannot see.
+// This types it in. The source field is REQUIRED and not decoration: these values land in
+// the same columns a real capture uses and are read by the threat matrix, the battle
+// calculator and !bio, so a reader who cannot tell second-hand data from our own is the one
+// failure this endpoint must not allow.
+//
+// Sciences are level counts and race traits are picks in the range the game actually uses;
+// both are bounded here rather than trusted, because a typo in a form that feeds win-chance
+// calculations is worth catching at the door.
+const SCIENCE_FIELDS = ['biology', 'economy', 'energy', 'mathematics', 'physics', 'social'];
+const RACE_PICK_FIELDS = ['race_growth', 'race_science', 'race_culture', 'race_production',
+    'race_speed', 'race_attack', 'race_defense'];
+
+function readBoundedInt(raw, min, max) {
+    const n = typeof raw === 'number' ? raw : parseInt(String(raw ?? '').trim(), 10);
+    if (!Number.isInteger(n) || n < min || n > max) return null;
+    return n;
+}
+
+router.post('/intel/manual', requireAuth, (req, res) => {
+    const body = req.body || {};
+    const playerId = readBoundedInt(body.player_id, 1, Number.MAX_SAFE_INTEGER);
+    if (playerId === null) return res.status(400).json({ error: 'A player id is required' });
+
+    const source = typeof body.source === 'string' ? body.source.trim() : '';
+    if (!source) return res.status(400).json({ error: 'Say where this came from — intel with no source cannot be judged later' });
+    if (source.length > 200) return res.status(400).json({ error: 'Source is too long (200 characters max)' });
+
+    const player = playersRepo.getPlayerNameWithTag(playerId);
+    if (!player) return res.status(404).json({ error: 'No such player on record' });
+
+    const values = { id: playerId };
+    for (const f of SCIENCE_FIELDS) {
+        const v = readBoundedInt(body[f], 0, 99);
+        if (v === null) return res.status(400).json({ error: `${f} must be a whole number between 0 and 99` });
+        values[f] = v;
+    }
+    for (const f of RACE_PICK_FIELDS) {
+        const v = readBoundedInt(body[f], -10, 10);
+        if (v === null) return res.status(400).json({ error: `${f} must be a whole number between -10 and 10` });
+        values[f] = v;
+    }
+    const trade = readBoundedInt(body.trade_revenue, 0, 999);
+    if (trade === null) return res.status(400).json({ error: 'trade_revenue must be a whole number between 0 and 999' });
+    values.trade_revenue = trade;
+
+    // "N/A" is what the game prints when there is no artefact, so it means none, not a name.
+    const artefactRaw = typeof body.artefact === 'string' ? body.artefact.trim() : '';
+    values.artefact = (!artefactRaw || artefactRaw.toUpperCase() === 'N/A') ? null : artefactRaw.slice(0, 100);
+
+    values.intel_source = source;
+    values.intel_entered_by = req.session.gameName || null;
+
+    try {
+        const changed = playersRepo.saveManualIntel(values);
+        if (!changed) return res.status(404).json({ error: 'No such player on record' });
+        console.log(`[Intel] Manual intel recorded for ${player.name} (${playerId}) by ${values.intel_entered_by || 'unknown'} — source: ${source}`);
+        res.json({ success: true, player: player.name });
+    } catch (err) {
+        console.error('[DB Error] Failed to save manual intel:', err);
+        res.status(500).json({ error: 'Failed to save intel' });
+    }
+});
+
 router.get('/intel/bio-threats', requireAuth, (req, res) => {
     try {
         const me = playersRepo.getPlayerBiologyByName((req.session.gameName || '').toLowerCase());

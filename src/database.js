@@ -196,6 +196,20 @@ function initDatabase() {
     addColumn('players', 'intel_lost_announced_at', 'DATETIME');
     addColumn('players', 'intel_regained_announced_at', 'DATETIME');
     addColumn('players', 'intel_updated_at', 'TEXT');
+    // Where a set of intel values came from, when it was NOT captured by this hub (2026-09-16).
+    // NULL means the ordinary case: the report was read off the game's own page by a member
+    // who had vision. Anything else is second-hand — an ally's screenshot, most often — and
+    // the text is whatever the member typed to identify it ("screenshot from Glutus [PUNK]").
+    //
+    // Recorded because the alternative is worse than having no such data at all: the stat
+    // columns are the same columns either way, so without this the hub would present somebody
+    // else's report, of unknown age, with no way for a reader to know it was never ours and
+    // no way for anyone to judge it when it goes stale. Everywhere these values are shown
+    // prominently, the source is shown with them.
+    addColumn('players', 'intel_source', 'TEXT');
+    // The hub account that typed it in, which is a different question from where it came from:
+    // one is the claim's origin, the other is who to ask about it.
+    addColumn('players', 'intel_entered_by', 'TEXT');
     // Set only by upsertPlayerFull (the deep profile/Statistics-page scrape) — unlike
     // updated_at, which every player-touching sync bumps (system scans, the API roster
     // list, etc.), this is specific to when total_farms/factories/labs/cybernetics were

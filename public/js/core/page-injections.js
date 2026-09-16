@@ -8,6 +8,7 @@ import '../utils/travel-model.js';   // side-effect import: empire-model.js's ow
 import '../utils/empire-model.js';   // side-effect import: TRAIT_PCT, the ONE source for race-bonus %/point
 import '../utils/aw-api.js';         // side-effect import: getTravelTime, for initColonizeLaunchWindows
 import '../utils/login-gaps.js';     // side-effect import: AWLoginGaps, the profile's quiet-window analysis
+import '../utils/manual-intel-form.js'; // side-effect import: AWManualIntelForm, the screenshot-entry form
 import '../utils/social-hint.js';    // side-effect import: AWSocialHint, the Science page's Social marker (needs game-tables above)
 import '../utils/research-time.js';  // side-effect import: AWResearch, research time shared by the calculator and the Economy countdown
 import '../utils/fleet-launch-target-dossier.js'; // side-effect import: AWTargetDossier, the launch-form target-info render logic
@@ -1186,6 +1187,10 @@ export async function initProfileHubIntel() {
         </div>`;
     anchor.parentNode.insertBefore(wrap, anchor);
     mountBattleRaceIntel(wrap, { playerId, hasBio: !!p.has_intel, hasLiveIntel });
+    // Only where the hub has no live view of its own: with the game's real Intelligence
+    // Report on screen there is nothing to type in, and offering to overwrite a live capture
+    // with a hand-typed one would be a way to make good data worse.
+    if (!hasLiveIntel) mountManualIntelEntry(wrap, { ...p, id: playerId });
 
     // Without live intel, the game renders the player-info card as a single col-12 instead
     // of its usual col-lg-6 paired with an Intelligence Report column — there is no "top
@@ -1430,9 +1435,24 @@ function buildNoIntelCard() {
         + buildRaceTable(raceCellUnknown, null);
 }
 
+// Second-hand intel must never read as our own. Where a real capture says "last known", an
+// entry typed from an ally's screenshot says so instead, and names the source — the values
+// sit in the same columns and feed the same threat and battle calculations, so the label is
+// the only thing telling a reader which kind they are looking at.
+function intelCardCaption(p) {
+    const updatedAt = formatSqliteUtc(p.intel_updated_at, undefined, 'unknown date');
+    if (p.intel_source) {
+        const who = p.intel_entered_by ? `, entered by ${p.intel_entered_by}` : '';
+        return {
+            text: `(not our capture — from ${p.intel_source}${who}; recorded ${updatedAt})`,
+            color: '#7cc',
+        };
+    }
+    return { text: `(last known — as of ${updatedAt}, not currently visible in-game)`, color: '#c96' };
+}
+
 function buildStaleIntelCard(p) {
     const row = (label, val) => `<tr><td>${esc(label)}</td><td class="lowlight">${esc(val)}</td></tr>`;
-    const updatedAt = formatSqliteUtc(p.intel_updated_at, undefined, 'unknown date');
     const irRows = [
         row('Biology', p.biology || 0),
         row('Economy', p.economy || 0),
@@ -1444,8 +1464,56 @@ function buildStaleIntelCard(p) {
         row('Artefact', p.artefact || 'N/A'),
     ].join('');
 
-    return buildIrTable({ text: `(last known — as of ${esc(updatedAt)}, not currently visible in-game)`, color: '#c96' }, irRows)
-        + buildRaceTable(raceCellKnown, p);
+    return buildIrTable(intelCardCaption(p), irRows) + buildRaceTable(raceCellKnown, p);
+}
+
+// The form lives under the card rather than replacing it, so the values already on record
+// stay readable while they are being corrected against a fresh screenshot.
+function mountManualIntelEntry(wrap, player) {
+    const { buildManualIntelFormHtml, readManualIntelForm } = globalThis.AWManualIntelForm;
+    const host = document.createElement('div');
+    host.id = 'aw-manual-intel-host';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'btn btn-sm btn-outline-info';
+    toggle.style.cssText = 'margin-bottom:8px;';
+    toggle.textContent = player.has_intel ? '✎ Correct / re-enter intel from a screenshot' : '✎ Enter intel from a screenshot';
+    host.appendChild(toggle);
+    wrap.appendChild(host);
+
+    toggle.addEventListener('click', () => {
+        if (host.querySelector('.aw-manual-intel')) return;
+        host.insertAdjacentHTML('beforeend', buildManualIntelFormHtml(player));
+        const form = host.querySelector('.aw-manual-intel');
+        const status = form.querySelector('[data-mi-status]');
+
+        form.querySelector('[data-mi-action="cancel"]').addEventListener('click', () => form.remove());
+        form.querySelector('[data-mi-action="save"]').addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            status.textContent = 'Saving…';
+            try {
+                const res = await fetch('/hub-api/intel/manual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(readManualIntelForm(form, player.id)),
+                });
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok || !body.success) {
+                    // The server's message names the offending field; showing it verbatim is
+                    // more use than a generic failure, since every rejection here is a typo.
+                    status.textContent = body.error || `Failed (HTTP ${res.status})`;
+                    btn.disabled = false;
+                    return;
+                }
+                status.textContent = 'Saved — reloading…';
+                window.location.reload();
+            } catch (err) {
+                status.textContent = `Failed: ${err.message}`;
+                btn.disabled = false;
+            }
+        });
+    });
 }
 
 (function() {
