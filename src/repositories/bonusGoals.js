@@ -179,7 +179,11 @@ const insertAwardStmt = db.prepare(`
 // goes to whoever brought the fight), and only for a report that did real damage — a
 // report with neither a population kill nor any CV lost by the defender is a probe/no-op,
 // not a genuine hit on the planet.
-function evaluateBattleReportForGoals(reportId) {
+// `now` is injectable for the same reason every other function in this file takes one: the
+// random_target lookup below is time-bounded, and a test that pins the activation clock but
+// not the evaluation clock is testing whatever today's date happens to be. That is exactly
+// what happened — this test passed only on 2026-09-15 and broke the moment the date rolled.
+function evaluateBattleReportForGoals(reportId, now = new Date()) {
     const report = battleReportForEvalStmt.get(reportId);
     if (!report || report.system_id == null || report.planet_index == null) return [];
     if (!Number.isInteger(report.att_player_id)) return [];
@@ -204,7 +208,7 @@ function evaluateBattleReportForGoals(reportId) {
     }
 
     for (const goal of listEnabledGoalsByType('random_target')) {
-        const active = getActiveTarget(goal.id);
+        const active = getActiveTarget(goal.id, now);
         if (!active || active.system_id !== report.system_id || active.planet_index !== report.planet_index) continue;
         const points = Number(goal.config.points) || 0;
         if (points <= 0) continue;
