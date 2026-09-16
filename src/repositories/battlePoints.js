@@ -202,12 +202,27 @@ function getCvAnchorCv() {
 function getCvAnchorPop() {
     return settingNumber('battle_points_cv_anchor_pop', 20);
 }
-// Pure display multiplier applied at the very end, after the curves and the CV/pop anchor
-// calibration below — it exists only so early-round kills don't all round to fractions of
-// a point on the leaderboard. It changes nothing about the relative fairness between CV
-// and pop, or between a small and a huge kill, since both get multiplied identically.
+// Applied at the very end, after the curves and the CV/pop anchor calibration below, to
+// BOTH cv_points and pop_points identically — so it can never disturb the anchor
+// equivalence (cvDynamicPoints(anchorCv) === popDynamicPoints(anchorPop) holds at any
+// scale) or the relative fairness between a small and a huge kill of the same type.
+//
+// 1, not 20 (2026-09-16c — live feedback: Moardin killed 3 population and !glory showed
+// 60 pop points, which read as wildly disproportionate against his own 3.3 CV points from
+// the same day). The user's own spec, verified against the formula rather than guessed:
+// "3 pop should give 3 points" AND "20 pop [should give] the same points as 5000 CV". Band
+// 1's rate is exactly 1 point per population (see popDynamicPoints below), so raw
+// popDynamicPoints(3) is already 3 — scale=1 is the one value that satisfies the first
+// requirement literally. The second requirement was never actually about scale: the
+// anchor equivalence is built into k below and holds at every scale, 20 included, so it
+// was never the source of the "too much" feeling — the FLAT ×20 on top of it was.
+//
+// Previously 20, "so early-round kills don't all round to fractions of a point" — a real
+// tradeoff this reverses: a 300 CV skirmish now shows as ~0.05 points instead of ~1, and a
+// player's total across many small fights will look smaller. That was accepted as the
+// right trade for population no longer scoring far above what a comparable CV kill would.
 function getDisplayScale() {
-    return settingNumber('battle_points_display_scale', 20);
+    return settingNumber('battle_points_display_scale', 1);
 }
 
 function round1(n) {
