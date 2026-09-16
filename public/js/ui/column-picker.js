@@ -33,10 +33,13 @@ function writeStored(key, value) {
  * @param {HTMLElement} o.mountEl   where the button goes (empty container in the toolbar)
  * @param {string} o.tableId        id of the <table> whose cells carry data-col
  * @param {string} o.tableKey       storage key part, e.g. 'warRoom'
- * @param {Array} o.columns         column definitions (stat-columns.js)
+ * @param {Array} o.columns         column definitions (stat-columns.js), in their natural order
  * @param {(visible: Set<string>) => void} [o.onChange]
+ * @param {(columns: Array) => void} [o.onReorder]  fires with the full column list (all keys,
+ *   including hidden ones) in the member's chosen order — hiding is pure CSS, but the actual
+ *   left-to-right sequence is baked into the header/row HTML, so a reorder needs a re-render.
  */
-export async function mountColumnPicker({ mountEl, tableId, tableKey, columns, onChange }) {
+export async function mountColumnPicker({ mountEl, tableId, tableKey, columns, onChange, onReorder }) {
     if (!mountEl || mountEl.dataset.awtPicker) return null;
     mountEl.dataset.awtPicker = tableKey;
 
@@ -50,7 +53,10 @@ export async function mountColumnPicker({ mountEl, tableId, tableKey, columns, o
 
     const userId = await getViewerId();
     const storageKey = Prefs.storageKey(tableKey, userId);
-    let visible = Prefs.resolveVisible(columns, readStored(storageKey));
+    const stored = readStored(storageKey);
+    let visible = Prefs.resolveVisible(columns, stored);
+    let ordered = Prefs.resolveOrder(columns, stored);
+    if (typeof onReorder === 'function') onReorder(ordered.slice());
 
     mountEl.innerHTML = `
         <div class="relative">
@@ -60,6 +66,8 @@ export async function mountColumnPicker({ mountEl, tableId, tableKey, columns, o
             </button>
             <div class="awt-col-menu hidden absolute right-0 top-full mt-1 z-50 w-72 max-h-[70vh] overflow-y-auto bg-zinc-900 border border-border rounded-md shadow-2xl p-2 text-sm">
                 <div class="awt-col-list flex flex-col gap-1"></div>
+                <div class="px-1 pt-2 pb-0.5 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold border-t border-border mt-2">Order (shown columns)</div>
+                <div class="awt-col-order flex flex-col gap-1"></div>
                 <div class="flex items-center gap-3 pt-2 mt-2 border-t border-border text-xs">
                     <button type="button" data-act="all" class="text-sky-400 hover:underline">Show all</button>
                     <button type="button" data-act="reset" class="text-muted-foreground hover:underline">Defaults</button>
@@ -70,11 +78,16 @@ export async function mountColumnPicker({ mountEl, tableId, tableKey, columns, o
     const btn = mountEl.querySelector('.awt-col-btn');
     const menu = mountEl.querySelector('.awt-col-menu');
     const list = mountEl.querySelector('.awt-col-list');
+    const orderList = mountEl.querySelector('.awt-col-order');
     const count = mountEl.querySelector('.awt-col-count');
 
     function apply() {
         style.textContent = Prefs.hiddenCss(tableId, Prefs.hiddenKeys(columns, visible));
         count.textContent = `${visible.size}/${columns.length}`;
+    }
+
+    function persist() {
+        writeStored(storageKey, Prefs.toStored(columns, visible, ordered.filter(c => !c.locked).map(c => c.key)));
     }
 
     function paintList() {
@@ -94,10 +107,41 @@ export async function mountColumnPicker({ mountEl, tableId, tableKey, columns, o
             </label>`).join('')}`).join('');
     }
 
+    // Up/down buttons rather than drag-and-drop: this menu is reached by tap on mobile as
+    // often as by click on desktop, and HTML5 drag events don't fire on touch without a
+    // polyfill this repo doesn't carry. Only shown (non-locked) columns are listed — hidden
+    // ones don't have a visible position to move, and the name column can't move at all.
+    function paintOrder() {
+        const shown = ordered.filter(c => !c.locked && visible.has(c.key));
+        orderList.innerHTML = shown.length ? shown.map((c, i) => `
+            <div class="flex items-center gap-1 px-2 py-1 rounded bg-zinc-800/40" data-key="${c.key}">
+                <span class="text-foreground flex-1 truncate">${c.label}</span>
+                <button type="button" data-move="-1" data-key="${c.key}" class="w-7 h-7 flex items-center justify-center rounded hover:bg-zinc-700 disabled:opacity-30 disabled:pointer-events-none" ${i === 0 ? 'disabled' : ''} aria-label="Move ${c.label} earlier"><i class="fa-solid fa-chevron-up text-xs"></i></button>
+                <button type="button" data-move="1" data-key="${c.key}" class="w-7 h-7 flex items-center justify-center rounded hover:bg-zinc-700 disabled:opacity-30 disabled:pointer-events-none" ${i === shown.length - 1 ? 'disabled' : ''} aria-label="Move ${c.label} later"><i class="fa-solid fa-chevron-down text-xs"></i></button>
+            </div>`).join('') : '<div class="px-2 py-1 text-xs text-muted-foreground italic">No columns shown</div>';
+    }
+
     function commit() {
-        writeStored(storageKey, Prefs.toStored(columns, visible));
+        persist();
         apply();
+        paintOrder();
         if (typeof onChange === 'function') onChange(new Set(visible));
+    }
+
+    function commitOrder() {
+        persist();
+        paintOrder();
+        if (typeof onReorder === 'function') onReorder(ordered.slice());
+    }
+
+    // Visibility and order both reset together, so persist and notify once rather than via
+    // commit()+commitOrder() back to back (same end state, half the localStorage writes).
+    function commitBoth() {
+        persist();
+        apply();
+        paintOrder();
+        if (typeof onChange === 'function') onChange(new Set(visible));
+        if (typeof onReorder === 'function') onReorder(ordered.slice());
     }
 
     list.addEventListener('change', e => {
@@ -108,11 +152,24 @@ export async function mountColumnPicker({ mountEl, tableId, tableKey, columns, o
         if (input.checked) visible.add(c.key); else visible.delete(c.key);
         commit();
     });
+    orderList.addEventListener('click', e => {
+        const btnEl = e.target.closest('button[data-move]');
+        if (!btnEl) return;
+        // paintOrder() below replaces orderList's innerHTML, detaching this very button before
+        // the click finishes bubbling to the document-level "click outside closes the menu"
+        // listener — which would then see a target no longer contained in mountEl and close
+        // the menu after every single move. Stopping propagation here keeps the menu open.
+        e.stopPropagation();
+        const next = Prefs.moveVisible(ordered, visible, btnEl.dataset.key, Number(btnEl.dataset.move));
+        if (next === ordered) return;
+        ordered = next;
+        commitOrder();
+    });
     menu.addEventListener('click', e => {
         const act = e.target.closest('[data-act]')?.dataset.act;
         if (!act) return;
         if (act === 'all') { visible = new Set(columns.map(c => c.key)); paintList(); commit(); }
-        if (act === 'reset') { visible = Prefs.defaultVisible(columns); paintList(); commit(); }
+        if (act === 'reset') { visible = Prefs.defaultVisible(columns); ordered = columns.slice(); paintList(); commitBoth(); }
         if (act === 'close') menu.classList.add('hidden');
     });
     btn.addEventListener('click', e => {
@@ -124,6 +181,7 @@ export async function mountColumnPicker({ mountEl, tableId, tableKey, columns, o
     });
 
     paintList();
+    paintOrder();
     apply();
-    return { isVisible: k => visible.has(k), getVisible: () => new Set(visible) };
+    return { isVisible: k => visible.has(k), getVisible: () => new Set(visible), getOrder: () => ordered.slice() };
 }
