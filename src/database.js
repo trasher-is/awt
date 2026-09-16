@@ -400,6 +400,16 @@ function initDatabase() {
             FOREIGN KEY(last_edited_by) REFERENCES app_users(id) ON DELETE SET NULL
         )
     `);
+    // A backstop, not belt-and-suspenders: CREATE TABLE IF NOT EXISTS only runs the version
+    // above on a database that has never had this table before. A production database
+    // already had system_plans WITHOUT edit_count by the time this line was added — created
+    // moments earlier by a manual `node -e "require(...)"` sanity check against the real
+    // awt.db, run before edit_count existed in the schema at all (see the incident this
+    // fixes). Nothing else would ever add the column to that already-existing table, and the
+    // process crashed on every subsequent boot with "no such column: sp.edit_count" until
+    // this line existed. addColumn is idempotent (catches "duplicate column name"), so this
+    // is a genuine no-op on a database that created the table with the column already in it.
+    addColumn('system_plans', 'edit_count', 'INTEGER NOT NULL DEFAULT 0');
 
     // 5. Fleets
     db.exec(`
