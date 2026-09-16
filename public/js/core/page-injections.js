@@ -1886,9 +1886,19 @@ export async function initFleetLaunchTargetDossier() {
 // anchoring to it (via the [data-clock] element it always contains) works without depending
 // on the exact layout of the system-page table above it.
 // ---------------------------------------------------------------
+// BUG (2026-09-16b, found live: toggle on, plan written, bot working, nothing rendered):
+// the Current-time/hosting-cycle badges sit in a BARE `.col text-start small ms-1` div
+// directly under `.container` — it is NOT wrapped in its own `.row` the way every other
+// section of the page is. `.closest('.row')` only walks ANCESTORS, and the nearest `.row`
+// on this page is a preceding SIBLING of that `.col`, not a container of it — so the lookup
+// always returned null, the function silently no-opped past its own `if (!anchor...)` guard,
+// and nothing was ever inserted. Confirmed against the real page markup pasted for this
+// feature's design, not guessed. Anchoring to the `.col` itself instead: a literal
+// `class="col ..."` is unambiguous here since nothing nearby carries the bare "col" token
+// (siblings are `badge ...` spans, not columns).
 function systemPlanTimersRow() {
     const clock = document.querySelector('[data-clock]');
-    return clock ? clock.closest('.row') : null;
+    return clock ? clock.closest('.col') : null;
 }
 
 // HTML comes from system-plan-panel.js (buildSystemPlanHtml), which is pure and Node-tested
