@@ -291,7 +291,15 @@ export const PLAYER_COLUMNS = [
     scienceCol('social', 'Soc', 'Sciences', 'has_intel', 'intel_updated_at', 'text-pink-400'),
 
     col('artefact', 'Artefact', { group: 'Intel', sort: 'string', head: 'border-l border-border', cell: 'border-l border-border', render: r => (P_INTEL(r) ? text(r.artefact) : Q) }),
-    col('intel_updated_at', 'Last Intel', { group: 'Intel', sort: 'string', head: 'border-l border-border', cell: 'text-muted-foreground border-l border-border', render: r => fmtIntelDate(r.intel_updated_at) }),
+    // A row whose intel was typed in from an ally's screenshot is marked here, because this
+    // is the column a reader checks to decide how much to trust the numbers beside it. The
+    // date alone would say "recent" about something that was never ours and may be far older
+    // than the day we recorded it.
+    col('intel_updated_at', 'Last Intel', { group: 'Intel', sort: 'string', head: 'border-l border-border', cell: 'text-muted-foreground border-l border-border', render: r => (
+        r.intel_source
+            ? `<span title="Not our own capture — from ${esc(r.intel_source)}${r.intel_entered_by ? `, entered by ${esc(r.intel_entered_by)}` : ''}">${fmtIntelDate(r.intel_updated_at)} <span class="text-cyan-400">↗</span></span>`
+            : fmtIntelDate(r.intel_updated_at)
+    ) }),
     col('stats_scraped_at', 'Stats age', { group: 'Intel', default: false, sort: 'string', cell: 'text-muted-foreground', render: r => fmtIntelDate(r.stats_scraped_at), title: 'When the hub last read this player\'s Statistics page' }),
 ];
 
