@@ -24,7 +24,9 @@ import '../utils/parse-number.js';   // side-effect import: AWNumber.compareNume
 import '../utils/idle-parse.js';     // side-effect import: AWIdleParse.parseIdleStringToSeconds
 import '../utils/sqlite-time.js';
 import '../utils/max-combat-value.js'; // side-effect import: AWMaxCombatValue, the CV-ceiling formula
-const { compareNumeric } = globalThis.AWNumber;
+import '../utils/game-tables.js';    // side-effect import: AWTables.CULTURE, the per-level point costs
+const { compareNumeric, parseLocaleNumber } = globalThis.AWNumber;
+const { CULTURE } = globalThis.AWTables;
 const { maxCombatValue, maxCombatValueForRow } = globalThis.AWMaxCombatValue;
 const { parseIdleStringToSeconds } = globalThis.AWIdleParse;
 const { parseTimestamp, formatLocalDateTime } = globalThis.AWSqliteTime;
@@ -119,6 +121,39 @@ export function formatCultureCountdown(isoStr, now = Date.now()) {
     if (msLeft <= 0) return 'Ready';
     const totalSecs = Math.floor(msLeft / 1000);
     return `${Math.floor(totalSecs / 3600)}h ${Math.floor((totalSecs % 3600) / 60)}m ${totalSecs % 60}s`;
+}
+
+// ETA for a culture level beyond the very next one (levelsAhead >= 2), reusing the same
+// per-level point table and math as the /Game/Science page's own look-ahead calc
+// (page-injections.js's initScienceCultureCalc) — but driven entirely by data already on the
+// sheet (next_culture_at + culture_rate) instead of a live CultureTable fetch. culture_rate
+// is a snapshot from whenever this member's sheet was last scraped, not a live rate, so the
+// result is approximate — callers should mark it as such (formatCultureLookahead's ~ prefix)
+// rather than present it as exact.
+function cultureLookaheadMs(r, levelsAhead, now = Date.now()) {
+    const rate = parseLocaleNumber(r.culture_rate);
+    const nextAt = parseTimestamp(r.next_culture_at);
+    const currentLevel = Number(r.pl_culture_level);
+    if (!rate || !nextAt || !Number.isFinite(currentLevel)) return null;
+
+    let ms = nextAt.getTime() - now;
+    for (let i = 2; i <= levelsAhead; i++) {
+        const points = CULTURE[currentLevel + i];
+        if (!(points > 0)) return null; // past the published table (level 100+), or bad data
+        ms += (points / rate) * 3600 * 1000;
+    }
+    return ms;
+}
+
+export function formatCultureLookahead(r, levelsAhead, now = Date.now()) {
+    const ms = cultureLookaheadMs(r, levelsAhead, now);
+    if (ms == null) return '-';
+    if (ms <= 0) return 'Ready';
+    const totalSecs = Math.floor(ms / 1000);
+    const days = Math.floor(totalSecs / 86400);
+    const hours = Math.floor((totalSecs % 86400) / 3600);
+    const mins = Math.floor((totalSecs % 3600) / 60);
+    return `~${days > 0 ? `${days}d ${hours}h` : `${hours}h ${mins}m`}`;
 }
 
 // Production bonus from a player's artifact. Only Cathedral (CD), Major (MJ) and
@@ -407,6 +442,8 @@ export const ALLY_STATS_COLUMNS = [
     col('player_id', 'ID', { group: 'Member', cell: 'text-muted-foreground', render: r => num(r.player_id) }),
     col('planets_text', 'Planets', { group: 'Sheet', sort: 'string', cell: 'text-aw-ally font-semibold', render: r => text(r.planets_text) }),
     col('next_culture_at', 'Next Cult', { group: 'Sheet', sort: 'string', cell: 'font-semibold text-yellow-500 whitespace-nowrap', render: r => formatCultureCountdown(r.next_culture_at) }),
+    col('culture_lvl2_eta', 'Cult +2', { group: 'Sheet', default: false, sort: 'number', sortValue: r => cultureLookaheadMs(r, 2), cell: 'font-semibold text-yellow-600 whitespace-nowrap', title: 'Approximate — from the culture rate on this sheet as of its last update', render: r => formatCultureLookahead(r, 2) }),
+    col('culture_lvl3_eta', 'Cult +3', { group: 'Sheet', default: false, sort: 'number', sortValue: r => cultureLookaheadMs(r, 3), cell: 'font-semibold text-yellow-700 whitespace-nowrap', title: 'Approximate — from the culture rate on this sheet as of its last update', render: r => formatCultureLookahead(r, 3) }),
     col('science_rate', 'Sci', { group: 'Sheet', sort: 'numtext', cell: 'text-blue-400 font-semibold', render: r => text(r.science_rate) }),
     col('culture_rate', 'Cul', { group: 'Sheet', sort: 'numtext', cell: 'text-purple-400 font-semibold', render: r => text(r.culture_rate) }),
     col('production_rate', 'Prd', { group: 'Sheet', sort: 'numtext', cell: 'text-orange-400 font-semibold', render: r => text(r.production_rate) }),
