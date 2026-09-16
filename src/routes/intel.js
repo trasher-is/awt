@@ -9,7 +9,7 @@ const tradeRepo = require('../repositories/trade');
 const battleReportsRepo = require('../repositories/battleReports');
 const { parseBattleReportFilters, serializeBattleReportExport } = require('../utils/battle-report-export');
 const usersRepo = require('../repositories/users');
-const { requireAuth } = require('./_middleware');
+const { requireAuth, requireAdmin } = require('./_middleware');
 const { observedNumber, positiveMachineNumber } = require('../utils/observed-number');
 const { parseTimestamp } = require('../../public/js/utils/sqlite-time.js');
 const { splitThreats } = require('../utils/threat-vision');
@@ -178,20 +178,71 @@ router.get('/intel/target-dossier', requireAuth, (req, res) => {
 // path, since only admins may create/edit and the bot already has the account-linking and
 // role checks it needs. Gated on the app_settings toggle so a disabled feature fetches and
 // shows nothing, not merely hides an empty panel client-side.
+function systemPlansEnabled() {
+    const row = settingsRepo.getSetting('system_plans_enabled');
+    return !!(row && row.value === '1');
+}
+function parseSystemIdParam(req, res) {
+    const systemId = parseInt(req.params.systemId, 10);
+    if (!Number.isInteger(systemId) || systemId <= 0) {
+        res.status(400).json({ error: 'Invalid system id' });
+        return null;
+    }
+    return systemId;
+}
+
 router.get('/intel/system-plan/:systemId', requireAuth, (req, res) => {
     try {
-        const systemId = parseInt(req.params.systemId, 10);
-        if (!Number.isInteger(systemId) || systemId <= 0) {
-            return res.status(400).json({ error: 'Invalid system id' });
-        }
-        const enabledSetting = settingsRepo.getSetting('system_plans_enabled');
-        const enabled = !!(enabledSetting && enabledSetting.value === '1');
-        if (!enabled) return res.json({ success: true, enabled: false, plan: null });
+        const systemId = parseSystemIdParam(req, res);
+        if (systemId === null) return;
+        if (!systemPlansEnabled()) return res.json({ success: true, enabled: false, plan: null });
 
         res.json({ success: true, enabled: true, plan: systemPlansRepo.getSystemPlan(systemId) });
     } catch (err) {
         console.error('[DB Error] Failed to fetch system plan:', err);
         res.status(500).json({ error: 'Failed to fetch system plan' });
+    }
+});
+
+// --- SYSTEM PLAN: web write path (2026-09-16e) ---
+// !splan (discord_bot.js) used to be the only way to write one. Both paths now share
+// systemPlansRepo directly — same upsert, same admin gate, same SYSTEM_PLAN_MAX_LENGTH —
+// so a plan created from one surface is fully editable from the other with no format
+// mismatch to work around.
+router.post('/intel/system-plan/:systemId', requireAuth, requireAdmin, (req, res) => {
+    try {
+        const systemId = parseSystemIdParam(req, res);
+        if (systemId === null) return;
+        if (!systemPlansEnabled()) return res.status(403).json({ error: 'System plans are turned off — enable them in the Command Center first' });
+
+        const note = typeof (req.body && req.body.note) === 'string' ? req.body.note.trim() : '';
+        if (!note) return res.status(400).json({ error: 'Plan text cannot be empty' });
+        if (note.length > systemPlansRepo.SYSTEM_PLAN_MAX_LENGTH) {
+            return res.status(400).json({ error: `Plan text is capped at ${systemPlansRepo.SYSTEM_PLAN_MAX_LENGTH} characters (${note.length} given) — the same limit the Discord editor enforces` });
+        }
+
+        const plan = systemPlansRepo.upsertSystemPlan(systemId, note, req.session.userId);
+        res.json({ success: true, plan });
+    } catch (err) {
+        console.error('[DB Error] Failed to save system plan:', err);
+        res.status(500).json({ error: 'Failed to save system plan' });
+    }
+});
+
+router.delete('/intel/system-plan/:systemId', requireAuth, requireAdmin, (req, res) => {
+    try {
+        const systemId = parseSystemIdParam(req, res);
+        if (systemId === null) return;
+        // Matches !splan del's own gate (discord_bot.js) — off means off for every write,
+        // deletion included, not just new plans.
+        if (!systemPlansEnabled()) return res.status(403).json({ error: 'System plans are turned off — enable them in the Command Center first' });
+
+        const removed = systemPlansRepo.deleteSystemPlan(systemId);
+        if (!removed) return res.status(404).json({ error: 'No plan on record for this system' });
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[DB Error] Failed to delete system plan:', err);
+        res.status(500).json({ error: 'Failed to delete system plan' });
     }
 });
 

@@ -1901,15 +1901,49 @@ function systemPlanTimersRow() {
     return clock ? clock.closest('.col') : null;
 }
 
-// HTML comes from system-plan-panel.js (buildSystemPlanHtml), which is pure and Node-tested
+// Cached for the page's lifetime — this never changes mid-session, and every system-page
+// navigation would otherwise cost a fresh /hub-api/me round trip just to decide whether to
+// draw two buttons.
+let _isSystemPlanAdminCache = null;
+async function isSystemPlanAdmin() {
+    if (_isSystemPlanAdminCache !== null) return _isSystemPlanAdminCache;
+    try {
+        const res = await fetch('/hub-api/me');
+        const data = await res.json();
+        _isSystemPlanAdminCache = !!(data && data.role === 'admin');
+    } catch (err) {
+        _isSystemPlanAdminCache = false;
+    }
+    return _isSystemPlanAdminCache;
+}
+
+// Save/delete round-trip shared by both the "Edit" and "Add" flows below — same endpoint
+// !splan's web counterpart (routes/intel.js) exposes, same admin/enabled checks server-side
+// regardless of what this client believes.
+async function saveSystemPlan(systemId, note) {
+    const res = await fetch(`/hub-api/intel/system-plan/${systemId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note }),
+    });
+    const body = await res.json().catch(() => ({}));
+    return { ok: res.ok && body.success, error: body.error, plan: body.plan };
+}
+async function deleteSystemPlan(systemId) {
+    const res = await fetch(`/hub-api/intel/system-plan/${systemId}`, { method: 'DELETE' });
+    const body = await res.json().catch(() => ({}));
+    return { ok: res.ok && body.success, error: body.error };
+}
+
+// HTML comes from system-plan-panel.js, which is pure and Node-tested
 // (src/utils/system-plan-panel.test.js) — this only wires up the DOM: the click-to-expand
-// toggle, and where the panel gets inserted.
-function renderSystemPlanPanel(plan) {
-    const { buildSystemPlanHtml } = globalThis.AWSystemPlanPanel;
+// toggle, the admin Edit/Delete/Add buttons, and where the panel gets inserted.
+function renderSystemPlanPanel(systemId, plan, isAdmin) {
+    const { buildSystemPlanHtml, buildSystemPlanEditFormHtml } = globalThis.AWSystemPlanPanel;
     const wrap = document.createElement('div');
     wrap.className = 'row';
     wrap.id = 'aw-system-plan';
-    wrap.innerHTML = buildSystemPlanHtml(plan, { formatUpdatedAt: (v) => formatSqliteUtc(v, undefined, '') });
+    wrap.innerHTML = buildSystemPlanHtml(plan, { formatUpdatedAt: (v) => formatSqliteUtc(v, undefined, ''), isAdmin });
 
     const header = wrap.querySelector('[data-aw-splan-toggle]');
     const body = wrap.querySelector('[data-aw-splan-body]');
@@ -1919,18 +1953,76 @@ function renderSystemPlanPanel(plan) {
         body.style.display = open ? 'none' : 'block';
         chevron.className = open ? 'bi bi-chevron-down' : 'bi bi-chevron-up';
     });
+
+    if (!isAdmin) return wrap;
+
+    // Replaces the WHOLE panel (not just the card inside it) with the edit form, matching
+    // what the Discord Edit modal shows — a single pre-filled box, not a collapse/header
+    // still sitting above it. buildSystemPlanEditFormHtml already returns its own
+    // .col-md-12 wrapper, so this must replace at the same level that wrapper belongs at
+    // (wrap's own children), not nest it a level deeper inside the existing card.
+    wrap.querySelector('[data-aw-splan-edit-btn]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        wrap.innerHTML = buildSystemPlanEditFormHtml(plan.note);
+        wireEditForm(wrap, systemId);
+    });
+    wrap.querySelector('[data-aw-splan-delete-btn]').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!window.confirm('Delete this system plan? This cannot be undone.')) return;
+        const result = await deleteSystemPlan(systemId);
+        if (!result.ok) { window.alert(result.error || 'Failed to delete the plan.'); return; }
+        wrap.remove();
+    });
     return wrap;
 }
+
+// Shared by both the Edit button's swap-in form and the Add-a-plan flow — reads the
+// textarea, saves, and re-renders the WHOLE panel from the server's response so the byline
+// (author/editor/timestamp) is never something this client has to compute itself.
+function wireEditForm(card, systemId) {
+    const { readSystemPlanEditForm } = globalThis.AWSystemPlanPanel;
+    const status = card.querySelector('[data-aw-splan-status]');
+    card.querySelector('[data-aw-splan-cancel-btn]').addEventListener('click', () => {
+        // Re-running the fetch is simpler and more honest than trying to restore the exact
+        // prior DOM by hand, and it costs one cheap request.
+        _awSystemPlanForceRefetch = true;
+        initSystemPlan();
+    });
+    card.querySelector('[data-aw-splan-save-btn]').addEventListener('click', async (e) => {
+        const note = readSystemPlanEditForm(card);
+        if (!note) { status.textContent = 'Plan text cannot be empty.'; return; }
+        e.currentTarget.disabled = true;
+        status.textContent = 'Saving…';
+        const result = await saveSystemPlan(systemId, note);
+        if (!result.ok) {
+            status.textContent = result.error || 'Failed to save.';
+            e.currentTarget.disabled = false;
+            return;
+        }
+        _awSystemPlanForceRefetch = true;
+        initSystemPlan();
+    });
+}
+
+// initSystemPlan()'s own data-key skip (below) exists so a routine view-hook re-pass
+// doesn't re-fetch a page the admin isn't touching — but right after a save/delete THIS
+// client just caused, that same skip would show the stale pre-edit panel. One-shot flag
+// rather than threading a "force" parameter through every view-hook call site.
+let _awSystemPlanForceRefetch = false;
 
 export async function initSystemPlan() {
     const match = window.location.pathname.match(/solarsystem\/(\d+)/i) || window.location.pathname.match(/\/system\/(\d+)/i);
     const systemId = match ? parseInt(match[1], 10) : NaN;
     if (!Number.isInteger(systemId) || systemId <= 0) return;
 
-    // Same data-key skip as the target dossier: a navigation to a DIFFERENT system id is
-    // what re-fetches, not every view-hook pass on the same page.
     const existing = document.getElementById('aw-system-plan');
-    if (existing && existing.getAttribute('data-key') === String(systemId)) return;
+    const existingPrompt = document.getElementById('aw-system-plan-add');
+    const force = _awSystemPlanForceRefetch;
+    _awSystemPlanForceRefetch = false;
+    // Same data-key skip as the target dossier: a navigation to a DIFFERENT system id (or a
+    // just-completed save/delete) is what re-fetches, not every view-hook pass on the page.
+    if (!force && ((existing && existing.getAttribute('data-key') === String(systemId))
+        || (existingPrompt && existingPrompt.getAttribute('data-key') === String(systemId)))) return;
 
     let data;
     try {
@@ -1942,16 +2034,37 @@ export async function initSystemPlan() {
     if (!data || !data.success) return;
 
     if (existing) existing.remove();
-    // Feature off, or on with nothing written for this system yet: show nothing rather than
-    // an empty box inviting a click that reveals no content.
-    if (!data.enabled || !data.plan) return;
+    if (existingPrompt) existingPrompt.remove();
+    if (!data.enabled) return; // toggle off: show nothing, admin controls included
 
     const anchor = systemPlanTimersRow();
     if (!anchor || !anchor.parentNode) return;
 
-    const panel = renderSystemPlanPanel(data.plan);
-    panel.setAttribute('data-key', String(systemId));
-    anchor.insertAdjacentElement('afterend', panel);
+    if (data.plan) {
+        const isAdmin = await isSystemPlanAdmin();
+        const panel = renderSystemPlanPanel(systemId, data.plan, isAdmin);
+        panel.setAttribute('data-key', String(systemId));
+        anchor.insertAdjacentElement('afterend', panel);
+        return;
+    }
+
+    // Nothing written yet. Only admins get an affordance to change that — anyone else
+    // seeing "no plan yet" for every system they ever visit would just be noise.
+    const isAdmin = await isSystemPlanAdmin();
+    if (!isAdmin) return;
+
+    const { buildAddPlanPromptHtml, buildSystemPlanEditFormHtml } = globalThis.AWSystemPlanPanel;
+    const promptWrap = document.createElement('div');
+    promptWrap.className = 'row';
+    promptWrap.id = 'aw-system-plan-add';
+    promptWrap.setAttribute('data-key', String(systemId));
+    promptWrap.innerHTML = buildAddPlanPromptHtml();
+    anchor.insertAdjacentElement('afterend', promptWrap);
+
+    promptWrap.querySelector('[data-aw-splan-add-btn]').addEventListener('click', () => {
+        promptWrap.innerHTML = buildSystemPlanEditFormHtml('');
+        wireEditForm(promptWrap, systemId);
+    });
 }
 
 // ---------------------------------------------------------------

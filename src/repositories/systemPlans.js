@@ -1,8 +1,14 @@
 // system_plans: ONE evolving note per system, not a log — see database.js's schema comment
-// for why this is a separate table from planet_plans rather than a reuse of it. Written only
-// through !splan (discord_bot.js), which is the sole admin check this data has; there is no
-// web write path.
+// for why this is a separate table from planet_plans rather than a reuse of it. Written
+// through !splan (discord_bot.js) and, since 2026-09-16e, the web panel's own inline editor
+// (routes/intel.js) — both admin-gated, both sharing this repository and the length cap
+// below so the two paths can never quietly drift apart.
 const db = require('../database');
+
+// Discord's own cap on a Paragraph text input (the !splan Edit modal) — the web editor and
+// the plain-text !splan write path both enforce the SAME limit, so nothing ever gets
+// written from one surface that the other couldn't later reopen.
+const SYSTEM_PLAN_MAX_LENGTH = 4000;
 
 // was_edited comes from edit_count, not a created_at/updated_at comparison — SQLite's
 // CURRENT_TIMESTAMP only has one second of resolution, so a real edit landing in the same
@@ -50,4 +56,4 @@ function deleteSystemPlan(systemId) {
     return deleteSystemPlanStmt.run(systemId).changes > 0;
 }
 
-module.exports = { getSystemPlan, upsertSystemPlan, deleteSystemPlan };
+module.exports = { getSystemPlan, upsertSystemPlan, deleteSystemPlan, SYSTEM_PLAN_MAX_LENGTH };
