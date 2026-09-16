@@ -676,6 +676,17 @@ router.post('/sync/player', requireAuth, (req, res) => {
     try {
         syncTransaction(safePlayer);
         announceIntelVisibility(p, safePlayer, priorIntel);
+        // Stat milestones, for the same reason the visibility announcement moved here
+        // (2026-09-16): this is the only route that ever sees a real intelligence report, so
+        // it is the only place a player's sciences actually change. Gated on has_intel
+        // because otherwise the columns this reads were not touched by this write at all and
+        // re-checking them would just re-derive the same answer. Never let a bonus-goal bug
+        // fail the profile sync itself.
+        if (safePlayer.has_intel === 1) {
+            try { bonusGoalsRepo.evaluatePlayerStatsForGoals(p.id); } catch (err) {
+                console.error(`[DB Error] Bonus-goal stat-milestone evaluation failed for player ${p.id}:`, err.message);
+            }
+        }
         res.json({ success: true });
     } catch (err) {
         console.error(`[DB Error] Failed to sync player ${p.id}:`, err);
@@ -956,15 +967,12 @@ router.post('/sync/player-detail', requireAuth, (req, res) => {
         if (Number.isInteger(observedLogins) && observedLogins > 0) {
             playersRepo.recordLoginSample(p.id, observedLogins);
         }
-        // Only when this sync actually delivered validated intel (see hasCompleteIntel
-        // above) — otherwise the stat columns weren't touched by this write at all, and
-        // re-checking them would just be re-deriving the same answer for no reason. Never
-        // let a bonus-goal bug fail the player-detail sync itself.
-        if (detail.has_intel === 1) {
-            try { bonusGoalsRepo.evaluatePlayerStatsForGoals(p.id); } catch (err) {
-                console.error(`[DB Error] Bonus-goal stat-milestone evaluation failed for player ${p.id}:`, err.message);
-            }
-        }
+        // Stat milestones used to hang here, gated on detail.has_intel === 1 — a condition
+        // this route can never meet, because the API carries no intelligenceReport at all
+        // (measured 2026-09-15, see announceIntelVisibility). So the Science-milestones goal
+        // had never once been evaluated in the life of the feature. It moved to /sync/player,
+        // the only route that sees a real report. Nothing is gated here any more rather than
+        // left looking like a live trigger.
         res.json({ success: true });
     } catch (err) {
         console.error(`[DB Error] Failed to sync player detail ${p.id}:`, err);

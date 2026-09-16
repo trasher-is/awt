@@ -233,20 +233,24 @@ db.prepare(`
     INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_id, att_player_name, def_lost_cv, killed_population)
     VALUES (91001, '2026-09-15T20:00:00Z', 800, 9, 905, 'BottleFinder', 100, 3)
 `).run();
-const wrongPlanetEval = bonusGoals.evaluateBattleReportForGoals(91001);
+// Evaluated at the SAME pinned instant the target was activated at. Passing day1 here is
+// the whole fix for a test that used to pass only on 2026-09-15: evaluate resolves the
+// active target against a clock, and leaving that clock as the real one meant the target
+// had expired by the time anyone ran the suite on a later day.
+const wrongPlanetEval = bonusGoals.evaluateBattleReportForGoals(91001, day1);
 ok('a real hit on a DIFFERENT planet in the same system claims nothing', wrongPlanetEval.length === 0, wrongPlanetEval);
 
 db.prepare(`
     INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_id, att_player_name, def_lost_cv, killed_population)
     VALUES (91002, '2026-09-15T21:00:00Z', 800, 3, 905, 'BottleFinder', 500, 5)
 `).run();
-const bottleEval = bonusGoals.evaluateBattleReportForGoals(91002);
+const bottleEval = bonusGoals.evaluateBattleReportForGoals(91002, day1);
 ok('a real hit on the ACTUAL target planet claims it for the flat point value (50)',
     bottleEval.some(a => a.goal_id === targetGoal.id && a.points === 50), bottleEval);
 
-ok('the target is now claimed — getActiveTarget returns null', bonusGoals.getActiveTarget(targetGoal.id) === null);
+ok('the target is now claimed — getActiveTarget returns null', bonusGoals.getActiveTarget(targetGoal.id, day1) === null);
 
-const displayAfterClaim = bonusGoals.getActiveTargetsForDisplay();
+const displayAfterClaim = bonusGoals.getActiveTargetsForDisplay(day1);
 ok('a claimed target no longer shows up for the client', !displayAfterClaim.some(t => t.system_id === 800 && t.planet_index === 3), displayAfterClaim);
 
 // A later report on the same planet, after it's already claimed, must not award again —

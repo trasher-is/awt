@@ -151,38 +151,48 @@ function request(server, method, urlPath, body) {
         const afterClaim = await request(server, 'GET', '/hub-api/sync/bonus-goals/active-target');
         ok('a claimed target no longer appears', !afterClaim.body.targets.some(t => t.system_id === 700 && t.planet_index === 1), afterClaim.body);
 
-        console.log('\n── player-detail sync triggers stat_milestone evaluation once validated intel arrives ' + '─'.repeat(2));
+        console.log('\n── the profile scrape triggers stat_milestone evaluation ' + '─'.repeat(20));
         const milestoneGoal = bonusGoalsRepo.createGoal({
             type: 'stat_milestone', name: 'route milestone test',
             config: { milestones: [{ stat: 'energy', threshold: 40, points: 30 }] },
             enabled: true,
         });
 
-        // A COMPLETE intel payload — every field hasCompleteIntel checks must be a real
-        // number (including every race_* one) for has_intel to actually resolve to 1;
-        // otherwise the sync would silently demote it to 0 and never touch the stat
-        // columns at all, so the milestone check would have nothing fresh to evaluate.
-        const detailPayload = {
-            player: {
-                id: 850, name: 'Scientist850', alliance_id: null, level: 5, points: 100,
-                ranking: null, country: null, is_active_player: 1, joined: null,
-                logins: null, last_activity_at: null, last_login_at: null, resigned_at: null,
-                number_of_battles: null, battle_luckiness: null, multi_status: null,
-                is_top_permanent_ranker: 0, has_supporter_badge: 0, supporter_type: null,
-                has_intel: 1,
-                biology: 10, economy: 10, energy: 42, mathematics: 10, physics: 10,
-                social: 10, trade_revenue: 10, artefact: null,
-                race_growth: 5, race_science: 5, race_culture: 5, race_production: 5,
-                race_speed: 5, race_attack: 5, race_defense: 5, race_trader: 5, race_sul: 5,
-            },
-        };
-        const detailRes = await request(server, 'POST', '/hub-api/sync/player-detail', detailPayload);
-        ok('player-detail sync itself still succeeds', detailRes.status === 200 && detailRes.body.success, detailRes.body);
+        // THE BUG THIS REPLACES (2026-09-16): this check used to drive /sync/player-detail,
+        // and it passed — because it handed that route a fully-populated intelligence report.
+        // The real API never sends one. It carries no intelligenceReport at all (measured
+        // 2026-09-15), so has_intel on that route is always 0 and the milestone trigger sitting
+        // behind `if (detail.has_intel === 1)` had never fired once in the life of the feature.
+        // A green test the whole time, proving only that a payload shape which does not exist
+        // would have worked. So the trigger moved to the profile scrape — the one route that
+        // sees a real report — and the test moved with it, onto the payload a scrape actually
+        // sends (player-parser.js's shape, has_intel set from the page's ir-summary block).
+        const scrapeRes = await request(server, 'POST', '/hub-api/sync/player', {
+            id: 850, name: 'Scientist850', level: 5, points: 100, logins: 0,
+            has_intel: 1,
+            biology: 10, economy: 10, energy: 42, mathematics: 10, physics: 10, social: 10,
+        });
+        ok('the profile sync itself still succeeds', scrapeRes.status === 200 && scrapeRes.body.success, scrapeRes.body);
 
         const milestoneAward = db.prepare(`SELECT * FROM bonus_goal_awards WHERE goal_id = ? AND source_key = ?`)
             .get(milestoneGoal.id, 'milestone:energy:40');
-        ok('the player-detail sync triggered milestone evaluation and credited the threshold (30 pts)',
+        ok('the scrape triggered milestone evaluation and credited the threshold (30 pts)',
             milestoneAward && milestoneAward.player_id === 850 && milestoneAward.points === 30, milestoneAward);
+
+        // And the inverse, which is what let the original bug hide: a sightless sync must not
+        // be treated as delivering stats. If this ever starts awarding, the gate is gone.
+        const quietGoal = bonusGoalsRepo.createGoal({
+            type: 'stat_milestone', name: 'route milestone test (no intel)',
+            config: { milestones: [{ stat: 'biology', threshold: 5, points: 15 }] },
+            enabled: true,
+        });
+        await request(server, 'POST', '/hub-api/sync/player', {
+            id: 851, name: 'Unseen851', level: 5, points: 100, logins: 0, has_intel: 0,
+            biology: 0, economy: 0, energy: 0, mathematics: 0, physics: 0, social: 0,
+        });
+        const quietAward = db.prepare(`SELECT COUNT(*) AS n FROM bonus_goal_awards WHERE goal_id = ?`).get(quietGoal.id);
+        ok('a scrape with no intel on the page awards nothing', quietAward.n === 0, quietAward);
+
     } finally {
         server.close();
     }
