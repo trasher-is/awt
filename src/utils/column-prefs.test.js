@@ -105,8 +105,17 @@ async function loadEsm(rel, tmp) {
     ok('war-room tooltip accepts offset timestamps and shows the local 24-hour time',
         intelTooltip.includes(`${localHour}:50:03`) && !/\b(?:AM|PM)\b|never/.test(intelTooltip));
 
+    // The intended default view of each table. It started as literally "what the table showed
+    // before the column picker landed", and mostly still is — every column added since has
+    // been opt-in so nobody's layout changes under them.
+    //
+    // players swapped 'cv' for 'max_cv' on 2026-09-16, the one deliberate change. The 'cv'
+    // column rendered cv_used/cv_limit, which are scraped from a page the game only ever
+    // shows you about YOURSELF — so it read 0/0 for all 160 players on record and always
+    // would have. Max CV answers the question it was there to answer, calculated rather than
+    // scraped. See public/js/utils/max-combat-value.js.
     const ORIGINAL = {
-        players: ['name', 'alliance_tag', 'level', 'science_level', 'culture_level', 'points', 'planet_count', 'total_population', 'cv',
+        players: ['name', 'alliance_tag', 'level', 'science_level', 'culture_level', 'points', 'planet_count', 'total_population', 'max_cv',
             'race_growth', 'race_science', 'race_culture', 'race_production', 'race_speed', 'race_attack', 'race_defense', 'race_trader',
             'trade_revenue', 'biology', 'economy', 'energy', 'mathematics', 'physics', 'social', 'artefact', 'intel_updated_at'],
         warRoom: ['name', 'idle', 'total_planets', 'calculated_prod', 'trade_revenue', 'cv_day', 'max_cv', 'race_speed', 'race_attack', 'race_defense',
@@ -138,7 +147,7 @@ async function loadEsm(rel, tmp) {
         ok('there are more columns than before — the point of the issue', keys.length > ORIGINAL[tableKey].length, keys.length);
 
         const defaults = [...Prefs.defaultVisible(table.columns)];
-        ok(`the default view is exactly the ${ORIGINAL[tableKey].length} columns the table showed before`,
+        ok(`the default view is exactly the ${ORIGINAL[tableKey].length} columns intended`,
             same(defaults, ORIGINAL[tableKey]), { extra: defaults.filter(k => !ORIGINAL[tableKey].includes(k)), missing: ORIGINAL[tableKey].filter(k => !defaults.includes(k)) });
 
         const head = SC.renderHeaderCells(table.columns, { sortCol: keys[1], sortAsc: false, headBase: table.headBase });
