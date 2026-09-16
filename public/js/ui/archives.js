@@ -64,7 +64,14 @@ function wireStatTable({ panel, table, headRowId, pickerMountId, tableId, tableK
         render();
     });
     paintHead();
-    mountColumnPicker({ mountEl: panel.querySelector(`#${pickerMountId}`), tableId, tableKey, columns: table.columns });
+    // The picker resolves the member's stored column order asynchronously (it awaits
+    // /hub-api/me first), so this fires once after mount with the natural order already
+    // painted above, then again on every drag/move — reassigning table.columns (not a copy
+    // elsewhere) means every render*Table function downstream picks it up automatically.
+    mountColumnPicker({
+        mountEl: panel.querySelector(`#${pickerMountId}`), tableId, tableKey, columns: table.columns,
+        onReorder: ordered => { table.columns = ordered; paintHead(); render(); },
+    });
     return paintHead;
 }
 

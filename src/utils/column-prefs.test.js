@@ -61,7 +61,7 @@ async function loadEsm(rel, tmp) {
     ok('...and one added with default off stays hidden', !Prefs.resolveVisible([...cols, { key: 'newoff', default: false }], stored).has('newoff'));
     ok('parseStored rejects garbage', Prefs.parseStored('not json') === null && Prefs.parseStored('[1]') === null && Prefs.parseStored('') === null && Prefs.parseStored(null) === null);
     ok('parseStored rejects a future version', Prefs.parseStored('{"v":99,"on":["a"]}') === null);
-    ok('parseStored keeps a good one', same(Prefs.parseStored('{"v":1,"on":["x"],"off":["a"]}'), { v: 1, on: ['x'], off: ['a'] }));
+    ok('parseStored keeps a good one', same(Prefs.parseStored('{"v":1,"on":["x"],"off":["a"]}'), { v: 1, on: ['x'], off: ['a'], order: [] }));
     ok('storage keys are per table and per member',
         Prefs.storageKey('warRoom', 7) === 'awt.columns.v1.warRoom.7' && Prefs.storageKey('warRoom', null) === 'awt.columns.v1.warRoom.anon');
     const css = Prefs.hiddenCss('warIntelTable', ['x', 'y', 'bad key', '"quote']);
@@ -69,6 +69,42 @@ async function loadEsm(rel, tmp) {
         css === '#warIntelTable [data-col="x"]{display:none}\n#warIntelTable [data-col="y"]{display:none}', css);
     ok('hiddenCss refuses an unsafe table id', Prefs.hiddenCss('a b', ['x']) === '');
     ok('hiddenKeys is the complement of visible', same(Prefs.hiddenKeys(cols, new Set(['name', 'a'])), ['b', 'x', 'y']));
+
+    console.log('\n── Preferences: column order ' + '─'.repeat(46));
+    ok('no stored order: natural definition order, locked first (already true here)',
+        same(Prefs.resolveOrder(cols, null).map(c => c.key), ['name', 'a', 'b', 'x', 'y']));
+    ok('a stored order is applied, with the locked column forced first regardless of position in storage',
+        same(Prefs.resolveOrder(cols, { order: ['y', 'name', 'x', 'a', 'b'] }).map(c => c.key), ['name', 'y', 'x', 'a', 'b']));
+    ok('unknown/duplicate keys in a stored order are dropped',
+        same(Prefs.resolveOrder(cols, { order: ['y', 'ghost', 'y', 'x'] }).map(c => c.key), ['name', 'y', 'x', 'a', 'b']));
+    ok('a column missing from the stored order (added since) is appended at its natural position',
+        same(Prefs.resolveOrder([...cols, { key: 'z' }], { order: ['b', 'a'] }).map(c => c.key), ['name', 'b', 'a', 'x', 'y', 'z']));
+    const orderedStored = Prefs.toStored(cols, Prefs.defaultVisible(cols), ['b', 'a', 'x', 'y']);
+    ok('toStored records a changed order', same(orderedStored.order, ['b', 'a', 'x', 'y']), orderedStored);
+    const unchangedOrderStored = Prefs.toStored(cols, Prefs.defaultVisible(cols), ['a', 'b', 'x', 'y']);
+    ok('toStored omits order when it matches the natural (definition) order', !('order' in unchangedOrderStored), unchangedOrderStored);
+
+    console.log('\n── Preferences: moving a column up/down among the visible ones ' + '─'.repeat(15));
+    const vis3 = new Set(['name', 'a', 'b', 'x']); // y stays hidden throughout
+    let moved = Prefs.moveVisible(cols, vis3, 'b', -1);
+    ok('moving b up swaps it with the previous VISIBLE column (a), not just the previous slot',
+        same(moved.map(c => c.key), ['name', 'b', 'a', 'x', 'y']), moved.map(c => c.key));
+    ok('moveVisible does not mutate the input array', same(cols.map(c => c.key), ['name', 'a', 'b', 'x', 'y']));
+    ok('the locked name column cannot be moved', Prefs.moveVisible(cols, vis3, 'name', 1) === cols);
+    ok('a hidden column cannot be moved', Prefs.moveVisible(cols, vis3, 'y', -1) === cols);
+    ok('moving the first visible column up is a no-op (same reference)', Prefs.moveVisible(cols, vis3, 'a', -1) === cols);
+    ok('moving the last visible column down is a no-op (same reference)', Prefs.moveVisible(cols, vis3, 'x', 1) === cols);
+    ok('an unknown key is a no-op (same reference)', Prefs.moveVisible(cols, vis3, 'ghost', 1) === cols);
+    // y sits between a and b in the definition order but is hidden — moving b up past a must
+    // swap the two VISIBLE columns' array slots and leave y sitting in whichever slot that
+    // swap lands it in (not hop over it as if it weren't there).
+    const colsWithGap = [{ key: 'name', locked: true }, { key: 'a' }, { key: 'y', default: false }, { key: 'b' }, { key: 'x' }];
+    const visGap = new Set(['name', 'a', 'b', 'x']);
+    const movedPastHidden = Prefs.moveVisible(colsWithGap, visGap, 'b', -1);
+    ok('a hidden column between the two swapped columns keeps its array slot, not its visible-neighbor',
+        same(movedPastHidden.map(c => c.key), ['name', 'b', 'y', 'a', 'x']), movedPastHidden.map(c => c.key));
+    ok('...and the visible order is what moved: a now comes after b, not before',
+        movedPastHidden.filter(c => visGap.has(c.key)).map(c => c.key).join(',') === 'name,b,a,x');
 
     console.log('\n── The column definitions ' + '─'.repeat(49));
     const SC = await loadEsm('public/js/ui/stat-columns.js', tmp);

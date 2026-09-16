@@ -60,15 +60,27 @@
         return visible;
     }
 
-    /** The difference from the defaults, which is all that gets remembered. */
-    function toStored(columns, visible) {
+    /**
+     * The difference from the defaults, which is all that gets remembered. `orderKeys`
+     * (optional) is every non-locked column's key in the member's current left-to-right
+     * order; it is only written when it actually differs from the definition order, so a
+     * member who never touches reordering stores nothing extra and picks up new columns at
+     * their natural position instead of a stale end-of-list slot.
+     */
+    function toStored(columns, visible, orderKeys) {
         const on = [], off = [];
         for (const c of columns) {
             const shown = visible.has(c.key);
             if (shown && !isDefaultOn(c)) on.push(c.key);
             if (!shown && isDefaultOn(c) && !isLocked(c)) off.push(c.key);
         }
-        return { v: VERSION, on, off };
+        const result = { v: VERSION, on, off };
+        if (Array.isArray(orderKeys)) {
+            const natural = columns.filter(c => !isLocked(c)).map(c => c.key);
+            const changed = orderKeys.length !== natural.length || orderKeys.some((k, i) => k !== natural[i]);
+            if (changed) result.order = orderKeys;
+        }
+        return result;
     }
 
     /** JSON from storage -> preference object, or null for anything unusable. */
@@ -78,10 +90,54 @@
             const obj = JSON.parse(raw);
             if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
             if (obj.v !== undefined && obj.v !== VERSION) return null;
-            return { v: VERSION, on: list(obj.on), off: list(obj.off) };
+            return { v: VERSION, on: list(obj.on), off: list(obj.off), order: list(obj.order) };
         } catch (err) {
             return null;
         }
+    }
+
+    /**
+     * Apply a stored column order to the definitions. Unknown/duplicate keys are dropped; any
+     * column missing from the stored order (new since the member last customised it, or
+     * never touched) is appended in its original definition position. Locked columns (the
+     * member-name column every table pins first) always stay first regardless of what is
+     * stored — moving it would break the `sticky left-0` CSS the header/body cells rely on.
+     * @returns {Array} a new column array; the same objects, reordered
+     */
+    function resolveOrder(columns, stored) {
+        const locked = columns.filter(isLocked);
+        const rest = columns.filter(c => !isLocked(c));
+        const orderKeys = stored && Array.isArray(stored.order) ? list(stored.order) : [];
+        if (!orderKeys.length) return [...locked, ...rest];
+
+        const byKey = new Map(rest.map(c => [c.key, c]));
+        const seen = new Set();
+        const ordered = [];
+        for (const k of orderKeys) {
+            const c = byKey.get(k);
+            if (c && !seen.has(k)) { ordered.push(c); seen.add(k); }
+        }
+        for (const c of rest) if (!seen.has(c.key)) ordered.push(c);
+        return [...locked, ...ordered];
+    }
+
+    /**
+     * Move the column `key` up (dir -1) or down (dir +1) among the currently visible,
+     * non-locked columns, leaving hidden columns' relative order alone. Returns a NEW array,
+     * or the same `columns` reference (by identity) for a no-op — key not found, locked, not
+     * visible, or already at that end — so callers can skip a re-render with `result === columns`.
+     */
+    function moveVisible(columns, visible, key, dir) {
+        const idxs = [];
+        columns.forEach((c, i) => { if (!isLocked(c) && visible.has(c.key)) idxs.push(i); });
+        const pos = idxs.findIndex(i => columns[i].key === key);
+        if (pos === -1) return columns;
+        const swapPos = pos + dir;
+        if (swapPos < 0 || swapPos >= idxs.length) return columns;
+        const next = columns.slice();
+        const a = idxs[pos], b = idxs[swapPos];
+        [next[a], next[b]] = [next[b], next[a]];
+        return next;
     }
 
     function hiddenKeys(columns, visible) {
@@ -96,5 +152,5 @@
             .join('\n');
     }
 
-    return { VERSION, KEY_RE, storageKey, defaultVisible, resolveVisible, toStored, parseStored, hiddenKeys, hiddenCss };
+    return { VERSION, KEY_RE, storageKey, defaultVisible, resolveVisible, toStored, parseStored, hiddenKeys, hiddenCss, resolveOrder, moveVisible };
 });
