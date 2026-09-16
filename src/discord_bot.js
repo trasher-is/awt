@@ -1,8 +1,10 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle, MessageFlags } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle, MessageFlags,
+    ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const db = require('./database');
 const systemsRepo = require('./repositories/systems');
 const fleetsRepo = require('./repositories/fleets');
 const plansRepo = require('./repositories/plans');
+const systemPlansRepo = require('./repositories/systemPlans');
 const playersRepo = require('./repositories/players');
 const alliancesRepo = require('./repositories/alliances');
 const usersRepo = require('./repositories/users');
@@ -13,6 +15,7 @@ const { friendlyAllianceTags } = require('./utils/friendly-alliance-tags');
 const { bestSystemForChannel } = require('./utils/system-channel-match');
 const { splitThreats } = require('./utils/threat-vision');
 const settingsRepo = require('./repositories/settings');
+const { parseTimestamp } = require('../public/js/utils/sqlite-time.js');
 const battlePointsRepo = require('./repositories/battlePoints');
 const battleReportsRepo = require('./repositories/battleReports');
 const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
@@ -103,6 +106,144 @@ client.on('interactionCreate', async (interaction) => {
     } catch (e) {
         console.error('[Discord] cover button failed:', e.message);
         try { await interaction.reply({ content: '⚠️ Could not register your cover — try again.', flags: MessageFlags.Ephemeral }); } catch (_) {}
+    }
+});
+
+// ─── SYSTEM PLANS (2026-09-16) ─────────────────────────────────────────────────
+// One evolving note per system, admin-authored, read by everyone — see database.js's
+// system_plans comment and the !splan command below for the full shape. This section is
+// the message/button/modal presentation; systemPlansRepo owns the data.
+
+// Discord's own cap on a Paragraph text input — the plain-text write path enforces the
+// same limit so nothing ever gets written that the Edit button couldn't later reopen.
+const SYSTEM_PLAN_MAX_LENGTH = 4000;
+
+function systemPlansEnabled() {
+    const row = settingsRepo.getSetting('system_plans_enabled');
+    return !!(row && row.value === '1');
+}
+
+// Shared by the initial `!splan <id>` read, the write confirmation, and every button/modal
+// round-trip after — one place decides what a system plan looks like, so an edit can never
+// render differently from a fresh read of the same row.
+function buildSystemPlanMessage(sysId, plan, isAdmin) {
+    const sys = systemsRepo.getSystemCoords(sysId);
+    const title = sys ? `${sys.name || 'Unknown'} #${sysId} — System Plan` : `System #${sysId} — System Plan`;
+
+    const embed = new EmbedBuilder()
+        .setTitle(title)
+        .setColor('#f59e0b')
+        .setDescription(plan.note);
+
+    const authorLine = plan.author_name ? `Written by **${plan.author_name}**` : 'Written by an account no longer on record';
+    const editedLine = plan.was_edited
+        ? `, last edited by **${plan.last_edited_by_name || 'an account no longer on record'}**`
+        : '';
+    embed.setFooter({ text: `${authorLine}${editedLine}` });
+    // SQLite's CURRENT_TIMESTAMP carries no zone marker and new Date() would read it as
+    // browser/server-local — see sqlite-time.js's own header for why every timestamp in the
+    // hub goes through this parser rather than a bare `new Date(...)`.
+    const updatedAt = parseTimestamp(plan.updated_at);
+    if (updatedAt) embed.setTimestamp(updatedAt);
+
+    const components = [];
+    if (isAdmin) {
+        components.push(new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`splan-edit:${sysId}`).setLabel('Edit').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId(`splan-del:${sysId}`).setLabel('Delete').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+        ));
+    }
+    return { embed, components };
+}
+
+// ✏️ Edit button: opens a modal PRE-FILLED with the current note. This is the actual feature
+// request — "give a text to edit, so you don't have to rewrite it all if you want to edit a
+// word" — which a plain !-prefix command cannot do (Discord never lets a bot pre-populate a
+// chat message for someone to send), but a modal's TextInputBuilder can via .setValue().
+client.on('interactionCreate', async (interaction) => {
+    try {
+        if (!interaction.isButton() || !interaction.customId.startsWith('splan-edit:')) return;
+        const sysId = interaction.customId.slice('splan-edit:'.length);
+
+        const row = usersRepo.getUserByDiscordId(interaction.user.id);
+        if (!row || row.role !== 'admin') {
+            return interaction.reply({ content: '❌ Only admins can edit a system plan.', flags: MessageFlags.Ephemeral });
+        }
+
+        const plan = systemPlansRepo.getSystemPlan(sysId);
+        const modal = new ModalBuilder().setCustomId(`splan-modal:${sysId}`).setTitle(`System #${sysId} Plan`);
+        const noteInput = new TextInputBuilder()
+            .setCustomId('note')
+            .setLabel('Plan text')
+            .setStyle(TextInputStyle.Paragraph)
+            .setMaxLength(SYSTEM_PLAN_MAX_LENGTH)
+            .setRequired(true);
+        // Empty when there is no existing plan — an admin can open Edit before one exists,
+        // by using the same button off a `!splan del`-then-recreate flow or a future "no
+        // plan yet" prompt; setValue('') is simply a no-op prefill in that case.
+        if (plan) noteInput.setValue(plan.note);
+        modal.addComponents(new ActionRowBuilder().addComponents(noteInput));
+
+        await interaction.showModal(modal);
+    } catch (e) {
+        console.error('[Discord] system-plan edit button failed:', e.message);
+        try { await interaction.reply({ content: '⚠️ Could not open the editor — try again.', flags: MessageFlags.Ephemeral }); } catch (_) {}
+    }
+});
+
+// 🗑️ Delete button — admin-checked again at click time (an admin can lose the role between
+// posting the message and someone clicking it), then the message is updated in place so the
+// channel sees the plan actually gone rather than a stale embed next to a broken button.
+client.on('interactionCreate', async (interaction) => {
+    try {
+        if (!interaction.isButton() || !interaction.customId.startsWith('splan-del:')) return;
+        const sysId = interaction.customId.slice('splan-del:'.length);
+
+        const row = usersRepo.getUserByDiscordId(interaction.user.id);
+        if (!row || row.role !== 'admin') {
+            return interaction.reply({ content: '❌ Only admins can delete a system plan.', flags: MessageFlags.Ephemeral });
+        }
+
+        systemPlansRepo.deleteSystemPlan(sysId);
+        await interaction.update({ content: `🗑️ System plan removed for System **#${sysId}**.`, embeds: [], components: [] });
+    } catch (e) {
+        console.error('[Discord] system-plan delete button failed:', e.message);
+        try { await interaction.reply({ content: '⚠️ Could not delete the plan — try again.', flags: MessageFlags.Ephemeral }); } catch (_) {}
+    }
+});
+
+// The modal's submit — saves and refreshes the SAME message the Edit button lived on
+// (interaction.message is available here because the modal was opened from that button's
+// interaction, exactly like the cover button's interaction.update above).
+client.on('interactionCreate', async (interaction) => {
+    try {
+        if (!interaction.isModalSubmit() || !interaction.customId.startsWith('splan-modal:')) return;
+        const sysId = interaction.customId.slice('splan-modal:'.length);
+
+        const row = usersRepo.getUserByDiscordId(interaction.user.id);
+        if (!row || row.role !== 'admin') {
+            return interaction.reply({ content: '❌ Only admins can edit a system plan.', flags: MessageFlags.Ephemeral });
+        }
+
+        const note = interaction.fields.getTextInputValue('note').trim();
+        if (!note) {
+            return interaction.reply({ content: '❌ The plan text cannot be empty — use the Delete button to remove it instead.', flags: MessageFlags.Ephemeral });
+        }
+
+        const plan = systemPlansRepo.upsertSystemPlan(sysId, note, row.id);
+        const { embed, components } = buildSystemPlanMessage(sysId, plan, true);
+        // isFromMessage() is false only if a modal were ever shown from something other than
+        // this button (a slash command, say) — not a path this feature has, but update()
+        // throws outright on a modal with no originating message, so this is the difference
+        // between a clean fallback and a caught-and-logged crash.
+        if (interaction.isFromMessage()) {
+            await interaction.update({ embeds: [embed], components });
+        } else {
+            await interaction.reply({ embeds: [embed], components });
+        }
+    } catch (e) {
+        console.error('[Discord] system-plan modal submit failed:', e.message);
+        try { await interaction.reply({ content: '⚠️ Could not save your edit — try again.', flags: MessageFlags.Ephemeral }); } catch (_) {}
     }
 });
 
@@ -410,6 +551,8 @@ async function handleMessage(message) {
                 { name: '`!dist <sys1_id> <sys2_id>`', value: 'Calculates the distance and required biology level between two systems.\n*Example: `!dist 100 200`*' },
                 { name: '`!plan <sys_id> <planet_num> <instructions...>`', value: 'Adds a tactical plan/note to a specific planet. (Requires your Discord ID to be linked in the Hub).\n*Example: `!plan 123 4 Send colony ship`*' },
                 { name: '`!plan del <sys_id> <planet_num>`', value: 'Removes a plan. You can only remove your own — an admin account can remove anyone\'s.\n*Example: `!plan del 123 4`*' },
+                { name: '`!splan <sys_id> [text...]`', value: 'One standing note for a whole system — not per-planet. No text: reads it back. With text: writes/overwrites it (admins only). Admins also get ✏️ Edit / 🗑️ Delete buttons on the reply — Edit opens a pre-filled box so you never retype the whole thing.\n*Example: `!splan 123` or `!splan 123 Hold this system, colony ships incoming`*' },
+                { name: '`!splan del <sys_id>`', value: 'Removes a system plan (admins only).\n*Example: `!splan del 123`*' },
                 { name: '`!vision <system_id> [alliance_tag]`', value: 'Performs a radar scan to see which alliance members have vision over a target system.\n*Example: `!vision 123 RAID`*' },
                 { name: '`!holes [alliance_tag]`', value: 'Scans your alliance\'s territory for a per-system breakdown: your own holdings, free unplanned, 🟧 planned (!plan), 🟨 neutral, 🟩 ally, and 🟥 war-list presence, per the Alliance Relations tags set in Admin.\n*Example: `!holes RAID`*' },
                 { name: '`!tt <sysA> <plnA> <sysB> <plnB> <speed> <nrg>`', value: 'Calculates fleet travel time between two coordinates.\n*Example: `!tt 100 1 200 4 10 5`*\n*(You can also swap speed/energy for a player name: `!tt 100 1 200 4 PlayerOne`)*' },
@@ -1281,6 +1424,84 @@ async function handleMessage(message) {
             console.error(err);
             message.reply('❌ Database error while saving plan.');
         }
+    }
+
+    // ----------------------------------------------------
+    // !splan <system_id>            - READ the system-level plan
+    // !splan <system_id> <text...>  - CREATE or OVERWRITE it (admin only)
+    // !splan del <system_id>        - DELETE it (admin only)
+    // ----------------------------------------------------
+    // Deliberately a single evolving note per system, not a log — see database.js's
+    // system_plans comment. "Give a text to edit" (the actual request behind this feature)
+    // is what the ✏️ Edit button + modal below are for: it opens pre-filled with the current
+    // note, so fixing one word never means retyping the whole thing. The plain-text form
+    // here is the alternative path for writing it the first time, or a deliberate full
+    // rewrite — not a substitute for the modal.
+    if (command === 'splan') {
+        if (!systemPlansEnabled()) {
+            return message.reply('❌ System plans are turned off. An admin can enable them in the Command Center.');
+        }
+
+        const sub = (args[0] || '').toLowerCase();
+
+        if (sub === 'del' || sub === 'delete' || sub === 'remove') {
+            const sysId = args[1];
+            if (!sysId || isNaN(sysId)) return message.reply('❌ Usage: `!splan del <system_id>`');
+
+            const discordName = message.author.username;
+            const user = usersRepo.getUserByDiscordName(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
+            if (!user) return message.reply(`❌ Your Discord username (\`${discordName}\`) is not linked to any Hub account. Add it in the Command Center first.`);
+            if (user.role !== 'admin') return message.reply('❌ Only admins can remove a system plan.');
+
+            try {
+                const removed = systemPlansRepo.deleteSystemPlan(sysId);
+                if (!removed) return message.reply(`❌ No plan on record for System **#${sysId}**.`);
+                message.react('🗑️');
+                message.reply(`🗑️ System plan removed for System **#${sysId}**.`);
+            } catch (err) {
+                console.error(err);
+                message.reply('❌ Database error while deleting the system plan.');
+            }
+            return;
+        }
+
+        const sysId = args[0];
+        if (!sysId || isNaN(sysId)) {
+            return message.reply('❌ Usage: `!splan <system_id>` to read, `!splan <system_id> <text...>` to write, or `!splan del <system_id>`.');
+        }
+        const note = args.slice(1).join(' ');
+
+        // READ path — open to everyone, same as planet_plans.
+        if (!note) {
+            const plan = systemPlansRepo.getSystemPlan(sysId);
+            if (!plan) return message.reply(`ℹ️ No system plan on record for System **#${sysId}**. Write one with \`!splan ${sysId} <text...>\` (admins only).`);
+
+            const discordName = message.author.username;
+            const user = usersRepo.getUserByDiscordName(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
+            const isAdmin = !!(user && user.role === 'admin');
+            const { embed, components } = buildSystemPlanMessage(sysId, plan, isAdmin);
+            return message.reply({ embeds: [embed], components });
+        }
+
+        // WRITE path (create or blunt overwrite) — admin only.
+        const discordName = message.author.username;
+        const user = usersRepo.getUserByDiscordName(discordName.toLowerCase(), `@${discordName.toLowerCase()}`);
+        if (!user) return message.reply(`❌ Your Discord username (\`${discordName}\`) is not linked to any Hub account. Add it in the Command Center first.`);
+        if (user.role !== 'admin') return message.reply('❌ Only admins can write a system plan.');
+        if (note.length > SYSTEM_PLAN_MAX_LENGTH) {
+            return message.reply(`❌ That's ${note.length} characters — system plans are capped at ${SYSTEM_PLAN_MAX_LENGTH}, the same limit the ✏️ Edit box enforces.`);
+        }
+
+        try {
+            const plan = systemPlansRepo.upsertSystemPlan(sysId, note, user.id);
+            message.react('✅');
+            const { embed, components } = buildSystemPlanMessage(sysId, plan, true);
+            message.reply({ content: `✅ System plan saved for System **#${sysId}**.`, embeds: [embed], components });
+        } catch (err) {
+            console.error(err);
+            message.reply('❌ Database error while saving the system plan.');
+        }
+        return;
     }
 
     // ----------------------------------------------------
