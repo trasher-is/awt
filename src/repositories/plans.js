@@ -1,10 +1,16 @@
 const db = require('../database');
 
-// Shape used by intel.js's system-intel panel (no updated_at).
+// Shape used by intel.js's system-intel panel (no updated_at). next_culture_at rides along
+// (sidebar "next culture" countdown) via app_users.game_name -> players.name -> the author's
+// row in alliance_member_stats — the same name-matching chain getCanonicalNameFromStats
+// relies on elsewhere. It's null whenever the author isn't a tracked alliance member (or has
+// no stats scraped yet), which the frontend must treat as "unknown", not "ready".
 const getPlansForSystemStmt = db.prepare(`
-    SELECT p.planet_index, p.note, u.game_name as author
+    SELECT p.planet_index, p.note, u.game_name as author, ams.next_culture_at
     FROM planet_plans p
     LEFT JOIN app_users u ON p.author_id = u.id
+    LEFT JOIN players pl ON pl.name = u.game_name COLLATE NOCASE
+    LEFT JOIN alliance_member_stats ams ON ams.player_id = pl.id
     WHERE p.system_id = ?
 `);
 function getPlansForSystem(sysId) {

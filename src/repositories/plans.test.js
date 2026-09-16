@@ -23,6 +23,12 @@ const cavemanId = userResult.lastInsertRowid;
 // Insert a system for the foreign key constraint
 db.prepare(`INSERT INTO systems (id, name) VALUES (10, 'TestSys')`).run();
 
+// caveman is also a tracked alliance member with a next_culture_at on file, so
+// getPlansForSystem's name-matching join (app_users.game_name -> players.name ->
+// alliance_member_stats.player_id) has something to find.
+const playerResult = db.prepare(`INSERT INTO players (name) VALUES ('caveman')`).run();
+db.prepare(`INSERT INTO alliance_member_stats (player_id, next_culture_at) VALUES (?, '2026-01-01 00:00:00')`).run(playerResult.lastInsertRowid);
+
 ok('planExists is false before creation', plans.planExists(10, 1) === false);
 
 plans.createPlan(10, 1, cavemanId, 'siege this');
@@ -30,6 +36,7 @@ ok('planExists is true after creation', plans.planExists(10, 1) === true);
 
 const forSystem = plans.getPlansForSystem(10);
 ok('getPlansForSystem returns the plan with author name', forSystem[0].author === 'caveman');
+ok('getPlansForSystem includes the author\'s next_culture_at via the players name match', forSystem[0].next_culture_at === '2026-01-01 00:00:00');
 
 const detailed = plans.getPlansForSystemDetailed(10);
 ok('getPlansForSystemDetailed includes updated_at', 'updated_at' in detailed[0]);

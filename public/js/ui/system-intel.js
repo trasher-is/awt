@@ -1,4 +1,5 @@
 import { esc } from '../utils/escape.js';
+import { formatCultureCountdown } from './stat-columns.js';
 import '../utils/battle-model.js';   // side-effect import: puts the model on globalThis
 import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
 
@@ -42,7 +43,7 @@ export async function loadPlans(sysId) {
                             </button>
                         </div>
                         <p class="text-muted-foreground text-s mb-2">${esc(p.note)}</p>
-                        <div class="text-s text-muted-foreground opacity-70 text-right">by ${esc(p.author || 'Unknown')}</div>
+                        <div class="text-s text-muted-foreground opacity-70 text-right">by ${esc(p.author || 'Unknown')}${p.next_culture_at ? `, next culture in ${esc(formatCultureCountdown(p.next_culture_at))}` : ''}</div>
                     </div>
                 `).join('');
 
