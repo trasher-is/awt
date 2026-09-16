@@ -9,6 +9,7 @@ import '../utils/empire-model.js';   // side-effect import: TRAIT_PCT, the ONE s
 import '../utils/aw-api.js';         // side-effect import: getTravelTime, for initColonizeLaunchWindows
 import '../utils/login-gaps.js';     // side-effect import: AWLoginGaps, the profile's quiet-window analysis
 import '../utils/manual-intel-form.js'; // side-effect import: AWManualIntelForm, the screenshot-entry form
+import '../utils/system-plan-panel.js'; // side-effect import: AWSystemPlanPanel, the collapsed system-plan panel's HTML
 import '../utils/social-hint.js';    // side-effect import: AWSocialHint, the Science page's Social marker (needs game-tables above)
 import '../utils/research-time.js';  // side-effect import: AWResearch, research time shared by the calculator and the Economy countdown
 import '../utils/fleet-launch-target-dossier.js'; // side-effect import: AWTargetDossier, the launch-form target-info render logic
@@ -1870,6 +1871,77 @@ export async function initFleetLaunchTargetDossier() {
     } finally {
         dossierFetchInFlight = false;
     }
+}
+
+// ---------------------------------------------------------------
+// SYSTEM PLAN (2026-09-16) — /Game/Map/SolarSystem/{id}
+// A compact, collapsed panel showing the ONE standing note an admin has written for this
+// system (see database.js's system_plans comment — deliberately not a log, "there
+// shouldn't be a messaging board, there should be 1-2 messages from admins"). Written and
+// edited entirely through the !splan Discord command; this only reads and displays.
+//
+// Placed after the native hosting-cycle timer row (Current time / Fleet hosting / Standard
+// hosting / Trade hosting badges) rather than a hand-picked spot inside the system table,
+// because that row is a shared partial present near the bottom of most game pages, so
+// anchoring to it (via the [data-clock] element it always contains) works without depending
+// on the exact layout of the system-page table above it.
+// ---------------------------------------------------------------
+function systemPlanTimersRow() {
+    const clock = document.querySelector('[data-clock]');
+    return clock ? clock.closest('.row') : null;
+}
+
+// HTML comes from system-plan-panel.js (buildSystemPlanHtml), which is pure and Node-tested
+// (src/utils/system-plan-panel.test.js) — this only wires up the DOM: the click-to-expand
+// toggle, and where the panel gets inserted.
+function renderSystemPlanPanel(plan) {
+    const { buildSystemPlanHtml } = globalThis.AWSystemPlanPanel;
+    const wrap = document.createElement('div');
+    wrap.className = 'row';
+    wrap.id = 'aw-system-plan';
+    wrap.innerHTML = buildSystemPlanHtml(plan, { formatUpdatedAt: (v) => formatSqliteUtc(v, undefined, '') });
+
+    const header = wrap.querySelector('[data-aw-splan-toggle]');
+    const body = wrap.querySelector('[data-aw-splan-body]');
+    const chevron = wrap.querySelector('[data-aw-splan-chevron]');
+    header.addEventListener('click', () => {
+        const open = body.style.display !== 'none';
+        body.style.display = open ? 'none' : 'block';
+        chevron.className = open ? 'bi bi-chevron-down' : 'bi bi-chevron-up';
+    });
+    return wrap;
+}
+
+export async function initSystemPlan() {
+    const match = window.location.pathname.match(/solarsystem\/(\d+)/i) || window.location.pathname.match(/\/system\/(\d+)/i);
+    const systemId = match ? parseInt(match[1], 10) : NaN;
+    if (!Number.isInteger(systemId) || systemId <= 0) return;
+
+    // Same data-key skip as the target dossier: a navigation to a DIFFERENT system id is
+    // what re-fetches, not every view-hook pass on the same page.
+    const existing = document.getElementById('aw-system-plan');
+    if (existing && existing.getAttribute('data-key') === String(systemId)) return;
+
+    let data;
+    try {
+        const res = await fetch(`/hub-api/intel/system-plan/${systemId}`);
+        data = await res.json();
+    } catch (err) {
+        return; // best-effort — next view-hook pass retries
+    }
+    if (!data || !data.success) return;
+
+    if (existing) existing.remove();
+    // Feature off, or on with nothing written for this system yet: show nothing rather than
+    // an empty box inviting a click that reveals no content.
+    if (!data.enabled || !data.plan) return;
+
+    const anchor = systemPlanTimersRow();
+    if (!anchor || !anchor.parentNode) return;
+
+    const panel = renderSystemPlanPanel(data.plan);
+    panel.setAttribute('data-key', String(systemId));
+    anchor.insertAdjacentElement('afterend', panel);
 }
 
 // ---------------------------------------------------------------

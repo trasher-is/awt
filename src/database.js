@@ -356,11 +356,48 @@ function initDatabase() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             system_id INTEGER,
             planet_index INTEGER,
-            author_id INTEGER, 
+            author_id INTEGER,
             note TEXT NOT NULL,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(system_id) REFERENCES systems(id) ON DELETE CASCADE,
             FOREIGN KEY(author_id) REFERENCES app_users(id) ON DELETE SET NULL
+        )
+    `);
+
+    // 4.6 System-level plans (2026-09-16) — deliberately NOT the same shape as planet_plans
+    // above. That table is many per-planet rows per system; this is ONE evolving note per
+    // system (system_id is the primary key, not just an index), because the request was for
+    // a standing note an admin edits in place ("planet sharing", "attack or defence plans"),
+    // not a message board — the user's own words: "this shouldn't be used as a messaging
+    // board, there should be 1-2 messages from admins". Reusing planet_plans with a NULL
+    // planet_index was considered and rejected: every existing query, the web panel and the
+    // !plan/!plan del bot commands are built around "many plans per system, one per planet",
+    // and overloading NULL to mean something else there would be fragile.
+    //
+    // author_id is who FIRST wrote it; last_edited_by is whoever most recently changed it —
+    // tracked separately because the two can differ (spec: show "who wrote, when, and if
+    // edited when was the last edit"). Admin-only to write (checked in discord_bot.js and
+    // nowhere else, since there is no web write path — see the !splan command), open to
+    // read, same as planet_plans.
+    // edit_count, not a created_at/updated_at comparison, is what decides "was this ever
+    // edited" — SQLite's CURRENT_TIMESTAMP has only ONE SECOND of resolution, so a genuine
+    // edit landing in the same wall-clock second as the original write would read
+    // updated_at == created_at and be silently reported as unedited. This repo has hit that
+    // exact class of bug before in production (the population-regrowth-guard self-lock,
+    // timed off a column that moved on every write) — a counter that only ever increments on
+    // a real UPDATE sidesteps the clock's resolution entirely rather than fighting it.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS system_plans (
+            system_id INTEGER PRIMARY KEY,
+            note TEXT NOT NULL,
+            author_id INTEGER,
+            last_edited_by INTEGER,
+            edit_count INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(system_id) REFERENCES systems(id) ON DELETE CASCADE,
+            FOREIGN KEY(author_id) REFERENCES app_users(id) ON DELETE SET NULL,
+            FOREIGN KEY(last_edited_by) REFERENCES app_users(id) ON DELETE SET NULL
         )
     `);
 

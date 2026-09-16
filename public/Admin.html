@@ -311,6 +311,16 @@
                 <span id="blockedChannelsStatus" class="text-xs text-muted-foreground mt-2 block"></span>
             </div>
 
+            <div class="bg-card border border-border rounded-lg p-4 shadow-sm">
+                <h3 class="font-bold text-foreground mb-1"><i class="fa-solid fa-clipboard-list text-muted-foreground mr-1"></i> System Plans</h3>
+                <p class="text-xs text-muted-foreground mb-3">One standing note per system (planet sharing, attack/defence plans, etc.), written and edited by admins with the Discord <code>!splan</code> command. Off by default — turn it on here to make it visible on the live system page and let <code>!splan</code> write.</p>
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" id="systemPlansEnabled" onchange="saveSystemPlansEnabled()" class="accent-primary cursor-pointer">
+                    <span class="text-sm">Enable system plans</span>
+                </label>
+                <span id="systemPlansEnabledStatus" class="text-xs text-muted-foreground mt-2 block"></span>
+            </div>
+
         </section>
 
         <section class="flex flex-col gap-4">
@@ -452,6 +462,7 @@
                     document.getElementById('blockedChannels').value = data.settings.discord_blocked_channels || '';
                     document.getElementById('alliesAllied').value = data.settings.alliance_relations_allied || '';
                     document.getElementById('alliesWar').value = data.settings.alliance_relations_war || '';
+                    document.getElementById('systemPlansEnabled').checked = data.settings.system_plans_enabled === '1';
                 }
             } catch (e) {}
         }
@@ -525,6 +536,27 @@
 
         function saveBlockedChannels() {
             return saveSetting('discord_blocked_channels', 'blockedChannels', 'blockedChannelsStatus');
+        }
+
+        // A checkbox, not a text field — saveSetting() above reads .value, so this stores
+        // '1'/'' the same way every other boolean-shaped setting in app_settings does
+        // (checked server-side with `row.value === '1'`, see intel.js's system-plan route).
+        async function saveSystemPlansEnabled() {
+            const checked = document.getElementById('systemPlansEnabled').checked;
+            const status = document.getElementById('systemPlansEnabledStatus');
+            try {
+                const res = await fetch('/hub-api/admin/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: 'system_plans_enabled', value: checked ? '1' : '' })
+                });
+                const data = await res.json();
+                status.textContent = data.success ? (checked ? '✅ Enabled.' : '✅ Disabled.') : '❌ ' + (data.error || 'Failed to save.');
+                status.className = data.success ? 'text-xs text-green-400 mt-2 block' : 'text-xs text-red-400 mt-2 block';
+            } catch (e) {
+                status.textContent = '❌ Network error.';
+                status.className = 'text-xs text-red-400 mt-2 block';
+            }
         }
 
         function saveAlliedTags() {

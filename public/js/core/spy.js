@@ -1,4 +1,4 @@
-import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates, initColonizeLaunchWindows, initAllianceRelationIcons, initEcoBonusJoinDates, initFleetLaunchModalETA, initSocialHint, initEconomyMilestone, initBioThreatPills, initFleetLaunchTargetDossier } from './page-injections.js';
+import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates, initColonizeLaunchWindows, initAllianceRelationIcons, initEcoBonusJoinDates, initFleetLaunchModalETA, initSocialHint, initEconomyMilestone, initBioThreatPills, initFleetLaunchTargetDossier, initSystemPlan } from './page-injections.js';
 import { initNewsIncomingTools } from '../ui/news-incoming.js';
 import { initLocalGameTimestamps } from './page-injections.js';
 import { initNewsBattleEvents } from '../ui/news-battle-events.js';
@@ -529,6 +529,9 @@ export function initSpy() {
             if (pathLower.includes('/game/map')) {
                 injectMapIndicators();
                 initFleetLaunchModalETA();
+                if (pathLower.includes('/game/map/solarsystem') || pathLower.includes('/game/system')) {
+                    initSystemPlan().catch(err => console.error('[Spy] system plan failed:', err.message));
+                }
             }
             if (pathLower.includes('/game/news')) {
                 initAllianceNewsAlerts();

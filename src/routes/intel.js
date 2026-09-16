@@ -18,6 +18,7 @@ const { friendlyAllianceTags, ownAllianceTags } = require('../utils/friendly-all
 const { truePowerForAllianceRow } = require('../utils/true-power');
 const settingsRepo = require('../repositories/settings');
 const systemClaimsRepo = require('../repositories/systemClaims');
+const systemPlansRepo = require('../repositories/systemPlans');
 const router = express.Router();
 const tradePriceStmt = db.prepare("SELECT value, updated_at FROM app_settings WHERE key = 'pp_price'");
 
@@ -168,6 +169,29 @@ router.get('/intel/target-dossier', requireAuth, (req, res) => {
     } catch (err) {
         console.error('[DB Error] Failed to fetch target dossier:', err);
         res.status(500).json({ error: 'Failed to fetch target dossier' });
+    }
+});
+
+// --- SYSTEM PLAN (2026-09-16) ---
+// Powers the collapsed panel page-injections.js adds to the live system-map page. Write
+// happens only through the !splan bot command (discord_bot.js) — there is no web write
+// path, since only admins may create/edit and the bot already has the account-linking and
+// role checks it needs. Gated on the app_settings toggle so a disabled feature fetches and
+// shows nothing, not merely hides an empty panel client-side.
+router.get('/intel/system-plan/:systemId', requireAuth, (req, res) => {
+    try {
+        const systemId = parseInt(req.params.systemId, 10);
+        if (!Number.isInteger(systemId) || systemId <= 0) {
+            return res.status(400).json({ error: 'Invalid system id' });
+        }
+        const enabledSetting = settingsRepo.getSetting('system_plans_enabled');
+        const enabled = !!(enabledSetting && enabledSetting.value === '1');
+        if (!enabled) return res.json({ success: true, enabled: false, plan: null });
+
+        res.json({ success: true, enabled: true, plan: systemPlansRepo.getSystemPlan(systemId) });
+    } catch (err) {
+        console.error('[DB Error] Failed to fetch system plan:', err);
+        res.status(500).json({ error: 'Failed to fetch system plan' });
     }
 });
 
