@@ -213,6 +213,19 @@ async function loadEsm(rel, tmp) {
     ok('idle falls back to the scraped string', e.idle_seconds === 3 * 3600 + 10 * 60 && e.idle_display === '3h 10m');
     ok('artefact multipliers: CD/MJ/HOR 1-3 only', SC.artifactProdMultiplier('MJ 2') === 1.2 && SC.artifactProdMultiplier('Memory Jar 3') === 1 && SC.artifactProdMultiplier(null) === 1);
 
+    console.log('\n── Alliance Stats: approximate future culture levels ' + '─'.repeat(22));
+    // Level 6 (next_culture_at) is 1h out; level 7 needs CULTURE[7] = 4059 points at 1,000/h
+    // -> +4.059h -> 5h 3m 32s total, truncated to whole minutes.
+    const cultNow = Date.now();
+    const cultRow = { pl_culture_level: 5, culture_rate: '1,000', next_culture_at: new Date(cultNow + 3600 * 1000).toISOString() };
+    ok('Cult +2 chains the published per-level point cost onto next_culture_at',
+        SC.formatCultureLookahead(cultRow, 2, cultNow) === '~5h 3m', SC.formatCultureLookahead(cultRow, 2, cultNow));
+    ok('it is marked approximate with a ~ prefix', SC.formatCultureLookahead(cultRow, 2, cultNow).startsWith('~'));
+    ok('missing culture_rate falls back to "-" instead of throwing',
+        SC.formatCultureLookahead({ pl_culture_level: 5, next_culture_at: cultRow.next_culture_at }, 2, cultNow) === '-');
+    ok('past the published table (level 100+) falls back to "-" instead of NaN',
+        SC.formatCultureLookahead({ pl_culture_level: 99, culture_rate: '1000', next_culture_at: cultRow.next_culture_at }, 2, cultNow) === '-');
+
     console.log('\n── Every database-backed column is really selected by its SQL ' + '─'.repeat(12));
     const playersSql = read('src/repositories/players.js');
     const warSql = playersSql.slice(playersSql.indexOf('const getWarRoomPlayersStmt'), playersSql.indexOf('function getWarRoomPlayers('));
