@@ -28,6 +28,23 @@ function close(a, b, tolerance = 0.05) {
 
 console.log('battlePoints-dynamic.test.js');
 
+console.log('\n── display scale (2026-09-16c: 20 -> 1, live-incident-driven) ' + '─'.repeat(12));
+// The actual production report that triggered this change: Moardin25 killed exactly 3
+// population in one battle (report #30998) and !glory showed 60 pop points against his own
+// 3.3 CV points from the same day — read as wildly disproportionate. The fix was verified
+// against the user's own stated spec ("3 pop should give 3 points", "20 pop [should give]
+// the same points as 5000 CV") rather than guessed: band 1's rate is already exactly 1
+// point per population, so scale=1 is the one value satisfying the first requirement
+// literally, and the anchor equivalence was never actually scale-dependent — see the two
+// checks right below.
+ok('the default is 1, not 20', battlePoints.getDisplayScale() === 1);
+ok('3 population now literally scores 3 points, matching the live incident\'s expectation',
+    battlePoints.popDynamicPoints(3) * battlePoints.getDisplayScale() === 3);
+ok('20 population still scores exactly the same as 5000 CV in one hit — the anchor\n' +
+    '     equivalence was never the part that needed fixing',
+    close(battlePoints.popDynamicPoints(20) * battlePoints.getDisplayScale(),
+        battlePoints.cvDynamicPoints(5000) * battlePoints.getDisplayScale(), 0.001));
+
 console.log('\n── popDynamicPoints: fixed-width band staircase (default width 9) ' + '─'.repeat(6));
 ok('defaults: pop band width is 9', battlePoints.getPopBandWidth() === 9);
 ok('0 or negative pop scores 0', battlePoints.popDynamicPoints(0) === 0 && battlePoints.popDynamicPoints(-5) === 0);
@@ -110,14 +127,19 @@ ok('Xoc (the loser both times, never credited) does not appear on the combined l
     !board.some(r => r.player_name === 'Xoc'), board);
 
 console.log('\n── display scale is a pure multiplier, not a shape change ' + '─'.repeat(10));
-settingsRepo.setSetting('battle_points_display_scale', '1');
-const unscaledBoard = battlePoints.getDynamicLeaderboard(null, 10, 'all');
-const wrenUnscaled = unscaledBoard.find(r => r.player_name === 'Wren');
-ok('display scale 1 vs 20 changes the absolute number by exactly that factor, not the ratio between cv/pop',
-    close(wren.points / wrenUnscaled.points, scale, 0.02)
-    && close(wren.cv_points / wren.pop_points, wrenUnscaled.cv_points / wrenUnscaled.pop_points, 0.02),
-    { scaled: wren, unscaled: wrenUnscaled });
-settingsRepo.setSetting('battle_points_display_scale', '20'); // restore default
+// 20 here is just "some OTHER scale to compare against the default with" — picked because
+// it used to BE the default (2026-09-16c: default dropped from 20 to 1, see getDisplayScale's
+// own comment for why) and so already had a name in this test; the property under test
+// (scale is a uniform multiplier) doesn't care what the two compared values are.
+settingsRepo.setSetting('battle_points_display_scale', '20');
+const otherScaleBoard = battlePoints.getDynamicLeaderboard(null, 10, 'all');
+const wrenOtherScale = otherScaleBoard.find(r => r.player_name === 'Wren');
+ok('going from the default scale to some other one changes the absolute number by exactly\n' +
+    '     that ratio, not the ratio between cv/pop',
+    close(wrenOtherScale.points / wren.points, 20 / scale, 0.02)
+    && close(wren.cv_points / wren.pop_points, wrenOtherScale.cv_points / wrenOtherScale.pop_points, 0.02),
+    { atDefault: wren, atTwenty: wrenOtherScale });
+settingsRepo.setSetting('battle_points_display_scale', String(scale)); // restore default
 
 console.log('\n── bonus-goal awards fold into the same leaderboard ' + '─'.repeat(19));
 // Wren also earned a bonus-goal award (e.g. a ranking_match hit — see bonusGoals.test.js
