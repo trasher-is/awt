@@ -87,7 +87,10 @@ function snapshot(id = 1) {
     set('cash', '1234.5');
     state.context.initRoadToTa(state.panel);
     ok('revisiting the mounted tab preserves scenario input without another fetch', $('cash').value === '1234.5' && pending.length === 1);
-    ok('embedded view leaves dialog closing and Escape handling to its parent', !$('close') && !state.panel.listeners.keydown);
+    ok('the standalone panel wires its own close button and Escape handling', !!$('close') && state.panel.listeners.keydown?.length === 1);
+    $('close').fire('click');
+    state.panel.listeners.keydown[0]({ key: 'Escape' });
+    ok('close button and Escape do not throw when closing the panel', true);
     ok('loading bio does not guess the separate economy bonus or effective growth', $('eco-bonus').value === '' && $('growth').value === '');
     $('use-bio').fire('click');
     ok('bio calculation requires an explicit economy bonus', $('growth').value === '' && $('results').innerHTML.includes('explicit trade and economy bonuses'));

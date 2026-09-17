@@ -5,12 +5,11 @@ const fleetsRepo = require('../repositories/fleets');
 const plansRepo = require('../repositories/plans');
 const playersRepo = require('../repositories/players');
 const alliancesRepo = require('../repositories/alliances');
-const tradeRepo = require('../repositories/trade');
 const battleReportsRepo = require('../repositories/battleReports');
 const { parseBattleReportFilters, serializeBattleReportExport } = require('../utils/battle-report-export');
 const usersRepo = require('../repositories/users');
 const { requireAuth, requireAdmin } = require('./_middleware');
-const { observedNumber, positiveMachineNumber } = require('../utils/observed-number');
+const { parseLocaleInt } = require('../../public/js/utils/parse-number.js');
 const { parseTimestamp } = require('../../public/js/utils/sqlite-time.js');
 const { splitThreats } = require('../utils/threat-vision');
 const { previousNames, findByFormerName } = require('../utils/round-archive');
@@ -20,7 +19,6 @@ const settingsRepo = require('../repositories/settings');
 const systemClaimsRepo = require('../repositories/systemClaims');
 const systemPlansRepo = require('../repositories/systemPlans');
 const router = express.Router();
-const tradePriceStmt = db.prepare("SELECT value, updated_at FROM app_settings WHERE key = 'pp_price'");
 
 // --- WHO USED TO BE CALLED THIS ---
 // The reverse lookup. Searching for a name that no longer exists should find the account
@@ -545,28 +543,33 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
 // for the client-side Trade Agreement scheduler.
 router.get('/intel/trade-analysis', requireAuth, (req, res) => {
     try {
+        // This inline toInt stripped every non-digit, so "1,5" read as 15 and a decimal
+        // rate silently became ten times itself. Same shared parser as everywhere else.
+        const toInt = parseLocaleInt;
+
         const rows = alliancesRepo.getTradeAnalysisRows();
-        const partnerObservations = tradeRepo.getPartnerObservations();
 
         const players = rows.map(r => {
-            // Use the same canonical graph as Board, including known completions
-            // from a partial report or from a partner outside the member roster.
-            const partners = partnerObservations.get(r.name.toLowerCase());
+            let partners = [];
+            if (r.trade_partners) {
+                try {
+                    const parsed = JSON.parse(r.trade_partners);
+                    if (Array.isArray(parsed)) partners = parsed.map(x => String(x).toLowerCase());
+                } catch (e) { /* not JSON / empty */ }
+            }
             return {
-                id: r.id,
                 name: r.name,
-                production_rate: observedNumber(r.production_rate, true),
-                astro_dollars: observedNumber(r.astro_dollars),
-                production_points: observedNumber(r.production_points),
-                trade_partners: partners?.reported_partners ?? null,
-                known_partners: partners?.known_partners ?? []
+                production_rate: toInt(r.production_rate),
+                astro_dollars: toInt(r.astro_dollars),
+                production_points: toInt(r.production_points),
+                trade_partners: partners
             };
         });
 
-        const ppRow = tradePriceStmt.get();
-        const pp_price = positiveMachineNumber(ppRow?.value);
+        const ppRow = settingsRepo.getPpPrice();
+        const pp_price = ppRow ? (parseFloat(ppRow.value) || 0) : 0;
 
-        res.json({ success: true, players, pp_price, pp_price_updated_at: ppRow?.updated_at ?? null });
+        res.json({ success: true, players, pp_price });
     } catch (err) {
         console.error('[DB Error] Failed trade analysis:', err);
         res.status(500).json({ error: 'Failed to build trade analysis' });

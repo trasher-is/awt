@@ -292,13 +292,7 @@ const serverNumberOffenders = [];
 for (const rel of ['src/utils/interceptors.js', 'src/routes/intel.js', 'src/routes/trade.js']) {
     const code = stripComments(fs.readFileSync(path.join(__dirname, '..', '..', rel), 'utf8'));
     if (/replace\(\/\[\^\\d\]\/g|replace\(\/\[,\.\\s\]\/g/.test(code)) serverNumberOffenders.push(rel);
-    const direct = /parse-number\.js/.test(code);
-    // The strict observation adapter validates missing inputs before delegating to the
-    // same locale parser. Verify that dependency rather than demanding an unused import.
-    const viaObserved = /require\(['"]\.\.\/utils\/observed-number(?:\.js)?['"]\)/.test(code);
-    const observedCode = viaObserved ? stripComments(fs.readFileSync(path.join(__dirname, 'observed-number.js'), 'utf8')) : '';
-    const delegates = viaObserved && /parse-number\.js/.test(observedCode) && /parseLocaleNumber\(text\)/.test(observedCode);
-    if (!direct && !delegates) serverNumberOffenders.push(`${rel} (does not use the shared parser)`);
+    if (!/parse-number\.js/.test(code)) serverNumberOffenders.push(`${rel} (does not use the shared parser)`);
 }
 ok('server number parsing goes through the shared module only', serverNumberOffenders.length === 0, serverNumberOffenders);
 
