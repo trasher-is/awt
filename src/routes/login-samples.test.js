@@ -106,13 +106,13 @@ const detailPayload = (id, logins) => JSON.parse(JSON.stringify({
         r = await request(server, 'POST', '/hub-api/sync/player-detail', detailPayload(501, 14.5));
         ok('a fractional counter records nothing', samplesOf(501).length === 5);
 
-        console.log('\n── Pruning keeps two weeks per player ' + '─'.repeat(37));
-        db.prepare(`INSERT INTO player_login_samples (player_id, total_logins, observed_at) VALUES (501, 1, datetime('now', '-20 days'))`).run();
+        console.log('\n── Pruning keeps a month per player ' + '─'.repeat(38));
+        db.prepare(`INSERT INTO player_login_samples (player_id, total_logins, observed_at) VALUES (501, 1, datetime('now', '-40 days'))`).run();
         db.prepare(`INSERT INTO player_login_samples (player_id, total_logins, observed_at) VALUES (501, 2, datetime('now', '-10 days'))`).run();
         ok('two back-dated samples in place', samplesOf(501).length === 7);
         await request(server, 'POST', '/hub-api/sync/player', { id: 501, name: 'ScanTarget', logins: 14 });
         const after = samplesOf(501);
-        ok('the write dropped the 20-day-old sample and kept the 10-day-old one', after.length === 7 && !after.some(s => s.total_logins === 1) && after.some(s => s.total_logins === 2), after);
+        ok('the write dropped the 40-day-old sample and kept the 10-day-old one', after.length === 7 && !after.some(s => s.total_logins === 1) && after.some(s => s.total_logins === 2), after);
         playersRepo.recordLoginSample(501, 14, 0);
         ok('keepDays below 1 is clamped to 1 day (the 10-day-old sample goes), not "delete everything"', samplesOf(501).length === 7 && samplesOf(501).some(s => s.total_logins === 2) === false, samplesOf(501).map(s => s.total_logins));
 

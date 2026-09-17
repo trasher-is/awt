@@ -334,7 +334,7 @@ function insertPlayerLogin(playerId, totalLogins) {
 // needs and nothing else records. See database.js for the table's rationale.
 const insertLoginSampleStmt = db.prepare(`INSERT INTO player_login_samples (player_id, total_logins) VALUES (?, ?)`);
 const pruneLoginSamplesStmt = db.prepare(`DELETE FROM player_login_samples WHERE player_id = ? AND observed_at < datetime('now', ?)`);
-function recordLoginSample(playerId, totalLogins, keepDays = 14) {
+function recordLoginSample(playerId, totalLogins, keepDays = 30) {
     insertLoginSampleStmt.run(playerId, totalLogins);
     pruneLoginSamplesStmt.run(playerId, `-${Math.max(1, Math.floor(keepDays))} days`);
 }
