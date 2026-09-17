@@ -19,50 +19,38 @@ function getTraders() {
     return rows.map(r => r.name.toLowerCase());
 }
 
-const { observedNumber, positiveMachineNumber } = require('../utils/observed-number');
+// This file's parseLocaleNumber was the only correct one of the three the project had;
+// it now lives in the shared module so interceptors.js and intel.js use it too, along
+// with every browser scraper.
+const { parseLocaleNumber } = require('../../public/js/utils/parse-number.js');
 
 // Current alliance members (those we have stats for), with trader flag and wealth.
 //   hoarded_au — A$ value of artifacts + supply units held (from /Game/Trade scrape)
 //   visible_au — openly-visible liquidity: Astro Dollars + Production Points × PP price
 function getMembers() {
     const ppRow = settingsRepo.getPpPrice();
-    const ppPrice = positiveMachineNumber(ppRow?.value);
+    const ppPrice = ppRow ? parseFloat(ppRow.value) || 0 : 0;
 
     const rows = alliancesRepo.getMembersWithStats();
-    const observations = tradeRepo.getPartnerObservations();
 
     return rows.map(r => {
-        const cash = observedNumber(r.astro_dollars);
-        const pp = observedNumber(r.production_points);
-        const production = observedNumber(r.production_rate, true);
-        // No rounding before readiness arithmetic. A missing price need not hide a
-        // known cash-only balance, but cannot value an unknown/nonzero PP balance.
-        const visible = cash !== null && pp !== null && (pp === 0 || ppPrice !== null)
-            ? cash + pp * (ppPrice ?? 0) : null;
-        const auPerH = production === 0 ? 0
-            : production !== null && ppPrice !== null ? production * ppPrice : null;
+        const visible = parseLocaleNumber(r.astro_dollars) + parseLocaleNumber(r.production_points) * ppPrice;
+        // A$/hour income: Production Points produced per hour valued at the live PP price.
+        const auPerH = parseLocaleNumber(r.production_rate) * ppPrice;
         return {
             name: r.name,
             isTrader: r.has_intel === 1 && r.race_trader > 0,
-            hoarded_au: observedNumber(r.hoarded_au),
-            visible_au: visible,
-            au_per_h: auPerH,
-            reported_partners: observations.get(r.name.toLowerCase())?.reported_partners ?? null,
-            known_partners: observations.get(r.name.toLowerCase())?.known_partners ?? [],
+            hoarded_au: Math.round(r.hoarded_au || 0),
+            visible_au: Math.round(visible),
+            au_per_h: Math.round(auPerH)
         };
     });
 }
 
-// Reported completions and active board intentions consume the same five slots.
-// Their overlap counts once. A missing reported list stays unknown in the response;
-// existing board reservations still establish a lower bound for legacy snapshots.
-function partnersFor(nameLower, observations) {
-    const partners = new Set(observations.get(nameLower)?.known_partners || []);
-    for (const row of tradeRepo.getActivePairKeys()) {
-        const pair = row.pair_key.split('|');
-        if (pair.includes(nameLower)) for (const name of pair) if (name !== nameLower) partners.add(name);
-    }
-    return partners;
+// How many active agreements (proposed/confirmed/done) a player is involved in.
+function countFor(nameLower) {
+    const rows = tradeRepo.getActivePairKeys();
+    return rows.filter(r => r.pair_key.split('|').includes(nameLower)).length;
 }
 
 // --- LIST EVERYTHING NEEDED TO RENDER THE BOARD ---
@@ -94,14 +82,11 @@ function validatePair(aName, bName) {
         return 'Two traders cannot trade with each other.';
     }
 
-    const aLower = aName.toLowerCase(), bLower = bName.toLowerCase();
-    const observations = tradeRepo.getPartnerObservations();
-    const aPartners = partnersFor(aLower, observations), bPartners = partnersFor(bLower, observations);
     const existing = tradeRepo.getAgreementStatusByPairKey(pairKey(aName, bName));
-    if ((existing && existing.status !== 'cancelled') || aPartners.has(bLower) || bPartners.has(aLower)) return 'This pairing already exists.';
+    if (existing && existing.status !== 'cancelled') return 'This pairing already exists.';
 
-    if (aPartners.size >= MAX_TAS) return `${aName} already has ${MAX_TAS} agreements.`;
-    if (bPartners.size >= MAX_TAS) return `${bName} already has ${MAX_TAS} agreements.`;
+    if (countFor(aName.toLowerCase()) >= MAX_TAS) return `${aName} already has ${MAX_TAS} agreements.`;
+    if (countFor(bName.toLowerCase()) >= MAX_TAS) return `${bName} already has ${MAX_TAS} agreements.`;
 
     return null;
 }

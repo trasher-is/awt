@@ -6,38 +6,19 @@ stops construction and starts accumulating saleable PP, and funding/activation e
 for the remaining trade agreements. It is a planning calculator; it does not place game
 orders, sell resources, initiate agreements or contact another player.
 
-## Where it fits in Trade Agreements
+## Where it fits
 
-Open **Trade Agreements → Road to TA** from the sidebar. The existing tools and the
-personal planner share one panel:
+Open **Road to TA** from the sidebar; it is its own panel, separate from **Trade
+Agreements** (which has its own Board and Schedule tabs for alliance coordination and
+confirmed-pairing funding order). Road to TA is the personal planner: what this player
+should build, when construction should stop, and when each remaining TA could activate.
+It uses the same 20,000 A$ standard fee and A$/PP units as the rest of Trade Agreements,
+but explicitly models population/Social 10 readiness, sale eligibility, siege discounts,
+future TA bonuses and partner acceptance — constraints the Board and Schedule don't
+simulate. None of these tools initiate an agreement in the game.
 
-| Tab | Question it answers | Scope |
-| --- | --- | --- |
-| Board | Who should partner with whom, and which pairs are confirmed or complete? | Alliance coordination; reported completed partners and active reservations share the five-slot limit. |
-| Schedule | When can confirmed pairs fund their fees at today's income and price? | A constant-rate funding estimate with Trader partners prioritized. |
-| Road to TA | What should this player build, when should construction stop, and when could each TA activate? | Current-planet development, strategy population gates, science, selling and activation scenarios. |
-
-The Schedule and Road to TA use the same 20,000 A$ standard fee and A$/PP units. Their
-dates can differ because Schedule does not simulate construction, population or Social
-10 readiness, sale eligibility or siege discounts, future TA bonuses, partner acceptance,
-or hosting windows. It assumes available PP can be sold at the selected price and holds
-income constant. Road to TA explicitly models those player-side constraints and labels
-unknown partner decisions. Neither tab initiates an agreement in the game.
-
-Schedule converts **both existing PP and future PP/hour** through the market price. For
-example, 100 PP/hour at 0.80 A$/PP raises 80 A$/hour, not 100 A$/hour. Missing observations
-remain unknown; unfundable pairs are listed as unresolved instead of receiving enormous
-fictional dates. Sub-hour estimates round up to minutes. A Trader paired with an ordinary
-player is assumed to accept for free; the ordinary player initiates. Trader–Trader pairs
-remain unsupported, matching the Board. Reported completed pairs are excluded, and known
-partner lists guard the five-agreement limit. If a partner list is missing, the slot count
-is only a known lower bound, which the Board marks with `+`.
-
-Switching tabs or closing and reopening Trade Agreements preserves the Road to TA form.
-**Sync partners** retains the existing alliance scan and refreshes the visible Schedule.
-Road to TA has a separate **Reload intel & reset inputs** action so a coordination refresh
-does not discard a planning scenario. Browser requests that finish after a newer Schedule
-calculation or tab change cannot replace the current result.
+Closing and reopening the panel preserves the Road to TA form. **Reload intel & reset
+inputs** re-reads saved intelligence and clears the form back to those values.
 
 ## Money and production points
 

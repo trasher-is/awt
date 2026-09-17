@@ -44,10 +44,6 @@ function getPartnerObservations() {
     return observations;
 }
 
-function getReportedPartnerNames(playerName) {
-    return getPartnerObservations().get(String(playerName).toLowerCase())?.reported_partners ?? null;
-}
-
 const getActivePairKeysStmt = db.prepare(`
     SELECT pair_key FROM trade_agreements
     WHERE status IN ('proposed','confirmed','done')
@@ -132,7 +128,7 @@ function deleteAllTradeAgreements() {
 }
 
 module.exports = {
-    getActivePairKeys, getActiveAgreements, getAgreementStatusByPairKey, getAgreementById, getReportedPartnerNames, getPartnerObservations,
+    getActivePairKeys, getActiveAgreements, getAgreementStatusByPairKey, getAgreementById, getPartnerObservations,
     proposeAgreement, confirmAgreement, cancelAgreement, forceSetAgreement,
     markAgreementDoneByInitiator, markAgreementDoneByScan, deleteAllTradeAgreements,
 };

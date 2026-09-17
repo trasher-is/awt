@@ -8,6 +8,7 @@ import {
     openEnemyIntelPanel,
     openAllianceStatsPanel,
     openTradeAgreementsPanel,
+    openRoadToTaPanel,
     openBattleCalcPanel,
     openTravelCalcPanel,
     openRoutePlannerPanel,
@@ -50,6 +51,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('open-war-room-btn')?.addEventListener('click', openEnemyIntelPanel);
     document.getElementById('open-alliance-stats-btn')?.addEventListener('click', openAllianceStatsPanel);
     document.getElementById('open-trade-agreements-btn')?.addEventListener('click', openTradeAgreementsPanel);
+    document.getElementById('open-road-to-ta-btn')?.addEventListener('click', openRoadToTaPanel);
     document.getElementById('open-players-db-btn')?.addEventListener('click', openDatabasePanel);
     document.getElementById('open-systems-db-btn')?.addEventListener('click', openSystemDatabasePanel);
     document.getElementById('open-planets-db-btn')?.addEventListener('click', openPlanetDatabasePanel);

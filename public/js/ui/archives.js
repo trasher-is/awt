@@ -9,7 +9,6 @@ import '../utils/battle-model.js';   // side-effect import: cvOf, so CV is defin
 import '../utils/parse-number.js';   // side-effect import: locale-aware sorting
 import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
 import '../utils/game-rate-limit.js';
-import '../utils/trade-schedule-model.js';
 const { gameFetch } = globalThis.AWGameRate;
 
 const { cvOf } = globalThis.AWBattleModel;
@@ -79,7 +78,7 @@ const rowsHtml = (table, rows, rowCls) =>
     rows.map(r => `<tr class="${rowCls}">${renderRowCells(table.columns, r, table.cellBase)}</tr>`).join('');
 
 function closeOtherPanels(exceptId) {
-    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'battle-calc-panel', 'travel-calc-panel', 'route-planner-panel', 'galaxy-map-panel', 'build-order-panel', 'empire-sim-panel', 'battle-reports-panel'].forEach(id => {
+    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'road-to-ta-panel', 'battle-calc-panel', 'travel-calc-panel', 'route-planner-panel', 'galaxy-map-panel', 'build-order-panel', 'empire-sim-panel', 'battle-reports-panel'].forEach(id => {
         if (id !== exceptId) document.getElementById(id)?.classList.replace('translate-x-0', 'translate-x-full');
     });
 }
@@ -822,13 +821,7 @@ function renderAllyStatsTable() {
 // ============================================================
 
 let taState = null;       // last fetched { me, isAdmin, maxTas, traders, members, agreements }
-let taSelectedTab = 'board';
-let taPanelLoad = null;
-let taRoadLoad = null;
-let taBoardRevision = 0;
-let taScheduleRevision = 0;
-let taScheduleAbort = null;
-const TA_TABS = ['board', 'schedule', 'road'];
+let taPlayerEcon = null;  // last fetched economics for the Schedule tab
 
 const taShort = (name) => {
     const o = { shitmonkey: 'SM', mnhebi: 'Hebi', thedoctor797: 'Doc', theknife: 'Knif' };
@@ -836,8 +829,8 @@ const taShort = (name) => {
 };
 // Compact A$ formatter: 1 234 567 -> "1.2M", 12 345 -> "12k", 0 -> "–".
 const fmtAU = (n) => {
-    if (!Number.isFinite(n)) return '—';
-    if (n === 0) return '0';
+    n = Number(n) || 0;
+    if (n <= 0) return '–';
     if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
     if (n >= 1e3) return Math.round(n / 1e3) + 'k';
     return String(Math.round(n));
@@ -846,145 +839,71 @@ const fmtAU = (n) => {
 // `needed` A$ at `rate` A$/h: "now" if already there, "–" if no income.
 const TA_TRADE_COST = 20000;
 const fmtReady = (needed, ratePerH) => {
-    if (!Number.isFinite(needed)) return '—';
     if (needed <= 0) return 'now';            // already at the threshold, regardless of income
     if (!ratePerH || ratePerH <= 0) return '–';
     const h = needed / ratePerH;
-    if (h < 1) return Math.ceil(h * 60) + 'm';
+    if (h < 1) return Math.round(h * 60) + 'm';
     if (h < 24) return (h < 10 ? h.toFixed(1) : Math.round(h)) + 'h';
     return (h / 24).toFixed(1) + 'd';
 };
 const taPairKey = (a, b) => [a.toLowerCase(), b.toLowerCase()].sort().join('|');
-const taReportedPartners = (nameLower) =>
-    taState?.members.find(member => member.name.toLowerCase() === nameLower)?.known_partners
-    ?? taState?.members.find(member => member.name.toLowerCase() === nameLower)?.reported_partners;
-const taCount = (nameLower, agreements) => {
-    const partners = new Set(taReportedPartners(nameLower) || []);
-    agreements.filter(t => t.status !== 'cancelled').forEach(t => {
-        const pair = t.pair_key.split('|');
-        if (pair.includes(nameLower)) pair.filter(name => name !== nameLower).forEach(name => partners.add(name));
-    });
-    return partners.size;
-};
-
-function invalidateTaSchedule() {
-    taScheduleRevision++;
-    taScheduleAbort?.abort();
-    taScheduleAbort = null;
-}
-
-function closeTradeAgreementsPanel() {
-    invalidateTaSchedule();
-    document.getElementById('trade-agreements-panel')?.classList.replace('translate-x-0', 'translate-x-full');
-    document.getElementById('open-trade-agreements-btn')?.focus();
-}
+const taCount = (nameLower, agreements) =>
+    agreements.filter(t => t.status !== 'cancelled' && t.pair_key.split('|').includes(nameLower)).length;
 
 export async function openTradeAgreementsPanel() {
-    if (taPanelLoad) return taPanelLoad.catch(() => {});
-    const existing = document.getElementById('trade-agreements-panel');
-    if (existing?.classList.contains('translate-x-0')) return closeTradeAgreementsPanel();
-    taPanelLoad = (async () => {
-        let panel = existing;
-        if (!panel) {
-            const res = await fetch('/hub-assets/components/trade-agreements.html');
-            if (!res.ok) throw new Error('Could not load Trade Agreements. Try again.');
-            document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
-            panel = document.getElementById('trade-agreements-panel');
-            if (!panel) throw new Error('Could not load Trade Agreements. Try again.');
-            panel.querySelector('#btn-close-trade-agreements')?.addEventListener('click', closeTradeAgreementsPanel);
-            panel.querySelector('#btn-refresh-ta')?.addEventListener('click', refreshTradeAgreements);
-            panel.querySelector('#ta-admin-set')?.addEventListener('click', adminSetPair);
-            TA_TABS.forEach((tab, index) => {
-                const button = panel.querySelector(`#ta-tab-${tab}`);
-                button?.addEventListener('click', () => switchTaTab(tab));
-                button?.addEventListener('keydown', event => {
-                    let next;
-                    if (event.key === 'ArrowRight') next = (index + 1) % TA_TABS.length;
-                    else if (event.key === 'ArrowLeft') next = (index + TA_TABS.length - 1) % TA_TABS.length;
-                    else if (event.key === 'Home') next = 0;
-                    else if (event.key === 'End') next = TA_TABS.length - 1;
-                    else return;
-                    event.preventDefault();
-                    switchTaTab(TA_TABS[next]);
-                    panel.querySelector(`#ta-tab-${TA_TABS[next]}`).focus();
-                });
-            });
-            document.addEventListener('keydown', event => {
-                if (event.key === 'Escape' && panel.classList.contains('translate-x-0')) closeTradeAgreementsPanel();
-            });
-        }
-        closeOtherPanels('trade-agreements-panel');
-        panel.classList.replace('translate-x-full', 'translate-x-0');
-        if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
-        switchTaTab(taSelectedTab, false);
-        await loadTradeAgreements();
-    })();
-    try { await taPanelLoad; }
-    catch (error) { window.alert(error.message); }
-    finally { taPanelLoad = null; }
+    let panel = document.getElementById('trade-agreements-panel');
+    if (!panel) {
+        const res = await fetch('/hub-assets/components/trade-agreements.html');
+        document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
+        panel = document.getElementById('trade-agreements-panel');
+
+        panel.querySelector('#btn-close-trade-agreements')?.addEventListener('click', () => panel.classList.replace('translate-x-0', 'translate-x-full'));
+        panel.querySelector('#btn-refresh-ta')?.addEventListener('click', refreshTradeAgreements);
+        panel.querySelector('#ta-tab-board')?.addEventListener('click', () => switchTaTab('board'));
+        panel.querySelector('#ta-tab-schedule')?.addEventListener('click', () => switchTaTab('schedule'));
+        panel.querySelector('#ta-admin-set')?.addEventListener('click', adminSetPair);
+    }
+
+    if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
+    closeOtherPanels('trade-agreements-panel');
+    panel.classList.replace('translate-x-full', 'translate-x-0');
+    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
+
+    switchTaTab('board');
+    await loadTradeAgreements();
 }
 
-function switchTaTab(tab, refreshSchedule = true) {
-    if (!TA_TABS.includes(tab)) return;
-    taSelectedTab = tab;
-    invalidateTaSchedule();
-    TA_TABS.forEach(name => {
-        const active = name === tab;
-        const button = document.getElementById(`ta-tab-${name}`);
-        document.getElementById(`ta-view-${name}`)?.classList.toggle('hidden', !active);
-        if (button) {
-            button.className = `h-9 px-4 text-sm font-medium ${active ? 'bg-white text-black' : 'bg-transparent text-muted-foreground hover:text-foreground'}`;
-            button.setAttribute('aria-selected', String(active));
-            button.tabIndex = active ? 0 : -1;
-        }
-    });
-    document.getElementById('btn-refresh-ta')?.classList.toggle('hidden', tab === 'road');
-    document.getElementById('ta-board-legend')?.classList.toggle('hidden', tab !== 'board');
-    if (tab === 'schedule' && refreshSchedule) runTradeSchedule();
-    if (tab === 'road') loadTaRoad();
-}
-
-async function loadTaRoad() {
-    if (taRoadLoad) return taRoadLoad.catch(() => {});
-    const view = document.getElementById('ta-view-road');
-    if (!view || view.querySelector('#road-to-ta-panel')) return;
-    view.innerHTML = '<p class="p-4 text-sm text-muted-foreground" role="status">Loading Road to TA…</p>';
-    taRoadLoad = (async () => {
-        const response = await fetch('/hub-assets/components/road-to-ta.html');
-        if (!response.ok) throw new Error('Could not load Road to TA.');
-        const markup = await response.text();
-        const { initRoadToTa } = await import('./road-to-ta.js');
-        view.innerHTML = markup;
-        const panel = view.querySelector('#road-to-ta-panel');
-        if (!panel) throw new Error('Could not load Road to TA.');
-        initRoadToTa(panel);
-    })();
-    try { await taRoadLoad; }
-    catch (error) {
-        view.innerHTML = '<div class="p-4 text-sm"><p role="alert">Could not load Road to TA.</p><button id="ta-road-retry" class="mt-3 h-9 px-4 rounded-md border border-border">Retry</button></div>';
-        view.querySelector('#ta-road-retry')?.addEventListener('click', loadTaRoad);
-    } finally { taRoadLoad = null; }
+function switchTaTab(tab) {
+    const boardBtn = document.getElementById('ta-tab-board');
+    const schedBtn = document.getElementById('ta-tab-schedule');
+    const boardView = document.getElementById('ta-view-board');
+    const schedView = document.getElementById('ta-view-schedule');
+    if (!boardBtn) return;
+    const active = 'bg-white text-black', idle = 'bg-transparent text-muted-foreground hover:text-foreground';
+    if (tab === 'schedule') {
+        schedView.classList.remove('hidden'); boardView.classList.add('hidden');
+        schedBtn.className = `h-9 px-4 text-sm font-medium ${active}`;
+        boardBtn.className = `h-9 px-4 text-sm font-medium ${idle}`;
+        runTradeSchedule();
+    } else {
+        boardView.classList.remove('hidden'); schedView.classList.add('hidden');
+        boardBtn.className = `h-9 px-4 text-sm font-medium ${active}`;
+        schedBtn.className = `h-9 px-4 text-sm font-medium ${idle}`;
+    }
 }
 
 async function loadTradeAgreements() {
-    const revision = ++taBoardRevision;
     try {
-        const response = await fetch('/hub-api/trade-agreements');
-        if (!response.ok) throw new Error('Failed');
-        const data = await response.json();
-        if (revision !== taBoardRevision) return;
+        const data = await (await fetch('/hub-api/trade-agreements')).json();
         if (!data.success) throw new Error(data.error || 'Failed');
         taState = data;
         const idLabel = document.getElementById('ta-identity');
         if (idLabel) idLabel.textContent = `You: ${data.me || '—'}${data.isAdmin ? ' (admin)' : ''}`;
         renderTaBoard();
     } catch (e) {
-        if (revision !== taBoardRevision) return;
-        taState = null;
         const m = document.getElementById('ta-matrix');
-        if (m) m.innerHTML = '<tr><td class="text-red-500 p-4">Failed to load trade agreements.</td></tr>';
+        if (m) m.innerHTML = `<tr><td class="text-red-500 p-4">Failed to load trade agreements.</td></tr>`;
     }
-    if (taSelectedTab === 'schedule' && document.getElementById('trade-agreements-panel')?.classList.contains('translate-x-0')) runTradeSchedule();
 }
 
 // Refresh = re-scan the alliance page (like Alliance Stats): walk each member's
@@ -1077,8 +996,8 @@ function renderTaBoard() {
     html += `<th class="bg-black border-0" style="min-width:14px"></th>`;
     html += `<th class="bg-zinc-900 px-2 py-1 text-amber-400 border border-border/40" title="A$ value of artifacts + supply units this member is holding">Hoard A$</th>`;
     html += `<th class="bg-zinc-900 px-2 py-1 text-emerald-400 border border-border/40" title="Visible liquidity: Astro Dollars + Production Points valued in A$">A$+PP</th>`;
-    html += `<th class="bg-zinc-900 px-2 py-1 text-sky-400 border border-border/40" title="Time to fund the ${TA_TRADE_COST.toLocaleString()} A$ initiation fee from visible liquidity at current income (Production/h × PP price)">Ready in</th>`;
-    html += `<th class="bg-zinc-900 px-2 py-1 text-sky-300 border border-border/40" title="Time to fund the ${TA_TRADE_COST.toLocaleString()} A$ initiation fee if the hoard is sold now (visible + hoard, then income)">Ready (sold)</th>`;
+    html += `<th class="bg-zinc-900 px-2 py-1 text-sky-400 border border-border/40" title="Time to reach ${TA_TRADE_COST.toLocaleString()} A$ from visible liquidity at current income (Production/h × PP price)">Ready in</th>`;
+    html += `<th class="bg-zinc-900 px-2 py-1 text-sky-300 border border-border/40" title="Time to reach ${TA_TRADE_COST.toLocaleString()} A$ if the hoard is sold now (visible + hoard, then income)">Ready (sold)</th>`;
     html += `</tr></thead><tbody>`;
 
     members.forEach(p1 => {
@@ -1086,18 +1005,20 @@ function renderTaBoard() {
         const full1 = c1 >= maxTas;
         html += `<tr>
             <td class="sticky left-0 bg-black px-2 py-1 md:px-3 md:py-1.5 font-semibold text-foreground border border-border/40 whitespace-nowrap">${esc(p1.name)}${p1.isTrader ? ' <span class="text-yellow-400">T</span>' : ''}</td>
-            <td class="px-2 py-1 md:px-3 md:py-1.5 text-center border border-border/40 ${full1 ? 'text-green-400 font-bold' : 'text-muted-foreground'}">${c1}${Array.isArray(p1.reported_partners) ? '' : '+'}/${maxTas}</td>`;
+            <td class="px-2 py-1 md:px-3 md:py-1.5 text-center border border-border/40 ${full1 ? 'text-green-400 font-bold' : 'text-muted-foreground'}">${c1}/${maxTas}</td>`;
         members.forEach(p2 => {
             html += taCell(p1, p2, { me: meLower, isAdmin, maxTas, traderSet, agreements, full1 });
         });
         html += `<td class="bg-black border-0"></td>`;
-        const amount = value => Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 6 }) : 'unknown';
-        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-amber-400 font-semibold" title="${amount(p1.hoarded_au)} A$">${fmtAU(p1.hoarded_au)}</td>`;
-        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-emerald-400" title="${amount(p1.visible_au)} A$">${fmtAU(p1.visible_au)}</td>`;
-        const need1 = Number.isFinite(p1.visible_au) ? Math.max(0, TA_TRADE_COST - p1.visible_au) : null;
-        const need2 = need1 === 0 ? 0 : need1 !== null && Number.isFinite(p1.hoarded_au) ? Math.max(0, need1 - p1.hoarded_au) : null;
-        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-400 whitespace-nowrap" title="${amount(p1.au_per_h)} A$/h · need ${amount(need1)} A$">${fmtReady(need1, p1.au_per_h)}</td>`;
-        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-300 whitespace-nowrap" title="${amount(p1.au_per_h)} A$/h · need ${amount(need2)} A$ after selling ${amount(p1.hoarded_au)} A$ hoard">${fmtReady(need2, p1.au_per_h)}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-amber-400 font-semibold" title="${(p1.hoarded_au || 0).toLocaleString()} A$">${fmtAU(p1.hoarded_au)}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-emerald-400" title="${(p1.visible_au || 0).toLocaleString()} A$">${fmtAU(p1.visible_au)}</td>`;
+        // Ready in: time to reach 20k from visible liquidity. Ready (sold): same once the hoard is sold now.
+        const need1 = Math.max(0, TA_TRADE_COST - (p1.visible_au || 0));
+        const need2 = Math.max(0, TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0));
+        const t1 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0), p1.au_per_h);
+        const t2 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0), p1.au_per_h);
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-400 whitespace-nowrap" title="${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${need1.toLocaleString()} A$">${t1}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-300 whitespace-nowrap" title="${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${need2.toLocaleString()} A$ after selling ${(p1.hoarded_au || 0).toLocaleString()} A$ hoard">${t2}</td>`;
         html += `</tr>`;
     });
     html += `</tbody>`;
@@ -1111,9 +1032,6 @@ function renderTaBoard() {
 function taCell(p1, p2, ctx) {
     const cls = 'border border-border/40 text-center';
     if (p1.name.toLowerCase() === p2.name.toLowerCase()) return `<td class="${cls}" style="background:#0a0a0a"></td>`;
-    const reported = (taReportedPartners(p1.name.toLowerCase()) || []).includes(p2.name.toLowerCase())
-        || (taReportedPartners(p2.name.toLowerCase()) || []).includes(p1.name.toLowerCase());
-    if (reported) return `<td class="${cls}" style="background:#1d4ed8" title="Completed agreement reported by the game">★</td>`;
     if (p1.isTrader && p2.isTrader) return `<td class="${cls}" style="background:#3f0a0a" title="Traders can't trade with traders"><i class="fa-solid fa-ban text-red-500/70"></i></td>`;
 
     const ta = ctx.agreements.find(t => t.pair_key === taPairKey(p1.name, p2.name));
@@ -1194,71 +1112,124 @@ async function adminSetPair() {
     } catch (e) {}
 }
 
-// ---------- Schedule tab: constant-rate funding for confirmed pairings ----------
+// ---------- Schedule tab (execution order for confirmed agreements) ----------
 async function runTradeSchedule() {
-    invalidateTaSchedule();
-    const revision = taScheduleRevision;
-    const controller = new AbortController();
-    taScheduleAbort = controller;
-    const isCurrent = () => revision === taScheduleRevision && taSelectedTab === 'schedule'
-        && document.getElementById('trade-agreements-panel')?.classList.contains('translate-x-0');
     const body = document.getElementById('ta-results-body');
-    if (body) body.innerHTML = '<tr><td colspan="4" class="text-center py-8 text-muted-foreground" role="status">Calculating…</td></tr>';
-    ['ta-sum-time', 'ta-sum-trades', 'ta-pp-price', 'ta-schedule-assumptions'].forEach(id => {
-        const node = document.getElementById(id);
-        if (node) node.textContent = id === 'ta-schedule-assumptions' ? '' : '—';
-    });
+    if (body) body.innerHTML = '<tr><td colspan="4" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Calculating…</td></tr>';
+
     try {
         const [econRes, taRes] = await Promise.all([
-            fetch('/hub-api/intel/trade-analysis', { signal: controller.signal }),
-            fetch('/hub-api/trade-agreements', { signal: controller.signal })
+            fetch('/hub-api/intel/trade-analysis'),
+            fetch('/hub-api/trade-agreements')
         ]);
-        if (!econRes.ok || !taRes.ok) throw new Error('Load failed');
-        const [econ, ta] = await Promise.all([econRes.json(), taRes.json()]);
-        if (!isCurrent()) return;
-        if (!econ.success || !ta.success) throw new Error('Load failed');
+        const econ = await econRes.json();
+        const ta = await taRes.json();
+        if (!econ.success || !ta.success) throw new Error('load failed');
+        taPlayerEcon = econ;
+
         const ppLabel = document.getElementById('ta-pp-price');
-        if (ppLabel) ppLabel.textContent = `PP price: ${econ.pp_price == null ? 'unknown' : `${econ.pp_price} A$/PP`}${econ.pp_price_updated_at ? ` · recorded ${formatLocalDateTime(econ.pp_price_updated_at)}` : ' · observation time unknown'}`;
-        const pairs = ta.agreements.filter(t => t.status === 'confirmed').map(t => [t.player_a, t.player_b]);
-        computeAndRenderTradeSchedule(econ.players || [], econ.pp_price, { cost: TA_TRADE_COST, traders: ta.traders || [], pairs });
-    } catch (error) {
-        if (!isCurrent()) return;
-        if (body) body.innerHTML = '<tr><td colspan="4" class="text-center py-8 text-red-500" role="alert">Failed to load schedule data. Switch tabs to retry.</td></tr>';
-    } finally {
-        if (revision === taScheduleRevision) taScheduleAbort = null;
+        if (ppLabel) ppLabel.textContent = `PP price: ${econ.pp_price ? '$' + econ.pp_price : 'not scanned'}`;
+
+        // Plan = confirmed agreements not yet done.
+        const pairs = ta.agreements
+            .filter(t => t.status === 'confirmed')
+            .map(t => [t.player_a, t.player_b]);
+        const traders = (ta.traders || []);
+
+        computeAndRenderTradeSchedule(econ.players || [], econ.pp_price || 0, { cost: 20000, traders, pairs });
+    } catch (e) {
+        if (body) body.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-red-500">Failed to load schedule data.</td></tr>`;
     }
 }
 
 function formatTaHours(totalHours) {
-    if (!Number.isFinite(totalHours)) return 'Unknown';
-    if (totalHours <= 0) return 'Now';
-    const minutes = Math.ceil(totalHours * 60);
-    const d = Math.floor(minutes / 1440);
-    const h = Math.floor((minutes % 1440) / 60);
-    const m = minutes % 60;
-    return `+${[d && `${d}d`, h && `${h}h`, m && `${m}m`].filter(Boolean).join(' ')}`;
+    if (totalHours <= 0.001) return 'Instant';
+    const d = Math.floor(totalHours / 24);
+    const h = Math.floor(totalHours % 24);
+    return d > 0 ? `+${d}d ${h}h` : `+${h}h`;
 }
 
 function computeAndRenderTradeSchedule(globalPlayers, ppPrice, config) {
-    const result = globalThis.AWTradeSchedule.plan(globalPlayers, ppPrice, config);
-    const { schedule, unresolved, totalHours, assumptions } = result;
+    const COST_NORMAL = config.cost || 20000;
+    const TRADERS = (config.traders || []).map(t => t.toLowerCase());
+    const TRADER_RANKS = {};
+    (config.traders || []).forEach((t, i) => { TRADER_RANKS[t.toLowerCase()] = i + 1; });
+    const MASTER_PAIRS = config.pairs || [];
+
+    const getTraderRank = (a, b) => Math.min(TRADER_RANKS[a.toLowerCase()] || 99, TRADER_RANKS[b.toLowerCase()] || 99);
+    const isPlayerPending = (name, pending) => { const n = name.toLowerCase(); return pending.some(p => p[0].toLowerCase() === n || p[1].toLowerCase() === n); };
+    const hasPendingTrader = (name, pending) => { const n = name.toLowerCase(); return pending.some(p => (p[0].toLowerCase() === n && TRADERS.includes(p[1].toLowerCase())) || (p[1].toLowerCase() === n && TRADERS.includes(p[0].toLowerCase()))); };
+
+    const playersMap = {}, foundPlayers = new Set();
+    globalPlayers.forEach(p => {
+        const isTrader = TRADERS.includes(p.name.toLowerCase());
+        playersMap[p.name.toLowerCase()] = {
+            name: p.name, base_prod: p.production_rate || 0,
+            ta_cost: isTrader ? 0 : COST_NORMAL,
+            saved: (p.astro_dollars || 0) + (p.production_points || 0) * ppPrice
+        };
+        foundPlayers.add(p.name.toLowerCase());
+    });
+
+    let pending = MASTER_PAIRS.slice();
+    const missingPlayers = new Set();
+    pending.forEach(pair => {
+        if (!foundPlayers.has(pair[0].toLowerCase())) missingPlayers.add(pair[0]);
+        if (!foundPlayers.has(pair[1].toLowerCase())) missingPlayers.add(pair[1]);
+    });
+
+    const schedule = [];
+    let currentTime = 0, guard = 0;
+    while (pending.length > 0 && guard < 1000) {
+        guard++;
+        const candidates = pending.filter(pair => {
+            const isTraderTrade = TRADERS.includes(pair[0].toLowerCase()) || TRADERS.includes(pair[1].toLowerCase());
+            if (isTraderTrade) return true;
+            return !hasPendingTrader(pair[0], pending) && !hasPendingTrader(pair[1], pending);
+        });
+        let bestPair = null, minTime = Infinity, bestRank = 99, bestIsTrader = false;
+        for (const pair of candidates) {
+            const p1 = playersMap[pair[0].toLowerCase()], p2 = playersMap[pair[1].toLowerCase()];
+            if (!p1 || !p2) continue;
+            const t1 = p1.saved < p1.ta_cost ? (p1.ta_cost - p1.saved) / (p1.base_prod || 1e-9) : 0;
+            const t2 = p2.saved < p2.ta_cost ? (p2.ta_cost - p2.saved) / (p2.base_prod || 1e-9) : 0;
+            const time = Math.max(t1, t2);
+            const rank = getTraderRank(p1.name, p2.name);
+            const itp = TRADERS.includes(p1.name.toLowerCase()) || TRADERS.includes(p2.name.toLowerCase());
+            if (time < minTime - 1e-4) { minTime = time; bestPair = pair; bestRank = rank; bestIsTrader = itp; }
+            else if (Math.abs(time - minTime) <= 1e-4 && rank < bestRank) { minTime = time; bestPair = pair; bestRank = rank; bestIsTrader = itp; }
+        }
+        if (!bestPair) break;
+        const dt = minTime; currentTime += dt;
+        for (const pn in playersMap) if (isPlayerPending(pn, pending)) playersMap[pn].saved += playersMap[pn].base_prod * dt;
+        const e1 = playersMap[bestPair[0].toLowerCase()], e2 = playersMap[bestPair[1].toLowerCase()];
+        e1.saved -= e1.ta_cost; e2.saved -= e2.ta_cost;
+        const idx = pending.findIndex(p => p[0] === bestPair[0] && p[1] === bestPair[1]);
+        if (idx > -1) pending.splice(idx, 1);
+        schedule.push({ time: currentTime, p1: e1.name, p2: e2.name, is_trader: bestIsTrader });
+    }
+
     const sumTime = document.getElementById('ta-sum-time'), sumTrades = document.getElementById('ta-sum-trades');
-    if (sumTime) sumTime.textContent = totalHours == null ? 'Incomplete' : formatTaHours(totalHours);
-    if (sumTrades) sumTrades.textContent = `${schedule.length} estimated${unresolved.length ? ` · ${unresolved.length} unresolved` : ''}`;
-    const notes = document.getElementById('ta-schedule-assumptions');
-    if (notes) notes.textContent = assumptions.join(' ');
+    if (sumTime) sumTime.innerText = formatTaHours(currentTime);
+    if (sumTrades) sumTrades.innerText = schedule.length;
+
     const tbody = document.getElementById('ta-results-body');
     if (!tbody) return;
+    if (schedule.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-green-400">No confirmed agreements pending execution.</td></tr>`;
+        return;
+    }
     const cell = (item, index) => {
         if (!item) return '<td></td><td></td>';
-        const pair = `${esc(item.p1)} <i class="fa-solid fa-right-left text-muted-foreground mx-2" aria-hidden="true"></i> ${esc(item.p2)}`;
-        const fees = `${item.p1}: ${item.cost1.toLocaleString()} A$; ${item.p2}: ${item.cost2.toLocaleString()} A$`;
-        return `<td class="p-3 text-muted-foreground font-mono">${index + 1}</td><td class="p-3 font-medium ${item.is_trader ? 'text-yellow-400' : 'text-foreground'}" title="${esc(fees)}">${pair} <span class="text-xs text-muted-foreground ml-1">(${formatTaHours(item.time)})</span></td>`;
+        let pair = `<span>${esc(item.p1)}</span> <i class="fa-solid fa-right-left text-muted-foreground mx-2"></i> <span>${esc(item.p2)}</span>`;
+        if (item.is_trader) pair = `<span class="text-yellow-400 font-bold">${pair}</span>`;
+        return `<td class="p-3 text-muted-foreground font-mono">${index + 1}</td><td class="p-3 font-medium text-foreground">${pair} <span class="text-xs text-muted-foreground ml-1">(${formatTaHours(item.time)})</span></td>`;
     };
     let rows = '';
     for (let i = 0; i < schedule.length; i += 2) rows += `<tr class="hover:bg-accent/40">${cell(schedule[i], i)}${cell(schedule[i + 1], i + 1)}</tr>`;
-    rows += unresolved.map(item => `<tr><td colspan="4" class="p-3 text-aw-warning">${esc(item.pair.join(' / '))}: ${esc(item.reason)}</td></tr>`).join('');
-    tbody.innerHTML = rows || '<tr><td colspan="4" class="text-center py-6 text-muted-foreground">No confirmed agreements pending funding.</td></tr>';
+    let footer = '';
+    if (missingPlayers.size > 0) footer = `<tr><td colspan="4" class="text-center py-2 text-aw-warning bg-yellow-950/30 text-xs">⚠️ No alliance-stats data for: ${esc(Array.from(missingPlayers).join(', '))}</td></tr>`;
+    tbody.innerHTML = rows + footer;
 }
 
 export async function openBattleCalcPanel() {
@@ -1358,4 +1329,33 @@ export async function openRoutePlannerPanel(options = {}) {
         const { showSavedRoutes } = await import('./route-planner.js');
         await showSavedRoutes();
     }
+}
+
+// Keep the template load single-flight when the sidebar is clicked repeatedly.
+let roadToTaPanelLoad = null;
+export async function openRoadToTaPanel() {
+    if (roadToTaPanelLoad) return roadToTaPanelLoad;
+    const existing = document.getElementById('road-to-ta-panel');
+    if (existing?.classList.contains('translate-x-0')) {
+        existing.classList.replace('translate-x-0', 'translate-x-full');
+        return;
+    }
+    roadToTaPanelLoad = (async () => {
+        let panel = document.getElementById('road-to-ta-panel');
+        if (!panel) {
+            const response = await fetch('/hub-assets/components/road-to-ta.html');
+            if (!response.ok) throw new Error('Could not load Road to TA.');
+            document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await response.text());
+            panel = document.getElementById('road-to-ta-panel');
+        }
+        const { initRoadToTa } = await import('./road-to-ta.js');
+        initRoadToTa(panel);
+        closeOtherPanels('road-to-ta-panel');
+        panel.classList.replace('translate-x-full', 'translate-x-0');
+        if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
+        panel.querySelector('#rta-player')?.focus();
+    })();
+    try { await roadToTaPanelLoad; }
+    catch (err) { window.alert(err.message); }
+    finally { roadToTaPanelLoad = null; }
 }

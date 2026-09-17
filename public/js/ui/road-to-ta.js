@@ -24,8 +24,7 @@ const when = value => value == null ? 'Not reached' : formatLocalDateTime(value,
 const valueOf = input => input?.value.trim() === '' ? null : Number(input?.value);
 const list = values => `<ul class="list-disc pl-5 space-y-1">${values.map(s => `<li>${esc(s)}</li>`).join('')}</ul>`;
 
-// State belongs to this mounted Trade Agreements view and survives switching tabs.
-// Nothing is written to intel or browser storage; the parent owns opening and closing.
+// Isolated UI state per mounted panel. Nothing is written to intel or browser storage.
 export function initRoadToTa(panel) {
     if (panel.dataset.initialized) return;
     panel.dataset.initialized = 'true';
@@ -33,6 +32,15 @@ export function initRoadToTa(panel) {
     let snapshot = null, request = 0, controller = null, selectedMode = 'normal';
     let results = null, inputAtResult = null, added = 0, growthUsesBio = false;
     const partnerRanges = new Map();
+
+    function close() {
+        panel.classList.replace('translate-x-0', 'translate-x-full');
+        document.getElementById('open-road-to-ta-btn')?.focus();
+    }
+    $('close').addEventListener('click', close);
+    panel.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && panel.classList.contains('translate-x-0')) close();
+    });
 
     function invalidate() {
         results = null;
