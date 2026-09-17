@@ -971,7 +971,7 @@ function initDatabase() {
     // "logins over time" line but cannot say when a player was NOT around: the hub never
     // sees a login time, only that the counter rose somewhere between two scans, so a quiet
     // hour is provable only from a scan that found the counter unchanged. Pruned per player
-    // on write (14 days); the profile reads 8. Cascades with the player row, so the round
+    // on write (30 days); the profile reads 8. Cascades with the player row, so the round
     // nuke needs no extra delete.
     db.exec(`
         CREATE TABLE IF NOT EXISTS player_login_samples (
