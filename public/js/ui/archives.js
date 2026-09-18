@@ -823,6 +823,30 @@ function renderAllyStatsTable() {
 let taState = null;       // last fetched { me, isAdmin, maxTas, traders, members, agreements }
 let taPlayerEcon = null;  // last fetched economics for the Schedule tab
 
+// My Savings' banking data, shared with Board and Schedule so "my" rate is consistent
+// everywhere in this panel instead of three different numbers for the same person.
+// null = never loaded this session; [] = loaded, no planets synced. Kept current by
+// loadMySavings() itself (every visit to that tab refreshes it); Board/Schedule only
+// populate it lazily, on demand, if the member never opened My Savings at all.
+let myPlanetsCache = null;
+let myPpPriceCache = 0;
+function bankingRateOf(planets) {
+    return (planets || []).filter(p => p.banking).reduce((sum, p) => sum + (p.production_rate || 0), 0);
+}
+async function ensureMyBankingData() {
+    if (myPlanetsCache !== null) return;
+    try {
+        const [planetsRes, econRes] = await Promise.all([
+            fetch('/hub-api/my-planets'),
+            fetch('/hub-api/intel/trade-analysis'),
+        ]);
+        const planetsData = await planetsRes.json();
+        const econData = await econRes.json();
+        myPlanetsCache = planetsData.success ? (planetsData.planets || []) : [];
+        myPpPriceCache = econData.success ? (econData.pp_price || 0) : 0;
+    } catch (e) { myPlanetsCache = []; myPpPriceCache = 0; }
+}
+
 const taShort = (name) => {
     const o = { shitmonkey: 'SM', mnhebi: 'Hebi', thedoctor797: 'Doc', theknife: 'Knif' };
     return o[name.toLowerCase()] || name.substring(0, 4);
@@ -893,7 +917,8 @@ function switchTaTab(tab) {
 
 async function loadTradeAgreements() {
     try {
-        const data = await (await fetch('/hub-api/trade-agreements')).json();
+        const [response] = await Promise.all([fetch('/hub-api/trade-agreements'), ensureMyBankingData()]);
+        const data = await response.json();
         if (!data.success) throw new Error(data.error || 'Failed');
         taState = data;
         const idLabel = document.getElementById('ta-identity');
@@ -1012,12 +1037,18 @@ function renderTaBoard() {
         html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-amber-400 font-semibold" title="${(p1.hoarded_au || 0).toLocaleString()} A$">${fmtAU(p1.hoarded_au)}</td>`;
         html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-emerald-400" title="${(p1.visible_au || 0).toLocaleString()} A$">${fmtAU(p1.visible_au)}</td>`;
         // Ready in: time to reach 20k from visible liquidity. Ready (sold): same once the hoard is sold now.
+        // For the viewer's own row, once they've used My Savings, its banking-only rate
+        // replaces total production — see myPlanetsCache's own comment for why.
+        const isMe = p1.name.toLowerCase() === meLower;
+        const usesBankingRate = isMe && myPlanetsCache && myPlanetsCache.length > 0;
+        const auPerH = usesBankingRate ? bankingRateOf(myPlanetsCache) * myPpPriceCache : p1.au_per_h;
+        const rateNote = usesBankingRate ? ' (banking planets only — see My Savings)' : '';
         const need1 = Math.max(0, TA_TRADE_COST - (p1.visible_au || 0));
         const need2 = Math.max(0, TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0));
-        const t1 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0), p1.au_per_h);
-        const t2 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0), p1.au_per_h);
-        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-400 whitespace-nowrap" title="${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${need1.toLocaleString()} A$">${t1}</td>`;
-        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-300 whitespace-nowrap" title="${(p1.au_per_h || 0).toLocaleString()} A$/h · need ${need2.toLocaleString()} A$ after selling ${(p1.hoarded_au || 0).toLocaleString()} A$ hoard">${t2}</td>`;
+        const t1 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0), auPerH);
+        const t2 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0), auPerH);
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-400 whitespace-nowrap" title="${(auPerH || 0).toLocaleString()} A$/h${rateNote} · need ${need1.toLocaleString()} A$">${t1}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-300 whitespace-nowrap" title="${(auPerH || 0).toLocaleString()} A$/h${rateNote} · need ${need2.toLocaleString()} A$ after selling ${(p1.hoarded_au || 0).toLocaleString()} A$ hoard">${t2}</td>`;
         html += `</tr>`;
     });
     html += `</tbody>`;
@@ -1125,6 +1156,7 @@ async function runTradeSchedule() {
         const ta = await taRes.json();
         if (!econ.success || !ta.success) throw new Error('load failed');
         taPlayerEcon = econ;
+        await ensureMyBankingData();
 
         const ppLabel = document.getElementById('ta-pp-price');
         if (ppLabel) ppLabel.textContent = `PP price: ${econ.pp_price ? '$' + econ.pp_price : 'not scanned'}`;
@@ -1135,7 +1167,14 @@ async function runTradeSchedule() {
             .map(t => [t.player_a, t.player_b]);
         const traders = (ta.traders || []);
 
-        computeAndRenderTradeSchedule(econ.players || [], econ.pp_price || 0, { cost: 20000, traders, pairs });
+        // Once the viewer has used My Savings, any pairing that includes them plans off
+        // their banking-only rate instead of total production — same reasoning as Board.
+        const meLower = (ta.me || taState?.me || '').toLowerCase();
+        const players = (econ.players || []).map(p => (p.name.toLowerCase() === meLower && myPlanetsCache && myPlanetsCache.length > 0)
+            ? { ...p, production_rate: bankingRateOf(myPlanetsCache) }
+            : p);
+
+        computeAndRenderTradeSchedule(players, econ.pp_price || 0, { cost: 20000, traders, pairs });
     } catch (e) {
         if (body) body.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-red-500">Failed to load schedule data.</td></tr>`;
     }
@@ -1249,6 +1288,9 @@ async function loadMySavings() {
         const planetsData = await planetsRes.json();
         const econData = await econRes.json();
         if (!planetsData.success) throw new Error(planetsData.error || 'load failed');
+        // Keep Board and Schedule's "my rate" in sync with whatever this tab just saw.
+        myPlanetsCache = planetsData.planets || [];
+        myPpPriceCache = econData.success ? (econData.pp_price || 0) : myPpPriceCache;
         renderMySavings(planetsData.planets || [], econData.success ? econData : null);
     })();
     try { await mySavingsLoad; }
@@ -1287,7 +1329,7 @@ function renderMySavings(planets, econData) {
     const economy = econData?.players?.find(p => p.name.toLowerCase() === meLower);
     const ppPrice = econData?.pp_price || 0;
     const saved = economy ? (economy.astro_dollars || 0) + (economy.production_points || 0) * ppPrice : 0;
-    const bankingRate = planets.filter(p => p.banking).reduce((sum, p) => sum + (p.production_rate || 0), 0);
+    const bankingRate = bankingRateOf(planets);
     const auPerH = bankingRate * ppPrice;
     const needed = TA_TRADE_COST - saved;
 
