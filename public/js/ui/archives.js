@@ -1066,11 +1066,12 @@ function renderTaBoard() {
         const outlook = trOutlook.get(p1.name.toLowerCase());
         if (outlook) {
             const next1 = outlook.next_hours != null ? `+1% ${formatTaHours(outlook.next_hours)}` : '';
-            const next2 = outlook.next2_hours != null ? `+1% more ${formatTaHours(outlook.next2_hours)}` : '';
-            const sub = [next1, next2].filter(Boolean).join(' · ') || '—';
-            html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 whitespace-nowrap"><div class="text-violet-400 font-semibold">${outlook.qualified_now}%</div><div class="text-[10px] text-muted-foreground">${esc(sub)}</div></td>`;
+            const next2 = outlook.next2_hours != null ? `+2% ${formatTaHours(outlook.next2_hours)}` : '';
+            const sub = [next1, next2].filter(Boolean).join(' · ') || 'no growth data yet';
+            html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 whitespace-nowrap" title="Trade revenue this member offers a new partner. Requires an up-to-date My Savings sync; projections assume their current growth rate holds.">`
+                + `<span class="text-violet-400 font-semibold">${outlook.qualified_now}%</span> <span class="text-[10px] text-muted-foreground">${esc(sub)}</span></td>`;
         } else {
-            html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-muted-foreground/60 text-xs" title="This member has never opened My Savings">no data</td>`;
+            html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-muted-foreground/60 text-xs whitespace-nowrap" title="This member has never opened My Savings">no data</td>`;
         }
         html += `</tr>`;
     });
