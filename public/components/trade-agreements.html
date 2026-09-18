@@ -86,17 +86,19 @@
 
     <!-- MY SAVINGS VIEW -->
     <div id="ta-view-savings" class="hidden flex-1 overflow-auto bg-black">
-        <div class="p-4 border-b border-border bg-zinc-950 flex flex-wrap items-center gap-4">
-            <p class="text-xs text-muted-foreground max-w-md">Tick off planets once they stop building and start banking PP. Only ticked planets' production counts toward the estimate below — no build-order guessing, just what you tell it.</p>
-            <button id="btn-reload-savings" type="button" class="h-9 px-4 rounded-md border border-border text-xs hover:bg-accent inline-flex items-center gap-2 ml-auto shrink-0">
-                <i class="fa-solid fa-rotate"></i> Reload my planets
-            </button>
+        <div class="max-w-2xl mx-auto w-full">
+            <div class="p-4 border-b border-border bg-zinc-950 flex flex-col gap-3">
+                <p class="text-xs text-muted-foreground">Tick off planets once they stop building and start banking PP. Only ticked planets' production counts toward the estimate below — no build-order guessing, just what you tell it.</p>
+                <button id="btn-reload-savings" type="button" class="h-9 px-4 rounded-md border border-border text-xs hover:bg-accent inline-flex items-center justify-center gap-2 self-start">
+                    <i class="fa-solid fa-rotate"></i> Reload my planets
+                </button>
+            </div>
+            <div class="p-4 flex flex-wrap items-center gap-6 border-b border-border/40">
+                <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider">Ready in</div><div id="savings-ready-in" class="text-lg font-bold text-foreground">--</div></div>
+                <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider">Banking rate</div><div id="savings-rate" class="text-lg font-bold text-sky-400">--</div></div>
+                <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider">Saved so far</div><div id="savings-saved" class="text-lg font-bold text-emerald-400">--</div></div>
+            </div>
+            <div id="savings-planets" class="p-4 flex flex-col gap-2"></div>
         </div>
-        <div class="p-4 flex flex-wrap items-center gap-6 border-b border-border/40">
-            <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider">Ready in</div><div id="savings-ready-in" class="text-lg font-bold text-foreground">--</div></div>
-            <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider">Banking rate</div><div id="savings-rate" class="text-lg font-bold text-sky-400">--</div></div>
-            <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider">Saved so far</div><div id="savings-saved" class="text-lg font-bold text-emerald-400">--</div></div>
-        </div>
-        <div id="savings-planets" class="p-4 flex flex-col gap-2"></div>
     </div>
 </div>
