@@ -888,7 +888,7 @@ function switchTaTab(tab) {
     });
     document.getElementById('btn-refresh-ta')?.classList.toggle('hidden', tab === 'savings');
     if (tab === 'schedule') runTradeSchedule();
-    if (tab === 'savings') loadMySavings();
+    if (tab === 'savings') { loadMySavings(); backgroundRefreshMySavings(); }
 }
 
 async function loadTradeAgreements() {
@@ -1262,11 +1262,24 @@ async function reloadMySavings() {
     const orig = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Scanning your planets...'; }
     try {
-        const { runMyPlanetsCheck } = await import('./my-planets-watch.js');
-        await runMyPlanetsCheck();
+        const { forceMyPlanetsSync } = await import('./my-planets-watch.js');
+        await forceMyPlanetsSync();
     } catch (e) {}
     if (btn) { btn.disabled = false; btn.innerHTML = orig; }
     await loadMySavings();
+}
+
+// Fired every time the tab is opened, so the list is never more than a few minutes stale
+// without the member having to remember to click Reload. Lock-gated (see runMyPlanetsCheck),
+// so switching tabs back and forth does not spam the game — most calls are a fast no-op.
+async function backgroundRefreshMySavings() {
+    try {
+        const { runMyPlanetsCheck } = await import('./my-planets-watch.js');
+        await runMyPlanetsCheck();
+    } catch (e) { return; }
+    const stillOpen = document.getElementById('trade-agreements-panel')?.classList.contains('translate-x-0');
+    const stillOnTab = !document.getElementById('ta-view-savings')?.classList.contains('hidden');
+    if (stillOpen && stillOnTab) loadMySavings();
 }
 
 function renderMySavings(planets, econData) {
@@ -1291,11 +1304,13 @@ function renderMySavings(planets, econData) {
         list.innerHTML = '<p class="text-center py-8 text-muted-foreground text-sm">No planets synced yet. Click "Reload my planets" while you have the game open in another tab.</p>';
         return;
     }
-    list.innerHTML = planets.map(p => `
+    const sorted = [...planets].sort((a, b) => (b.population ?? -1) - (a.population ?? -1));
+    list.innerHTML = sorted.map(p => `
         <label class="flex items-center gap-3 bg-zinc-950 border border-border rounded-md px-3 py-2 cursor-pointer hover:bg-zinc-900">
             <input type="checkbox" data-planet-toggle="${p.game_planet_id}" ${p.banking ? 'checked' : ''} class="w-4 h-4">
             <span class="flex-1 text-sm text-foreground">${esc(p.name || `Planet ${p.game_planet_id}`)}</span>
-            <span class="text-xs text-muted-foreground">Pop ${p.population ?? '—'}</span>
+            <span class="text-xs text-muted-foreground w-14 text-right">Pop ${p.population ?? '—'}</span>
+            <span class="text-xs text-amber-400 font-mono w-28 text-right" title="Production Points already saved on this planet">${Number.isFinite(p.production_pp) ? `${p.production_pp.toLocaleString()} PP` : '—'}</span>
             <span class="text-xs text-sky-400 font-mono w-28 text-right">${Number.isFinite(p.production_rate) ? `+${p.production_rate.toFixed(1)} PP/h` : '—'}</span>
             <span class="text-xs ${p.banking ? 'text-emerald-400' : 'text-aw-warning'} w-24 text-right">${p.banking ? 'banking' : 'still building'}</span>
         </label>`).join('');

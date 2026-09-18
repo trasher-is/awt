@@ -26,22 +26,34 @@ function claimLock() {
     }
 }
 
+async function syncMyPlanets() {
+    const pageRes = await gameFetch(PLANETS_PATH);
+    if (!pageRes.ok) return;
+    const doc = new DOMParser().parseFromString(await pageRes.text(), 'text/html');
+    const planets = parseMyPlanetsPage(doc);
+    if (!planets.length) return; // page didn't parse the way we expect — leave the old snapshot in place
+    await fetch('/hub-api/sync/my-planets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planets }),
+    });
+}
+
+// Lock-gated: for the timer and for opening the tab, where hammering the game on every
+// switch would be wasteful. Silently a no-op within the lock window — see forceMyPlanetsSync
+// for the explicit "Reload my planets" button, which must not silently do nothing.
 export async function runMyPlanetsCheck() {
     if (!claimLock()) return;
-    try {
-        const pageRes = await gameFetch(PLANETS_PATH);
-        if (!pageRes.ok) return;
-        const doc = new DOMParser().parseFromString(await pageRes.text(), 'text/html');
-        const planets = parseMyPlanetsPage(doc);
-        if (!planets.length) return; // page didn't parse the way we expect — leave the old snapshot in place
-        await fetch('/hub-api/sync/my-planets', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ planets }),
-        });
-    } catch (err) {
-        console.warn('[MyPlanetsWatch] check failed:', err.message);
-    }
+    try { await syncMyPlanets(); }
+    catch (err) { console.warn('[MyPlanetsWatch] check failed:', err.message); }
+}
+
+// Bypasses the lock: a member who explicitly clicked "reload" and gets back the same
+// stale list because a background check happened to run 2 minutes ago is a worse
+// experience than one extra game request.
+export async function forceMyPlanetsSync() {
+    try { await syncMyPlanets(); }
+    catch (err) { console.warn('[MyPlanetsWatch] forced sync failed:', err.message); }
 }
 
 let started = false;
