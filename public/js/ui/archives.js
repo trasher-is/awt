@@ -850,6 +850,8 @@ const taPairKey = (a, b) => [a.toLowerCase(), b.toLowerCase()].sort().join('|');
 const taCount = (nameLower, agreements) =>
     agreements.filter(t => t.status !== 'cancelled' && t.pair_key.split('|').includes(nameLower)).length;
 
+const TA_TABS = ['board', 'schedule', 'savings'];
+
 export async function openTradeAgreementsPanel() {
     let panel = document.getElementById('trade-agreements-panel');
     if (!panel) {
@@ -859,9 +861,9 @@ export async function openTradeAgreementsPanel() {
 
         panel.querySelector('#btn-close-trade-agreements')?.addEventListener('click', () => panel.classList.replace('translate-x-0', 'translate-x-full'));
         panel.querySelector('#btn-refresh-ta')?.addEventListener('click', refreshTradeAgreements);
-        panel.querySelector('#ta-tab-board')?.addEventListener('click', () => switchTaTab('board'));
-        panel.querySelector('#ta-tab-schedule')?.addEventListener('click', () => switchTaTab('schedule'));
+        TA_TABS.forEach(tab => panel.querySelector(`#ta-tab-${tab}`)?.addEventListener('click', () => switchTaTab(tab)));
         panel.querySelector('#ta-admin-set')?.addEventListener('click', adminSetPair);
+        panel.querySelector('#btn-reload-savings')?.addEventListener('click', reloadMySavings);
     }
 
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
@@ -874,22 +876,19 @@ export async function openTradeAgreementsPanel() {
 }
 
 function switchTaTab(tab) {
-    const boardBtn = document.getElementById('ta-tab-board');
-    const schedBtn = document.getElementById('ta-tab-schedule');
-    const boardView = document.getElementById('ta-view-board');
-    const schedView = document.getElementById('ta-view-schedule');
-    if (!boardBtn) return;
+    if (!TA_TABS.includes(tab)) return;
     const active = 'bg-white text-black', idle = 'bg-transparent text-muted-foreground hover:text-foreground';
-    if (tab === 'schedule') {
-        schedView.classList.remove('hidden'); boardView.classList.add('hidden');
-        schedBtn.className = `h-9 px-4 text-sm font-medium ${active}`;
-        boardBtn.className = `h-9 px-4 text-sm font-medium ${idle}`;
-        runTradeSchedule();
-    } else {
-        boardView.classList.remove('hidden'); schedView.classList.add('hidden');
-        boardBtn.className = `h-9 px-4 text-sm font-medium ${active}`;
-        schedBtn.className = `h-9 px-4 text-sm font-medium ${idle}`;
-    }
+    TA_TABS.forEach(name => {
+        const btn = document.getElementById(`ta-tab-${name}`);
+        const view = document.getElementById(`ta-view-${name}`);
+        if (!btn || !view) return;
+        const isActive = name === tab;
+        view.classList.toggle('hidden', !isActive);
+        btn.className = `h-9 px-4 text-sm font-medium ${isActive ? active : idle}`;
+    });
+    document.getElementById('btn-refresh-ta')?.classList.toggle('hidden', tab === 'savings');
+    if (tab === 'schedule') runTradeSchedule();
+    if (tab === 'savings') loadMySavings();
 }
 
 async function loadTradeAgreements() {
@@ -1230,6 +1229,98 @@ function computeAndRenderTradeSchedule(globalPlayers, ppPrice, config) {
     let footer = '';
     if (missingPlayers.size > 0) footer = `<tr><td colspan="4" class="text-center py-2 text-aw-warning bg-yellow-950/30 text-xs">⚠️ No alliance-stats data for: ${esc(Array.from(missingPlayers).join(', '))}</td></tr>`;
     tbody.innerHTML = rows + footer;
+}
+
+// ---------- My Savings tab: only counts planets the player has ticked as banking ----------
+// Deliberately not a simulation: no build-order guessing, no auto-detected "is this planet
+// still building" — the player says so, once, with a checkbox. See planet_banking's
+// comment in database.js for why that flag is manual.
+let mySavingsLoad = null;
+async function loadMySavings() {
+    if (mySavingsLoad) return mySavingsLoad.catch(() => {});
+    const list = document.getElementById('savings-planets');
+    if (list) list.innerHTML = '<p class="text-center py-8 text-muted-foreground text-sm"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading your planets...</p>';
+    mySavingsLoad = (async () => {
+        const [planetsRes, econRes] = await Promise.all([
+            fetch('/hub-api/my-planets'),
+            fetch('/hub-api/intel/trade-analysis'),
+        ]);
+        if (!planetsRes.ok || !econRes.ok) throw new Error('load failed');
+        const planetsData = await planetsRes.json();
+        const econData = await econRes.json();
+        if (!planetsData.success) throw new Error(planetsData.error || 'load failed');
+        renderMySavings(planetsData.planets || [], econData.success ? econData : null);
+    })();
+    try { await mySavingsLoad; }
+    catch (e) {
+        if (list) list.innerHTML = '<p class="text-center py-8 text-red-500 text-sm">Failed to load your planets.</p>';
+    } finally { mySavingsLoad = null; }
+}
+
+async function reloadMySavings() {
+    const btn = document.getElementById('btn-reload-savings');
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Scanning your planets...'; }
+    try {
+        const { runMyPlanetsCheck } = await import('./my-planets-watch.js');
+        await runMyPlanetsCheck();
+    } catch (e) {}
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    await loadMySavings();
+}
+
+function renderMySavings(planets, econData) {
+    const meLower = (taState?.me || '').toLowerCase();
+    const economy = econData?.players?.find(p => p.name.toLowerCase() === meLower);
+    const ppPrice = econData?.pp_price || 0;
+    const saved = economy ? (economy.astro_dollars || 0) + (economy.production_points || 0) * ppPrice : 0;
+    const bankingRate = planets.filter(p => p.banking).reduce((sum, p) => sum + (p.production_rate || 0), 0);
+    const auPerH = bankingRate * ppPrice;
+    const needed = TA_TRADE_COST - saved;
+
+    const readyEl = document.getElementById('savings-ready-in');
+    const rateEl = document.getElementById('savings-rate');
+    const savedEl = document.getElementById('savings-saved');
+    if (readyEl) readyEl.textContent = fmtReady(needed, auPerH);
+    if (rateEl) rateEl.textContent = `${bankingRate.toFixed(1)} PP/h (~${fmtAU(auPerH)} A$/h)`;
+    if (savedEl) savedEl.textContent = `${fmtAU(saved)} A$`;
+
+    const list = document.getElementById('savings-planets');
+    if (!list) return;
+    if (!planets.length) {
+        list.innerHTML = '<p class="text-center py-8 text-muted-foreground text-sm">No planets synced yet. Click "Reload my planets" while you have the game open in another tab.</p>';
+        return;
+    }
+    list.innerHTML = planets.map(p => `
+        <label class="flex items-center gap-3 bg-zinc-950 border border-border rounded-md px-3 py-2 cursor-pointer hover:bg-zinc-900">
+            <input type="checkbox" data-planet-toggle="${p.game_planet_id}" ${p.banking ? 'checked' : ''} class="w-4 h-4">
+            <span class="flex-1 text-sm text-foreground">${esc(p.name || `Planet ${p.game_planet_id}`)}</span>
+            <span class="text-xs text-muted-foreground">Pop ${p.population ?? '—'}</span>
+            <span class="text-xs text-sky-400 font-mono w-28 text-right">${Number.isFinite(p.production_rate) ? `+${p.production_rate.toFixed(1)} PP/h` : '—'}</span>
+            <span class="text-xs ${p.banking ? 'text-emerald-400' : 'text-aw-warning'} w-24 text-right">${p.banking ? 'banking' : 'still building'}</span>
+        </label>`).join('');
+    list.querySelectorAll('[data-planet-toggle]').forEach(box => box.addEventListener('change', () => toggleSavingsPlanet(box)));
+}
+
+async function toggleSavingsPlanet(box) {
+    const gamePlanetId = box.dataset.planetToggle;
+    const banking = box.checked;
+    box.disabled = true;
+    try {
+        const res = await fetch(`/hub-api/my-planets/${gamePlanetId}/banking`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ banking }),
+        });
+        const data = await res.json();
+        if (!data.success) { box.checked = !banking; if (typeof window.showToast === 'function') window.showToast(data.error || 'Failed to update'); return; }
+        await loadMySavings();
+    } catch (e) {
+        box.checked = !banking;
+        if (typeof window.showToast === 'function') window.showToast('Network error');
+    } finally {
+        box.disabled = false;
+    }
 }
 
 export async function openBattleCalcPanel() {

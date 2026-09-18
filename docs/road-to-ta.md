@@ -9,13 +9,16 @@ orders, sell resources, initiate agreements or contact another player.
 ## Where it fits
 
 Open **Road to TA** from the sidebar; it is its own panel, separate from **Trade
-Agreements** (which has its own Board and Schedule tabs for alliance coordination and
-confirmed-pairing funding order). Road to TA is the personal planner: what this player
-should build, when construction should stop, and when each remaining TA could activate.
-It uses the same 20,000 A$ standard fee and A$/PP units as the rest of Trade Agreements,
-but explicitly models population/Social 10 readiness, sale eligibility, siege discounts,
-future TA bonuses and partner acceptance — constraints the Board and Schedule don't
-simulate. None of these tools initiate an agreement in the game.
+Agreements** (which has Board and Schedule tabs for alliance coordination and
+confirmed-pairing funding order, plus a My Savings tab — a deliberately unsimulated
+countdown that only counts planets the player has manually marked as done building and
+banking PP, for when Road to TA's own modeling is more than someone needs). Road to TA is
+the personal planner: what this player should build, when construction should stop, and
+when each remaining TA could activate. It uses the same 20,000 A$ standard fee and A$/PP
+units as the rest of Trade Agreements, but explicitly models population/Social 10
+readiness, sale eligibility, siege discounts, future TA bonuses and partner acceptance —
+constraints Board, Schedule and My Savings don't simulate. None of these tools initiate an
+agreement in the game.
 
 Closing and reopening the panel preserves the Road to TA form. **Reload intel & reset
 inputs** re-reads saved intelligence and clears the form back to those values.
