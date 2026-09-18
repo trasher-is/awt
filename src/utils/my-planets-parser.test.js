@@ -24,15 +24,21 @@ function cell(text, dataSort) {
     return {
         textContent: text,
         getAttribute: (n) => (n === 'data-sort' ? (dataSort === undefined ? null : dataSort) : null),
+        querySelector: () => null,
     };
 }
-// `cells`: [sidDataSort, name, populationText, /* progress bar, skipped */ , growthRateText, [productionPp, productionPpDataSort], productionRateText]
-function row({ planetId, sid, name, population, growthRate = '+0.0', pp, ppDataSort, productionRate, tooFewCells = false }) {
+// The real cell nests a `.progress-text` child with "104/1,191" text; `progressText`
+// undefined means no such child at all (an empty/unstarted progress bar, seen in practice).
+function progressCell(progressText) {
+    return { querySelector: (sel) => (sel === '.progress-text' && progressText !== undefined ? cell(progressText) : null) };
+}
+// `cells`: [sidDataSort, name, populationText, progress-bar, growthRateText, [productionPp, productionPpDataSort], productionRateText]
+function row({ planetId, sid, name, population, progressText, growthRate = '+0.0', pp, ppDataSort, productionRate, tooFewCells = false }) {
     const cells = tooFewCells ? [cell('x')] : [
         cell(`[${sid}] (0/0)`, sid),
         cell(name),
         cell(String(population)),
-        cell(''), // progress bar cell, not read by the parser
+        progressCell(progressText),
         cell(growthRate),
         cell(String(pp), ppDataSort),
         cell(productionRate),
@@ -58,11 +64,21 @@ function doc(rows) {
     console.log('\n── A well-formed row parses fully ' + '─'.repeat(42));
     {
         const rows = parseMyPlanetsPage(doc([
-            row({ planetId: 18292, sid: '40', name: 'Minchir #5', population: 11, growthRate: '+11.8', pp: 445, ppDataSort: '445', productionRate: '+24.8' }),
+            row({ planetId: 18292, sid: '40', name: 'Minchir #5', population: 11, progressText: '104/1,191', growthRate: '+11.8', pp: 445, ppDataSort: '445', productionRate: '+24.8' }),
         ]));
         ok('one row parsed', rows.length === 1, rows);
         ok('every field captured', rows[0].game_planet_id === 18292 && rows[0].system_id === 40 && rows[0].name === 'Minchir #5'
-            && rows[0].population === 11 && rows[0].production_pp === 445 && rows[0].production_rate === 24.8, rows[0]);
+            && rows[0].population === 11 && rows[0].production_pp === 445 && rows[0].production_rate === 24.8
+            && rows[0].population_progress === 104 && rows[0].growth_rate === 11.8, rows[0]);
+    }
+
+    console.log('\n── A planet with no progress bar yet reports unknown progress ' + '─'.repeat(9));
+    {
+        const rows = parseMyPlanetsPage(doc([
+            row({ planetId: 3, sid: '5', name: 'A', population: 1, growthRate: '', pp: 0, productionRate: '+0' }), // progressText and growthRate left empty
+        ]));
+        ok('population_progress is null, not zero, when the page has no progress child', rows[0].population_progress === null, rows[0]);
+        ok('growth_rate is null, not zero, for an empty rate cell', rows[0].growth_rate === null, rows[0]);
     }
 
     console.log('\n── Production reads from data-sort when present, text otherwise ' + '─'.repeat(6));

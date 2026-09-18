@@ -915,9 +915,22 @@ function switchTaTab(tab) {
     if (tab === 'savings') { loadMySavings(); backgroundRefreshMySavings(); }
 }
 
+// Name (lowercase) -> { qualified_now, next_hours, next2_hours }, refreshed on every
+// Board load. A missing key means that member has never opened My Savings — Board must
+// show that as "no data", never a fabricated 0%.
+let trOutlook = new Map();
+
+async function loadTradeOutlook() {
+    try {
+        const res = await fetch('/hub-api/trade-agreements/tr-outlook');
+        const data = await res.json();
+        trOutlook = data.success ? new Map(data.members.map(m => [m.name.toLowerCase(), m])) : new Map();
+    } catch (e) { trOutlook = new Map(); }
+}
+
 async function loadTradeAgreements() {
     try {
-        const [response] = await Promise.all([fetch('/hub-api/trade-agreements'), ensureMyBankingData()]);
+        const [response] = await Promise.all([fetch('/hub-api/trade-agreements'), ensureMyBankingData(), loadTradeOutlook()]);
         const data = await response.json();
         if (!data.success) throw new Error(data.error || 'Failed');
         taState = data;
@@ -1022,6 +1035,7 @@ function renderTaBoard() {
     html += `<th class="bg-zinc-900 px-2 py-1 text-emerald-400 border border-border/40" title="Visible liquidity: Astro Dollars + Production Points valued in A$">A$+PP</th>`;
     html += `<th class="bg-zinc-900 px-2 py-1 text-sky-400 border border-border/40" title="Time to reach ${TA_TRADE_COST.toLocaleString()} A$ from visible liquidity at current income (Production/h × PP price)">Ready in</th>`;
     html += `<th class="bg-zinc-900 px-2 py-1 text-sky-300 border border-border/40" title="Time to reach ${TA_TRADE_COST.toLocaleString()} A$ if the hoard is sold now (visible + hoard, then income)">Ready (sold)</th>`;
+    html += `<th class="bg-zinc-900 px-2 py-1 text-violet-400 border border-border/40" title="Trade revenue this member offers a new partner: 1% per own planet at population 10+, and when their next two population-10 crossings are projected. Requires that member to have opened My Savings at least once; projections assume their current growth rate holds.">Offers</th>`;
     html += `</tr></thead><tbody>`;
 
     members.forEach(p1 => {
@@ -1049,6 +1063,15 @@ function renderTaBoard() {
         const t2 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0), auPerH);
         html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-400 whitespace-nowrap" title="${(auPerH || 0).toLocaleString()} A$/h${rateNote} · need ${need1.toLocaleString()} A$">${t1}</td>`;
         html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-300 whitespace-nowrap" title="${(auPerH || 0).toLocaleString()} A$/h${rateNote} · need ${need2.toLocaleString()} A$ after selling ${(p1.hoarded_au || 0).toLocaleString()} A$ hoard">${t2}</td>`;
+        const outlook = trOutlook.get(p1.name.toLowerCase());
+        if (outlook) {
+            const next1 = outlook.next_hours != null ? `+1% ${formatTaHours(outlook.next_hours)}` : '';
+            const next2 = outlook.next2_hours != null ? `+1% more ${formatTaHours(outlook.next2_hours)}` : '';
+            const sub = [next1, next2].filter(Boolean).join(' · ') || '—';
+            html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 whitespace-nowrap"><div class="text-violet-400 font-semibold">${outlook.qualified_now}%</div><div class="text-[10px] text-muted-foreground">${esc(sub)}</div></td>`;
+        } else {
+            html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-muted-foreground/60 text-xs" title="This member has never opened My Savings">no data</td>`;
+        }
         html += `</tr>`;
     });
     html += `</tbody>`;

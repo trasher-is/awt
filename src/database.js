@@ -325,6 +325,13 @@ function initDatabase() {
         );
         CREATE INDEX IF NOT EXISTS idx_planet_banking_player ON planet_banking(player_id);
     `);
+    // population_progress: absolute points already banked toward the planet's NEXT
+    // population level. growth_rate: population points/hour. Together with `population`
+    // they let getAllianceTrOutlook (planetBanking.js) project, via game-tables.js's
+    // POP_GROWTH table, when a sub-10 planet will cross population 10 — each such planet
+    // adds 1% trade revenue for whoever partners with this player (2026-09-18b).
+    addColumn('planet_banking', 'population_progress', 'INTEGER');
+    addColumn('planet_banking', 'growth_rate', 'REAL');
 
     db.exec(`
         CREATE TABLE IF NOT EXISTS planets (
