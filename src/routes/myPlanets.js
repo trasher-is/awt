@@ -48,6 +48,8 @@ router.post('/sync/my-planets', requireAuth, (req, res) => {
                 system_id: Number.isInteger(p.system_id) ? p.system_id : null,
                 name: typeof p.name === 'string' ? p.name.slice(0, 200) : null,
                 population: Number.isFinite(p.population) ? Math.round(p.population) : null,
+                population_progress: Number.isFinite(p.population_progress) ? Math.round(p.population_progress) : null,
+                growth_rate: Number.isFinite(p.growth_rate) ? p.growth_rate : null,
                 production_pp: Number.isFinite(p.production_pp) ? Math.round(p.production_pp) : null,
                 production_rate: Number.isFinite(p.production_rate) ? p.production_rate : null,
             }));
@@ -80,6 +82,18 @@ router.post('/my-planets/:gamePlanetId/banking', requireAuth, (req, res) => {
     } catch (err) {
         console.error('[DB Error] My Savings banking toggle failure:', err);
         res.status(500).json({ success: false, error: 'Failed to update planet' });
+    }
+});
+
+// Alliance-wide, not "my"-scoped: any member can see who's worth waiting on before
+// proposing the next TA. A member who has never opened My Savings just has no rows and so
+// no entry here — see getAllianceTrOutlook's own comment for why that's "no data", not 0%.
+router.get('/trade-agreements/tr-outlook', requireAuth, (req, res) => {
+    try {
+        res.json({ success: true, members: planetBankingRepo.getAllianceTrOutlook() });
+    } catch (err) {
+        console.error('[DB Error] Failed to load TR outlook:', err);
+        res.status(500).json({ success: false, error: 'Failed to load TR outlook' });
     }
 });
 
