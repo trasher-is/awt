@@ -140,6 +140,12 @@ window.addEventListener('DOMContentLoaded', () => {
     import('./best-planets-watch.js')
         .then(({ initBestPlanetsWatch }) => initBestPlanetsWatch())
         .catch(err => console.warn('[BestPlanetsWatch] failed to start:', err));
+
+    // Various Changes: Highest Population coverage watch (2026-09-18) — same pattern as
+    // the Best Planets watch above, for /Ranking/HighestPopulation.
+    import('./highest-population-watch.js')
+        .then(({ initHighestPopulationWatch }) => initHighestPopulationWatch())
+        .catch(err => console.warn('[HighestPopulationWatch] failed to start:', err));
 });
 
 // --- CORE UI CONTROLS ---
