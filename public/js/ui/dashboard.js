@@ -146,6 +146,12 @@ window.addEventListener('DOMContentLoaded', () => {
     import('./highest-population-watch.js')
         .then(({ initHighestPopulationWatch }) => initHighestPopulationWatch())
         .catch(err => console.warn('[HighestPopulationWatch] failed to start:', err));
+
+    // My Savings: background per-planet production sync (2026-09-18) — same on-demand-load
+    // pattern as the others.
+    import('./my-planets-watch.js')
+        .then(({ initMyPlanetsWatch }) => initMyPlanetsWatch())
+        .catch(err => console.warn('[MyPlanetsWatch] failed to start:', err));
 });
 
 // --- CORE UI CONTROLS ---

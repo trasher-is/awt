@@ -303,6 +303,29 @@ function initDatabase() {
         )
     `);
 
+    // My Savings (2026-09-18): per-planet production, self-scraped from the viewer's own
+    // /Game/Planets page (no alliance-wide walk — a player can only read their own planet
+    // list). `banking` is the one field this sync never overwrites: it is the player's own
+    // manual "this planet stopped building and is saving toward the next TA" call, which
+    // auto-detection can't make reliably (a player can forget to configure Auto Produce and
+    // just spend PP by hand later, so "is Progress moving" is not proof either way). Every
+    // other column is wholesale-replaced on each sync, same pattern as best_planets_snapshot.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS planet_banking (
+            game_planet_id INTEGER PRIMARY KEY,
+            player_id INTEGER NOT NULL,
+            system_id INTEGER,
+            name TEXT,
+            population INTEGER,
+            production_pp INTEGER,
+            production_rate REAL,
+            banking INTEGER NOT NULL DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_planet_banking_player ON planet_banking(player_id);
+    `);
+
     db.exec(`
         CREATE TABLE IF NOT EXISTS planets (
             game_planet_id INTEGER UNIQUE,
