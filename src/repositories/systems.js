@@ -285,6 +285,35 @@ function getBestPlanetsFriendlyCoverage(friendlyTagsUpper) {
     return { friendly, total };
 }
 
+// --- highest_population_snapshot (Various Changes: Highest Population coverage) ---
+// Same shape and reasoning as best_planets_snapshot above, for /Ranking/HighestPopulation.
+
+const clearHighestPopulationSnapshotStmt = db.prepare(`DELETE FROM highest_population_snapshot`);
+function clearHighestPopulationSnapshot() {
+    clearHighestPopulationSnapshotStmt.run();
+}
+
+const insertHighestPopulationSnapshotStmt = db.prepare(`INSERT INTO highest_population_snapshot (game_planet_id, rank, updated_at) VALUES (?, ?, ?)`);
+function insertHighestPopulationSnapshot(gamePlanetId, rank, updatedAt) {
+    insertHighestPopulationSnapshotStmt.run(gamePlanetId, rank, updatedAt);
+}
+
+function getHighestPopulationFriendlyCoverage(friendlyTagsUpper) {
+    const tags = [...friendlyTagsUpper];
+    const total = db.prepare(`SELECT COUNT(*) as n FROM highest_population_snapshot`).get().n;
+    if (!tags.length) return { friendly: 0, total };
+    const placeholders = tags.map(() => '?').join(',');
+    const friendly = db.prepare(`
+        SELECT COUNT(*) as n
+        FROM highest_population_snapshot bp
+        JOIN planets p ON p.game_planet_id = bp.game_planet_id
+        JOIN players u ON p.owner_id = u.id
+        JOIN alliances a ON u.alliance_id = a.id
+        WHERE UPPER(a.tag) IN (${placeholders})
+    `).get(...tags).n;
+    return { friendly, total };
+}
+
 // --- planets ---
 
 const getSystemPlanetsWithIntelStmt = db.prepare(`
@@ -689,6 +718,7 @@ module.exports = {
     countUnconfirmedSieges,
     getBestGuardedInArea, diffAndReplaceBestGuardedAreaWatch,
     clearBestPlanetsSnapshot, insertBestPlanetsSnapshot, getBestPlanetsFriendlyCoverage, countSecuredSystems,
+    clearHighestPopulationSnapshot, insertHighestPopulationSnapshot, getHighestPopulationFriendlyCoverage,
     getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getPlanetsByOwner, getOldPlanet, upsertPlanet,
     getPlanetsForAllianceTag, getPlanetOwnerName, getPlanetOwnersByLocations, getRoutePlanetIntelByLocations,
     getFriendlyRouteAirports, getPlanetNameByLocation, getPlanetNameByGameId, getPlanetLocationByGameId,

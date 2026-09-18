@@ -291,6 +291,18 @@ function initDatabase() {
         )
     `);
 
+    // Highest Population ranking watch (2026-09-18, Various Changes): same shape and
+    // reasoning as best_planets_snapshot above, watching /Ranking/HighestPopulation instead.
+    // A separate table (not a shared "ranking watch" one keyed by page) because the two
+    // pages' friendly-coverage counts are announced and tracked independently.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS highest_population_snapshot (
+            game_planet_id INTEGER PRIMARY KEY,
+            rank INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    `);
+
     db.exec(`
         CREATE TABLE IF NOT EXISTS planets (
             game_planet_id INTEGER UNIQUE,

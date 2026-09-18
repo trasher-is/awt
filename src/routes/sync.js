@@ -1309,6 +1309,50 @@ router.post('/sync/best-planets-snapshot', requireAuth, (req, res) => {
     }
 });
 
+// --- RANKING: HIGHEST POPULATION COVERAGE (Various Changes, 2026-09-18) ---
+// Same shape and reasoning as /sync/best-planets-snapshot above, including the "separate
+// from whichever /Ranking/... page an admin may have pointed the SECRET bonus-goals
+// ranking_match mechanism at" caveat — that goal type isn't hardcoded to BestPlanets, so
+// it could equally be configured against HighestPopulation. Public, aggregate-only, no
+// dedup guard (identical reasoning: the hourly re-check is harmless when unchanged).
+router.post('/sync/highest-population-snapshot', requireAuth, (req, res) => {
+    const { rows } = req.body;
+    if (!Array.isArray(rows)) {
+        return res.status(400).json({ error: 'Invalid payload' });
+    }
+    const syncedAt = new Date().toISOString();
+
+    const syncTx = db.transaction((entries) => {
+        systemsRepo.clearHighestPopulationSnapshot();
+        for (const row of entries) {
+            if (!Number.isInteger(row.game_planet_id) || !Number.isInteger(row.rank)) continue;
+            systemsRepo.insertHighestPopulationSnapshot(row.game_planet_id, row.rank, syncedAt);
+        }
+    });
+
+    try {
+        syncTx(rows);
+
+        const { friendly, total } = systemsRepo.getHighestPopulationFriendlyCoverage(ownAllianceTags());
+        const lastAnnounced = settingsRepo.getSetting('highest_population_friendly_count_last_announced');
+        const lastCount = lastAnnounced ? parseInt(lastAnnounced.value, 10) : null;
+        if (total > 0 && friendly !== lastCount) {
+            const delta = Number.isFinite(lastCount) ? friendly - lastCount : null;
+            const trend = delta == null ? '' : delta > 0 ? ` (+${delta})` : delta < 0 ? ` (${delta})` : '';
+            sendVariousChangeEmbed(
+                '👥 Highest Population coverage',
+                `We now hold **${friendly}/${total}**${trend} of the Highest Population ranking.`,
+            ).catch(err => console.error('[Discord] highest-population various-changes announce error:', err.message));
+            settingsRepo.setSetting('highest_population_friendly_count_last_announced', String(friendly));
+        }
+
+        res.json({ success: true, skipped: false });
+    } catch (err) {
+        console.error('[DB Error] Highest Population snapshot sync failure:', err);
+        res.status(500).json({ error: 'Database ranking sync error event' });
+    }
+});
+
 // --- ALLIANCE STATS RECEIVER & SYNC ---
 router.post('/sync/alliance-stats', requireAuth, (req, res) => {
     const s = req.body;
