@@ -185,6 +185,7 @@ const getTradeAnalysisRowsStmt = db.prepare(`
            ams.production_rate,
            ams.astro_dollars,
            ams.production_points,
+           ams.hoarded_au,
            p.trade_partners
     FROM alliance_member_stats ams
     JOIN players p ON p.id = ams.player_id
