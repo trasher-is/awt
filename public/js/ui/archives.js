@@ -1360,9 +1360,12 @@ function renderMySavings(planets, econData) {
     const meLower = (taState?.me || '').toLowerCase();
     const economy = econData?.players?.find(p => p.name.toLowerCase() === meLower);
     const ppPrice = econData?.pp_price || 0;
-    const saved = economy
-        ? (economy.astro_dollars || 0) + (economy.production_points || 0) * ppPrice + (economy.hoarded_au || 0)
-        : 0;
+    // "Saved so far" is visible liquidity only (Astro Dollars + PP at market price) — same
+    // basis as the Board's "A$+PP" column. "if sold" adds the Trade inventory hoard
+    // (artifacts + supply units), matching the Board's separate "Ready (sold)" column: a
+    // number you'd only reach by actually selling, not one already sitting as A$/PP.
+    const saved = economy ? (economy.astro_dollars || 0) + (economy.production_points || 0) * ppPrice : 0;
+    const savedWithSelling = saved + (economy ? (economy.hoarded_au || 0) : 0);
     const bankingRate = bankingRateOf(planets);
     const auPerH = bankingRate * ppPrice;
     const needed = TA_TRADE_COST - saved;
@@ -1370,9 +1373,11 @@ function renderMySavings(planets, econData) {
     const readyEl = document.getElementById('savings-ready-in');
     const rateEl = document.getElementById('savings-rate');
     const savedEl = document.getElementById('savings-saved');
+    const savedSoldEl = document.getElementById('savings-saved-sold');
     if (readyEl) readyEl.textContent = fmtReady(needed, auPerH);
     if (rateEl) rateEl.textContent = `${bankingRate.toFixed(1)} PP/h (~${fmtAU(auPerH)} A$/h)`;
     if (savedEl) savedEl.textContent = `${fmtAU(saved)} A$`;
+    if (savedSoldEl) savedSoldEl.textContent = `${fmtAU(savedWithSelling)} A$`;
 
     const list = document.getElementById('savings-planets');
     if (!list) return;
