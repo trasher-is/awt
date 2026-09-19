@@ -152,6 +152,13 @@ window.addEventListener('DOMContentLoaded', () => {
     import('./my-planets-watch.js')
         .then(({ initMyPlanetsWatch }) => initMyPlanetsWatch())
         .catch(err => console.warn('[MyPlanetsWatch] failed to start:', err));
+
+    // My Savings / Hoard A$: background sync of the viewer's own /Game/Trade inventory
+    // value (2026-09-19) — same on-demand-load pattern as the others. Previously this only
+    // updated when the member happened to browse to /Game/Trade in the embedded frame.
+    import('./trade-inventory-watch.js')
+        .then(({ initTradeInventoryWatch }) => initTradeInventoryWatch())
+        .catch(err => console.warn('[TradeInventoryWatch] failed to start:', err));
 });
 
 // --- CORE UI CONTROLS ---

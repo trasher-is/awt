@@ -1329,20 +1329,27 @@ async function reloadMySavings() {
     const orig = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Scanning your planets...'; }
     try {
-        const { forceMyPlanetsSync } = await import('./my-planets-watch.js');
-        await forceMyPlanetsSync();
+        const [{ forceMyPlanetsSync }, { forceTradeInventorySync }] = await Promise.all([
+            import('./my-planets-watch.js'),
+            import('./trade-inventory-watch.js'),
+        ]);
+        await Promise.all([forceMyPlanetsSync(), forceTradeInventorySync()]);
     } catch (e) {}
     if (btn) { btn.disabled = false; btn.innerHTML = orig; }
     await loadMySavings();
 }
 
 // Fired every time the tab is opened, so the list is never more than a few minutes stale
-// without the member having to remember to click Reload. Lock-gated (see runMyPlanetsCheck),
-// so switching tabs back and forth does not spam the game — most calls are a fast no-op.
+// without the member having to remember to click Reload. Lock-gated (see runMyPlanetsCheck /
+// runTradeInventoryCheck), so switching tabs back and forth does not spam the game — most
+// calls are a fast no-op.
 async function backgroundRefreshMySavings() {
     try {
-        const { runMyPlanetsCheck } = await import('./my-planets-watch.js');
-        await runMyPlanetsCheck();
+        const [{ runMyPlanetsCheck }, { runTradeInventoryCheck }] = await Promise.all([
+            import('./my-planets-watch.js'),
+            import('./trade-inventory-watch.js'),
+        ]);
+        await Promise.all([runMyPlanetsCheck(), runTradeInventoryCheck()]);
     } catch (e) { return; }
     const stillOpen = document.getElementById('trade-agreements-panel')?.classList.contains('translate-x-0');
     const stillOnTab = !document.getElementById('ta-view-savings')?.classList.contains('hidden');
@@ -1353,7 +1360,9 @@ function renderMySavings(planets, econData) {
     const meLower = (taState?.me || '').toLowerCase();
     const economy = econData?.players?.find(p => p.name.toLowerCase() === meLower);
     const ppPrice = econData?.pp_price || 0;
-    const saved = economy ? (economy.astro_dollars || 0) + (economy.production_points || 0) * ppPrice : 0;
+    const saved = economy
+        ? (economy.astro_dollars || 0) + (economy.production_points || 0) * ppPrice + (economy.hoarded_au || 0)
+        : 0;
     const bankingRate = bankingRateOf(planets);
     const auPerH = bankingRate * ppPrice;
     const needed = TA_TRADE_COST - saved;
@@ -1368,7 +1377,7 @@ function renderMySavings(planets, econData) {
     const list = document.getElementById('savings-planets');
     if (!list) return;
     if (!planets.length) {
-        list.innerHTML = '<p class="text-center py-8 text-muted-foreground text-sm">No planets synced yet. Click "Reload my planets" while you have the game open in another tab.</p>';
+        list.innerHTML = '<p class="text-center py-8 text-muted-foreground text-sm">No planets synced yet. Click "Reload" while you have the game open in another tab.</p>';
         return;
     }
     const sorted = [...planets].sort((a, b) => (b.population ?? -1) - (a.population ?? -1));
