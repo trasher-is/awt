@@ -1,13 +1,18 @@
-// Regression coverage for /sync/strongest-fleet (2026-09-20, war-tool groundwork).
+// Regression coverage for /sync/strongest-fleet (2026-09-20, war-tool groundwork; revised
+// same day for durable history -- see database.js's strongest_fleet comment for the full
+// reasoning behind the switch from wholesale-replace/rank-keyed to upsert/player-keyed).
 //
-// Three things this route exists specifically to get right, per the design discussion:
-// (1) a player can hold more than one fleet in the same top-50 snapshot at once, so rows
-//     are keyed by rank, not owner -- re-syncing must never produce two rows for someone
-//     whose fleet just moved planet or grew (e.g. "yesterday's 300 destroyers and today's
-//     400 as separate rows" is exactly the bug this table's wholesale-replace avoids);
-// (2) an owner who isn't a known player yet gets player_id stored as NULL, not dropped;
-// (3) anything untouched for 5+ days is purged before each sync, so a scraper gone quiet
-//     doesn't leave stale rows looking current forever.
+// Four things this route exists specifically to get right:
+// (1) upsert, not wholesale-replace -- a player missing from THIS sync keeps their
+//     last-known row rather than being wiped, which is how the table ends up holding more
+//     than one day's top-50 at once;
+// (2) a player with two simultaneous fleets in one scrape is collapsed to their single
+//     highest-cv row -- player_id can only ever hold one row now;
+// (3) an owner who isn't a known player is skipped entirely, not kept with player_id NULL
+//     -- there's no stable identity left to upsert against under the new schema;
+// (4) anything untouched for 5+ days is purged before each sync, so a scraper gone quiet
+//     doesn't leave stale rows looking current forever, and a genuinely-gone player
+//     eventually drops out of the history this table now keeps.
 //
 // Run with: node src/routes/sync-strongest-fleet.test.js
 
@@ -67,54 +72,50 @@ function request(server, method, urlPath, body) {
         db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (1, 'RAID', 'Raiders'), (2, 'FOE', 'Enemies')`).run();
         db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (101, 'kralgar', 2), (102, 'Wearic', 2)`).run();
 
-        console.log('\n── First sync: two fleets for the same player, plus an unknown owner ' + '─'.repeat(4));
+        console.log('\n── First sync: a player with two simultaneous fleets, plus an unknown owner ' + '─'.repeat(2));
         const firstRes = await request(server, 'POST', '/hub-api/sync/strongest-fleet', {
             rows: [
                 { rank: 1, player_id: 101, cv: 975, destroyers: 325, cruisers: 0, battleships: 0 },
                 { rank: 2, player_id: 102, cv: 99, destroyers: 33, cruisers: 0, battleships: 0 },
-                { rank: 3, player_id: 102, cv: 93, destroyers: 31, cruisers: 0, battleships: 0 }, // same player, second fleet
+                { rank: 3, player_id: 102, cv: 93, destroyers: 31, cruisers: 0, battleships: 0 }, // Wearic, second/smaller fleet
                 { rank: 4, player_id: 999999, cv: 51, destroyers: 17, cruisers: 0, battleships: 0 }, // unknown player
             ],
         });
         ok('sync succeeds', firstRes.status === 200 && firstRes.body.success, firstRes.body);
 
-        const rowsAfterFirst = db.prepare(`SELECT rank, player_id, cv FROM strongest_fleet ORDER BY rank`).all();
-        ok('all 4 rows land, including both of Wearic\'s fleets', rowsAfterFirst.length === 4, rowsAfterFirst);
-        ok('the two same-player rows both keep their own rank/cv, not deduped away',
-            rowsAfterFirst[1].player_id === 102 && rowsAfterFirst[1].cv === 99 &&
-            rowsAfterFirst[2].player_id === 102 && rowsAfterFirst[2].cv === 93,
-            rowsAfterFirst);
-        ok('the unknown owner is stored with player_id NULL, not dropped',
-            rowsAfterFirst[3].player_id === null && rowsAfterFirst[3].cv === 51, rowsAfterFirst[3]);
+        const rowsAfterFirst = db.prepare(`SELECT rank, player_id, cv FROM strongest_fleet ORDER BY player_id`).all();
+        ok('exactly 2 rows: the unknown owner was skipped, not kept with player_id NULL',
+            rowsAfterFirst.length === 2, rowsAfterFirst);
+        ok('Wearic\'s two simultaneous fleets collapsed to a single row at his HIGHER cv (99, not 93)',
+            rowsAfterFirst.find(r => r.player_id === 102)?.cv === 99, rowsAfterFirst);
+        ok('kralgar\'s single fleet is stored as-is', rowsAfterFirst.find(r => r.player_id === 101)?.cv === 975, rowsAfterFirst);
 
-        console.log('\n── Second sync: kralgar\'s fleet grew and moved rank -- no leftover old row ' + '─'.repeat(2));
+        console.log('\n── Second sync: kralgar\'s fleet grew; Wearic is absent this time ' + '─'.repeat(6));
         const secondRes = await request(server, 'POST', '/hub-api/sync/strongest-fleet', {
             rows: [
-                { rank: 1, player_id: 102, cv: 480, destroyers: 160, cruisers: 0, battleships: 0 },
                 { rank: 2, player_id: 101, cv: 1200, destroyers: 400, cruisers: 0, battleships: 0 }, // kralgar, grown, different rank
             ],
         });
         ok('second sync succeeds', secondRes.status === 200 && secondRes.body.success, secondRes.body);
 
-        const rowsAfterSecond = db.prepare(`SELECT rank, player_id, cv FROM strongest_fleet ORDER BY rank`).all();
-        ok('exactly 2 rows exist -- the wholesale replace left no trace of the old 4',
+        const rowsAfterSecond = db.prepare(`SELECT rank, player_id, cv, updated_at FROM strongest_fleet ORDER BY player_id`).all();
+        ok('still 2 rows -- Wearic, absent from this scrape, was NOT wiped (this is the whole point of the upsert switch)',
             rowsAfterSecond.length === 2, rowsAfterSecond);
-        ok('kralgar has exactly one row, at his new cv, not a second leftover at 975',
+        ok('kralgar has exactly one row, UPDATED in place to his new cv/rank (not a second leftover row at 975)',
             rowsAfterSecond.filter(r => r.player_id === 101).length === 1 &&
-            rowsAfterSecond.find(r => r.player_id === 101).cv === 1200,
+            rowsAfterSecond.find(r => r.player_id === 101).cv === 1200 &&
+            rowsAfterSecond.find(r => r.player_id === 101).rank === 2,
             rowsAfterSecond);
+        ok('Wearic\'s row is untouched (still his first-sync cv of 99)',
+            rowsAfterSecond.find(r => r.player_id === 102)?.cv === 99, rowsAfterSecond);
 
         console.log('\n── A row untouched for 5+ days is purged on the next sync, not carried forward ' + '─'.repeat(1));
-        db.prepare(`INSERT INTO strongest_fleet (rank, player_id, destroyers, cruisers, battleships, cv, updated_at)
-                    VALUES (50, 101, 1, 0, 0, 3, datetime('now', '-6 days'))`).run();
-        // clearStrongestFleet() would already wipe this on any sync, so to prove the
-        // staleness purge itself (not just the wholesale replace) fire it against a table
-        // it does NOT otherwise touch: delete the trigger row it would leave behind is
-        // pointless to assert directly -- instead confirm the repository function alone
-        // removes it, independent of a sync ever running.
-        require('../repositories/fleets').deleteStrongestFleetOlderThan5Days();
-        const staleGone = db.prepare(`SELECT COUNT(*) AS n FROM strongest_fleet WHERE rank = 50`).get().n;
-        ok('the 6-day-old row is gone after the staleness purge', staleGone === 0, staleGone);
+        db.prepare(`UPDATE strongest_fleet SET updated_at = datetime('now', '-6 days') WHERE player_id = 102`).run();
+        const thirdRes = await request(server, 'POST', '/hub-api/sync/strongest-fleet', { rows: [] });
+        ok('an empty-payload sync still succeeds', thirdRes.status === 200 && thirdRes.body.success, thirdRes.body);
+        const rowsAfterThird = db.prepare(`SELECT player_id FROM strongest_fleet`).all();
+        ok('Wearic\'s 6-day-stale row is gone; kralgar\'s fresh row survives',
+            rowsAfterThird.length === 1 && rowsAfterThird[0].player_id === 101, rowsAfterThird);
     } finally {
         server.close();
     }

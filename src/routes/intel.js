@@ -20,6 +20,29 @@ const systemClaimsRepo = require('../repositories/systemClaims');
 const systemPlansRepo = require('../repositories/systemPlans');
 const router = express.Router();
 
+// Shared by /intel/fleet-locations and /intel/player/:id (2026-09-20, war-tool groundwork):
+// merges transports/colony_ships (from the player's latest ship-detail battle report) and
+// last_battle_seen (the same source !lastseen uses) onto one
+// fleetsRepo.getFleetLocationMatches row. See that repo function's own comment for what
+// location_status means and why a CV collision is reported honestly rather than guessed.
+function enrichFleetMatch(f) {
+    const extra = f.player_id != null ? battleReportsRepo.getLatestShipCompositionExtra(f.player_id) : null;
+    const lastSeen = f.player_id != null ? battleReportsRepo.getRecentPlanets(f.player_id, 1)[0] : null;
+    const lastSeenSystem = lastSeen ? systemsRepo.getFullSystem(lastSeen.system_id) : null;
+    return {
+        ...f,
+        transports: extra ? extra.transports : null,
+        colony_ships: extra ? extra.colony_ships : null,
+        composition_source_id: extra ? extra.source_id : null,
+        composition_at: extra ? extra.started_at : null,
+        last_battle_seen: lastSeen ? {
+            system_id: lastSeen.system_id, system_name: lastSeenSystem ? lastSeenSystem.name : null,
+            planet_index: lastSeen.planet_index, occurred_at: lastSeen.occurred_at,
+            source: lastSeen.source, source_id: lastSeen.source_id,
+        } : null,
+    };
+}
+
 // --- WHO USED TO BE CALLED THIS ---
 // The reverse lookup. Searching for a name that no longer exists should find the account
 // that used it, because "who was Elfenlied" is a question people actually ask and the
@@ -424,24 +447,14 @@ router.get('/intel/fleets_db', requireAuth, (req, res) => {
 // location_status ('home' | 'parked' | 'away' | 'ambiguous') means and why a CV collision
 // is reported honestly rather than resolved by a guess.
 //
-// transports/colony_ships are merged in per player_id from their most recent ship-detail
-// battle report (see battleReportsRepo.getLatestShipCompositionExtra's own comment) —
-// StrongestFleet never carries either count, since neither has combat value. Kept as its
-// own composition_at timestamp, separate from the fleet row's own updated_at, because it
-// can be far staler (or fresher) than the ranking snapshot and must never be presented as
-// if it came from the same observation.
+// transports/colony_ships and last_battle_seen come from enrichFleetMatch above — see its
+// own comment. Most valuable for `away`/`ambiguous` fleets, where best_guarded has nothing
+// to offer, but included for every fleet since a `home`/`parked` match can itself go stale
+// between ranking-page visits and a recent battle report is a stronger, independent
+// confirmation.
 router.get('/intel/fleet-locations', requireAuth, (req, res) => {
     try {
-        const fleets = fleetsRepo.getFleetLocationMatches().map((f) => {
-            const extra = f.player_id != null ? battleReportsRepo.getLatestShipCompositionExtra(f.player_id) : null;
-            return {
-                ...f,
-                transports: extra ? extra.transports : null,
-                colony_ships: extra ? extra.colony_ships : null,
-                composition_source_id: extra ? extra.source_id : null,
-                composition_at: extra ? extra.started_at : null,
-            };
-        });
+        const fleets = fleetsRepo.getFleetLocationMatches().map(enrichFleetMatch);
         res.json({ success: true, fleets });
     } catch (err) {
         console.error('[DB Error] Failed to fetch fleet location matches:', err);
@@ -553,6 +566,18 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
             console.error('[DB Error] Name history unavailable:', err.message);
         }
 
+        // Fleet card (2026-09-20, war-tool groundwork): null when this player has no
+        // strongest_fleet row at all (never ranked recently, or dropped off 5+ days ago) —
+        // the profile injection renders that as "no fleet data", not an error.
+        let fleet = null;
+        try {
+            const playerIdNum = parseInt(playerId, 10);
+            const match = Number.isInteger(playerIdNum) ? fleetsRepo.getFleetLocationMatchForPlayer(playerIdNum) : null;
+            fleet = match ? enrichFleetMatch(match) : null;
+        } catch (err) {
+            console.error('[DB Error] Fleet card unavailable:', err.message);
+        }
+
         res.json({
             success: true,
             player: playerInfo,
@@ -560,7 +585,8 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
             heatmap: heatmap,
             loginSamples,
             systems: systems, // <-- Injected payload
-            formerNames
+            formerNames,
+            fleet
         });
 
     } catch (error) {
