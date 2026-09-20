@@ -108,6 +108,67 @@ db.prepare(`DELETE FROM systems`).run();
 db.prepare(`DELETE FROM players`).run();
 db.prepare(`DELETE FROM alliances`).run();
 
+// --- getFleetSightingHistory: merging rankings/battle-report/vision sightings ---
+console.log('\n── getFleetSightingHistory ' + '─'.repeat(40));
+
+db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (30, 'FOE', 'Enemies')`).run();
+db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (301, 'kralgar', 30), (302, 'Victim', 30)`).run();
+db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (400, 'Praepes', 0, 0), (401, 'Maasym', 1, 1), (402, 'OldSystem', 9, 9)`).run();
+db.prepare(`INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id) VALUES (40001, 400, 6, 301)`).run();
+db.prepare(`INSERT INTO best_guarded (game_planet_id, cv, updated_at) VALUES (40001, '975', '2026-09-19T22:00:00.000Z')`).run();
+
+// Rankings sighting: home, fresh.
+fleets.upsertStrongestFleet(301, 1, 325, 0, 0, 975, '2026-09-20T18:00:00.000Z');
+
+// Battle-report sighting: kralgar is the ATTACKER, more recent than the rankings sighting.
+db.prepare(`
+    INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, system_id, planet_index,
+        att_destroyers, att_destroyers_lost, att_cruisers, att_battleships, att_transports, att_colony_ships)
+    VALUES (8001, '2026-09-20T20:00:00.000Z', 301, 302, 401, 3, 300, 50, 0, 0, 10, 0)
+`).run();
+
+// Vision sighting: oldest of the three but still inside the 5-day window.
+db.prepare(`INSERT INTO fleets (owner_id, system_id, planet_index, destroyers, cruisers, battleships, updated_at)
+            VALUES (301, 400, 6, 300, 0, 0, '2026-09-19T10:00:00.000Z')`).run();
+
+// A stale battle report from 6 days ago -- must NOT appear in a 5-day history.
+db.prepare(`
+    INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, system_id, planet_index, att_destroyers)
+    VALUES (8002, datetime('now', '-6 days'), 301, 302, 402, 1, 5)
+`).run();
+
+const history = fleets.getFleetSightingHistory(301, 5);
+ok('exactly 3 sightings within the window (the 6-day-old report is excluded)', history.length === 3, history);
+ok('sorted newest first: battle report, then rankings, then vision',
+    history[0].source === 'battle_report' && history[1].source === 'rankings' && history[2].source === 'vision',
+    history.map(h => h.source));
+ok('the rankings entry resolves a home location via the same cross-match logic',
+    history[1].system_name === 'Praepes' && history[1].location_status === 'home', history[1]);
+ok('the battle-report entry uses the ATTACKER-side (kralgar\'s) committed ship counts, not the defender\'s',
+    history[0].destroyers === 300 && history[0].transports === 10, history[0]);
+ok('the battle-report and vision entries have their CV recomputed from composition (300 destroyers = 900 CV), not left null',
+    history[0].cv === 900 && history[2].cv === 900, [history[0].cv, history[2].cv]);
+ok('the vision entry carries its own system/planet directly, no location_status',
+    history[2].system_name === 'Praepes' && history[2].planet_index === 6 && history[2].location_status === null, history[2]);
+
+// A player with a currently-away rankings fleet should surface that as a sighting with a
+// real status but no location, not silently omit the rankings source entirely.
+db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (303, 'Loner', 30)`).run();
+fleets.upsertStrongestFleet(303, 2, 1, 0, 0, 3, '2026-09-20T18:00:00.000Z');
+const awayHistory = fleets.getFleetSightingHistory(303, 5);
+ok('an away rankings fleet still appears, with no location and status "away"',
+    awayHistory.length === 1 && awayHistory[0].source === 'rankings'
+    && awayHistory[0].system_id === null && awayHistory[0].location_status === 'away', awayHistory);
+
+db.prepare(`DELETE FROM battle_reports`).run();
+db.prepare(`DELETE FROM fleets`).run();
+fleets.deleteAllStrongestFleet();
+db.prepare(`DELETE FROM best_guarded`).run();
+db.prepare(`DELETE FROM planets`).run();
+db.prepare(`DELETE FROM systems`).run();
+db.prepare(`DELETE FROM players`).run();
+db.prepare(`DELETE FROM alliances`).run();
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

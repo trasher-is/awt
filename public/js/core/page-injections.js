@@ -1183,13 +1183,14 @@ export async function initProfileHubIntel() {
     wrap.id = 'awt-hub-intel-block';
     wrap.innerHTML = `
         <div class="row">
-            <div class="col-12">${buildFleetCard(data.fleet)}</div>
+            <div class="col-12">${buildFleetsCard(data.fleetHistory)}</div>
         </div>
         <div class="row">
             <div class="col-lg-6">${buildActivityLogCard(data.heatmap, data.loginSamples)}</div>
             <div class="col-lg-6">${buildBuildingsCard(p)}</div>
         </div>`;
     anchor.parentNode.insertBefore(wrap, anchor);
+    mountFleetsCardExpand(wrap);
     mountBattleRaceIntel(wrap, { playerId, hasBio: !!p.has_intel, hasLiveIntel });
     // Only where the hub has no live view of its own: with the game's real Intelligence
     // Report on screen there is nothing to type in, and offering to overwrite a live capture
@@ -1372,14 +1373,17 @@ function buildBuildingsCard(p) {
         </table>`;
 }
 
-// Fleet card (2026-09-20, war-tool groundwork): mirrors the Fleet Locations panel's row
-// for this ONE player — see fleetsRepo.getFleetLocationMatches's own comment for what
-// location_status ('home' | 'parked' | 'away' | 'ambiguous') means, and enrichFleetMatch's
-// (src/routes/intel.js) for transports/colony_ships/last_battle_seen. `fleet` is null when
-// this player has no strongest_fleet row at all — never ranked in the top 50 recently, or
-// dropped off 5+ days ago — which renders as an explicit "no data" row, not a blank card,
-// so its absence is never confused with "definitely no fleet".
-const FLEET_STATUS_LABEL = { home: 'Home', parked: 'Parked', away: 'Away', ambiguous: 'Ambiguous' };
+// Fleets card (2026-09-20, war-tool groundwork; revised same day to a 5-day sighting
+// history instead of a single current-state row): one row per sighting from
+// fleetsRepo.getFleetSightingHistory — 'rankings' (StrongestFleet, cross-matched to
+// BestGuarded for a location), 'battle_report' (linked to the actual report, same as the
+// !lastseen Discord command), or 'vision' (a live system-map sighting, no link — there is
+// no per-sighting page to link to). Newest first, already sorted server-side; only the
+// first 5 rows show by default, with a "Show N more" link revealing the rest, since the
+// history can hold several days' worth of sightings. Ranking pages (both StrongestFleet
+// and BestGuarded) only actually change once a day, at midnight CET — a "Fleet ranking
+// seen" timestamp minutes old does not mean the underlying data is any fresher than the
+// last daily tick, only that someone happened to reload the ranking page since then.
 function fleetAgeLabel(iso) {
     if (!iso) return '—';
     const ms = Date.now() - new Date(iso).getTime();
@@ -1391,38 +1395,67 @@ function fleetAgeLabel(iso) {
     if (hrs < 48) return `${hrs}h ago`;
     return `${Math.floor(hrs / 24)}d ago`;
 }
-function buildFleetCard(fleet) {
-    if (!fleet) {
+function fleetLocationCell(entry) {
+    if (entry.system_id == null) {
+        const hint = entry.location_status === 'ambiguous' ? 'Ambiguous CV match — see Fleet Locations panel'
+            : entry.location_status === 'away' ? 'Away — no matching Best Guarded planet'
+            : 'Unknown';
+        return `<span class="lowlight" title="${esc(hint)}">—</span>`;
+    }
+    const name = entry.system_name ? `${esc(entry.system_name)} ` : '';
+    return `<a href="/Game/Map/SolarSystem/${entry.system_id}">[${entry.system_id}] ${name}#${entry.planet_index}</a>`;
+}
+function fleetSourceCell(entry) {
+    if (entry.source === 'battle_report') return `<a href="/About/BattleReport/${entry.source_id}">Battle ${entry.source_id}</a>`;
+    if (entry.source === 'vision') return 'From vision';
+    return 'From rankings';
+}
+function buildFleetsCard(history) {
+    if (!history || history.length === 0) {
         return `
         <table class="table">
-            <thead><tr><th><i class="bi bi-rocket"></i> Fleet</th></tr></thead>
-            <tbody><tr><td class="lowlight">No StrongestFleet ranking data on record (not in the top 50 recently, or dropped off 5+ days ago).</td></tr></tbody>
+            <thead><tr><th><i class="bi bi-rocket"></i> Fleets</th></tr></thead>
+            <tbody><tr><td class="lowlight">No fleet sightings on record in the last 5 days.</td></tr></tbody>
         </table>`;
     }
 
-    let locationText;
-    if (fleet.location_status === 'home') locationText = `Home — ${esc(fleet.location.system_name || 'Unknown')} #${fleet.location.planet_index}`;
-    else if (fleet.location_status === 'parked') locationText = `${esc(fleet.location.system_name || 'Unknown')} #${fleet.location.planet_index} (${esc(fleet.location.owner_name || 'Unowned')}${fleet.location.owner_tag ? ` [${esc(fleet.location.owner_tag)}]` : ''})`;
-    else if (fleet.location_status === 'ambiguous') locationText = `${fleet.candidates.length} candidate${fleet.candidates.length === 1 ? '' : 's'} share this CV`;
-    else locationText = 'No matching Best Guarded planet';
+    const buildRow = (entry, hidden) => `
+        <tr${hidden ? ' class="awt-fleet-extra" style="display:none;"' : ''}>
+            <td>${fleetLocationCell(entry)}</td>
+            <td class="lowlight" style="font-weight:bold;">${(entry.cv || 0).toLocaleString()}</td>
+            <td class="lowlight">${entry.destroyers ?? 0} / ${entry.cruisers ?? 0} / ${entry.battleships ?? 0}</td>
+            <td class="lowlight">${entry.transports ?? '—'} / ${entry.colony_ships ?? '—'}</td>
+            <td class="lowlight" title="${esc(formatSqliteUtc(entry.seen_at))}">${fleetAgeLabel(entry.seen_at)}</td>
+            <td class="lowlight">${fleetSourceCell(entry)}</td>
+        </tr>`;
 
-    const lastBattleText = fleet.last_battle_seen
-        ? `${esc(fleet.last_battle_seen.system_name || 'Unknown')} #${fleet.last_battle_seen.planet_index ?? '?'} (${fleetAgeLabel(fleet.last_battle_seen.occurred_at)})`
-        : '—';
+    const visible = history.slice(0, 5);
+    const extra = history.slice(5);
+    const rows = visible.map(e => buildRow(e, false)).join('') + extra.map(e => buildRow(e, true)).join('');
+    const moreRow = extra.length
+        ? `<tr class="awt-fleet-more-row"><td colspan="6" style="text-align:center;"><a href="#" class="awt-fleet-more-link">Show ${extra.length} more</a></td></tr>`
+        : '';
 
     return `
         <table class="table">
-            <thead><tr><th colspan="2"><i class="bi bi-rocket"></i> Fleet <span style="font-weight:normal;font-size:10px;color:#888;">(StrongestFleet ranking, refreshed on ranking-page visits)</span></th></tr></thead>
-            <tbody>
-                <tr><td>Combat Value</td><td class="lowlight" style="font-weight:bold;">${(fleet.cv || 0).toLocaleString()}</td></tr>
-                <tr><td>Destroyers / Cruisers / Battleships</td><td class="lowlight">${fleet.destroyers || 0} / ${fleet.cruisers || 0} / ${fleet.battleships || 0}</td></tr>
-                <tr><td title="Learned from this player's most recent ship-detail-scraped battle report, not the ranking page.">Transports / Colony Ships*</td><td class="lowlight">${fleet.transports ?? '—'} / ${fleet.colony_ships ?? '—'}</td></tr>
-                <tr><td>Status</td><td class="lowlight" style="font-weight:bold;">${esc(FLEET_STATUS_LABEL[fleet.location_status] || fleet.location_status)}</td></tr>
-                <tr><td>Location</td><td class="lowlight">${locationText}</td></tr>
-                <tr><td title="Same source as the !lastseen Discord command.">Last battle seen*</td><td class="lowlight">${lastBattleText}</td></tr>
-                <tr><td>Fleet ranking seen</td><td class="lowlight">${fleetAgeLabel(fleet.updated_at)}</td></tr>
-            </tbody>
+            <thead>
+                <tr><th colspan="6"><i class="bi bi-rocket"></i> Fleets <span style="font-weight:normal;font-size:10px;color:#888;">(last 5 days — rankings, battle reports &amp; system vision)</span></th></tr>
+                <tr style="font-size:11px;"><th>Location</th><th>CV</th><th>DS/CR/BS</th><th>TR/CS</th><th>Last seen</th><th>Source</th></tr>
+            </thead>
+            <tbody>${rows}${moreRow}</tbody>
         </table>`;
+}
+// Separate mount step (same convention as mountBattleRaceIntel/mountManualIntelEntry below)
+// since the "Show more" toggle needs a real event listener, not an inline handler, once
+// buildFleetsCard's string has already been inserted via innerHTML.
+function mountFleetsCardExpand(wrap) {
+    const link = wrap.querySelector('.awt-fleet-more-link');
+    if (!link) return;
+    link.addEventListener('click', (e) => {
+        e.preventDefault();
+        wrap.querySelectorAll('.awt-fleet-extra').forEach(tr => { tr.style.display = ''; });
+        wrap.querySelector('.awt-fleet-more-row')?.remove();
+    });
 }
 
 // Dispatches between the two shapes a player's row of intel columns can be in when this

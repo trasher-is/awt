@@ -1,9 +1,9 @@
-// Route-level coverage for the `fleet` field GET /hub-api/intel/player/:id now returns
-// (war-tool groundwork, 2026-09-20) -- the profile injection's data source for the new
-// Fleets card. The cross-match/enrichment logic itself has its own full coverage
-// (fleets.test.js, intel-fleet-locations.test.js); this only confirms the wiring: the
-// right player's match comes back, and a player with no strongest_fleet row gets `fleet:
-// null` rather than an error or a stale row belonging to someone else.
+// Route-level coverage for the `fleetHistory` field GET /hub-api/intel/player/:id returns
+// (war-tool groundwork, 2026-09-20; revised same day to a 5-day sighting history) -- the
+// profile injection's data source for the Fleets card. getFleetSightingHistory itself has
+// its own full coverage in fleets.test.js; this only confirms the wiring: the right
+// player's history comes back, and a player with no sightings gets `fleetHistory: []`
+// rather than an error or someone else's rows.
 //
 // Run with: node src/routes/intel-player-fleet.test.js
 
@@ -64,13 +64,16 @@ function getJson(server, urlPath) {
         console.log('\n── a player with a matched fleet ' + '─'.repeat(42));
         let r = await getJson(server, '/hub-api/intel/player/901');
         ok('request succeeds', r.status === 200 && r.body.success, r.body);
-        ok('fleet resolves home, to the right player, not someone else\'s row',
-            r.body.fleet && r.body.fleet.player_id === 901 && r.body.fleet.location_status === 'home', r.body.fleet);
+        ok('fleetHistory has exactly the one rankings sighting, resolved home',
+            Array.isArray(r.body.fleetHistory) && r.body.fleetHistory.length === 1
+            && r.body.fleetHistory[0].source === 'rankings' && r.body.fleetHistory[0].location_status === 'home',
+            r.body.fleetHistory);
 
         console.log('\n── a player who has never been ranked ' + '─'.repeat(38));
         r = await getJson(server, '/hub-api/intel/player/903');
         ok('request succeeds', r.status === 200 && r.body.success, r.body);
-        ok('fleet is null, not an error and not kralgar\'s row', r.body.fleet === null, r.body.fleet);
+        ok('fleetHistory is an empty array, not an error and not kralgar\'s rows',
+            Array.isArray(r.body.fleetHistory) && r.body.fleetHistory.length === 0, r.body.fleetHistory);
     } finally {
         server.close();
     }
