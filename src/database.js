@@ -303,6 +303,37 @@ function initDatabase() {
         )
     `);
 
+    // Strongest Fleet ranking watch (2026-09-20, war-tool groundwork): current
+    // /Ranking/StrongestFleet top-50, wholesale-replaced on every re-scrape — same pattern
+    // as best_planets_snapshot/highest_population_snapshot, EXCEPT keyed by `rank`, not by
+    // the fleet owner: confirmed live (2026-09-20) that a single player can hold more than
+    // one fleet in the top-50 at once (e.g. two separate destroyer stacks), so player_id is
+    // not unique per snapshot and can't be the key. player_id is nullable and best-effort —
+    // a row whose owner isn't yet a known player gets stored with NULL rather than dropped,
+    // since the CV/composition is still worth having even without an identity.
+    //
+    // destroyers/cruisers/battleships/cv are stored as INTEGER (unlike best_guarded's `cv`
+    // TEXT column, kept as raw page text purely for display) because this table's whole
+    // purpose is numeric cross-matching against best_guarded to locate a fleet by
+    // composition — every consumer would otherwise repeat the same CAST(REPLACE(...)) noise.
+    //
+    // No per-row expiry column: staleness is bounded by deleting anything untouched for 5+
+    // days at the top of every sync (see /sync/strongest-fleet) rather than trusting a
+    // separate cleanup job to run — if the scraper stops being fed (nobody visits the
+    // ranking page), the data ages out on its own instead of quietly going stale forever.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS strongest_fleet (
+            rank INTEGER PRIMARY KEY,
+            player_id INTEGER,
+            destroyers INTEGER NOT NULL DEFAULT 0,
+            cruisers INTEGER NOT NULL DEFAULT 0,
+            battleships INTEGER NOT NULL DEFAULT 0,
+            cv INTEGER NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE SET NULL
+        )
+    `);
+
     // My Savings (2026-09-18): per-planet production, self-scraped from the viewer's own
     // /Game/Planets page (no alliance-wide walk — a player can only read their own planet
     // list). `banking` is the one field this sync never overwrites: it is the player's own

@@ -2243,3 +2243,50 @@ export async function initEcoBonusJoinDates() {
         .catch(err => console.error('[Hub Tracker] Ranking update injection error trace:', err));
     }
 })();
+
+// War-tool groundwork (2026-09-20): /Ranking/StrongestFleet top-50, same wholesale-replace
+// idea as autoScrapeRankings above but keyed by `rank`, not by owner — a player can hold
+// more than one fleet in the ranking at once (confirmed live: two separate destroyer
+// stacks under the same name), so rank is the only value guaranteed unique per row. The
+// destroyer/cruiser/battleship breakdown is captured alongside cv specifically so a later
+// cross-match against best_guarded doesn't have to rely on cv alone, which collides
+// whenever two players field identical fleet composition (also confirmed live: two
+// different players both at 105 CV / 35 destroyers on the same day).
+(function autoScrapeStrongestFleet() {
+    if (!window.location.pathname.toLowerCase().includes('/ranking/strongestfleet')) return;
+
+    console.log('[Hub Tracker] Strongest Fleet ranking channel recognized. Evaluating metrics...');
+
+    const rows = document.querySelectorAll('table.table tbody tr');
+    const processedEntries = [];
+
+    rows.forEach(row => {
+        const tds = row.querySelectorAll('td');
+        if (tds.length < 6) return;
+
+        const rank = parseInt(tds[0].innerText.trim(), 10);
+        const ownerLink = row.querySelector('a[href^="/Game/Players/Profile/"]');
+        const playerId = ownerLink ? parseInt(ownerLink.getAttribute('href').split('/').pop(), 10) : null;
+
+        if (isNaN(rank)) return;
+        processedEntries.push({
+            rank,
+            player_id: isNaN(playerId) ? null : playerId,
+            cv: Math.round(parseLocaleNumber(tds[2].innerText)),
+            destroyers: Math.round(parseLocaleNumber(tds[3].innerText)),
+            cruisers: Math.round(parseLocaleNumber(tds[4].innerText)),
+            battleships: Math.round(parseLocaleNumber(tds[5].innerText)),
+        });
+    });
+
+    if (processedEntries.length > 0) {
+        fetch('/hub-api/sync/strongest-fleet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rows: processedEntries })
+        })
+        .then(res => res.json())
+        .then(() => console.log('[Hub Tracker] Strongest Fleet ranking synced.'))
+        .catch(err => console.error('[Hub Tracker] Strongest Fleet ranking sync error trace:', err));
+    }
+})();

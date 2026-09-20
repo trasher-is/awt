@@ -457,6 +457,45 @@ ok('an invalid previous scan timestamp leaves attribution unknown',
 ok('a recent report is excluded if the planet has been synced since that battle',
     battleReports.findRecentAttackerAtPlanet(801, 1, 180, { ...bombardContext, observedAfter: minutesAgo(20) }) === null);
 
+// --- getLatestShipCompositionExtra ---
+console.log('\n── getLatestShipCompositionExtra: transports/colony ships from battle reports ' + '─'.repeat(2));
+
+db.prepare(`INSERT INTO players (id, name) VALUES (510, 'Hauler'), (511, 'Raider510')`).run();
+
+ok('a player with no battle history at all returns null', battleReports.getLatestShipCompositionExtra(510) === null);
+
+// Older report: Hauler (510) is the ATTACKER, brought transports and colony ships.
+db.prepare(`
+    INSERT INTO battle_reports (
+        id, started_at, att_player_id, def_player_id,
+        att_destroyers, att_destroyers_lost, att_transports, att_transports_lost,
+        att_colony_ships, att_colony_ships_lost
+    ) VALUES (9900, '2026-09-01T10:00:00Z', 510, 511, 5, 0, 20, 0, 3, 0)
+`).run();
+const older = battleReports.getLatestShipCompositionExtra(510);
+ok('attacker-side transports/colony_ships are read from the att_* columns',
+    older && older.transports === 20 && older.colony_ships === 3 && older.source_id === 9900, older);
+
+// Newer report: Hauler (510) is now the DEFENDER, with a different, more recent count —
+// must win over the older attacker-side report above (ORDER BY started_at DESC).
+db.prepare(`
+    INSERT INTO battle_reports (
+        id, started_at, att_player_id, def_player_id,
+        def_destroyers, def_destroyers_lost, def_transports, def_transports_lost,
+        def_colony_ships, def_colony_ships_lost
+    ) VALUES (9901, '2026-09-05T10:00:00Z', 511, 510, 8, 2, 12, 12, 0, 0)
+`).run();
+const newer = battleReports.getLatestShipCompositionExtra(510);
+ok('the newer report wins, and correctly reads the DEFENDER-side (def_*) columns this time',
+    newer && newer.transports === 12 && newer.colony_ships === 0 && newer.source_id === 9901, newer);
+
+// A report where ship detail was never scraped (att_destroyers NULL) must not count as a
+// composition observation, even though the player/report link exists.
+db.prepare(`INSERT INTO players (id, name) VALUES (512, 'Unscraped')`).run();
+db.prepare(`INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id) VALUES (9902, '2026-09-10T10:00:00Z', 512, 511)`).run();
+ok('a report with no ship-detail scrape yet is not treated as a composition observation',
+    battleReports.getLatestShipCompositionExtra(512) === null);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {

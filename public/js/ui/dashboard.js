@@ -5,6 +5,7 @@ import {
     openSystemDatabasePanel,
     openPlanetDatabasePanel,
     openFleetDatabasePanel,
+    openFleetLocationsPanel,
     openEnemyIntelPanel,
     openAllianceStatsPanel,
     openTradeAgreementsPanel,
@@ -56,6 +57,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('open-systems-db-btn')?.addEventListener('click', openSystemDatabasePanel);
     document.getElementById('open-planets-db-btn')?.addEventListener('click', openPlanetDatabasePanel);
     document.getElementById('open-fleets-db-btn')?.addEventListener('click', openFleetDatabasePanel);
+    document.getElementById('open-fleet-locations-btn')?.addEventListener('click', openFleetLocationsPanel);
     document.getElementById('open-battle-calc-btn')?.addEventListener('click', openBattleCalcPanel);
     document.getElementById('open-battle-reports-btn')?.addEventListener('click', openBattleReportsPanel);
     document.getElementById('open-travel-calc-btn')?.addEventListener('click', openTravelCalcPanel);
