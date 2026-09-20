@@ -6,10 +6,10 @@
     <div class="flex-1 overflow-hidden flex flex-col p-4 md:p-6 gap-4">
         <div class="text-sm text-muted-foreground">
             Cross-matches <span class="font-mono">/Ranking/StrongestFleet</span> against <span class="font-mono">/Ranking/BestGuarded</span>
-            by combat value, plus each player's last-known ship composition and battle location. Refreshes only when
-            someone visits the two ranking pages in-game (same as the Best Guarded badge elsewhere in the hub) — this
-            is a read of whatever the hub currently has, not a live poll. A player keeps their last-known row for
-            5 days after dropping out of the top 50, so this list is usually bigger than 50.
+            by combat value, plus each player's last-known ship composition and battle location. Both ranking pages
+            only actually change once a day, at midnight CET — this table refreshes whenever someone visits them
+            in-game since the last daily tick, not on a live poll. A player keeps their last-known row for 5 days
+            after dropping out of the top 50, so this list is usually bigger than 50.
         </div>
         <div class="flex justify-between items-center gap-4">
             <div class="relative w-full md:w-72"><input type="text" id="fltloc-search-input" placeholder="Filter by owner or [TAG]..." class="flex h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pe-8"><i class="fa-solid fa-filter absolute right-3 top-2.5 text-muted-foreground text-sm pointer-events-none"></i></div>

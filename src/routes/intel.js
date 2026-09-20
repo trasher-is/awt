@@ -566,16 +566,17 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
             console.error('[DB Error] Name history unavailable:', err.message);
         }
 
-        // Fleet card (2026-09-20, war-tool groundwork): null when this player has no
-        // strongest_fleet row at all (never ranked recently, or dropped off 5+ days ago) —
-        // the profile injection renders that as "no fleet data", not an error.
-        let fleet = null;
+        // Fleets card (2026-09-20, war-tool groundwork; revised same day to a 5-day
+        // sighting history — see fleetsRepo.getFleetSightingHistory's own comment for what
+        // 'rankings' | 'battle_report' | 'vision' each mean). Empty array when this player
+        // has no sightings in the window at all — the profile injection renders that as
+        // "no fleet data", not an error.
+        let fleetHistory = [];
         try {
             const playerIdNum = parseInt(playerId, 10);
-            const match = Number.isInteger(playerIdNum) ? fleetsRepo.getFleetLocationMatchForPlayer(playerIdNum) : null;
-            fleet = match ? enrichFleetMatch(match) : null;
+            fleetHistory = Number.isInteger(playerIdNum) ? fleetsRepo.getFleetSightingHistory(playerIdNum, 5) : [];
         } catch (err) {
-            console.error('[DB Error] Fleet card unavailable:', err.message);
+            console.error('[DB Error] Fleets card unavailable:', err.message);
         }
 
         res.json({
@@ -586,7 +587,7 @@ router.get('/intel/player/:id', requireAuth, (req, res) => {
             loginSamples,
             systems: systems, // <-- Injected payload
             formerNames,
-            fleet
+            fleetHistory
         });
 
     } catch (error) {

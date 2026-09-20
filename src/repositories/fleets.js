@@ -1,4 +1,6 @@
 const db = require('../database');
+const { cvOf } = require('../../public/js/utils/battle-model.js');
+const { parseTimestamp } = require('../../public/js/utils/sqlite-time.js');
 
 const countFleetsStmt = db.prepare(`SELECT COUNT(*) as count FROM fleets`);
 function countFleets() {
@@ -304,6 +306,97 @@ function getFleetLocationMatchForPlayer(playerId) {
     return getFleetLocationMatches().find((f) => f.player_id === playerId) || null;
 }
 
+// --- fleet sighting history (player-profile Fleets table, 2026-09-20) ---
+// Merges three independent, genuinely different sources of "we have seen this player's
+// fleet" into one newest-first timeline, tagged with where each entry came from. Nothing
+// here deduplicates across sources — a battle report and a rankings snapshot from the same
+// day are two separate confirmations worth keeping side by side, not one row to merge:
+//
+//  - 'rankings'      the player's current strongest_fleet row (at most one, since that
+//                     table is itself upserted per player — see its own comment), located
+//                     via the same self-match/collision logic as getFleetLocationMatches;
+//                     no location for an `away`/`ambiguous` result, since there is none to
+//                     show honestly.
+//  - 'battle_report' every battle report in the window with ship detail scraped, reading
+//                     THAT PLAYER's side of the att_/def_ columns directly — what they
+//                     fielded in the fight, not the post-loss remainder (same choice as
+//                     getLatestShipCompositionExtra, for the same reason: showing a
+//                     post-loss ship count next to a pre-loss CV, or vice versa, would be
+//                     internally inconsistent).
+//  - 'vision'        live system-map sightings from the `fleets` table (owner_id =
+//                     player) — the same intel system-scan pages already capture.
+//
+// CV is recomputed from the observed composition for battle_report/vision rows (`fleets.
+// combat_value` is never actually populated by any writer — see insertFleetForAllianceStats
+// — and a report's own survived_cv would be a post-loss number sitting next to a pre-loss
+// ship count). The rankings row's cv is used as-is: it's the ranking page's own number.
+function getFleetSightingHistory(playerId, days = 5) {
+    const cutoff = `-${Math.max(1, Math.round(Number(days) || 5))} days`;
+
+    const entries = [];
+
+    const rankingsRow = db.prepare(`
+        SELECT destroyers, cruisers, battleships, cv, updated_at
+        FROM strongest_fleet WHERE player_id = ? AND updated_at > datetime('now', ?)
+    `).get(playerId, cutoff);
+    if (rankingsRow) {
+        const match = getFleetLocationMatchForPlayer(playerId);
+        const loc = match && match.location ? match.location : null;
+        entries.push({
+            source: 'rankings', source_id: null, seen_at: rankingsRow.updated_at,
+            system_id: loc ? loc.system_id : null, system_name: loc ? loc.system_name : null,
+            planet_index: loc ? loc.planet_index : null,
+            location_status: match ? match.location_status : null,
+            destroyers: rankingsRow.destroyers, cruisers: rankingsRow.cruisers, battleships: rankingsRow.battleships,
+            transports: null, colony_ships: null, cv: rankingsRow.cv,
+        });
+    }
+
+    const battleRows = db.prepare(`
+        SELECT br.id AS source_id, br.started_at AS seen_at, br.system_id, s.name AS system_name, br.planet_index,
+               CASE WHEN br.att_player_id = @playerId THEN br.att_destroyers ELSE br.def_destroyers END AS destroyers,
+               CASE WHEN br.att_player_id = @playerId THEN br.att_cruisers ELSE br.def_cruisers END AS cruisers,
+               CASE WHEN br.att_player_id = @playerId THEN br.att_battleships ELSE br.def_battleships END AS battleships,
+               CASE WHEN br.att_player_id = @playerId THEN br.att_transports ELSE br.def_transports END AS transports,
+               CASE WHEN br.att_player_id = @playerId THEN br.att_colony_ships ELSE br.def_colony_ships END AS colony_ships
+        FROM battle_reports br
+        LEFT JOIN systems s ON s.id = br.system_id
+        WHERE (br.att_player_id = @playerId OR br.def_player_id = @playerId)
+          AND br.system_id IS NOT NULL
+          AND br.started_at > datetime('now', @cutoff)
+          AND (CASE WHEN br.att_player_id = @playerId THEN br.att_destroyers ELSE br.def_destroyers END) IS NOT NULL
+    `).all({ playerId, cutoff });
+    for (const r of battleRows) {
+        entries.push({
+            source: 'battle_report', source_id: r.source_id, seen_at: r.seen_at,
+            system_id: r.system_id, system_name: r.system_name, planet_index: r.planet_index, location_status: null,
+            destroyers: r.destroyers, cruisers: r.cruisers, battleships: r.battleships,
+            transports: r.transports, colony_ships: r.colony_ships,
+            cv: cvOf({ destroyers: r.destroyers, cruisers: r.cruisers, battleships: r.battleships }),
+        });
+    }
+
+    const visionRows = db.prepare(`
+        SELECT f.id AS source_id, f.updated_at AS seen_at, f.system_id, s.name AS system_name, f.planet_index,
+               f.destroyers, f.cruisers, f.battleships, f.transports, f.colony_ships
+        FROM fleets f
+        LEFT JOIN systems s ON s.id = f.system_id
+        WHERE f.owner_id = ? AND f.updated_at > datetime('now', ?)
+    `).all(playerId, cutoff);
+    for (const r of visionRows) {
+        entries.push({
+            source: 'vision', source_id: null, seen_at: r.seen_at,
+            system_id: r.system_id, system_name: r.system_name, planet_index: r.planet_index, location_status: null,
+            destroyers: r.destroyers, cruisers: r.cruisers, battleships: r.battleships,
+            transports: r.transports, colony_ships: r.colony_ships,
+            cv: cvOf({ destroyers: r.destroyers, cruisers: r.cruisers, battleships: r.battleships }),
+        });
+    }
+
+    entries.sort((a, b) => (parseTimestamp(b.seen_at)?.getTime() || 0) - (parseTimestamp(a.seen_at)?.getTime() || 0));
+    return entries;
+}
+
 module.exports = {
     countFleets, getFleetsForSystem, getFleetsForSystemFull, getFleetsFullDb,
     getFleetsForTimeline, deleteFleetsOlderThan10Days, deleteAllFleets, deleteFleetsByOwner,
@@ -311,5 +404,5 @@ module.exports = {
     getMemberIdsForTags, replaceEnemyFleetsForSystem,
     getInterceptFleetsByAlliance, getInterceptFleetsByActiveUsers,
     deleteStrongestFleetOlderThan5Days, deleteAllStrongestFleet, upsertStrongestFleet, getStrongestFleetFull,
-    getFleetLocationMatches, getFleetLocationMatchForPlayer,
+    getFleetLocationMatches, getFleetLocationMatchForPlayer, getFleetSightingHistory,
 };
