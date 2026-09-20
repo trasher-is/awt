@@ -45,6 +45,10 @@ ok('an "All buildings" row sums the four and averages the sum', byLabel['All bui
 ok('the header names the denominator', /Avg \/ planet[\s\S]*\(6\)/.test(html));
 ok('the header keeps the "4 day old data" disclaimer and the scrape-time tooltip', /4 day old data/.test(html) && /Hub last scraped this: formatted\(2026-09-05 10:00:00\)/.test(html));
 ok('no per-planet maximum is invented', !/Max/i.test(html.replace(/<[^>]+>/g, '')));
+// 2026-09-20: Cybernetics moved above Labs per trasheris's request.
+const rowOrder = rows.filter(r => r.length === 3 && r[0]).map(r => r[0]);
+ok('rows run Farms, Factories, Cybernetics, Labs, then All buildings',
+    JSON.stringify(rowOrder) === JSON.stringify(['Farms', 'Factories', 'Cybernetics', 'Labs', 'All buildings']), rowOrder);
 
 console.log('\n── Degenerate inputs ' + '─'.repeat(54));
 const none = cellsOf(build({}));

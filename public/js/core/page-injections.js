@@ -1332,8 +1332,8 @@ function buildQuietWindowsSection(loginSamples) {
 const BUILDING_ROWS = [
     ['Farms', 'total_farms'],
     ['Factories', 'total_factories'],
-    ['Labs', 'total_labs'],
     ['Cybernetics', 'total_cybernetics'],
+    ['Labs', 'total_labs'],
 ];
 
 function buildBuildingsCard(p) {
