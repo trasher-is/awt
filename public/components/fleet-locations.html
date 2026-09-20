@@ -1,0 +1,39 @@
+<div id="fleet-locations-panel" class="absolute top-0 left-0 md:left-14 right-0 h-full bg-background/95 backdrop-blur-md border-l border-border z-40 transform translate-x-full transition-transform duration-300 flex flex-col shadow-2xl">
+    <div class="h-14 border-b border-border flex items-center justify-between px-6 bg-card shrink-0">
+        <div class="flex items-center gap-3 text-foreground font-semibold"><i class="fa-solid fa-crosshairs text-aw-enemy text-xl"></i><span class="tracking-wider uppercase">Fleet Locations</span></div>
+        <button id="fltloc-close-btn" class="text-muted-foreground hover:text-foreground transition-colors p-2 rounded hover:bg-accent"><i class="fa-solid fa-xmark text-xl"></i></button>
+    </div>
+    <div class="flex-1 overflow-hidden flex flex-col p-4 md:p-6 gap-4">
+        <div class="flex justify-between items-center gap-4">
+            <div class="text-sm text-muted-foreground">
+                Cross-matches every <span class="font-mono">/Ranking/StrongestFleet</span> entry against
+                <span class="font-mono">/Ranking/BestGuarded</span> by combat value. Refreshes only when someone
+                visits both ranking pages in-game — this is a read of whatever the hub currently has, not a live scan.
+            </div>
+            <div class="text-sm text-muted-foreground font-mono shrink-0">Showing <span id="fltloc-result-count" class="text-foreground font-bold">0</span> fleets</div>
+        </div>
+        <div class="flex-1 overflow-auto border border-border rounded-lg bg-card relative shadow-sm">
+            <table class="w-full md:w-auto text-left text-sm whitespace-nowrap">
+                <thead class="sticky top-0 bg-secondary text-secondary-foreground shadow-sm z-10">
+                    <tr>
+                        <th class="p-3">#</th>
+                        <th class="p-3 border-l border-border">Owner</th>
+                        <th class="p-3">Alliance</th>
+                        <th class="p-3 border-l border-border text-aw-warning">CV</th>
+                        <th class="p-3 text-red-400">DS</th>
+                        <th class="p-3 text-red-400">CR</th>
+                        <th class="p-3 text-red-400">BS</th>
+                        <th class="p-3 text-gray-400" title="Learned from this player's most recent ship-detail-scraped battle report, not the ranking page — StrongestFleet never lists these.">TR*</th>
+                        <th class="p-3 text-gray-400" title="Same source as TR* — see that column's tooltip.">CS*</th>
+                        <th class="p-3 border-l border-border">Status</th>
+                        <th class="p-3">Location</th>
+                        <th class="p-3 border-l border-border">Fleet seen</th>
+                        <th class="p-3">Guard seen</th>
+                        <th class="p-3">Comp. seen*</th>
+                    </tr>
+                </thead>
+                <tbody id="fltloc-table-body" class="divide-y divide-border"></tbody>
+            </table>
+        </div>
+    </div>
+</div>

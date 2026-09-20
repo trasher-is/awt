@@ -418,6 +418,37 @@ router.get('/intel/fleets_db', requireAuth, (req, res) => {
     }
 });
 
+// War-tool groundwork (2026-09-20): every /Ranking/StrongestFleet entry, cross-matched
+// against /Ranking/BestGuarded by combat value to say where (if anywhere visible) that
+// fleet currently is. See fleetsRepo.getFleetLocationMatches's own comment for what
+// location_status ('home' | 'parked' | 'away' | 'ambiguous') means and why a CV collision
+// is reported honestly rather than resolved by a guess.
+//
+// transports/colony_ships are merged in per player_id from their most recent ship-detail
+// battle report (see battleReportsRepo.getLatestShipCompositionExtra's own comment) —
+// StrongestFleet never carries either count, since neither has combat value. Kept as its
+// own composition_at timestamp, separate from the fleet row's own updated_at, because it
+// can be far staler (or fresher) than the ranking snapshot and must never be presented as
+// if it came from the same observation.
+router.get('/intel/fleet-locations', requireAuth, (req, res) => {
+    try {
+        const fleets = fleetsRepo.getFleetLocationMatches().map((f) => {
+            const extra = f.player_id != null ? battleReportsRepo.getLatestShipCompositionExtra(f.player_id) : null;
+            return {
+                ...f,
+                transports: extra ? extra.transports : null,
+                colony_ships: extra ? extra.colony_ships : null,
+                composition_source_id: extra ? extra.source_id : null,
+                composition_at: extra ? extra.started_at : null,
+            };
+        });
+        res.json({ success: true, fleets });
+    } catch (err) {
+        console.error('[DB Error] Failed to fetch fleet location matches:', err);
+        res.status(500).json({ error: 'Failed to fetch fleet locations' });
+    }
+});
+
 // --- GET ACTIVE ALLIANCE MEMBERS (From app_users), plus friendly alliance tags ---
 // `members` (hub-registered game names) is what it always was — spy.js's fallback for
 // resolving a name when no alliance tag is visible in the DOM (e.g. an "Allied Transit"

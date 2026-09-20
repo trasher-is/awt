@@ -148,6 +148,30 @@ function computeRemainingFleet(row, playerId) {
     return { cv, byType };
 }
 
+// Best-known transports/colony-ships for a player, learned from their most recent
+// ship-detail-scraped battle report on either side (war-tool groundwork, 2026-09-20): the
+// StrongestFleet ranking only ever shows Destroyer/Cruiser/Battleship (transports and
+// colony ships carry 0 combat value, per game-rules.md's Transports/Colony ships section,
+// so a CV-based ranking has no reason to list them), so a battle report is the only place
+// either count is ever observed. What comes back is what that player COMMITTED to that one
+// fight, not their current whole fleet — a lower bound, not a live total — which is why
+// it's returned with the report's own started_at rather than folded silently into
+// strongest_fleet's fresher destroyer/cruiser/battleship numbers.
+const getLatestShipCompositionExtraStmt = db.prepare(`
+    SELECT
+        CASE WHEN att_player_id = @playerId THEN att_transports ELSE def_transports END AS transports,
+        CASE WHEN att_player_id = @playerId THEN att_colony_ships ELSE def_colony_ships END AS colony_ships,
+        id AS source_id, started_at
+    FROM battle_reports
+    WHERE (att_player_id = @playerId OR def_player_id = @playerId)
+      AND (CASE WHEN att_player_id = @playerId THEN att_destroyers ELSE def_destroyers END) IS NOT NULL
+    ORDER BY started_at DESC
+    LIMIT 1
+`);
+function getLatestShipCompositionExtra(playerId) {
+    return getLatestShipCompositionExtraStmt.get({ playerId }) || null;
+}
+
 function getRecentPlanets(playerId, limit = 5) {
     const candidates = [
         ...recentPlanetsBattleReportsStmt.all(playerId, playerId, limit).map(row => ({
@@ -505,6 +529,7 @@ module.exports = {
     findRecentAttackerAtPlanet,
     getRecentBattlesAtPlanet,
     getRecentPlanets,
+    getLatestShipCompositionExtra,
     hasAnyBattleHistory,
     getBattleReportsFeed,
     searchBattleReportsFeed,

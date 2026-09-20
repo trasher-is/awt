@@ -1359,6 +1359,52 @@ router.post('/sync/highest-population-snapshot', requireAuth, (req, res) => {
     }
 });
 
+// --- RANKING: STRONGEST FLEET (war-tool groundwork, 2026-09-20) ---
+// Same wholesale-replace shape as /sync/best-planets-snapshot, with two differences forced
+// by this specific page: (1) rows carry a destroyer/cruiser/battleship breakdown, not just
+// a rank, because CV alone collides between players with identical fleet composition — see
+// this feature's design discussion for the concrete case (two players both at 105 CV / 35
+// destroyers); (2) a 5-day staleness purge runs first, so a scraper that stops being fed
+// (nobody visits the ranking page) ages the data out instead of leaving it looking current
+// indefinitely — see database.js's table comment.
+//
+// A row's player_id is stored as `null`, never dropped, when the owner isn't a known
+// player yet: the CV/composition is still real intel worth keeping, and unlike
+// sync.js's system-scan enemy-fleet path (which truly cannot avoid the FK — see its own
+// comment on playerExistsById), this table's player_id is nullable specifically so a
+// stranger's fleet doesn't have to be thrown away just because we can't yet name them.
+router.post('/sync/strongest-fleet', requireAuth, (req, res) => {
+    const { rows } = req.body;
+    if (!Array.isArray(rows)) {
+        return res.status(400).json({ error: 'Invalid payload' });
+    }
+    const syncedAt = new Date().toISOString();
+
+    const syncTx = db.transaction((entries) => {
+        fleetsRepo.deleteStrongestFleetOlderThan5Days();
+        fleetsRepo.clearStrongestFleet();
+        for (const row of entries) {
+            if (!Number.isInteger(row.rank) || !Number.isInteger(row.cv)) continue;
+            const playerId = Number.isInteger(row.player_id) && playersRepo.playerExistsById(row.player_id)
+                ? row.player_id
+                : null;
+            fleetsRepo.insertStrongestFleet(
+                row.rank, playerId,
+                Number(row.destroyers) || 0, Number(row.cruisers) || 0, Number(row.battleships) || 0,
+                row.cv, syncedAt
+            );
+        }
+    });
+
+    try {
+        syncTx(rows);
+        res.json({ success: true, skipped: false });
+    } catch (err) {
+        console.error('[DB Error] Strongest Fleet snapshot sync failure:', err);
+        res.status(500).json({ error: 'Database ranking sync error event' });
+    }
+});
+
 // --- ALLIANCE STATS RECEIVER & SYNC ---
 router.post('/sync/alliance-stats', requireAuth, (req, res) => {
     const s = req.body;

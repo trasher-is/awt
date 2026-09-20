@@ -78,7 +78,7 @@ const rowsHtml = (table, rows, rowCls) =>
     rows.map(r => `<tr class="${rowCls}">${renderRowCells(table.columns, r, table.cellBase)}</tr>`).join('');
 
 function closeOtherPanels(exceptId) {
-    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'road-to-ta-panel', 'battle-calc-panel', 'travel-calc-panel', 'route-planner-panel', 'galaxy-map-panel', 'build-order-panel', 'empire-sim-panel', 'battle-reports-panel'].forEach(id => {
+    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'fleet-locations-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'road-to-ta-panel', 'battle-calc-panel', 'travel-calc-panel', 'route-planner-panel', 'galaxy-map-panel', 'build-order-panel', 'empire-sim-panel', 'battle-reports-panel'].forEach(id => {
         if (id !== exceptId) document.getElementById(id)?.classList.replace('translate-x-0', 'translate-x-full');
     });
 }
@@ -205,6 +205,93 @@ export async function openFleetDatabasePanel() {
             renderFleetTable(); 
         }
     } catch (err) { document.getElementById('flt-db-table-body').innerHTML = '<tr><td colspan="11" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
+}
+
+// --- FLEET LOCATIONS (war-tool groundwork, 2026-09-20) ---
+// A first, deliberately plain verification surface for /hub-api/intel/fleet-locations —
+// no search/sort/column-picker machinery yet, just "does the cross-match actually look
+// right when rendered." Those can be added once the underlying data is trusted.
+let rawFleetLocations = [];
+
+function ageLabel(iso) {
+    if (!iso) return '—';
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return '—';
+    const mins = Math.floor(ms / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 48) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+}
+
+const LOCATION_STATUS_STYLE = {
+    home: { label: 'Home', cls: 'text-green-400' },
+    parked: { label: 'Parked', cls: 'text-aw-warning' },
+    away: { label: 'Away', cls: 'text-muted-foreground' },
+    ambiguous: { label: 'Ambiguous', cls: 'text-red-400' },
+};
+
+function renderFleetLocationsTable() {
+    const countEl = document.getElementById('fltloc-result-count');
+    if (countEl) countEl.innerText = rawFleetLocations.length;
+    const tbody = document.getElementById('fltloc-table-body');
+    if (!tbody) return;
+
+    tbody.innerHTML = rawFleetLocations.map(f => {
+        const status = LOCATION_STATUS_STYLE[f.location_status] || { label: f.location_status || 'Unknown', cls: 'text-muted-foreground' };
+        let locationText;
+        if (f.location_status === 'home') locationText = `${esc(f.location.system_name || 'Unknown')} #${f.location.planet_index}`;
+        else if (f.location_status === 'parked') locationText = `${esc(f.location.system_name || 'Unknown')} #${f.location.planet_index} (${esc(f.location.owner_name || 'Unowned')}${f.location.owner_tag ? ` [${esc(f.location.owner_tag)}]` : ''})`;
+        else if (f.location_status === 'ambiguous') locationText = `${f.candidates.length} candidate${f.candidates.length === 1 ? '' : 's'} at this CV`;
+        else locationText = '—';
+
+        return `
+        <tr class="hover:bg-accent/50 transition-colors">
+            <td class="p-3 text-muted-foreground">#${f.rank}</td>
+            <td class="p-3 border-l border-border font-medium text-foreground">${esc(f.owner_name || (f.player_id == null ? 'Unknown' : `#${f.player_id}`))}</td>
+            <td class="p-3 text-aw-warning">${f.alliance_tag ? `[${esc(f.alliance_tag)}]` : '-'}</td>
+            <td class="p-3 border-l border-border text-aw-warning font-bold">${(f.cv || 0).toLocaleString()}</td>
+            <td class="p-3 text-red-400">${f.destroyers || 0}</td>
+            <td class="p-3 text-red-400">${f.cruisers || 0}</td>
+            <td class="p-3 text-red-400">${f.battleships || 0}</td>
+            <td class="p-3 text-gray-400">${f.transports ?? '—'}</td>
+            <td class="p-3 text-gray-400">${f.colony_ships ?? '—'}</td>
+            <td class="p-3 border-l border-border font-bold ${status.cls}">${esc(status.label)}</td>
+            <td class="p-3">${locationText}</td>
+            <td class="p-3 border-l border-border text-muted-foreground">${ageLabel(f.updated_at)}</td>
+            <td class="p-3 text-muted-foreground">${f.location ? ageLabel(f.location.guard_updated_at) : '—'}</td>
+            <td class="p-3 text-muted-foreground">${ageLabel(f.composition_at)}</td>
+        </tr>`;
+    }).join('');
+}
+
+export async function openFleetLocationsPanel() {
+    let panel = document.getElementById('fleet-locations-panel');
+    if (!panel) {
+        const res = await fetch('/hub-assets/components/fleet-locations.html');
+        document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
+        panel = document.getElementById('fleet-locations-panel');
+        panel.querySelector('#fltloc-close-btn')?.addEventListener('click', () => {
+            panel.classList.replace('translate-x-0', 'translate-x-full');
+        });
+    }
+    if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
+    closeOtherPanels('fleet-locations-panel');
+    panel.classList.replace('translate-x-full', 'translate-x-0');
+    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
+
+    document.getElementById('fltloc-table-body').innerHTML = '<tr><td colspan="14" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading...</td></tr>';
+    try {
+        const res = await fetch('/hub-api/intel/fleet-locations');
+        const data = await res.json();
+        if (data.success) {
+            rawFleetLocations = data.fleets;
+            renderFleetLocationsTable();
+        }
+    } catch (err) {
+        document.getElementById('fltloc-table-body').innerHTML = '<tr><td colspan="14" class="text-center py-8 text-red-500">Failed to load data.</td></tr>';
+    }
 }
 
 // --- WAR ROOM (ENEMY INTEL) LOGIKA ---
