@@ -1036,13 +1036,13 @@ function renderTaBoard() {
         const t = p.isTrader ? 'text-yellow-400' : 'text-muted-foreground';
         html += `<th class="bg-zinc-900 px-1 py-1 border border-border/40 ${t}" title="${esc(p.name)}">${esc(taShort(p.name))}</th>`;
     });
-    // Trailing wealth columns: a spacer, then hoarded A$ and visible A$ (+PP).
+    // Trailing wealth columns: a spacer, then A$+PP, Ready in, Hoard A$, Ready (sold), Offers.
     html += `<th class="bg-black border-0" style="min-width:14px"></th>`;
-    html += `<th class="bg-zinc-900 px-2 py-1 text-amber-400 border border-border/40" title="A$ value of artifacts + supply units this member is holding">Hoard A$</th>`;
-    html += `<th class="bg-zinc-900 px-2 py-1 text-emerald-400 border border-border/40" title="Visible liquidity: Astro Dollars + Production Points valued in A$">A$+PP</th>`;
-    html += `<th class="bg-zinc-900 px-2 py-1 text-sky-400 border border-border/40" title="Time to reach ${TA_TRADE_COST.toLocaleString()} A$ from visible liquidity at current income (Production/h × PP price)">Ready in</th>`;
-    html += `<th class="bg-zinc-900 px-2 py-1 text-sky-300 border border-border/40" title="Time to reach ${TA_TRADE_COST.toLocaleString()} A$ if the hoard is sold now (visible + hoard, then income)">Ready (sold)</th>`;
-    html += `<th class="bg-zinc-900 px-2 py-1 text-violet-400 border border-border/40" title="Trade revenue this member offers a new partner: 1% per own planet at population 10+, and when their next two population-10 crossings are projected. Requires that member to have opened My Savings at least once; projections assume their current growth rate holds.">Offers</th>`;
+    html += `<th class="bg-zinc-900 px-2 py-1 text-center text-emerald-400 border border-border/40" title="Visible liquidity: Astro Dollars + Production Points valued in A$">A$+PP</th>`;
+    html += `<th class="bg-zinc-900 px-2 py-1 text-center text-sky-400 border border-border/40" title="Time to reach ${TA_TRADE_COST.toLocaleString()} A$ from visible liquidity at current income (Production/h × PP price)">Ready in</th>`;
+    html += `<th class="bg-zinc-900 px-2 py-1 text-center text-amber-400 border border-border/40" title="A$ value of artifacts + supply units this member is holding">Hoard A$</th>`;
+    html += `<th class="bg-zinc-900 px-2 py-1 text-center text-sky-300 border border-border/40" title="Time to reach ${TA_TRADE_COST.toLocaleString()} A$ if the hoard is sold now (visible + hoard, then income)">Ready (sold)</th>`;
+    html += `<th class="bg-zinc-900 px-2 py-1 text-left text-violet-400 border border-border/40" title="Trade revenue this member offers a new partner: 1% per own planet at population 10+, and when their next two population-10 crossings are projected. Requires that member to have opened My Savings at least once; projections assume their current growth rate holds.">Offers</th>`;
     html += `</tr></thead><tbody>`;
 
     members.forEach(p1 => {
@@ -1055,8 +1055,6 @@ function renderTaBoard() {
             html += taCell(p1, p2, { me: meLower, isAdmin, maxTas, traderSet, agreements, full1 });
         });
         html += `<td class="bg-black border-0"></td>`;
-        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-amber-400 font-semibold" title="${(p1.hoarded_au || 0).toLocaleString()} A$">${fmtAU(p1.hoarded_au)}</td>`;
-        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-emerald-400" title="${(p1.visible_au || 0).toLocaleString()} A$">${fmtAU(p1.visible_au)}</td>`;
         // Ready in: time to reach 20k from visible liquidity. Ready (sold): same once the hoard is sold now.
         // For the viewer's own row, once they've used My Savings, its banking-only rate
         // replaces total production — see myPlanetsCache's own comment for why.
@@ -1068,18 +1066,20 @@ function renderTaBoard() {
         const need2 = Math.max(0, TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0));
         const t1 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0), auPerH);
         const t2 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0), auPerH);
-        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-400 whitespace-nowrap" title="${(auPerH || 0).toLocaleString()} A$/h${rateNote} · need ${need1.toLocaleString()} A$">${t1}</td>`;
-        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-sky-300 whitespace-nowrap" title="${(auPerH || 0).toLocaleString()} A$/h${rateNote} · need ${need2.toLocaleString()} A$ after selling ${(p1.hoarded_au || 0).toLocaleString()} A$ hoard">${t2}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-center border border-border/40 text-emerald-400" title="${(p1.visible_au || 0).toLocaleString()} A$">${fmtAUExact(p1.visible_au)}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-center border border-border/40 text-sky-400 whitespace-nowrap" title="${(auPerH || 0).toLocaleString()} A$/h${rateNote} · need ${need1.toLocaleString()} A$">${t1}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-center border border-border/40 text-amber-400 font-semibold" title="${(p1.hoarded_au || 0).toLocaleString()} A$">${fmtAUExact(p1.hoarded_au)}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-center border border-border/40 text-sky-300 whitespace-nowrap" title="${(auPerH || 0).toLocaleString()} A$/h${rateNote} · need ${need2.toLocaleString()} A$ after selling ${(p1.hoarded_au || 0).toLocaleString()} A$ hoard">${t2}</td>`;
         const outlook = trOutlook.get(p1.name.toLowerCase());
         if (outlook) {
             const next1 = outlook.next_hours != null ? `+1% ${formatTaHours(outlook.next_hours)}` : '';
             const next2 = outlook.next2_hours != null ? `+2% ${formatTaHours(outlook.next2_hours)}` : '';
             const parts = [next1, next2].filter(Boolean);
             const sub = parts.length ? parts.map(esc).join('<span class="mx-2 text-border-strong">·</span>') : 'no growth data yet';
-            html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 whitespace-nowrap" title="Trade revenue this member offers a new partner. Requires an up-to-date My Savings sync; projections assume their current growth rate holds.">`
+            html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-left border border-border/40 whitespace-nowrap" title="Trade revenue this member offers a new partner. Requires an up-to-date My Savings sync; projections assume their current growth rate holds.">`
                 + `<span class="text-violet-400 font-semibold">${outlook.qualified_now}%</span><span class="ml-3 text-xs text-muted-foreground">${sub}</span></td>`;
         } else {
-            html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-right border border-border/40 text-muted-foreground/60 text-xs whitespace-nowrap" title="This member has never opened My Savings">no data</td>`;
+            html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-left border border-border/40 text-muted-foreground/60 text-xs whitespace-nowrap" title="This member has never opened My Savings">no data</td>`;
         }
         html += `</tr>`;
     });
