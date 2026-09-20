@@ -162,19 +162,35 @@ router.post('/admin/trade-agreements', requireAdmin, (req, res) => {
 });
 
 // --- COMPLETION SYNC: scraped from a member's /Game/Trade/Agreements page ---
-// Body: { partners: ["NameA","NameB", ...] } — partners the logged-in user already has TAs with.
+// Body: { partners: ["NameA","NameB", ...] } — every partner listed on the logged-in
+// member's own Existing Agreements table right now, regardless of that row's Status text
+// (sent/received/establishing/established all mean at least one side has already sent
+// money, which is this alliance's own bar for "done" — see trade-agreements-parser.js).
+//
+// This is also a complete, current snapshot of that member's real agreements, so it
+// doubles as the reconciliation signal: any 'done' pair of mine whose partner is NOT in
+// this list was declined before completing, or that partner has resigned, and the Board
+// must stop showing it as done (see getDoneAgreementsForPlayer's own comment).
 router.post('/sync/trade-agreements', requireAuth, (req, res) => {
     const me = req.session.gameName;
     const partners = Array.isArray(req.body.partners) ? req.body.partners : [];
     if (!me) return res.status(400).json({ error: 'No session identity' });
 
     const tx = db.transaction((list) => {
+        const seen = new Set();
         for (const raw of list) {
             const partner = canonicalName(String(raw).trim());
             if (!partner || partner.toLowerCase() === me.toLowerCase()) continue;
+            seen.add(partner.toLowerCase());
             const [a, b] = [me, partner].sort((x, y) => x.toLowerCase().localeCompare(y.toLowerCase()));
             tradeRepo.markAgreementDoneByInitiator(pairKey(me, partner), a, b, me);
         }
+
+        const stale = tradeRepo.getDoneAgreementsForPlayer(me).filter((row) => {
+            const other = row.player_a.toLowerCase() === me.toLowerCase() ? row.player_b : row.player_a;
+            return !seen.has(other.toLowerCase());
+        });
+        if (stale.length) tradeRepo.cancelAgreementsByIds(stale.map((row) => row.id));
     });
 
     try {

@@ -119,6 +119,29 @@ function markAgreementDoneByScan(pairKey, playerA, playerB) {
     markAgreementDoneByScanStmt.run(pairKey, playerA, playerB);
 }
 
+// Reconciliation (2026-09-20): a member's own /Game/Trade/Agreements page is a complete,
+// current snapshot of every real agreement they're party to. If a pair we marked 'done'
+// (see markAgreementDoneByInitiator/ByScan) no longer has that partner listed there, the
+// real agreement was declined before completing, or the partner resigned — either way it
+// is no longer real, and the Board must stop showing it as done. Only 'done' rows: a
+// 'proposed'/'confirmed' pair is Board-only intent that may not have an in-game offer sent
+// yet, so its absence here isn't evidence of anything and must not be wiped.
+const getDoneAgreementsForPlayerStmt = db.prepare(`
+    SELECT id, player_a, player_b FROM trade_agreements
+    WHERE status = 'done' AND (player_a = ? COLLATE NOCASE OR player_b = ? COLLATE NOCASE)
+`);
+function getDoneAgreementsForPlayer(name) {
+    return getDoneAgreementsForPlayerStmt.all(name, name);
+}
+
+// Arity varies per call (ids length), so prepared fresh each call — same reasoning as
+// systems.js's getSystemsByIds.
+function cancelAgreementsByIds(ids) {
+    if (!ids.length) return { changes: 0 };
+    const placeholders = ids.map(() => '?').join(',');
+    return db.prepare(`DELETE FROM trade_agreements WHERE id IN (${placeholders})`).run(...ids);
+}
+
 // pair_key identifies two PLAYER NAMES, and names are only meaningful within the round
 // they played in — a round reset must clear every agreement or a name reused (or
 // coincidentally reassigned) next round would inherit a stale confirmed/done status.
@@ -131,4 +154,5 @@ module.exports = {
     getActivePairKeys, getActiveAgreements, getAgreementStatusByPairKey, getAgreementById, getPartnerObservations,
     proposeAgreement, confirmAgreement, cancelAgreement, forceSetAgreement,
     markAgreementDoneByInitiator, markAgreementDoneByScan, deleteAllTradeAgreements,
+    getDoneAgreementsForPlayer, cancelAgreementsByIds,
 };
