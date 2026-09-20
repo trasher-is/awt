@@ -263,6 +263,7 @@ const upsertPlayerFullStmt = db.prepare(`
         race_trader, race_sul, joined, logins, has_intel, intel_updated_at,
         home_planet_id, home_system_id, home_planet_index, possible_homes,
         total_planets, total_population, total_farms, total_factories, total_labs, total_cybernetics, cv_used, cv_limit,
+        max_farms, max_factories, max_labs, max_cybernetics,
         stats_scraped_at
     ) VALUES (
         @id, @name, @alliance_id, @country, @local_time, @idle_time, @last_activity_at, @origin_system,
@@ -274,6 +275,7 @@ const upsertPlayerFullStmt = db.prepare(`
         CASE WHEN @has_intel = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
         @home_planet_id, @home_system_id, @home_planet_index, @possible_homes,
         @total_planets, @total_population, @total_farms, @total_factories, @total_labs, @total_cybernetics, @cv_used, @cv_limit,
+        @max_farms, @max_factories, @max_labs, @max_cybernetics,
         CURRENT_TIMESTAMP
     ) ON CONFLICT(id) DO UPDATE SET
         name=excluded.name, alliance_id=excluded.alliance_id, country=excluded.country,
@@ -295,6 +297,7 @@ const upsertPlayerFullStmt = db.prepare(`
         possible_homes=excluded.possible_homes, total_planets=excluded.total_planets, total_population=excluded.total_population,
         total_farms=excluded.total_farms, total_factories=excluded.total_factories, total_labs=excluded.total_labs,
         total_cybernetics=excluded.total_cybernetics, cv_used=excluded.cv_used, cv_limit=excluded.cv_limit,
+        max_farms=excluded.max_farms, max_factories=excluded.max_factories, max_labs=excluded.max_labs, max_cybernetics=excluded.max_cybernetics,
         stats_scraped_at=CURRENT_TIMESTAMP,
         updated_at=CURRENT_TIMESTAMP,
 

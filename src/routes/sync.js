@@ -607,6 +607,12 @@ router.post('/sync/player', requireAuth, (req, res) => {
         total_factories: p.total_factories || 0,
         total_labs: p.total_labs || 0,
         total_cybernetics: p.total_cybernetics || 0,
+        // Highest single-planet count per type — null (not 0) when the stats-history fetch
+        // came back empty, so an unknown max is never shown as a real "biggest planet: 0".
+        max_farms: Number.isInteger(p.max_farms) ? p.max_farms : null,
+        max_factories: Number.isInteger(p.max_factories) ? p.max_factories : null,
+        max_labs: Number.isInteger(p.max_labs) ? p.max_labs : null,
+        max_cybernetics: Number.isInteger(p.max_cybernetics) ? p.max_cybernetics : null,
         cv_used: p.cv_used || 0,
         cv_limit: p.cv_limit || 0
     };

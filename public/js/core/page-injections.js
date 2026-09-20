@@ -1319,28 +1319,32 @@ function buildQuietWindowsSection(loginSamples) {
         + quietLine;
 }
 
-// Total and average per planet (issue #119) — the same Sum/Avg reading the game's own
-// Planets → Buildings tab gives for your OWN planets, here for someone else's.
+// Total, average and max per planet (issue #119) — the same Sum/Avg reading the game's own
+// Planets → Buildings tab gives for your OWN planets, here for someone else's, plus a Max
+// column the game's own Statistics history record carries right alongside the totals
+// (maxFarm/maxFactory/maxLab/maxCybernet, next to farms/factories/labs/cybernets — see
+// player-parser.js's scrapePlayer) but the hub wasn't reading until now.
 //
 // The denominator is the profile page's own planet count (total_planets: public, complete,
 // refreshed on every profile scrape), falling back to the planets the hub happens to have
 // scanned. The numerator is the Statistics-page total, which the game itself reports up to
 // four days behind — so the average is "recent buildings over current planets" and is
-// labelled as such. A per-planet MAXIMUM is not shown: the hub has no per-planet building
-// counts for other players (the Statistics page only publishes totals), so there is nothing
-// truthful to put in that column.
+// labelled as such.
 const BUILDING_ROWS = [
-    ['Farms', 'total_farms'],
-    ['Factories', 'total_factories'],
-    ['Cybernetics', 'total_cybernetics'],
-    ['Labs', 'total_labs'],
+    ['Farms', 'total_farms', 'max_farms'],
+    ['Factories', 'total_factories', 'max_factories'],
+    ['Cybernetics', 'total_cybernetics', 'max_cybernetics'],
+    ['Labs', 'total_labs', 'max_labs'],
 ];
 
 function buildBuildingsCard(p) {
     const planets = Number(p.total_planets) || Number(p.planet_count) || 0;
     const num = v => Number(v) || 0;
     const avg = total => (planets > 0 ? (num(total) / planets).toFixed(1) : '—');
-    const row = (label, val, strong) => `<tr${strong ? ' style="font-weight:bold;"' : ''}><td>${esc(label)}</td><td class="lowlight">${num(val)}</td><td class="lowlight">${avg(val)}</td></tr>`;
+    // max is nullable (unlike total, which defaults to 0): an unscraped/empty stats record
+    // must read as "unknown", never as a real "biggest planet has 0 of these".
+    const max = v => (v == null ? '—' : num(v));
+    const row = (label, val, maxVal, strong) => `<tr${strong ? ' style="font-weight:bold;"' : ''}><td>${esc(label)}</td><td class="lowlight">${num(val)}</td><td class="lowlight">${avg(val)}</td><td class="lowlight">${max(maxVal)}</td></tr>`;
     const all = BUILDING_ROWS.reduce((sum, [, field]) => sum + num(p[field]), 0);
     // The disclaimer is about the GAME's own Statistics page, not our scrape timing: it
     // reports building counts up to ~4 days behind live, so even a scrape taken this
@@ -1355,12 +1359,12 @@ function buildBuildingsCard(p) {
     return `
         <table class="table">
             <thead>
-                <tr${scrapedTitle}><th colspan="3"><i class="bi bi-building"></i> Buildings <span style="font-weight:normal;font-size:10px;color:#c96;">(4 day old data)</span></th></tr>
-                <tr style="font-size:11px;"><th></th><th>Total</th><th title="${esc(avgTitle)}">Avg / planet${planets > 0 ? ` <span style="font-weight:normal;color:#888;">(${planets})</span>` : ''}</th></tr>
+                <tr${scrapedTitle}><th colspan="4"><i class="bi bi-building"></i> Buildings <span style="font-weight:normal;font-size:10px;color:#c96;">(4 day old data)</span></th></tr>
+                <tr style="font-size:11px;"><th></th><th>Total</th><th title="${esc(avgTitle)}">Avg / planet${planets > 0 ? ` <span style="font-weight:normal;color:#888;">(${planets})</span>` : ''}</th><th title="Highest single-planet count for this building type">Max</th></tr>
             </thead>
             <tbody>
-                ${BUILDING_ROWS.map(([label, field]) => row(label, p[field], false)).join('')}
-                ${row('All buildings', all, true)}
+                ${BUILDING_ROWS.map(([label, field, maxField]) => row(label, p[field], p[maxField], false)).join('')}
+                ${row('All buildings', all, null, true)}
             </tbody>
         </table>`;
 }

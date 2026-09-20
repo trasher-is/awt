@@ -41,6 +41,12 @@ export function extractPlayerData(playerId, doc = document, report = new ScrapeR
         total_factories: 0,
         total_labs: 0,
         total_cybernetics: 0,
+        // Highest single-planet count per building type, from the same stats-scan record
+        // as the totals above (see scrapePlayer's maxFarm/maxFactory/maxLab/maxCybernet).
+        max_farms: null,
+        max_factories: null,
+        max_labs: null,
+        max_cybernetics: null,
         cv_used: 0,
         cv_limit: 0
     };
@@ -237,6 +243,45 @@ export function extractPlayerData(playerId, doc = document, report = new ScrapeR
     return p;
 }
 
+// Pulls the latest building totals + per-planet maximums out of a /Game/Players/Statistic
+// response's embedded `var data = [...]` array (the same array the page's own
+// BuildingsChart/PlanetsChart render from) and applies them to `p` in place. A pure
+// string/JSON function — no DOM, no fetch — so it's directly testable against a real saved
+// response body. Returns true if it found and applied a record, false otherwise (caller
+// leaves `p`'s existing defaults alone on false, same as before this was split out).
+export function applyStatsHistory(p, htmlText) {
+    // Regex targeting string data: var data = [ ... ];
+    const dataRegexMatch = htmlText.match(/var\s+data\s*=\s*(\[[\s\S]*?\]);/);
+    if (!dataRegexMatch) return false;
+
+    const infrastructureHistoryArray = JSON.parse(dataRegexMatch[1]);
+    if (!Array.isArray(infrastructureHistoryArray) || infrastructureHistoryArray.length === 0) return false;
+
+    // Extract the latest non-redacted log element entry at the tail end of the query window
+    const latestLogRecord = infrastructureHistoryArray[infrastructureHistoryArray.length - 1];
+
+    // Direct structural conversion mapping down into matching keys.
+    // Planets/population already come from the profile's Planets table
+    // (more current + always public) — only fall back to history if absent.
+    p.total_planets     = p.total_planets    || parseInt(latestLogRecord.count, 10) || 0;
+    p.total_population  = p.total_population  || parseInt(latestLogRecord.population, 10) || 0;
+    p.total_farms       = parseInt(latestLogRecord.farms, 10) || 0;
+    p.total_factories   = parseInt(latestLogRecord.factories, 10) || 0;
+    p.total_labs        = parseInt(latestLogRecord.labs, 10) || 0;
+    p.total_cybernetics = parseInt(latestLogRecord.cybernets, 10) || 0;
+    // Highest single-planet count per type, same record — feeds the
+    // profile Buildings card's Max column.
+    p.max_farms         = parseInt(latestLogRecord.maxFarm, 10);
+    p.max_factories     = parseInt(latestLogRecord.maxFactory, 10);
+    p.max_labs          = parseInt(latestLogRecord.maxLab, 10);
+    p.max_cybernetics   = parseInt(latestLogRecord.maxCybernet, 10);
+    if (isNaN(p.max_farms)) p.max_farms = null;
+    if (isNaN(p.max_factories)) p.max_factories = null;
+    if (isNaN(p.max_labs)) p.max_labs = null;
+    if (isNaN(p.max_cybernetics)) p.max_cybernetics = null;
+    return true;
+}
+
 // Generates the safe date URL string parameters to step backwards over obfuscation walls
 export function buildSecuredStatsUrl(playerId) {
     const now = new Date();
@@ -268,30 +313,9 @@ export async function scrapePlayer(playerId) {
         const statsResponse = await gameFetch(statsUrl);
         if (statsResponse.ok) {
             const htmlText = await statsResponse.text();
-            
-            // Regex targeting string data: var data = [ ... ];
-            const dataRegexMatch = htmlText.match(/var\s+data\s*=\s*(\[[\s\S]*?\]);/);
-            if (dataRegexMatch) {
-                const infrastructureHistoryArray = JSON.parse(dataRegexMatch[1]);
-                
-                if (Array.isArray(infrastructureHistoryArray) && infrastructureHistoryArray.length > 0) {
-                    // Extract the latest non-redacted log element entry at the tail end of the query window
-                    const latestLogRecord = infrastructureHistoryArray[infrastructureHistoryArray.length - 1];
-                    console.log(`[Spy] Historical infrastructure values decrypted:`, latestLogRecord);
-                    
-                    // Direct structural conversion mapping down into matching keys.
-                    // Planets/population already come from the profile's Planets table
-                    // (more current + always public) — only fall back to history if absent.
-                    p.total_planets     = p.total_planets    || parseInt(latestLogRecord.count, 10) || 0;
-                    p.total_population  = p.total_population  || parseInt(latestLogRecord.population, 10) || 0;
-                    p.total_farms       = parseInt(latestLogRecord.farms, 10) || 0;
-                    p.total_factories   = parseInt(latestLogRecord.factories, 10) || 0;
-                    p.total_labs        = parseInt(latestLogRecord.labs, 10) || 0;
-                    p.total_cybernetics = parseInt(latestLogRecord.cybernets, 10) || 0;
-                }
-            } else {
-                console.warn(`[Spy] Script data block initialization line missing on target history window layout.`);
-            }
+            const applied = applyStatsHistory(p, htmlText);
+            if (applied) console.log(`[Spy] Historical infrastructure values decrypted for player ${playerId}`);
+            else console.warn(`[Spy] Script data block initialization line missing on target history window layout.`);
         }
     } catch (statsErr) {
         console.error(`[Spy] Background infrastructure parsing failure:`, statsErr);
