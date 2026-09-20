@@ -1396,14 +1396,15 @@ function fleetAgeLabel(iso) {
     return `${Math.floor(hrs / 24)}d ago`;
 }
 function fleetLocationCell(entry) {
-    if (entry.system_id == null) {
-        const hint = entry.location_status === 'ambiguous' ? 'Ambiguous CV match — see Fleet Locations panel'
-            : entry.location_status === 'away' ? 'Away — no matching Best Guarded planet'
-            : 'Unknown';
-        return `<span class="lowlight" title="${esc(hint)}">—</span>`;
-    }
+    if (entry.system_id == null) return `<span class="lowlight" title="No location on record">—</span>`;
     const name = entry.system_name ? `${esc(entry.system_name)} ` : '';
-    return `<a href="/Game/Map/SolarSystem/${entry.system_id}">[${entry.system_id}] ${name}#${entry.planet_index}</a>`;
+    const label = `[${entry.system_id}] ${name}#${entry.planet_index}`;
+    // Not confirmed via a live Best Guarded match (rankings entries only, when the fleet is
+    // away/ambiguous) -- this is the player's registered home planet instead, offered
+    // because a plausible location plus the Last Seen column beats a bare dash, but marked
+    // so it's never mistaken for a live sighting.
+    const suffix = entry.location_confirmed === false ? ' <span class="lowlight" title="Not confirmed live — this is the registered home planet, shown as a best guess">(home base)</span>' : '';
+    return `<a href="/Game/Map/SolarSystem/${entry.system_id}">${label}</a>${suffix}`;
 }
 function fleetSourceCell(entry) {
     if (entry.source === 'battle_report') return `<a href="/About/BattleReport/${entry.source_id}">Battle ${entry.source_id}</a>`;

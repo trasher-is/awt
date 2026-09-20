@@ -306,7 +306,26 @@ function getFleetLocationMatchForPlayer(playerId) {
     return getFleetLocationMatches().find((f) => f.player_id === playerId) || null;
 }
 
-// --- fleet sighting history (player-profile Fleets table, 2026-09-20) ---
+// Best-known home location for a player, used ONLY as a fallback below when a rankings
+// entry has no live best_guarded match — same COALESCE(home_system_id, origin_system) /
+// COALESCE(home_planet_index, 1) convention already used for the intercept-homes queries
+// elsewhere in players.js.
+const getHomeFallbackStmt = db.prepare(`
+    SELECT COALESCE(p.home_system_id, p.origin_system) AS system_id,
+           COALESCE(p.home_planet_index, 1) AS planet_index,
+           s.name AS system_name
+    FROM players p
+    LEFT JOIN systems s ON s.id = COALESCE(p.home_system_id, p.origin_system)
+    WHERE p.id = ?
+`);
+function getHomeFallback(playerId) {
+    const row = getHomeFallbackStmt.get(playerId);
+    return row && row.system_id != null ? row : null;
+}
+
+// --- fleet sighting history (player-profile Fleets table, 2026-09-20; revised same day:
+// rankings now always shows a location, and battle reports show what SURVIVED, not what
+// was fielded) ---
 // Merges three independent, genuinely different sources of "we have seen this player's
 // fleet" into one newest-first timeline, tagged with where each entry came from. Nothing
 // here deduplicates across sources — a battle report and a rankings snapshot from the same
@@ -314,22 +333,30 @@ function getFleetLocationMatchForPlayer(playerId) {
 //
 //  - 'rankings'      the player's current strongest_fleet row (at most one, since that
 //                     table is itself upserted per player — see its own comment), located
-//                     via the same self-match/collision logic as getFleetLocationMatches;
-//                     no location for an `away`/`ambiguous` result, since there is none to
-//                     show honestly.
-//  - 'battle_report' every battle report in the window with ship detail scraped, reading
-//                     THAT PLAYER's side of the att_/def_ columns directly — what they
-//                     fielded in the fight, not the post-loss remainder (same choice as
-//                     getLatestShipCompositionExtra, for the same reason: showing a
-//                     post-loss ship count next to a pre-loss CV, or vice versa, would be
-//                     internally inconsistent).
+//                     via the same self-match/collision logic as getFleetLocationMatches
+//                     when that resolves (home/parked). When it doesn't (away/ambiguous —
+//                     no best_guarded planet to point to), this falls back to the player's
+//                     own registered home planet instead of leaving location blank: the
+//                     Last Seen column already carries the "how sure are we, and since
+//                     when" signal, so an unconfirmed-but-plausible location beats a bare
+//                     dash. `location_confirmed: false` marks that fallback case so a
+//                     caller can still tell the two apart if it wants to.
+//  - 'battle_report' every battle report in the window with ship detail scraped, showing
+//                     what SURVIVED that fight (committed minus lost per ship type), not
+//                     what was fielded — a wiped-out ship type reads as 0, and a report
+//                     where NOTHING survived at all is dropped from the history entirely:
+//                     a fleet with nothing left isn't a sighting of a fleet, it's a record
+//                     of one ending, and showing "0 / 0 / 0" would just read as noise on
+//                     what should be a list of fleets that still exist.
 //  - 'vision'        live system-map sightings from the `fleets` table (owner_id =
 //                     player) — the same intel system-scan pages already capture.
 //
 // CV is recomputed from the observed composition for battle_report/vision rows (`fleets.
 // combat_value` is never actually populated by any writer — see insertFleetForAllianceStats
-// — and a report's own survived_cv would be a post-loss number sitting next to a pre-loss
-// ship count). The rankings row's cv is used as-is: it's the ranking page's own number.
+// — and a report's own survived_cv is computed pre-transports/colony-ships, which have 0 CV
+// anyway but would make "cv from composition" and "cv from the row" subtly different
+// numbers for no reason). The rankings row's cv is used as-is: it's the ranking page's own
+// number.
 function getFleetSightingHistory(playerId, days = 5) {
     const cutoff = `-${Math.max(1, Math.round(Number(days) || 5))} days`;
 
@@ -341,12 +368,14 @@ function getFleetSightingHistory(playerId, days = 5) {
     `).get(playerId, cutoff);
     if (rankingsRow) {
         const match = getFleetLocationMatchForPlayer(playerId);
-        const loc = match && match.location ? match.location : null;
+        let loc = match && match.location ? match.location : null;
+        const locationConfirmed = !!loc;
+        if (!loc) loc = getHomeFallback(playerId);
         entries.push({
             source: 'rankings', source_id: null, seen_at: rankingsRow.updated_at,
             system_id: loc ? loc.system_id : null, system_name: loc ? loc.system_name : null,
             planet_index: loc ? loc.planet_index : null,
-            location_status: match ? match.location_status : null,
+            location_status: match ? match.location_status : null, location_confirmed: locationConfirmed,
             destroyers: rankingsRow.destroyers, cruisers: rankingsRow.cruisers, battleships: rankingsRow.battleships,
             transports: null, colony_ships: null, cv: rankingsRow.cv,
         });
@@ -355,10 +384,15 @@ function getFleetSightingHistory(playerId, days = 5) {
     const battleRows = db.prepare(`
         SELECT br.id AS source_id, br.started_at AS seen_at, br.system_id, s.name AS system_name, br.planet_index,
                CASE WHEN br.att_player_id = @playerId THEN br.att_destroyers ELSE br.def_destroyers END AS destroyers,
+               CASE WHEN br.att_player_id = @playerId THEN br.att_destroyers_lost ELSE br.def_destroyers_lost END AS destroyers_lost,
                CASE WHEN br.att_player_id = @playerId THEN br.att_cruisers ELSE br.def_cruisers END AS cruisers,
+               CASE WHEN br.att_player_id = @playerId THEN br.att_cruisers_lost ELSE br.def_cruisers_lost END AS cruisers_lost,
                CASE WHEN br.att_player_id = @playerId THEN br.att_battleships ELSE br.def_battleships END AS battleships,
+               CASE WHEN br.att_player_id = @playerId THEN br.att_battleships_lost ELSE br.def_battleships_lost END AS battleships_lost,
                CASE WHEN br.att_player_id = @playerId THEN br.att_transports ELSE br.def_transports END AS transports,
-               CASE WHEN br.att_player_id = @playerId THEN br.att_colony_ships ELSE br.def_colony_ships END AS colony_ships
+               CASE WHEN br.att_player_id = @playerId THEN br.att_transports_lost ELSE br.def_transports_lost END AS transports_lost,
+               CASE WHEN br.att_player_id = @playerId THEN br.att_colony_ships ELSE br.def_colony_ships END AS colony_ships,
+               CASE WHEN br.att_player_id = @playerId THEN br.att_colony_ships_lost ELSE br.def_colony_ships_lost END AS colony_ships_lost
         FROM battle_reports br
         LEFT JOIN systems s ON s.id = br.system_id
         WHERE (br.att_player_id = @playerId OR br.def_player_id = @playerId)
@@ -366,13 +400,20 @@ function getFleetSightingHistory(playerId, days = 5) {
           AND br.started_at > datetime('now', @cutoff)
           AND (CASE WHEN br.att_player_id = @playerId THEN br.att_destroyers ELSE br.def_destroyers END) IS NOT NULL
     `).all({ playerId, cutoff });
+    const survivors = (count, lost) => Math.max(0, (count || 0) - (lost || 0));
     for (const r of battleRows) {
+        const destroyers = survivors(r.destroyers, r.destroyers_lost);
+        const cruisers = survivors(r.cruisers, r.cruisers_lost);
+        const battleships = survivors(r.battleships, r.battleships_lost);
+        const transports = survivors(r.transports, r.transports_lost);
+        const colony_ships = survivors(r.colony_ships, r.colony_ships_lost);
+        if (destroyers + cruisers + battleships + transports + colony_ships === 0) continue; // wiped out -- nothing left to sight
         entries.push({
             source: 'battle_report', source_id: r.source_id, seen_at: r.seen_at,
-            system_id: r.system_id, system_name: r.system_name, planet_index: r.planet_index, location_status: null,
-            destroyers: r.destroyers, cruisers: r.cruisers, battleships: r.battleships,
-            transports: r.transports, colony_ships: r.colony_ships,
-            cv: cvOf({ destroyers: r.destroyers, cruisers: r.cruisers, battleships: r.battleships }),
+            system_id: r.system_id, system_name: r.system_name, planet_index: r.planet_index,
+            location_status: null, location_confirmed: true,
+            destroyers, cruisers, battleships, transports, colony_ships,
+            cv: cvOf({ destroyers, cruisers, battleships }),
         });
     }
 
@@ -386,7 +427,8 @@ function getFleetSightingHistory(playerId, days = 5) {
     for (const r of visionRows) {
         entries.push({
             source: 'vision', source_id: null, seen_at: r.seen_at,
-            system_id: r.system_id, system_name: r.system_name, planet_index: r.planet_index, location_status: null,
+            system_id: r.system_id, system_name: r.system_name, planet_index: r.planet_index,
+            location_status: null, location_confirmed: true,
             destroyers: r.destroyers, cruisers: r.cruisers, battleships: r.battleships,
             transports: r.transports, colony_ships: r.colony_ships,
             cv: cvOf({ destroyers: r.destroyers, cruisers: r.cruisers, battleships: r.battleships }),
