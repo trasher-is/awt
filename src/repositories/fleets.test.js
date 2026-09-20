@@ -121,10 +121,19 @@ db.prepare(`INSERT INTO best_guarded (game_planet_id, cv, updated_at) VALUES (40
 fleets.upsertStrongestFleet(301, 1, 325, 0, 0, 975, '2026-09-20T18:00:00.000Z');
 
 // Battle-report sighting: kralgar is the ATTACKER, more recent than the rankings sighting.
+// He fielded 300 destroyers and lost 50 of them, plus 10 transports (none lost) -- the
+// history should show what SURVIVED (250 / 10), not what he brought (300 / 10).
 db.prepare(`
     INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, system_id, planet_index,
         att_destroyers, att_destroyers_lost, att_cruisers, att_battleships, att_transports, att_colony_ships)
     VALUES (8001, '2026-09-20T20:00:00.000Z', 301, 302, 401, 3, 300, 50, 0, 0, 10, 0)
+`).run();
+
+// A second battle report where kralgar lost EVERYTHING -- this must not appear at all.
+db.prepare(`
+    INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, system_id, planet_index,
+        att_destroyers, att_destroyers_lost)
+    VALUES (8003, '2026-09-20T21:00:00.000Z', 301, 302, 401, 3, 20, 20)
 `).run();
 
 // Vision sighting: oldest of the three but still inside the 5-day window.
@@ -138,27 +147,32 @@ db.prepare(`
 `).run();
 
 const history = fleets.getFleetSightingHistory(301, 5);
-ok('exactly 3 sightings within the window (the 6-day-old report is excluded)', history.length === 3, history);
+ok('exactly 3 sightings within the window (the 6-day-old report and the wipeout are excluded)', history.length === 3, history);
 ok('sorted newest first: battle report, then rankings, then vision',
     history[0].source === 'battle_report' && history[1].source === 'rankings' && history[2].source === 'vision',
     history.map(h => h.source));
-ok('the rankings entry resolves a home location via the same cross-match logic',
-    history[1].system_name === 'Praepes' && history[1].location_status === 'home', history[1]);
-ok('the battle-report entry uses the ATTACKER-side (kralgar\'s) committed ship counts, not the defender\'s',
-    history[0].destroyers === 300 && history[0].transports === 10, history[0]);
-ok('the battle-report and vision entries have their CV recomputed from composition (300 destroyers = 900 CV), not left null',
-    history[0].cv === 900 && history[2].cv === 900, [history[0].cv, history[2].cv]);
+ok('the rankings entry resolves a CONFIRMED home location via the cross-match logic',
+    history[1].system_name === 'Praepes' && history[1].location_status === 'home' && history[1].location_confirmed === true, history[1]);
+ok('the battle-report entry shows SURVIVORS (300-50=250 destroyers), not what was fielded',
+    history[0].destroyers === 250 && history[0].transports === 10, history[0]);
+ok('the wiped-out report (8003, 20 destroyers all lost) does not appear anywhere in the history',
+    !history.some(h => h.source_id === 8003), history);
+ok('the battle-report and vision entries have their CV recomputed from surviving composition (250 destroyers = 750 CV), not left null',
+    history[0].cv === 750 && history[2].cv === 900, [history[0].cv, history[2].cv]);
 ok('the vision entry carries its own system/planet directly, no location_status',
     history[2].system_name === 'Praepes' && history[2].planet_index === 6 && history[2].location_status === null, history[2]);
 
-// A player with a currently-away rankings fleet should surface that as a sighting with a
-// real status but no location, not silently omit the rankings source entirely.
-db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (303, 'Loner', 30)`).run();
+// A player with a currently-away rankings fleet should now fall back to their registered
+// home planet rather than showing a bare dash -- Last Seen already carries the "how sure
+// are we" signal, so an unconfirmed-but-plausible location beats no location at all.
+db.prepare(`INSERT INTO players (id, name, alliance_id, origin_system) VALUES (303, 'Loner', 30, 400)`).run();
 fleets.upsertStrongestFleet(303, 2, 1, 0, 0, 3, '2026-09-20T18:00:00.000Z');
 const awayHistory = fleets.getFleetSightingHistory(303, 5);
-ok('an away rankings fleet still appears, with no location and status "away"',
+ok('an away rankings fleet falls back to the player\'s registered home system, marked unconfirmed',
     awayHistory.length === 1 && awayHistory[0].source === 'rankings'
-    && awayHistory[0].system_id === null && awayHistory[0].location_status === 'away', awayHistory);
+    && awayHistory[0].system_id === 400 && awayHistory[0].system_name === 'Praepes'
+    && awayHistory[0].planet_index === 1 // COALESCE(home_planet_index, 1): Loner has none on record
+    && awayHistory[0].location_status === 'away' && awayHistory[0].location_confirmed === false, awayHistory);
 
 db.prepare(`DELETE FROM battle_reports`).run();
 db.prepare(`DELETE FROM fleets`).run();
