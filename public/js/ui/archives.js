@@ -859,6 +859,13 @@ const fmtAU = (n) => {
     if (n >= 1e3) return Math.round(n / 1e3) + 'k';
     return String(Math.round(n));
 };
+// Full-precision A$ formatter for My Savings: unlike fmtAU above, this never abbreviates —
+// the whole point of My Savings is checking exact numbers against what the game shows.
+const fmtAUExact = (n) => {
+    n = Number(n) || 0;
+    if (n <= 0) return '0';
+    return Math.round(n).toLocaleString();
+};
 // A trade needs 20k A$ on hand. fmtReady(needed, rate) → compact time to accrue
 // `needed` A$ at `rate` A$/h: "now" if already there, "–" if no income.
 const TA_TRADE_COST = 20000;
@@ -1376,8 +1383,8 @@ function renderMySavings(planets, econData) {
     const savedSoldEl = document.getElementById('savings-saved-sold');
     if (readyEl) readyEl.textContent = fmtReady(needed, auPerH);
     if (rateEl) rateEl.textContent = `${bankingRate.toFixed(1)} PP/h (~${fmtAU(auPerH)} A$/h)`;
-    if (savedEl) savedEl.textContent = `${fmtAU(saved)} A$`;
-    if (savedSoldEl) savedSoldEl.textContent = `${fmtAU(savedWithSelling)} A$`;
+    if (savedEl) savedEl.textContent = `${fmtAUExact(saved)} A$`;
+    if (savedSoldEl) savedSoldEl.textContent = `${fmtAUExact(savedWithSelling)} A$`;
 
     const list = document.getElementById('savings-planets');
     if (!list) return;

@@ -82,9 +82,24 @@ function makeDoc({ priceRows = [], invTableFor = null }) {
             ],
             invTableFor: inv,
         });
-        const hoarded = parseTradeInventoryPage(doc);
+        const { hoarded } = parseTradeInventoryPage(doc);
         // 3 * 100 (Ancient Relic) + 2 * 50 (Supply Unit, "2/6" -> held 2) = 400
         ok('artifact qty * price + supply-unit held-count * price', hoarded === 400, hoarded);
+    }
+
+    console.log('\n── The Astro Dollar row is read exactly, not folded into the hoard ' + '─'.repeat(7));
+    {
+        const inv = table([
+            itemRow([cell('Astro Dollar'), cell('$7,200.27')]),
+            itemRow([cell('Ancient Relic'), cell('1')]),
+        ]);
+        const doc = makeDoc({
+            priceRows: [priceRow({ name: 'Ancient Relic', price: '10.00' })],
+            invTableFor: inv,
+        });
+        const result = parseTradeInventoryPage(doc);
+        ok('astroDollars reads the exact balance, not abbreviated', result.astroDollars === 7200.27, result);
+        ok('the Astro Dollar row itself contributes nothing to the artifact/supply-unit hoard', result.hoarded === 10, result);
     }
 
     console.log('\n── Rows after "Orders" / "Trade Revenue" stop counting ' + '─'.repeat(21));
@@ -100,7 +115,7 @@ function makeDoc({ priceRows = [], invTableFor = null }) {
             priceRows: [priceRow({ name: 'Ancient Relic', price: '10.00' })],
             invTableFor: inv,
         });
-        const hoarded = parseTradeInventoryPage(doc);
+        const { hoarded } = parseTradeInventoryPage(doc);
         ok('only the Inventory section is valued, not Orders or Trade Revenue', hoarded === 10, hoarded);
     }
 
@@ -115,21 +130,21 @@ function makeDoc({ priceRows = [], invTableFor = null }) {
             priceRows: [priceRow({ name: 'Ancient Relic', price: '25.00' })],
             invTableFor: inv,
         });
-        ok('label rows contribute nothing', parseTradeInventoryPage(doc) === 50, parseTradeInventoryPage(doc));
+        ok('label rows contribute nothing', parseTradeInventoryPage(doc).hoarded === 50, parseTradeInventoryPage(doc));
     }
 
     console.log('\n── An item with no matching price row values at zero, not NaN ' + '─'.repeat(11));
     {
         const inv = table([itemRow([cell('Mystery Box'), cell('4')])]);
         const doc = makeDoc({ priceRows: [], invTableFor: inv });
-        ok('unpriced item contributes 0', parseTradeInventoryPage(doc) === 0, parseTradeInventoryPage(doc));
+        ok('unpriced item contributes 0', parseTradeInventoryPage(doc).hoarded === 0, parseTradeInventoryPage(doc));
     }
 
     console.log('\n── A row with too few cells is skipped ' + '─'.repeat(30));
     {
         const inv = table([{ querySelectorAll: (sel) => (sel === 'td' ? [cell('No Orders!')] : []) }]);
         const doc = makeDoc({ priceRows: [], invTableFor: inv });
-        ok('malformed row produced no crash and no value', parseTradeInventoryPage(doc) === 0, parseTradeInventoryPage(doc));
+        ok('malformed row produced no crash and no value', parseTradeInventoryPage(doc).hoarded === 0, parseTradeInventoryPage(doc));
     }
 
     console.log('\n── No Inventory table found returns null, not zero ' + '─'.repeat(19));

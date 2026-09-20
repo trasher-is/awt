@@ -215,19 +215,30 @@ router.post('/sync/trade-partners', requireAuth, (req, res) => {
     }
 });
 
-// --- HOARD SYNC: the logged-in member's A$ value of held artifacts + supply units ---
-// Body: { hoarded_au: <number> } — scraped from their /Game/Trade inventory.
+// --- HOARD + ASTRO DOLLARS SYNC: both read off the logged-in member's /Game/Trade page ---
+// Body: { hoarded_au: <number>, astro_dollars: <number> }. astro_dollars overwrites the
+// same column the Alliance member-sheet scrape used to own — deliberately: this alliance
+// wants that figure sourced from Trade (exact) rather than Alliance (coarser, and gated on
+// someone opening a page nobody visits). See upsertTradeSync's own comment.
 router.post('/sync/trade-inventory', requireAuth, (req, res) => {
     const me = req.session.gameName;
     if (!me) return res.status(400).json({ error: 'No session identity' });
 
     const n = parseInt(req.body.hoarded_au, 10);
-    const value = isNaN(n) ? 0 : Math.max(0, n);
+    const hoardedAu = isNaN(n) ? 0 : Math.max(0, n);
+    // astro_dollars is optional so an old tab's cached bundle (still POSTing the
+    // pre-2026-09-20 { hoarded_au } shape right after a deploy, before it reloads itself —
+    // see version-watch.js) updates the hoard without zeroing out a real astro_dollars
+    // balance it never sent.
+    const hasAstroDollars = req.body.astro_dollars !== undefined;
+    const a = parseFloat(req.body.astro_dollars);
+    const astroDollars = isNaN(a) ? 0 : Math.max(0, a);
 
     try {
         const row = playersRepo.getPlayerIdByName(me);
         if (!row) return res.json({ success: true, stored: false });
-        alliancesRepo.upsertHoardedAu(row.id, value);
+        if (hasAstroDollars) alliancesRepo.upsertTradeSync(row.id, hoardedAu, astroDollars);
+        else alliancesRepo.upsertHoardedAu(row.id, hoardedAu);
         res.json({ success: true, stored: true });
     } catch (e) {
         console.error('[DB Error] sync trade-inventory:', e);

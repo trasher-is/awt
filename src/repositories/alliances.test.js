@@ -58,6 +58,19 @@ ok('getTraders finds the race_trader player', traders.length === 1 && traders[0]
 const members = alliances.getMembersWithStats();
 ok('getMembersWithStats joins hoarded_au from alliance_member_stats', members.find(m => m.name === 'trader1').hoarded_au === 5000);
 
+// 2026-09-20: astro_dollars/production_points now also get written from Planets + Trade
+// syncs, deliberately never from /Game/Alliance — see upsertTradeSync's own comment.
+alliances.upsertTradeSync(2, 1352, 7200.27);
+const afterTradeSync = db.prepare('SELECT hoarded_au, astro_dollars FROM alliance_member_stats WHERE player_id = 2').get();
+ok('upsertTradeSync sets hoarded_au', afterTradeSync.hoarded_au === 1352, afterTradeSync);
+ok('upsertTradeSync stores astro_dollars as clean text, not SQLite-affinity-mangled',
+    afterTradeSync.astro_dollars === '7200.27', afterTradeSync);
+
+alliances.upsertProductionPoints(2, 856);
+const afterPpSync = db.prepare('SELECT production_points FROM alliance_member_stats WHERE player_id = 2').get();
+ok('upsertProductionPoints stores a whole number as clean text ("856", not "856.0")',
+    afterPpSync.production_points === '856', afterPpSync);
+
 const canonical = alliances.getCanonicalNameFromStats('TRADER1');
 ok('getCanonicalNameFromStats is case-insensitive', canonical && canonical.name === 'trader1');
 

@@ -32,12 +32,13 @@ async function syncTradeInventory() {
     const pageRes = await gameFetch(TRADE_PATH);
     if (!pageRes.ok) return;
     const doc = new DOMParser().parseFromString(await pageRes.text(), 'text/html');
-    const hoarded = parseTradeInventoryPage(doc);
-    if (hoarded == null) return; // page didn't parse the way we expect — leave the old value in place
+    const result = parseTradeInventoryPage(doc);
+    if (result == null) return; // page didn't parse the way we expect — leave the old values in place
+    const { hoarded, astroDollars } = result;
     await fetch('/hub-api/sync/trade-inventory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hoarded_au: Math.round(hoarded) }),
+        body: JSON.stringify({ hoarded_au: Math.round(hoarded), astro_dollars: astroDollars }),
     });
 }
 

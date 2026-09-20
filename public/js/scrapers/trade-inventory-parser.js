@@ -1,8 +1,11 @@
 // public/js/scrapers/trade-inventory-parser.js
 // Scrapes the logged-in member's /Game/Trade page and reports the A$ value of the
 // artifacts + supply units they are HOARDING (their Inventory holdings), priced
-// from the live Prices table on the same page. The hub stores it per member so
-// the Trade Agreements board can show who's sitting on how much.
+// from the live Prices table on the same page, plus their exact Astro Dollar balance
+// (also shown right there in the Inventory table). The hub stores both per member so
+// the Trade Agreements board can show who's sitting on how much — deliberately never the
+// Alliance member-sheet's astro_dollars, which is coarser and only updates when someone
+// opens /Game/Alliance (2026-09-20: this alliance wants Planets + Trade only for this).
 
 // Locale-agnostic number parse: handles both "8 122,72" (comma decimal) and
 // "8,122.72" (dot decimal), plus space/NBSP thousands. When both separators are
@@ -27,12 +30,13 @@ function parseNumber(text) {
     return isNaN(v) ? null : v;
 }
 
-// Reads the A$ value of held artifacts + supply units out of a /Game/Trade document. Takes
-// a `doc` (the live `document` when running inside the page via spy.js, or a DOMParser
-// result when fetched in the background — see trade-inventory-watch.js) so both callers
-// share one parser instead of two copies drifting apart. Returns null when the page didn't
-// parse the way we expect (e.g. Inventory table not found), so callers can leave the old
-// value in place rather than overwriting it with a wrong zero.
+// Reads the A$ value of held artifacts + supply units, and the exact Astro Dollar balance,
+// out of a /Game/Trade document. Takes a `doc` (the live `document` when running inside the
+// page via spy.js, or a DOMParser result when fetched in the background — see
+// trade-inventory-watch.js) so both callers share one parser instead of two copies
+// drifting apart. Returns null when the page didn't parse the way we expect (e.g. Inventory
+// table not found), so callers can leave the old values in place rather than overwriting
+// them with a wrong zero.
 //
 // Uses textContent, not innerText, throughout: innerText depends on the element actually
 // being rendered, which a DOMParser result never is (see escape.js's own note on this) —
@@ -58,8 +62,9 @@ export function parseTradeInventoryPage(doc) {
     });
     if (!invTable) return null;
 
-    // 3) Walk rows; value artifacts + supply units until the Orders/Trade Revenue sections.
-    let hoarded = 0, section = 'inventory';
+    // 3) Walk rows; value artifacts + supply units until the Orders/Trade Revenue sections,
+    // and read the exact Astro Dollar balance off its own row along the way.
+    let hoarded = 0, astroDollars = 0, section = 'inventory';
     invTable.querySelectorAll('tbody tr').forEach(row => {
         const cells = row.querySelectorAll('td');
         if (cells.length < 2) return;                       // e.g. "No Orders!" colspan row
@@ -70,10 +75,12 @@ export function parseTradeInventoryPage(doc) {
         if (/^Orders$/i.test(name)) { section = 'orders'; return; }
         if (/^Trade Revenue$/i.test(name)) { section = 'done'; return; }
         if (section !== 'inventory') return;
-        if (name === 'Inventory' || name === 'qty' || name === 'Astro Dollar') return;
+        if (name === 'Inventory' || name === 'qty') return;
 
         const qtyText = (cells[1].textContent || '').trim();
-        if (name === 'Supply Unit') {
+        if (name === 'Astro Dollar') {
+            astroDollars = parseNumber(qtyText) || 0;
+        } else if (name === 'Supply Unit') {
             const held = parseInt(qtyText.split('/')[0].replace(/[^\d-]/g, ''), 10) || 0;   // "0/6" -> 0
             hoarded += held * suPrice;
         } else {
@@ -81,20 +88,21 @@ export function parseTradeInventoryPage(doc) {
             hoarded += qty * (priceMap[name] || 0);
         }
     });
-    return hoarded;
+    return { hoarded, astroDollars };
 }
 
 export async function scrapeTradeInventory() {
     try {
-        const hoarded = parseTradeInventoryPage(document);
-        if (hoarded == null) return;
+        const result = parseTradeInventoryPage(document);
+        if (result == null) return;
+        const { hoarded, astroDollars } = result;
 
         await fetch('/hub-api/sync/trade-inventory', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ hoarded_au: Math.round(hoarded) })
+            body: JSON.stringify({ hoarded_au: Math.round(hoarded), astro_dollars: astroDollars })
         });
-        console.log(`[Spy] Trade inventory synced (hoarded A$ ${Math.round(hoarded)})`);
+        console.log(`[Spy] Trade inventory synced (hoarded A$ ${Math.round(hoarded)}, astro dollars ${astroDollars})`);
     } catch (err) {
         console.error('[Spy] Failed to scrape trade inventory', err);
     }
