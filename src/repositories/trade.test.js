@@ -51,6 +51,21 @@ ok('markAgreementDoneByScan creates a done row with initiator=scan', scanRow.sta
 trade.proposeAgreement('adminpair|x', 'adminpair', 'x', 'someoneelse');
 ok('proposeAgreement does not touch a non-cancelled existing pair (ON CONFLICT WHERE guard)', trade.getActiveAgreements().find(r => r.pair_key === 'adminpair|x').status === 'confirmed');
 
+// getDoneAgreementsForPlayer / cancelAgreementsByIds (2026-09-20): the reconciliation the
+// /sync/trade-agreements route runs when a partner disappears from a member's own
+// /Game/Trade/Agreements page (declined before completing, or the partner resigned).
+trade.markAgreementDoneByInitiator('caveman|reconciled', 'caveman', 'reconciled', 'caveman');
+trade.markAgreementDoneByInitiator('caveman|stillthere', 'caveman', 'stillthere', 'caveman');
+const doneForCaveman = trade.getDoneAgreementsForPlayer('caveman');
+ok('getDoneAgreementsForPlayer finds every done row either side of the pair', doneForCaveman.length === 2);
+ok('getDoneAgreementsForPlayer is case-insensitive', trade.getDoneAgreementsForPlayer('CAVEMAN').length === 2);
+const toCancel = doneForCaveman.find(r => [r.player_a, r.player_b].map(n => n.toLowerCase()).includes('reconciled'));
+trade.cancelAgreementsByIds([toCancel.id]);
+ok('cancelAgreementsByIds removes only the targeted row', trade.getDoneAgreementsForPlayer('caveman').length === 1);
+ok('the untouched pair is still done', trade.getAgreementById(trade.getDoneAgreementsForPlayer('caveman')[0].id).status === 'done');
+ok('cancelAgreementsByIds with an empty list is a no-op, not an error', (() => { trade.cancelAgreementsByIds([]); return trade.getDoneAgreementsForPlayer('caveman').length === 1; })());
+trade.cancelAgreementsByIds(trade.getDoneAgreementsForPlayer('caveman').map(r => r.id));
+
 // Regression for a real production bug (2026-08-30): trade_agreements was never cleared
 // by the round-reset ("nuke intel") route — pair_key identifies two player NAMES, only
 // meaningful within the round they played in.
