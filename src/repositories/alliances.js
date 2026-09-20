@@ -266,6 +266,49 @@ function upsertHoardedAu(playerId, value) {
     upsertHoardedAuStmt.run(playerId, value);
 }
 
+// Hoard + Astro Dollars together, both read off the same /Game/Trade inventory scrape
+// (2026-09-20). astro_dollars was previously only refreshed by the Alliance member-sheet
+// scrape (alliance-parser.js), which only runs when someone opens /Game/Alliance — a page
+// this alliance rarely visits, and which reports the figure heavily rounded anyway. The
+// Trade page is fetched in the background regardless (see trade-inventory-watch.js) and
+// shows the exact value, so it now overwrites astro_dollars too, deliberately never
+// touching /Game/Alliance for this.
+const upsertTradeSyncStmt = db.prepare(`
+    INSERT INTO alliance_member_stats (player_id, hoarded_au, astro_dollars, updated_at)
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(player_id) DO UPDATE SET
+        hoarded_au = excluded.hoarded_au,
+        astro_dollars = excluded.astro_dollars,
+        updated_at = CURRENT_TIMESTAMP
+`);
+function upsertTradeSync(playerId, hoardedAu, astroDollars) {
+    // astro_dollars is a TEXT column (it historically held raw label text off the Alliance
+    // sheet, e.g. "$1"). Binding a plain JS number there hits SQLite's real->text affinity
+    // conversion, which stringifies a whole number as "856.0" — parses back fine through
+    // parseLocaleNumber, but is needlessly confusing next to every other row's plain-looking
+    // value. Stringifying ourselves keeps it as the same clean decimal text everywhere else.
+    upsertTradeSyncStmt.run(playerId, hoardedAu, String(astroDollars));
+}
+
+// Production Points, read off the viewer's own /Game/Planets sync (sum of each planet's
+// already-saved Production Points — see planetBanking.js's syncPlayerPlanets) rather than
+// the Alliance member-sheet's much larger, coarser figure. Same reasoning as
+// upsertTradeSync above: this alliance wants My Savings/the Board built from Planets +
+// Trade only, never /Game/Alliance.
+const upsertProductionPointsStmt = db.prepare(`
+    INSERT INTO alliance_member_stats (player_id, production_points, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(player_id) DO UPDATE SET
+        production_points = excluded.production_points,
+        updated_at = CURRENT_TIMESTAMP
+`);
+function upsertProductionPoints(playerId, value) {
+    // Same reasoning as upsertTradeSync's own comment: production_points is TEXT, so bind
+    // a string ourselves rather than let SQLite's affinity conversion turn a whole number
+    // into e.g. "856.0".
+    upsertProductionPointsStmt.run(playerId, String(value));
+}
+
 const upsertAllianceMemberStatsStmt = db.prepare(`
     INSERT INTO alliance_member_stats (
         player_id, planets_text, next_culture_at, science_rate, culture_rate, production_rate,
@@ -328,6 +371,6 @@ module.exports = {
     insertBroadcast, getBroadcasts, updateBroadcast, deleteBroadcast,
     getAllianceMemberStatIds, getTradeAnalysisRows, getAllianceStatsForArchive,
     getTraders, getMembersWithStats, getCanonicalNameFromStats,
-    upsertHoardedAu, upsertAllianceMemberStats, deleteStaleAllianceMembers,
+    upsertHoardedAu, upsertTradeSync, upsertProductionPoints, upsertAllianceMemberStats, deleteStaleAllianceMembers,
     deleteAllAllianceMemberStats,
 };

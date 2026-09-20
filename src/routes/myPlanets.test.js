@@ -92,6 +92,11 @@ function request(server, method, urlPath, body) {
         ok('population_progress and growth_rate round-trip', withGrowthData.population_progress === 104 && withGrowthData.growth_rate === 11.8, withGrowthData);
         const withoutGrowthData = r.body.planets.find(p => p.game_planet_id === 18281);
         ok('an omitted growth_rate/population_progress stays null, not 0', withoutGrowthData.population_progress === null && withoutGrowthData.growth_rate === null, withoutGrowthData);
+        // 2026-09-20: the sync also totals production_pp across every planet into
+        // alliance_member_stats.production_points, replacing the Alliance member-sheet's
+        // coarser figure for this member's own row — see myPlanets.js's own comment.
+        let statsRow = db.prepare('SELECT production_points FROM alliance_member_stats WHERE player_id = 301').get();
+        ok('production_points is the sum of every synced planet\'s production_pp (445 + 9)', Number(statsRow.production_points) === 454, statsRow);
 
         console.log('\n── Toggling banking on ' + '─'.repeat(53));
         r = await request(server, 'POST', '/hub-api/my-planets/18292/banking', { banking: true });
@@ -118,6 +123,8 @@ function request(server, method, urlPath, body) {
         ok('the surviving planet keeps its banking flag across the resync', stillBanking.banking === 1, stillBanking);
         ok('the freshly-seen planet defaults to still-building', freshPlanet.banking === 0, freshPlanet);
         ok('the resync also refreshed the production numbers', stillBanking.production_pp === 460 && stillBanking.production_rate === 25.1, stillBanking);
+        statsRow = db.prepare('SELECT production_points FROM alliance_member_stats WHERE player_id = 301').get();
+        ok('production_points follows the resync too (460 + 396)', Number(statsRow.production_points) === 856, statsRow);
 
         console.log('\n── A toggle cannot reach another account\'s planet ' + '─'.repeat(26));
         sessionUserId = neighbour.id;
@@ -134,8 +141,10 @@ function request(server, method, urlPath, body) {
         ok('a non-integer planet id is a 400', r.status === 400, r.body);
 
         console.log('\n── TR outlook: projected population-10 crossings, alliance-wide ' + '─'.repeat(6));
-        // Membership for the outlook join is alliance_member_stats, same as Board.
-        db.prepare(`INSERT INTO alliance_member_stats (player_id) VALUES (301), (302)`).run();
+        // Membership for the outlook join is alliance_member_stats, same as Board. 301
+        // already has a row (the sync above now also writes production_points into it —
+        // see the assertions above), so this only needs to add 302.
+        db.prepare(`INSERT OR IGNORE INTO alliance_member_stats (player_id) VALUES (301), (302)`).run();
         db.prepare(`INSERT INTO players (id, name) VALUES (303, 'NoPlanetsYet')`).run();
         db.prepare(`INSERT INTO alliance_member_stats (player_id) VALUES (303)`).run();
         // ownerone (301): one qualified planet already, one at pop 9 close to qualifying,

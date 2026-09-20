@@ -1,6 +1,7 @@
 const express = require('express');
 const usersRepo = require('../repositories/users');
 const planetBankingRepo = require('../repositories/planetBanking');
+const alliancesRepo = require('../repositories/alliances');
 const { requireAuth } = require('./_middleware');
 const router = express.Router();
 
@@ -54,6 +55,13 @@ router.post('/sync/my-planets', requireAuth, (req, res) => {
                 production_rate: Number.isFinite(p.production_rate) ? p.production_rate : null,
             }));
         planetBankingRepo.syncPlayerPlanets(playerId, rows);
+        // Production Points (2026-09-20): the total already-saved PP across every synced
+        // planet, replacing the Alliance member-sheet's much coarser figure for this
+        // member's own row — see alliances.js's upsertProductionPoints for why. Summed
+        // over ALL planets, not just banking ones: production_pp is stock already sitting
+        // there, independent of whether future production is being banked or spent.
+        const totalPp = rows.reduce((sum, p) => sum + (p.production_pp || 0), 0);
+        alliancesRepo.upsertProductionPoints(playerId, totalPp);
         res.json({ success: true });
     } catch (err) {
         console.error('[DB Error] My Savings planet sync failure:', err);
