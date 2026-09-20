@@ -1183,6 +1183,9 @@ export async function initProfileHubIntel() {
     wrap.id = 'awt-hub-intel-block';
     wrap.innerHTML = `
         <div class="row">
+            <div class="col-12">${buildFleetCard(data.fleet)}</div>
+        </div>
+        <div class="row">
             <div class="col-lg-6">${buildActivityLogCard(data.heatmap, data.loginSamples)}</div>
             <div class="col-lg-6">${buildBuildingsCard(p)}</div>
         </div>`;
@@ -1365,6 +1368,59 @@ function buildBuildingsCard(p) {
             <tbody>
                 ${BUILDING_ROWS.map(([label, field, maxField]) => row(label, p[field], p[maxField], false)).join('')}
                 ${row('All buildings', all, null, true)}
+            </tbody>
+        </table>`;
+}
+
+// Fleet card (2026-09-20, war-tool groundwork): mirrors the Fleet Locations panel's row
+// for this ONE player — see fleetsRepo.getFleetLocationMatches's own comment for what
+// location_status ('home' | 'parked' | 'away' | 'ambiguous') means, and enrichFleetMatch's
+// (src/routes/intel.js) for transports/colony_ships/last_battle_seen. `fleet` is null when
+// this player has no strongest_fleet row at all — never ranked in the top 50 recently, or
+// dropped off 5+ days ago — which renders as an explicit "no data" row, not a blank card,
+// so its absence is never confused with "definitely no fleet".
+const FLEET_STATUS_LABEL = { home: 'Home', parked: 'Parked', away: 'Away', ambiguous: 'Ambiguous' };
+function fleetAgeLabel(iso) {
+    if (!iso) return '—';
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return '—';
+    const mins = Math.floor(ms / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 48) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+}
+function buildFleetCard(fleet) {
+    if (!fleet) {
+        return `
+        <table class="table">
+            <thead><tr><th><i class="bi bi-rocket"></i> Fleet</th></tr></thead>
+            <tbody><tr><td class="lowlight">No StrongestFleet ranking data on record (not in the top 50 recently, or dropped off 5+ days ago).</td></tr></tbody>
+        </table>`;
+    }
+
+    let locationText;
+    if (fleet.location_status === 'home') locationText = `Home — ${esc(fleet.location.system_name || 'Unknown')} #${fleet.location.planet_index}`;
+    else if (fleet.location_status === 'parked') locationText = `${esc(fleet.location.system_name || 'Unknown')} #${fleet.location.planet_index} (${esc(fleet.location.owner_name || 'Unowned')}${fleet.location.owner_tag ? ` [${esc(fleet.location.owner_tag)}]` : ''})`;
+    else if (fleet.location_status === 'ambiguous') locationText = `${fleet.candidates.length} candidate${fleet.candidates.length === 1 ? '' : 's'} share this CV`;
+    else locationText = 'No matching Best Guarded planet';
+
+    const lastBattleText = fleet.last_battle_seen
+        ? `${esc(fleet.last_battle_seen.system_name || 'Unknown')} #${fleet.last_battle_seen.planet_index ?? '?'} (${fleetAgeLabel(fleet.last_battle_seen.occurred_at)})`
+        : '—';
+
+    return `
+        <table class="table">
+            <thead><tr><th colspan="2"><i class="bi bi-rocket"></i> Fleet <span style="font-weight:normal;font-size:10px;color:#888;">(StrongestFleet ranking, refreshed on ranking-page visits)</span></th></tr></thead>
+            <tbody>
+                <tr><td>Combat Value</td><td class="lowlight" style="font-weight:bold;">${(fleet.cv || 0).toLocaleString()}</td></tr>
+                <tr><td>Destroyers / Cruisers / Battleships</td><td class="lowlight">${fleet.destroyers || 0} / ${fleet.cruisers || 0} / ${fleet.battleships || 0}</td></tr>
+                <tr><td title="Learned from this player's most recent ship-detail-scraped battle report, not the ranking page.">Transports / Colony Ships*</td><td class="lowlight">${fleet.transports ?? '—'} / ${fleet.colony_ships ?? '—'}</td></tr>
+                <tr><td>Status</td><td class="lowlight" style="font-weight:bold;">${esc(FLEET_STATUS_LABEL[fleet.location_status] || fleet.location_status)}</td></tr>
+                <tr><td>Location</td><td class="lowlight">${locationText}</td></tr>
+                <tr><td title="Same source as the !lastseen Discord command.">Last battle seen*</td><td class="lowlight">${lastBattleText}</td></tr>
+                <tr><td>Fleet ranking seen</td><td class="lowlight">${fleetAgeLabel(fleet.updated_at)}</td></tr>
             </tbody>
         </table>`;
 }

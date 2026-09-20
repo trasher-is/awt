@@ -1359,20 +1359,23 @@ router.post('/sync/highest-population-snapshot', requireAuth, (req, res) => {
     }
 });
 
-// --- RANKING: STRONGEST FLEET (war-tool groundwork, 2026-09-20) ---
-// Same wholesale-replace shape as /sync/best-planets-snapshot, with two differences forced
-// by this specific page: (1) rows carry a destroyer/cruiser/battleship breakdown, not just
-// a rank, because CV alone collides between players with identical fleet composition — see
-// this feature's design discussion for the concrete case (two players both at 105 CV / 35
-// destroyers); (2) a 5-day staleness purge runs first, so a scraper that stops being fed
-// (nobody visits the ranking page) ages the data out instead of leaving it looking current
-// indefinitely — see database.js's table comment.
+// --- RANKING: STRONGEST FLEET (war-tool groundwork, 2026-09-20; revised same day for
+// durable history once real data showed the wholesale-replace, top-50-only design was too
+// narrow — see database.js's table comment for the full reasoning) ---
+// Rows carry a destroyer/cruiser/battleship breakdown, not just a rank, because CV alone
+// collides between players with identical fleet composition (confirmed live: two players
+// both at 105 CV / 35 destroyers on the same day). A 5-day staleness purge runs first, so a
+// scraper that stops being fed (nobody visits the ranking page) ages old rows out instead
+// of leaving them looking current indefinitely.
 //
-// A row's player_id is stored as `null`, never dropped, when the owner isn't a known
-// player yet: the CV/composition is still real intel worth keeping, and unlike
-// sync.js's system-scan enemy-fleet path (which truly cannot avoid the FK — see its own
-// comment on playerExistsById), this table's player_id is nullable specifically so a
-// stranger's fleet doesn't have to be thrown away just because we can't yet name them.
+// A row is upserted, never inserted fresh, keyed by player_id — so a player missing from
+// this particular scrape keeps their last-known row rather than being wiped, which is what
+// lets the table hold more than one day's top-50 at once. Two consequences fall out of
+// that: (1) a row whose owner can't be resolved to a known player is skipped entirely (no
+// stable identity to upsert against — unlike the table's first version, this is NOT kept
+// with player_id NULL); (2) when the SAME player appears more than once in one scrape (a
+// rare real case — a player can hold two simultaneous fleets), only their highest-cv row is
+// upserted, since player_id can only ever hold one row now.
 router.post('/sync/strongest-fleet', requireAuth, (req, res) => {
     const { rows } = req.body;
     if (!Array.isArray(rows)) {
@@ -1382,14 +1385,17 @@ router.post('/sync/strongest-fleet', requireAuth, (req, res) => {
 
     const syncTx = db.transaction((entries) => {
         fleetsRepo.deleteStrongestFleetOlderThan5Days();
-        fleetsRepo.clearStrongestFleet();
+
+        const byPlayer = new Map();
         for (const row of entries) {
             if (!Number.isInteger(row.rank) || !Number.isInteger(row.cv)) continue;
-            const playerId = Number.isInteger(row.player_id) && playersRepo.playerExistsById(row.player_id)
-                ? row.player_id
-                : null;
-            fleetsRepo.insertStrongestFleet(
-                row.rank, playerId,
+            if (!Number.isInteger(row.player_id) || !playersRepo.playerExistsById(row.player_id)) continue;
+            const existing = byPlayer.get(row.player_id);
+            if (!existing || row.cv > existing.cv) byPlayer.set(row.player_id, row);
+        }
+        for (const [playerId, row] of byPlayer) {
+            fleetsRepo.upsertStrongestFleet(
+                playerId, row.rank,
                 Number(row.destroyers) || 0, Number(row.cruisers) || 0, Number(row.battleships) || 0,
                 row.cv, syncedAt
             );

@@ -57,6 +57,52 @@ function resetIntelVisibilityBaseline() {
     console.log(`[DB] Cleared blind-sweep intel visibility baseline for ${r.changes} player(s).`);
 }
 
+// One-shot (2026-09-20): strongest_fleet shipped for one day keyed by `rank` (the only way
+// to hold a player's rare second simultaneous fleet), then got revised same-day to hold
+// durable per-player history instead — which needs player_id as the key. Live production
+// data already existed under the old shape by the time this landed, so it can't just be a
+// fresh CREATE TABLE: collapse each player down to their single largest-cv row (ties broken
+// by lowest rank), drop rows with no resolvable player_id (no identity to upsert against
+// going forward — see the new table's own comment), and rebuild under the new schema.
+// Nothing here is precious: worst case, a rebuild from a stale pre-migration snapshot is
+// indistinguishable from waiting for the next ranking-page visit to refresh it.
+const STRONGEST_FLEET_PLAYER_KEYED_MIGRATION_KEY = 'strongest_fleet_player_keyed_migration_v1_at';
+function migrateStrongestFleetToPlayerKeyed() {
+    const done = db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(STRONGEST_FLEET_PLAYER_KEYED_MIGRATION_KEY);
+    if (done) return;
+    const isOldShape = db.prepare(`PRAGMA table_info(strongest_fleet)`).all()
+        .some(c => c.name === 'rank' && c.pk === 1);
+    if (isOldShape) {
+        db.exec(`
+            CREATE TABLE strongest_fleet_new (
+                player_id INTEGER PRIMARY KEY,
+                rank INTEGER NOT NULL,
+                destroyers INTEGER NOT NULL DEFAULT 0,
+                cruisers INTEGER NOT NULL DEFAULT 0,
+                battleships INTEGER NOT NULL DEFAULT 0,
+                cv INTEGER NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+            )
+        `);
+        const migrated = db.prepare(`
+            INSERT INTO strongest_fleet_new (player_id, rank, destroyers, cruisers, battleships, cv, updated_at)
+            SELECT player_id, rank, destroyers, cruisers, battleships, cv, updated_at
+            FROM strongest_fleet sf
+            WHERE player_id IS NOT NULL
+              AND rank = (
+                  SELECT MIN(rank) FROM strongest_fleet
+                  WHERE player_id = sf.player_id
+                    AND cv = (SELECT MAX(cv) FROM strongest_fleet WHERE player_id = sf.player_id)
+              )
+        `).run();
+        db.exec(`DROP TABLE strongest_fleet`);
+        db.exec(`ALTER TABLE strongest_fleet_new RENAME TO strongest_fleet`);
+        console.log(`[DB] Migrated strongest_fleet to player-keyed history (${migrated.changes} row(s) kept).`);
+    }
+    db.prepare(`INSERT INTO app_settings (key, value) VALUES (?, CURRENT_TIMESTAMP)`).run(STRONGEST_FLEET_PLAYER_KEYED_MIGRATION_KEY);
+}
+
 function initDatabase() {
     // 1. Admin Control
     db.exec(`
@@ -303,34 +349,43 @@ function initDatabase() {
         )
     `);
 
-    // Strongest Fleet ranking watch (2026-09-20, war-tool groundwork): current
-    // /Ranking/StrongestFleet top-50, wholesale-replaced on every re-scrape — same pattern
-    // as best_planets_snapshot/highest_population_snapshot, EXCEPT keyed by `rank`, not by
-    // the fleet owner: confirmed live (2026-09-20) that a single player can hold more than
-    // one fleet in the top-50 at once (e.g. two separate destroyer stacks), so player_id is
-    // not unique per snapshot and can't be the key. player_id is nullable and best-effort —
-    // a row whose owner isn't yet a known player gets stored with NULL rather than dropped,
-    // since the CV/composition is still worth having even without an identity.
+    // Strongest Fleet ranking watch (2026-09-20, war-tool groundwork; revised same day once
+    // real data showed the top-50-only, wholesale-replace design was too narrow) — keyed by
+    // `player_id`, holding each player's single largest known fleet, UPSERTED on every
+    // sync rather than wholesale-replaced: a player who drops out of today's top-50 keeps
+    // their last-known row (rank/cv/composition/updated_at all frozen at whatever they were
+    // last seen at) instead of vanishing, so the table naturally grows to hold more than 50
+    // players as different people rotate through the ranking across days. The 5-day
+    // staleness purge (still run first, every sync — see /sync/strongest-fleet) is what
+    // actually bounds this, not the ranking page's own cutoff.
+    //
+    // player_id is the PRIMARY KEY, not `rank`, DESPITE a single player occasionally
+    // holding more than one simultaneous fleet in the ranking (confirmed live 2026-09-20:
+    // Wearic at both 99 CV and 93 CV at once) — a per-fleet-instance key isn't available
+    // from anything the game exposes, and the whole point of this revision is durable
+    // per-player history, which needs a stable identity to upsert against. The tradeoff:
+    // when a player has two simultaneous fleets, only the larger is kept; the smaller is
+    // used for that sync's location cross-match (nothing upstream is blind to it) but is
+    // not separately remembered afterward. A row whose owner cannot be resolved to a known
+    // player is not stored at all (unlike the first version of this table) — there's no
+    // stable identity to upsert against, so keeping it would just re-litigate the very
+    // "yesterday's 300 destroyers and today's 400 as separate rows" problem this table
+    // exists to avoid, for an owner we can't even name.
     //
     // destroyers/cruisers/battleships/cv are stored as INTEGER (unlike best_guarded's `cv`
     // TEXT column, kept as raw page text purely for display) because this table's whole
     // purpose is numeric cross-matching against best_guarded to locate a fleet by
     // composition — every consumer would otherwise repeat the same CAST(REPLACE(...)) noise.
-    //
-    // No per-row expiry column: staleness is bounded by deleting anything untouched for 5+
-    // days at the top of every sync (see /sync/strongest-fleet) rather than trusting a
-    // separate cleanup job to run — if the scraper stops being fed (nobody visits the
-    // ranking page), the data ages out on its own instead of quietly going stale forever.
     db.exec(`
         CREATE TABLE IF NOT EXISTS strongest_fleet (
-            rank INTEGER PRIMARY KEY,
-            player_id INTEGER,
+            player_id INTEGER PRIMARY KEY,
+            rank INTEGER NOT NULL,
             destroyers INTEGER NOT NULL DEFAULT 0,
             cruisers INTEGER NOT NULL DEFAULT 0,
             battleships INTEGER NOT NULL DEFAULT 0,
             cv INTEGER NOT NULL,
             updated_at TEXT NOT NULL,
-            FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE SET NULL
+            FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
         )
     `);
 
@@ -638,6 +693,7 @@ function initDatabase() {
     // Runs here rather than beside the intel_* migrations above because its one-shot
     // marker lives in app_settings, which only exists as of the statement right above.
     resetIntelVisibilityBaseline();
+    migrateStrongestFleetToPlayerKeyed();
 
     // --- DISCORD INCOMING ALERT TRACKING ---
     // Maps a game attacking-fleet id to the Discord message announcing it, so the

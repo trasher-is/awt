@@ -164,28 +164,36 @@ function getInterceptFleetsByActiveUsers() {
 // --- strongest_fleet (Ranking: /Ranking/StrongestFleet, war-tool groundwork) ---
 
 // Anything not touched by a sync in 5+ days ages out on its own (see database.js's table
-// comment) — run this FIRST in the sync route, before the wholesale replace below, so a
-// scraper that's been silent for a while can't leave a misleadingly "current-looking" row
-// sitting untouched forever.
+// comment) — run this FIRST in the sync route, before the upsert below, so a scraper
+// that's been silent for a while can't leave a misleadingly "current-looking" row sitting
+// untouched forever, and so a player who genuinely dropped off 5+ days ago doesn't linger
+// in the "more than the top-50" history this table exists to keep.
 const deleteStrongestFleetOlderThan5DaysStmt = db.prepare(`DELETE FROM strongest_fleet WHERE updated_at <= datetime('now', '-5 days')`);
 function deleteStrongestFleetOlderThan5Days() {
     return deleteStrongestFleetOlderThan5DaysStmt.run();
 }
 
-const clearStrongestFleetStmt = db.prepare(`DELETE FROM strongest_fleet`);
-function clearStrongestFleet() {
-    clearStrongestFleetStmt.run();
+// Upsert, NOT wholesale-replace (2026-09-20 revision — see database.js's table comment for
+// the full reasoning): a player missing from today's scrape simply isn't touched, so their
+// last-known row survives until the 5-day purge above removes it. This is what lets the
+// table hold more than one day's top-50 at once. The sync route is responsible for
+// collapsing a player's multiple simultaneous fleets down to one row (largest cv) before
+// calling this, and for never calling it with a player_id that doesn't resolve to a known
+// player — there is no stable identity to upsert an unknown owner against.
+const upsertStrongestFleetStmt = db.prepare(`
+    INSERT INTO strongest_fleet (player_id, rank, destroyers, cruisers, battleships, cv, updated_at)
+    VALUES (@playerId, @rank, @destroyers, @cruisers, @battleships, @cv, @updatedAt)
+    ON CONFLICT(player_id) DO UPDATE SET
+        rank = excluded.rank, destroyers = excluded.destroyers, cruisers = excluded.cruisers,
+        battleships = excluded.battleships, cv = excluded.cv, updated_at = excluded.updated_at
+`);
+function upsertStrongestFleet(playerId, rank, destroyers, cruisers, battleships, cv, updatedAt) {
+    upsertStrongestFleetStmt.run({ playerId, rank, destroyers, cruisers, battleships, cv, updatedAt });
 }
 
-// player_id is passed as `null` (not skipped) by the sync route when the ranking's owner
-// isn't a known player yet — see that route's own comment for why silently dropping the
-// row instead would be the wrong call.
-const insertStrongestFleetStmt = db.prepare(`
-    INSERT INTO strongest_fleet (rank, player_id, destroyers, cruisers, battleships, cv, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-`);
-function insertStrongestFleet(rank, playerId, destroyers, cruisers, battleships, cv, updatedAt) {
-    insertStrongestFleetStmt.run(rank, playerId, destroyers, cruisers, battleships, cv, updatedAt);
+const deleteAllStrongestFleetStmt = db.prepare(`DELETE FROM strongest_fleet`);
+function deleteAllStrongestFleet() {
+    deleteAllStrongestFleetStmt.run();
 }
 
 const getStrongestFleetFullStmt = db.prepare(`
@@ -251,11 +259,14 @@ function getFleetLocationMatches() {
 
     // Pass 1: resolve every fleet that can self-match (owns a planet at its own cv) —
     // these are certain and must never be pulled into another fleet's collision count.
-    const selfResolved = new Map(); // rank -> location
+    // Keyed by player_id (the table's real primary key since the 2026-09-20 history
+    // revision), not rank — rank is now just "last known rank" and can repeat across
+    // different players' rows on different days, so it is no longer a safe map key.
+    const selfResolved = new Map(); // player_id -> location
     for (const f of fleets) {
         const candidates = guardedByCv.get(f.cv) || [];
         const self = candidates.find((g) => g.owner_id === f.player_id);
-        if (self) selfResolved.set(f.rank, asCandidate(self));
+        if (self) selfResolved.set(f.player_id, asCandidate(self));
     }
 
     // Pass 2: among fleets that did NOT self-resolve, count how many are still contending
@@ -263,12 +274,12 @@ function getFleetLocationMatches() {
     // from contention (their cv coincidence with someone else is no longer anyone's problem).
     const unresolvedCountByCv = new Map();
     for (const f of fleets) {
-        if (selfResolved.has(f.rank)) continue;
+        if (selfResolved.has(f.player_id)) continue;
         unresolvedCountByCv.set(f.cv, (unresolvedCountByCv.get(f.cv) || 0) + 1);
     }
 
     return fleets.map((f) => {
-        const home = selfResolved.get(f.rank);
+        const home = selfResolved.get(f.player_id);
         if (home) return { ...f, location_status: 'home', location: home, candidates: [] };
 
         const candidates = guardedByCv.get(f.cv) || [];
@@ -283,12 +294,22 @@ function getFleetLocationMatches() {
     });
 }
 
+// Player-profile card (2026-09-20): the same cross-match as above, for exactly one player.
+// Recomputes the full match set rather than querying strongest_fleet WHERE player_id = ?
+// directly — the collision/self-match logic genuinely needs every OTHER fleet at the same
+// cv to answer correctly (see the ambiguous-vs-home distinction above), and this table is
+// small enough (5 days of a top-50 ranking, at most a few hundred rows) that recomputing
+// is simpler than trying to answer the question from one row in isolation.
+function getFleetLocationMatchForPlayer(playerId) {
+    return getFleetLocationMatches().find((f) => f.player_id === playerId) || null;
+}
+
 module.exports = {
     countFleets, getFleetsForSystem, getFleetsForSystemFull, getFleetsFullDb,
     getFleetsForTimeline, deleteFleetsOlderThan10Days, deleteAllFleets, deleteFleetsByOwner,
     insertFleetForAllianceStats, updateFleetGameId,
     getMemberIdsForTags, replaceEnemyFleetsForSystem,
     getInterceptFleetsByAlliance, getInterceptFleetsByActiveUsers,
-    deleteStrongestFleetOlderThan5Days, clearStrongestFleet, insertStrongestFleet, getStrongestFleetFull,
-    getFleetLocationMatches,
+    deleteStrongestFleetOlderThan5Days, deleteAllStrongestFleet, upsertStrongestFleet, getStrongestFleetFull,
+    getFleetLocationMatches, getFleetLocationMatchForPlayer,
 };

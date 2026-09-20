@@ -208,9 +208,10 @@ export async function openFleetDatabasePanel() {
 }
 
 // --- FLEET LOCATIONS (war-tool groundwork, 2026-09-20) ---
-// A first, deliberately plain verification surface for /hub-api/intel/fleet-locations —
-// no search/sort/column-picker machinery yet, just "does the cross-match actually look
-// right when rendered." Those can be added once the underlying data is trusted.
+// A deliberately plain verification surface for /hub-api/intel/fleet-locations — no
+// sort/column-picker machinery yet, just "does the cross-match actually look right when
+// rendered" plus a basic name/tag filter, since the table can now hold several days'
+// worth of players (see the panel's own history-retention note) rather than exactly 50.
 let rawFleetLocations = [];
 
 function ageLabel(iso) {
@@ -233,18 +234,33 @@ const LOCATION_STATUS_STYLE = {
 };
 
 function renderFleetLocationsTable() {
+    const input = document.getElementById('fltloc-search-input');
+    const q = (input ? input.value : '').trim().toLowerCase();
+    const filtered = q
+        ? rawFleetLocations.filter(f => (f.owner_name && f.owner_name.toLowerCase().includes(q)) || (f.alliance_tag && f.alliance_tag.toLowerCase().includes(q)))
+        : rawFleetLocations;
+
     const countEl = document.getElementById('fltloc-result-count');
-    if (countEl) countEl.innerText = rawFleetLocations.length;
+    if (countEl) countEl.innerText = filtered.length;
     const tbody = document.getElementById('fltloc-table-body');
     if (!tbody) return;
 
-    tbody.innerHTML = rawFleetLocations.map(f => {
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="15" class="text-center py-8 text-muted-foreground">${rawFleetLocations.length === 0 ? 'No fleets on record yet.' : 'No match.'}</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = filtered.map(f => {
         const status = LOCATION_STATUS_STYLE[f.location_status] || { label: f.location_status || 'Unknown', cls: 'text-muted-foreground' };
         let locationText;
         if (f.location_status === 'home') locationText = `${esc(f.location.system_name || 'Unknown')} #${f.location.planet_index}`;
         else if (f.location_status === 'parked') locationText = `${esc(f.location.system_name || 'Unknown')} #${f.location.planet_index} (${esc(f.location.owner_name || 'Unowned')}${f.location.owner_tag ? ` [${esc(f.location.owner_tag)}]` : ''})`;
         else if (f.location_status === 'ambiguous') locationText = `${f.candidates.length} candidate${f.candidates.length === 1 ? '' : 's'} at this CV`;
         else locationText = '—';
+
+        const lastBattleText = f.last_battle_seen
+            ? `${esc(f.last_battle_seen.system_name || 'Unknown')} #${f.last_battle_seen.planet_index ?? '?'}`
+            : '—';
 
         return `
         <tr class="hover:bg-accent/50 transition-colors">
@@ -259,6 +275,7 @@ function renderFleetLocationsTable() {
             <td class="p-3 text-gray-400">${f.colony_ships ?? '—'}</td>
             <td class="p-3 border-l border-border font-bold ${status.cls}">${esc(status.label)}</td>
             <td class="p-3">${locationText}</td>
+            <td class="p-3 border-l border-border" title="${f.last_battle_seen ? ageLabel(f.last_battle_seen.occurred_at) : ''}">${lastBattleText}</td>
             <td class="p-3 border-l border-border text-muted-foreground">${ageLabel(f.updated_at)}</td>
             <td class="p-3 text-muted-foreground">${f.location ? ageLabel(f.location.guard_updated_at) : '—'}</td>
             <td class="p-3 text-muted-foreground">${ageLabel(f.composition_at)}</td>
@@ -275,13 +292,14 @@ export async function openFleetLocationsPanel() {
         panel.querySelector('#fltloc-close-btn')?.addEventListener('click', () => {
             panel.classList.replace('translate-x-0', 'translate-x-full');
         });
+        panel.querySelector('#fltloc-search-input')?.addEventListener('input', renderFleetLocationsTable);
     }
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
     closeOtherPanels('fleet-locations-panel');
     panel.classList.replace('translate-x-full', 'translate-x-0');
     if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
 
-    document.getElementById('fltloc-table-body').innerHTML = '<tr><td colspan="14" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading...</td></tr>';
+    document.getElementById('fltloc-table-body').innerHTML = '<tr><td colspan="15" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading...</td></tr>';
     try {
         const res = await fetch('/hub-api/intel/fleet-locations');
         const data = await res.json();
@@ -290,7 +308,7 @@ export async function openFleetLocationsPanel() {
             renderFleetLocationsTable();
         }
     } catch (err) {
-        document.getElementById('fltloc-table-body').innerHTML = '<tr><td colspan="14" class="text-center py-8 text-red-500">Failed to load data.</td></tr>';
+        document.getElementById('fltloc-table-body').innerHTML = '<tr><td colspan="15" class="text-center py-8 text-red-500">Failed to load data.</td></tr>';
     }
 }
 

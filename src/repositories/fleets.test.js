@@ -48,7 +48,7 @@ console.log('\n── getFleetLocationMatches ' + '─'.repeat(40));
 db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (10, 'RAID', 'Raiders'), (20, 'FOE', 'Enemies')`).run();
 db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES
     (201, 'kralgar', 20), (202, 'Zalbinion', 20), (203, 'Strem', 20), (204, 'Acquario', 20),
-    (205, 'Wanderer', 20), (206, 'Nomad', 20), (207, 'Bystander', 20)`).run();
+    (205, 'Wanderer', 20), (206, 'Nomad', 20), (207, 'Bystander', 20), (208, 'Loner', 20)`).run();
 db.prepare(`INSERT INTO systems (id, name, x, y) VALUES
     (300, 'Praepes', 0, 0), (301, 'Maasym', 1, 1), (302, 'Albaldah', 2, 2), (303, 'Vertex', 3, 3), (304, 'Nowhere', 4, 4)`).run();
 db.prepare(`INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id) VALUES
@@ -70,33 +70,38 @@ db.prepare(`INSERT INTO best_guarded (game_planet_id, cv, updated_at) VALUES
 // Acquario both showing 105 CV is NOT a collision between them -- each is independently
 // sitting on their OWN home planet, which happens to also read 105. Self-ownership must
 // resolve both to `home`, never `ambiguous`, regardless of the other player's coincidence.
-fleets.insertStrongestFleet(1, 201, 325, 0, 0, 975, '2026-09-20T10:00:00.000Z'); // kralgar, home
-fleets.insertStrongestFleet(2, 202, 160, 0, 0, 480, '2026-09-20T10:00:00.000Z'); // Zalbinion, parked on Acquario's planet
-fleets.insertStrongestFleet(3, 203, 35, 0, 0, 105, '2026-09-20T10:00:00.000Z');  // Strem, home (coincidental cv match with Acquario)
-fleets.insertStrongestFleet(4, 204, 35, 0, 0, 105, '2026-09-20T10:00:00.000Z');  // Acquario, home (coincidental cv match with Strem)
-fleets.insertStrongestFleet(5, 201, 1, 0, 0, 3, '2026-09-20T10:00:00.000Z');     // kralgar's second, tiny fleet, cv matches nothing -> away
-fleets.insertStrongestFleet(6, 205, 15, 0, 0, 50, '2026-09-20T10:00:00.000Z');   // Wanderer, doesn't own anything at cv 50
-fleets.insertStrongestFleet(7, 206, 15, 0, 0, 50, '2026-09-20T10:00:00.000Z');   // Nomad, same cv, also doesn't own anything at cv 50 -- genuinely can't tell them apart
+// upsertStrongestFleet(playerId, rank, ...) -- player_id is the table's key since the
+// 2026-09-20 history revision, so (unlike the old insertStrongestFleet) a player can only
+// ever hold one row; collapsing a player's multiple simultaneous fleets to one happens at
+// the sync-route layer (see sync-strongest-fleet.test.js), not here.
+fleets.upsertStrongestFleet(201, 1, 325, 0, 0, 975, '2026-09-20T10:00:00.000Z'); // kralgar, home
+fleets.upsertStrongestFleet(202, 2, 160, 0, 0, 480, '2026-09-20T10:00:00.000Z'); // Zalbinion, parked on Acquario's planet
+fleets.upsertStrongestFleet(203, 3, 35, 0, 0, 105, '2026-09-20T10:00:00.000Z');  // Strem, home (coincidental cv match with Acquario)
+fleets.upsertStrongestFleet(204, 4, 35, 0, 0, 105, '2026-09-20T10:00:00.000Z');  // Acquario, home (coincidental cv match with Strem)
+fleets.upsertStrongestFleet(208, 5, 1, 0, 0, 3, '2026-09-20T10:00:00.000Z');     // Loner, tiny fleet, cv matches nothing -> away
+fleets.upsertStrongestFleet(205, 6, 15, 0, 0, 50, '2026-09-20T10:00:00.000Z');   // Wanderer, doesn't own anything at cv 50
+fleets.upsertStrongestFleet(206, 7, 15, 0, 0, 50, '2026-09-20T10:00:00.000Z');   // Nomad, same cv, also doesn't own anything at cv 50 -- genuinely can't tell them apart
 
 const matches = fleets.getFleetLocationMatches();
-const byRank = Object.fromEntries(matches.map(m => [m.rank, m]));
+const byPlayer = Object.fromEntries(matches.map(m => [m.player_id, m]));
 
 ok('kralgar\'s 975-cv fleet matches his own planet -> home',
-    byRank[1].location_status === 'home' && byRank[1].location.system_name === 'Praepes');
+    byPlayer[201].location_status === 'home' && byPlayer[201].location.system_name === 'Praepes');
 ok('Zalbinion\'s 480-cv fleet matches a planet he does not own -> parked',
-    byRank[2].location_status === 'parked' && byRank[2].location.owner_name === 'Acquario');
+    byPlayer[202].location_status === 'parked' && byPlayer[202].location.owner_name === 'Acquario');
 ok('Strem\'s 105-cv fleet self-resolves to HIS OWN planet, despite Acquario sharing the same cv',
-    byRank[3].location_status === 'home' && byRank[3].location.system_name === 'Vertex');
+    byPlayer[203].location_status === 'home' && byPlayer[203].location.system_name === 'Vertex');
 ok('Acquario\'s 105-cv fleet ALSO self-resolves to his own planet, not treated as colliding with Strem',
-    byRank[4].location_status === 'home' && byRank[4].location.system_name === 'Albaldah');
-ok('kralgar\'s second, unmatched fleet is away (no best_guarded planet at cv 3)',
-    byRank[5].location_status === 'away' && byRank[5].location === null);
+    byPlayer[204].location_status === 'home' && byPlayer[204].location.system_name === 'Albaldah');
+ok('Loner\'s unmatched tiny fleet is away (no best_guarded planet at cv 3)',
+    byPlayer[208].location_status === 'away' && byPlayer[208].location === null);
 ok('Wanderer and Nomad, neither of whom self-match, ARE genuinely ambiguous over Bystander\'s one spot',
-    byRank[6].location_status === 'ambiguous' && byRank[7].location_status === 'ambiguous');
+    byPlayer[205].location_status === 'ambiguous' && byPlayer[206].location_status === 'ambiguous');
 ok('every matched row carries a last-seen timestamp for both sides',
-    byRank[1].updated_at === '2026-09-20T10:00:00.000Z' && byRank[1].location.guard_updated_at === '2026-09-19T22:00:00.000Z');
+    byPlayer[201].updated_at === '2026-09-20T10:00:00.000Z' && byPlayer[201].location.guard_updated_at === '2026-09-19T22:00:00.000Z');
 
-db.prepare(`DELETE FROM strongest_fleet`).run();
+fleets.deleteAllStrongestFleet();
+ok('deleteAllStrongestFleet empties the table', db.prepare(`SELECT COUNT(*) AS n FROM strongest_fleet`).get().n === 0);
 db.prepare(`DELETE FROM best_guarded`).run();
 db.prepare(`DELETE FROM planets`).run();
 db.prepare(`DELETE FROM systems`).run();
