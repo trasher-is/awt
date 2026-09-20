@@ -1140,6 +1140,17 @@ function initDatabase() {
     // They disappear with the player at a round reset and never enter race snapshots.
     addColumn('players', 'battle_race_inference', 'TEXT');
     addColumn('players', 'battle_race_not_before', 'TEXT');
+
+    // max_farms/max_factories/max_labs/max_cybernetics (2026-09-20): the single
+    // highest-count planet for each building type, right alongside total_farms etc. —
+    // both come from the same /Game/Players/Statistic history record (see
+    // player-parser.js's scrapePlayer), just different fields on it (maxFarm/maxFactory/
+    // maxLab/maxCybernet vs farms/factories/labs/cybernets). Powers the profile Buildings
+    // card's Max column.
+    addColumn('players', 'max_farms', 'INTEGER');
+    addColumn('players', 'max_factories', 'INTEGER');
+    addColumn('players', 'max_labs', 'INTEGER');
+    addColumn('players', 'max_cybernetics', 'INTEGER');
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_battle_reports_att_player ON battle_reports(att_player_id);
         CREATE INDEX IF NOT EXISTS idx_battle_reports_def_player ON battle_reports(def_player_id);
