@@ -186,8 +186,8 @@ function request(server, method, urlPath, body) {
         // 1, reporting "3 fully secured systems" when the true answer was 1.
         console.log('\n── Secured is recomputed even when nothing announceable changed ' + '─'.repeat(8));
         db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (951, 'Quiet System', 9, 9)`).run();
-        db.prepare(`INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, is_sieged)
-                    VALUES (95101, 951, 1, 701, 6, 0, 1)`).run(); // RAID-owned but under siege -> not secured
+        db.prepare(`INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, is_sieged, siege_is_friendly)
+                    VALUES (95101, 951, 1, 701, 6, 0, 1, 0)`).run(); // RAID-owned but under a CONFIRMED-hostile siege -> not secured
         const siegedRow = db.prepare(`SELECT is_secured FROM systems WHERE id = 951`).get();
         ok('the besieged system starts out not secured', siegedRow.is_secured === 0, siegedRow);
 
@@ -207,14 +207,41 @@ function request(server, method, urlPath, body) {
             systemsRepo.countSecuredSystems() === 1, systemsRepo.countSecuredSystems());
 
         // And the reverse: a system that quietly stops qualifying must not stay flagged.
-        db.prepare(`UPDATE planets SET is_sieged = 1 WHERE game_planet_id = 95101`).run();
+        db.prepare(`UPDATE planets SET is_sieged = 1, siege_is_friendly = 0 WHERE game_planet_id = 95101`).run();
         const resiegedRes = await request(server, 'POST', '/hub-api/sync/system', {
             system_id: 951,
-            planets: [{ game_planet_id: 95101, planet_index: 1, owner: { id: 701, name: 'Holder', alliance_tag: 'RAID' }, population: 6, starbase: 0, is_sieged: 1 }],
+            planets: [{ game_planet_id: 95101, planet_index: 1, owner: { id: 701, name: 'Holder', alliance_tag: 'RAID' }, population: 6, starbase: 0, is_sieged: 1, siege_is_friendly: false }],
         });
         ok('the re-sieged sync succeeds', resiegedRes.status === 200 && resiegedRes.body.success, resiegedRes.body);
         ok('a system that stops qualifying is un-flagged on the very next sync, not left stale',
             db.prepare(`SELECT is_secured FROM systems WHERE id = 951`).get().is_secured === 0);
+
+        // 2026-09-21 fix — the actual "ally sieges ally" spam report: routing a fleet through
+        // a captured friendly planet ("using an airport", docs/player-guide.md) trips the
+        // API's bare hasSiege flag with nobody watching that system live to confirm it, so
+        // siege_is_friendly never resolves off NULL before the fleet moves on and the siege
+        // lifts. That used to read as "contested" (unsure -> assume hostile), unsecuring the
+        // system and then re-securing it once the transit ended, re-firing the "now fully
+        // secured" celebration for a friendly fleet passing through — never a real threat.
+        console.log('\n── An unconfirmed siege ("using an airport") does not toggle secured, or re-announce ' + '─'.repeat(1));
+        db.prepare(`UPDATE planets SET is_sieged = 0, siege_is_friendly = NULL WHERE game_planet_id = 95101`).run();
+        db.prepare(`UPDATE systems SET is_secured = 1 WHERE id = 951`).run(); // back to secured, as if the hostile siege above had never happened
+        milestoneCalls.length = 0;
+        const transitStartRes = await request(server, 'POST', '/hub-api/sync/system', {
+            system_id: 951,
+            planets: [{ game_planet_id: 95101, planet_index: 1, owner: { id: 701, name: 'Holder', alliance_tag: 'RAID' }, population: 6, starbase: 0, is_sieged: 1 }],
+        });
+        ok('the API-only siege sync succeeds', transitStartRes.status === 200 && transitStartRes.body.success, transitStartRes.body);
+        ok('the system stays secured through an unconfirmed siege',
+            db.prepare(`SELECT is_secured FROM systems WHERE id = 951`).get().is_secured === 1);
+        const transitEndRes = await request(server, 'POST', '/hub-api/sync/system', {
+            system_id: 951,
+            planets: [{ game_planet_id: 95101, planet_index: 1, owner: { id: 701, name: 'Holder', alliance_tag: 'RAID' }, population: 6, starbase: 0, is_sieged: 0 }],
+        });
+        ok('the transit ending succeeds', transitEndRes.status === 200 && transitEndRes.body.success, transitEndRes.body);
+        ok('still secured, and no SYSTEM_SECURED spam for a transit that never actually left', db.prepare(`SELECT is_secured FROM systems WHERE id = 951`).get().is_secured === 1
+            && milestoneCalls.flatMap(c => c.events).filter(e => e.type === 'SYSTEM_SECURED').length === 0,
+            milestoneCalls);
 
         // Several members' tabs each sync the whole galaxy independently, from their own
         // account's viewpoint, and their captures differ in age. Without an ordering key an
