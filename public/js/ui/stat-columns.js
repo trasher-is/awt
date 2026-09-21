@@ -309,7 +309,15 @@ export const PLAYER_COLUMNS = [
     col('logins', 'Logins', { group: 'Player', default: false, render: r => fmtInt(r.logins) }),
 
     col('ranking', 'Rank', { group: 'Progress', default: false, render: r => (r.ranking == null ? '-' : fmtInt(r.ranking)) }),
-    col('level', 'PL', { group: 'Progress', render: r => num(r.level) }),
+    // level_progress_percent/xp_remaining_to_next_level only exist once this player has had
+    // at least one Player/{id} API detail scan (the background sweep is a slow, whole-roster
+    // walk — see players.js's staleness comments) — a player synced only via the list
+    // endpoint has a level but no progress/XP breakdown yet, hence the null-guarded tooltip.
+    col('level', 'PL', {
+        group: 'Progress',
+        render: r => r.level_progress_percent == null ? num(r.level)
+            : `<span title="${r.level_progress_percent}% to next level${r.xp_remaining_to_next_level != null ? ` (${fmtInt(r.xp_remaining_to_next_level)} XP remaining)` : ''}">${num(r.level)}</span>`,
+    }),
     col('science_level', 'SciLvl', { group: 'Progress', head: 'text-blue-300', cell: 'text-blue-300', render: r => num(r.science_level) }),
     col('culture_level', 'CulLvl', { group: 'Progress', head: 'text-purple-300', cell: 'text-purple-300', render: r => num(r.culture_level) }),
     col('points', 'Points', { group: 'Progress', cell: 'text-primary font-medium', render: r => fmtInt(r.points) }),

@@ -142,8 +142,8 @@
     // One player's full detail, including intelligenceReport when the caller has vision.
     // API v1 breaking change (rolled out live 2026-09-21): the bare int playerLevel field
     // is gone, replaced by playerLevelDetails: {level, progressPercent, xpEarnedInLevel,
-    // xpRequiredForNextLevel, xpRemainingToNextLevel, totalXp}. See
-    // mapPlayerDetailToSyncPayload, which reads playerLevelDetails.level.
+    // xpRequiredForNextLevel, xpRemainingToNextLevel, totalXp}. mapPlayerDetailToSyncPayload
+    // carries all six through.
     function getPlayer(id) {
         return requestJson('/api/v1/Player/' + encodeURIComponent(id));
     }
@@ -332,16 +332,22 @@
     // parameter present, even when null).
     function mapPlayerDetailToSyncPayload(d) {
         const intel = d && d.intelligenceReport;
+        // playerLevel was replaced by this playerLevelDetails object in the API v1 change
+        // that shipped live 2026-09-21 — the old bare d.playerLevel read went to null the
+        // moment the field disappeared. Every sub-field is read defensively (a player who
+        // hasn't leveled since their last detail scan is still a normal, complete object;
+        // this guards a malformed/absent one instead).
+        const lvl = d.playerLevelDetails;
+        const int = v => Number.isInteger(v) ? v : null;
         return {
             id: d.id, name: typeof d.name === 'string' ? d.name : null,
             alliance_id: Number.isInteger(d.allianceId) ? d.allianceId : null,
-            // playerLevel was replaced by playerLevelDetails.level in the API v1 change
-            // that shipped live 2026-09-21 — the old bare d.playerLevel read went to null
-            // the moment the field disappeared. playerLevelDetails also carries
-            // progressPercent/xpEarnedInLevel/xpRequiredForNextLevel/
-            // xpRemainingToNextLevel/totalXp, none of which have a column yet.
-            level: d.playerLevelDetails && Number.isInteger(d.playerLevelDetails.level)
-                ? d.playerLevelDetails.level : null,
+            level: int(lvl && lvl.level),
+            level_progress_percent: int(lvl && lvl.progressPercent),
+            xp_earned_in_level: int(lvl && lvl.xpEarnedInLevel),
+            xp_required_for_next_level: int(lvl && lvl.xpRequiredForNextLevel),
+            xp_remaining_to_next_level: int(lvl && lvl.xpRemainingToNextLevel),
+            total_xp: int(lvl && lvl.totalXp),
             points: Number.isInteger(d.pointsScored) ? d.pointsScored : null,
             ranking: Number.isInteger(d.rank) ? d.rank : null,
             country: typeof d.playsFromCountryCode === 'string' ? d.playsFromCountryCode : null,

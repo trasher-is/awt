@@ -814,7 +814,10 @@ function markNewPlayerAnnounced(id) {
 // eco_bonus — those are scrape-only, the API detail response has no data for them.
 const upsertPlayerFromApiDetailStmt = db.prepare(`
     INSERT INTO players (
-        id, name, alliance_id, level, points, ranking, country,
+        id, name, alliance_id, level,
+        level_progress_percent, xp_earned_in_level, xp_required_for_next_level,
+        xp_remaining_to_next_level, total_xp,
+        points, ranking, country,
         is_active_player, joined, logins, last_activity_at, last_login_at, resigned_at,
         number_of_battles, battle_luckiness, multi_status, is_top_permanent_ranker,
         has_supporter_badge, supporter_type,
@@ -822,7 +825,10 @@ const upsertPlayerFromApiDetailStmt = db.prepare(`
         race_growth, race_science, race_culture, race_production, race_speed, race_attack,
         race_defense, race_trader, race_sul, has_intel, intel_updated_at, origin_system
     ) VALUES (
-        @id, @name, @alliance_id, @level, @points, @ranking, @country,
+        @id, @name, @alliance_id, @level,
+        @level_progress_percent, @xp_earned_in_level, @xp_required_for_next_level,
+        @xp_remaining_to_next_level, @total_xp,
+        @points, @ranking, @country,
         @is_active_player, @joined, @logins, @last_activity_at, @last_login_at, @resigned_at,
         @number_of_battles, @battle_luckiness, @multi_status, @is_top_permanent_ranker,
         @has_supporter_badge, @supporter_type,
@@ -833,6 +839,11 @@ const upsertPlayerFromApiDetailStmt = db.prepare(`
         @origin_system
     ) ON CONFLICT(id) DO UPDATE SET
         name=excluded.name, alliance_id=excluded.alliance_id, level=excluded.level,
+        level_progress_percent=excluded.level_progress_percent,
+        xp_earned_in_level=excluded.xp_earned_in_level,
+        xp_required_for_next_level=excluded.xp_required_for_next_level,
+        xp_remaining_to_next_level=excluded.xp_remaining_to_next_level,
+        total_xp=excluded.total_xp,
         points=excluded.points, ranking=excluded.ranking, country=excluded.country,
         is_active_player=excluded.is_active_player, joined=excluded.joined, logins=excluded.logins,
         last_activity_at=excluded.last_activity_at, last_login_at=excluded.last_login_at,
@@ -867,12 +878,20 @@ const upsertPlayerFromApiDetailStmt = db.prepare(`
         has_intel = CASE WHEN excluded.has_intel = 1 THEN 1 ELSE players.has_intel END
 `);
 function upsertPlayerFromApiDetail(player) {
-    // origin_system defaulted here rather than demanded of every caller: better-sqlite3
-    // throws "Missing named parameter" when a key the statement mentions is merely absent
-    // (the same trap that once crashed every detail sync over race_growth — see the
-    // statement's own note), and a caller that has no origin to report should not have to
-    // know that. A null is COALESCEd away in the upsert, so it never erases a known origin.
-    upsertPlayerFromApiDetailStmt.run({ origin_system: null, ...player });
+    // origin_system and the level_progress_percent/xp_* fields are defaulted here rather
+    // than demanded of every caller: better-sqlite3 throws "Missing named parameter" when a
+    // key the statement mentions is merely absent (the same trap that once crashed every
+    // detail sync over race_growth — see the statement's own note), and a caller with
+    // nothing to report for them (older test fixtures, a payload from before the API v1
+    // playerLevelDetails change) should not have to know that. origin_system is COALESCEd
+    // away in the upsert so a null never erases a known origin; the xp_*/level_progress_
+    // percent columns have no such guard and are plain-overwritten, same as level itself.
+    upsertPlayerFromApiDetailStmt.run({
+        origin_system: null,
+        level_progress_percent: null, xp_earned_in_level: null,
+        xp_required_for_next_level: null, xp_remaining_to_next_level: null, total_xp: null,
+        ...player,
+    });
 }
 
 // When is a player's Player/{id} detail stale enough to re-scan? ONE predicate, shared by
