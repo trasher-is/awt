@@ -158,19 +158,32 @@ db.prepare(`UPDATE planets SET owner_id = NULL WHERE game_planet_id IN (90001, 9
 ok('a system with zero real owners is never "secured" (nothing has actually been claimed)',
     systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === 'lost');
 
-// 2026-09-12 fix: a friendly-owned planet under active siege must NOT count towards
-// "secured" — a hostile fleet mid-attack means the system is actively contested, not
-// closed. Real production bug: a system with 6 of 7 friendly-owned planets under siege
+// 2026-09-12 fix: a friendly-owned planet under a CONFIRMED-hostile siege must NOT count
+// towards "secured" — a hostile fleet mid-attack means the system is actively contested,
+// not closed. Real production bug: a system with 6 of 7 friendly-owned planets under siege
 // was still showing as "secured" because this check only ever looked at ownership tags.
 db.prepare(`UPDATE planets SET owner_id = 901 WHERE game_planet_id IN (90001, 90002, 90003)`).run();
 ok('back to fully friendly-owned (sanity check before the siege case)',
     systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === 'secured');
-systems.upsertPlanet(90001, 900, 1, 901, 5, 0, 0, 1); // still RAID-owned, but now under siege
-ok('a friendly planet under active siege is NOT secured, even though every owner is still friendly',
+systems.upsertPlanet(90001, 900, 1, 901, 5, 0, 0, 1, null, 0); // still RAID-owned, but now under a confirmed-hostile siege
+ok('a friendly planet under a confirmed-hostile siege is NOT secured, even though every owner is still friendly',
     systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === 'lost');
 systems.upsertPlanet(90001, 900, 1, 901, 5, 0, 0, 0); // siege lifted
 ok('clearing the siege re-secures the system (a fresh 0->1 transition)',
     systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === 'secured');
+
+// 2026-09-21 fix: an UNCONFIRMED siege (allegiance never resolved — the confirm-scrape only
+// runs while a member has that part of the galaxy map open) must NOT block "secured" either.
+// This is the "using an airport" case: a fleet routed through a captured friendly planet
+// trips the API's bare hasSiege flag with nobody watching live to confirm it, and used to
+// flip the system unsecured-then-secured-again on every transit, spamming the "now fully
+// secured" celebration for something that was never a threat.
+systems.upsertPlanet(90001, 900, 1, 901, 5, 0, 0, 1); // siege_is_friendly left NULL — unconfirmed
+ok('an unconfirmed siege does not un-secure the system',
+    systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === null);
+systems.upsertPlanet(90001, 900, 1, 901, 5, 0, 0, 0); // the transit ends, siege lifts
+ok('and its lifting is not a transition either — nothing to re-announce',
+    systems.checkAndUpdateSystemSecured(900, friendly, ownOnly) === null);
 
 // getBestGuardedInArea / diffAndReplaceBestGuardedAreaWatch (2026-09-12): "all top50 in
 // the area", not just #1/top10 — filters the FULL Best Guarded snapshot down to planets

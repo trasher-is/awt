@@ -349,19 +349,29 @@ function getSystemPlanetsForBot(sysId) {
 // configured NAP/ally, see friendly-alliance-tags.js), AND at least one of those planets
 // is owned by our OWN alliance specifically, not NAP partners alone (2026-09-12e fix — a
 // system entirely held by an ally, with none of it ours, isn't "ours" to call closed). A
-// planet under siege does NOT count as secure either — a hostile fleet mid-attack there
-// means the system is actively contested, not closed — UNLESS the siege is known to be
-// friendly (2026-09-13: the API's hasSiege flag is also true for an allied fleet in orbit,
-// so "sieged" alone was blocking closure on our own allies parking at home; only the live
-// DOM knows which, hence siege_is_friendly). A siege of unknown allegiance still blocks:
-// if we can't tell, assume contested rather than celebrate early.
+// planet under a CONFIRMED-hostile siege does not count as secure either — a hostile fleet
+// mid-attack there means the system is actively contested, not closed.
+//
+// An unconfirmed siege (siege_is_friendly still NULL) does NOT block closure (2026-09-21
+// fix). It used to: only a live DOM view can tell a friendly fleet apart from a hostile
+// one, and the confirm-scrape that would settle it only runs while a member has that part
+// of the galaxy map open (see api-galaxy-seed.js's siegeConfirmQueue) — but "using an
+// airport" (routing a fleet through a captured friendly planet, see docs/player-guide.md)
+// trips the API's bare hasSiege flag without anyone necessarily watching that system live,
+// so the siege comes and goes with allegiance NEVER confirmed. Treating "unsure" as
+// contested meant every such transit flipped the system unsecured and back, re-firing the
+// "now fully secured" celebration in Discord for a friendly fleet passing through — real
+// production spam (issue: "ally sieges ally ... triggering raider"). This is not a new
+// blind spot: SIEGE_STARTED (the actual "under siege!" alarm, in sync.js) already withholds
+// alarming on an unconfirmed siege for the exact same reason, so "secured" merely matches
+// the threat model that alarm already uses instead of being stricter than it for no reason.
 // (This tightened the original 2026-09-12 version, which only required every OWNED planet
 // to be friendly and let Free planets sit uncounted — confirmed live to undercount how
 // "closed" the maintainer actually meant.)
 function isSystemFullyFriendly(sysId, friendlyTagsUpper, ownTagsUpper) {
     const rows = getSystemPlanetsForBotStmt.all(sysId);
     if (!rows.length) return false;
-    const contested = p => p.is_sieged && p.siege_is_friendly !== 1;
+    const contested = p => p.is_sieged && p.siege_is_friendly === 0;
     const allOwnedAndFriendly = rows.every(p =>
         p.owner_id != null && p.ally_tag && friendlyTagsUpper.has(String(p.ally_tag).toUpperCase()) && !contested(p));
     if (!allOwnedAndFriendly) return false;
