@@ -8,7 +8,8 @@ database, and exposes that back through a dashboard and a Discord bot.
 The dashboard tracks where members' fleets actually are: a Fleet Locations panel
 cross-matches the game's own rankings against live vision to say whether a fleet
 is home, parked elsewhere, or away, and each player's profile shows a 5-day
-sighting history merged from rankings, battle reports, and vision.
+sighting history merged from rankings, battle reports, and vision. This is new
+and still being shaken out, so treat its output with some skepticism.
 
 ## How it fits together
 
