@@ -132,11 +132,18 @@
 
     // All active players (no filter): [{id, allianceId, isActivePlayer, name, allianceTag,
     // joinedAt, playerLevel, playsFromCountryCode, pointsScored, rank}].
+    // API v1 breaking change (rolled out live 2026-09-21): playerLevel here is now a
+    // decimal, not an int — e.g. 2.65 means Level 2, 65% of the way to Level 3. The
+    // integer level is Math.floor(playerLevel); see mapPlayersToSyncPayload.
     function getPlayers() {
         return requestJson('/api/v1/Player');
     }
 
     // One player's full detail, including intelligenceReport when the caller has vision.
+    // API v1 breaking change (rolled out live 2026-09-21): the bare int playerLevel field
+    // is gone, replaced by playerLevelDetails: {level, progressPercent, xpEarnedInLevel,
+    // xpRequiredForNextLevel, xpRemainingToNextLevel, totalXp}. See
+    // mapPlayerDetailToSyncPayload, which reads playerLevelDetails.level.
     function getPlayer(id) {
         return requestJson('/api/v1/Player/' + encodeURIComponent(id));
     }
@@ -299,7 +306,12 @@
                 // fresh alliance id with no matching alliances row yet, and the INSERT
                 // threw SqliteError: FOREIGN KEY constraint failed.
                 alliance_tag: typeof p.allianceTag === 'string' ? p.allianceTag : null,
-                level: Number.isInteger(p.playerLevel) ? p.playerLevel : null,
+                // playerLevel is a decimal here (e.g. 2.65 = Level 2, 65% to Level 3) as of
+                // the API v1 change that shipped live 2026-09-21 — floor it to the integer
+                // level this column stores. The old plain Number.isInteger(p.playerLevel)
+                // check silently went to null the moment the API stopped sending an int.
+                level: typeof p.playerLevel === 'number' && Number.isFinite(p.playerLevel)
+                    ? Math.floor(p.playerLevel) : null,
                 points: Number.isInteger(p.pointsScored) ? p.pointsScored : null,
                 rank: Number.isInteger(p.rank) ? p.rank : null,
                 country: typeof p.playsFromCountryCode === 'string' ? p.playsFromCountryCode : null,
@@ -323,7 +335,13 @@
         return {
             id: d.id, name: typeof d.name === 'string' ? d.name : null,
             alliance_id: Number.isInteger(d.allianceId) ? d.allianceId : null,
-            level: Number.isInteger(d.playerLevel) ? d.playerLevel : null,
+            // playerLevel was replaced by playerLevelDetails.level in the API v1 change
+            // that shipped live 2026-09-21 — the old bare d.playerLevel read went to null
+            // the moment the field disappeared. playerLevelDetails also carries
+            // progressPercent/xpEarnedInLevel/xpRequiredForNextLevel/
+            // xpRemainingToNextLevel/totalXp, none of which have a column yet.
+            level: d.playerLevelDetails && Number.isInteger(d.playerLevelDetails.level)
+                ? d.playerLevelDetails.level : null,
             points: Number.isInteger(d.pointsScored) ? d.pointsScored : null,
             ranking: Number.isInteger(d.rank) ? d.rank : null,
             country: typeof d.playsFromCountryCode === 'string' ? d.playsFromCountryCode : null,
