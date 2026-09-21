@@ -257,6 +257,47 @@ ok('upsertPlayerFromApiDetail with has_intel=1 DOES write intel columns',
     afterDetailWithIntel.biology === 40 && afterDetailWithIntel.race_attack === 6
     && afterDetailWithIntel.artefact === 'real-artefact', afterDetailWithIntel);
 
+// playerLevelDetails fields (API v1 change, live 2026-09-21): plain-overwritten every
+// detail sync, same as level itself — no has_intel guard, since these have nothing to do
+// with the alliance-vision-gated intelligenceReport.
+players.upsertPlayerFromApiDetail({
+    id: 701, name: 'Detail Name 3', alliance_id: null, level: 52, points: 6200, ranking: 2,
+    country: 'US', is_active_player: 1, joined: '2026-08-01T00:00:00Z', logins: 14,
+    last_activity_at: '2026-08-29T12:00:00Z', last_login_at: '2026-08-29T11:00:00Z',
+    resigned_at: null, number_of_battles: 6, battle_luckiness: 0.3, multi_status: 'clean',
+    is_top_permanent_ranker: 0, has_supporter_badge: 1, supporter_type: 'gold',
+    has_intel: 0, biology: 40, economy: 41, energy: 42, mathematics: 43, physics: 44, social: 45,
+    trade_revenue: 46, artefact: 'real-artefact',
+    race_growth: 1, race_science: 2, race_culture: 3, race_production: 4, race_speed: 5,
+    race_attack: 6, race_defense: 7, race_trader: 8, race_sul: 9,
+    level_progress_percent: 65, xp_earned_in_level: 74, xp_required_for_next_level: 114,
+    xp_remaining_to_next_level: 40, total_xp: 574,
+});
+const afterDetailXp = players.getPlayerFullById(701);
+ok('upsertPlayerFromApiDetail writes level_progress_percent/xp_* fields',
+    afterDetailXp.level_progress_percent === 65 && afterDetailXp.xp_earned_in_level === 74
+    && afterDetailXp.xp_required_for_next_level === 114 && afterDetailXp.xp_remaining_to_next_level === 40
+    && afterDetailXp.total_xp === 574, afterDetailXp);
+
+// A caller that omits them entirely (an old test fixture, or a payload from before the
+// playerLevelDetails change) must not crash with "Missing named parameter" — it should
+// just overwrite them to null, the same as any other un-supplied detail field.
+players.upsertPlayerFromApiDetail({
+    id: 701, name: 'Detail Name 4', alliance_id: null, level: 53, points: 6300, ranking: 2,
+    country: 'US', is_active_player: 1, joined: '2026-08-01T00:00:00Z', logins: 15,
+    last_activity_at: '2026-08-29T13:00:00Z', last_login_at: '2026-08-29T12:00:00Z',
+    resigned_at: null, number_of_battles: 7, battle_luckiness: 0.4, multi_status: 'clean',
+    is_top_permanent_ranker: 0, has_supporter_badge: 1, supporter_type: 'gold',
+    has_intel: 0, biology: 40, economy: 41, energy: 42, mathematics: 43, physics: 44, social: 45,
+    trade_revenue: 46, artefact: 'real-artefact',
+    race_growth: 1, race_science: 2, race_culture: 3, race_production: 4, race_speed: 5,
+    race_attack: 6, race_defense: 7, race_trader: 8, race_sul: 9,
+});
+const afterDetailXpOmitted = players.getPlayerFullById(701);
+ok('a payload that omits the xp_* fields does not throw, and overwrites them to null',
+    afterDetailXpOmitted.level_progress_percent === null && afterDetailXpOmitted.xp_earned_in_level === null
+    && afterDetailXpOmitted.total_xp === null, afterDetailXpOmitted);
+
 players.upsertPlayerBasic(702, 'Second Player', null);
 players.upsertPlayerBasic(703, 'Third Player', null);
 const stale = players.getStalePlayerIdsForApiScan(10);

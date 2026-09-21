@@ -284,6 +284,16 @@ function initDatabase() {
     // battle_reports.announced (see routes/sync.js's /sync/battle-reports handler).
     addColumn('players', 'announced_new_player', 'INTEGER DEFAULT 0');
 
+    // Detail-only (Player/{id} playerLevelDetails, API v1 change live 2026-09-21): null
+    // until a player has had at least one API detail scan. level_progress_percent duplicates
+    // information already implied by total_xp/xp_required_for_next_level, but the API sends
+    // it pre-computed and rounding it back out of the XP fields is unnecessary work.
+    addColumn('players', 'level_progress_percent', 'INTEGER');
+    addColumn('players', 'xp_earned_in_level', 'INTEGER');
+    addColumn('players', 'xp_required_for_next_level', 'INTEGER');
+    addColumn('players', 'xp_remaining_to_next_level', 'INTEGER');
+    addColumn('players', 'total_xp', 'INTEGER');
+
     // NOTE: the migrations for player_logins.total_logins and fleets.arrival_at used to
     // sit here, above the CREATE TABLE statements for those two tables. On a fresh
     // database they therefore failed with "no such table", the error was swallowed, and

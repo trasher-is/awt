@@ -370,7 +370,12 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
     // playerLevel was replaced by playerLevelDetails.level since the API v1 change that
     // shipped live 2026-09-21.
     const fullDetail = AWApi.mapPlayerDetailToSyncPayload({
-        id: 413, name: 'Someplayer', allianceId: 9, playerLevelDetails: { level: 5 }, pointsScored: 100,
+        id: 413, name: 'Someplayer', allianceId: 9,
+        playerLevelDetails: {
+            level: 5, progressPercent: 65, xpEarnedInLevel: 74, xpRequiredForNextLevel: 114,
+            xpRemainingToNextLevel: 40, totalXp: 574,
+        },
+        pointsScored: 100,
         rank: 12, playsFromCountryCode: 'DE', isActivePlayer: true, joinedAt: '2026-08-01T00:00:00Z',
         numberOfLogins: 40, lastActivityAt: '2026-08-30T10:00:00Z', lastLoginAt: '2026-08-30T09:00:00Z',
         resignedAt: null, numberOfBattles: 3, battleLuckiness: 1.2, multiStatus: 'clean',
@@ -385,6 +390,10 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
         fullDetail.id === 413 && fullDetail.name === 'Someplayer' && fullDetail.alliance_id === 9
         && fullDetail.level === 5 && fullDetail.points === 100 && fullDetail.ranking === 12
         && fullDetail.country === 'DE' && fullDetail.joined === '2026-08-01T00:00:00Z', fullDetail);
+    ok('the full playerLevelDetails sub-object (progress/xp fields) carries through',
+        fullDetail.level_progress_percent === 65 && fullDetail.xp_earned_in_level === 74
+        && fullDetail.xp_required_for_next_level === 114 && fullDetail.xp_remaining_to_next_level === 40
+        && fullDetail.total_xp === 574, fullDetail);
     ok('has_intel is 1 when intelligenceReport is present', fullDetail.has_intel === 1, fullDetail);
     ok('every race_* field carries through when the race sub-object is complete',
         fullDetail.race_growth === 1 && fullDetail.race_sul === 9, fullDetail);
@@ -439,6 +448,11 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
     });
     ok('a bare playerLevel with no playerLevelDetails maps level to null, not the stale int',
         missingLevelDetails.level === null, missingLevelDetails.level);
+    ok('and every level_progress_percent/xp_* field is null too, not undefined (dropped by JSON.stringify)',
+        missingLevelDetails.level_progress_percent === null && missingLevelDetails.xp_earned_in_level === null
+        && missingLevelDetails.xp_required_for_next_level === null
+        && missingLevelDetails.xp_remaining_to_next_level === null && missingLevelDetails.total_xp === null,
+        missingLevelDetails);
 
     console.log('\n── Source scan: the rules this file lives under ' + '─'.repeat(28));
     // Comments stripped first so a comment describing an old rule can never trip these.
