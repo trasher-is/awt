@@ -334,11 +334,13 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
         noAlliancesField.alliances.length === 0, noAlliancesField);
 
     console.log('\n── mapPlayersToSyncPayload: the ONE API→/sync/player-list mapper ' + '─'.repeat(12));
-    // Synthetic players in the getPlayers/searchPlayers (ListPlayer) shape.
+    // Synthetic players in the getPlayers/searchPlayers (ListPlayer) shape. playerLevel is
+    // a decimal since the API v1 change that shipped live 2026-09-21 (2.65 = Level 2, 65%
+    // to Level 3) — the mapper must floor it, not require an int.
     const apiPlayers = [
         {
             id: 601, name: 'Zenobia', allianceId: 77, isActivePlayer: true,
-            joinedAt: '2026-08-01T00:00:00Z', playerLevel: 12, playsFromCountryCode: 'US',
+            joinedAt: '2026-08-01T00:00:00Z', playerLevel: 12.65, playsFromCountryCode: 'US',
             pointsScored: 5000, rank: 3,
         },
         {
@@ -350,7 +352,7 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
     const playersPayload = AWApi.mapPlayersToSyncPayload(apiPlayers);
     ok('every player is mapped', playersPayload.players.length === 2, playersPayload.players.length);
     const [pl1, pl2] = playersPayload.players;
-    ok('id/name/alliance_id/level/points/rank/country/joined carry through',
+    ok('id/name/alliance_id/points/rank/country/joined carry through, level is floored',
         pl1.id === 601 && pl1.name === 'Zenobia' && pl1.alliance_id === 77 && pl1.level === 12
         && pl1.points === 5000 && pl1.rank === 3 && pl1.country === 'US'
         && pl1.joined === '2026-08-01T00:00:00Z', pl1);
@@ -365,8 +367,10 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
 
     console.log('\n── mapPlayerDetailToSyncPayload: the ONE API→/sync/player-detail mapper ' + '─'.repeat(5));
     // Real-shaped Player/{id} detail with a FULL intelligenceReport.race object.
+    // playerLevel was replaced by playerLevelDetails.level since the API v1 change that
+    // shipped live 2026-09-21.
     const fullDetail = AWApi.mapPlayerDetailToSyncPayload({
-        id: 413, name: 'Someplayer', allianceId: 9, playerLevel: 5, pointsScored: 100,
+        id: 413, name: 'Someplayer', allianceId: 9, playerLevelDetails: { level: 5 }, pointsScored: 100,
         rank: 12, playsFromCountryCode: 'DE', isActivePlayer: true, joinedAt: '2026-08-01T00:00:00Z',
         numberOfLogins: 40, lastActivityAt: '2026-08-30T10:00:00Z', lastLoginAt: '2026-08-30T09:00:00Z',
         resignedAt: null, numberOfBattles: 3, battleLuckiness: 1.2, multiStatus: 'clean',
@@ -392,7 +396,7 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
     // undefined is dropped entirely by JSON.stringify on the way to the server, which
     // crashed better-sqlite3's named-parameter binding.
     const partialRaceDetail = AWApi.mapPlayerDetailToSyncPayload({
-        id: 414, name: 'Otherplayer', allianceId: null, playerLevel: 5, pointsScored: 100,
+        id: 414, name: 'Otherplayer', allianceId: null, playerLevelDetails: { level: 5 }, pointsScored: 100,
         rank: null, playsFromCountryCode: null, isActivePlayer: true, joinedAt: null,
         numberOfLogins: null, lastActivityAt: null, lastLoginAt: null, resignedAt: null,
         numberOfBattles: null, battleLuckiness: null, multiStatus: null,
@@ -410,7 +414,7 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
         && JSON.parse(JSON.stringify(partialRaceDetail)).race_growth === null, partialRaceDetail);
 
     const noIntelDetail = AWApi.mapPlayerDetailToSyncPayload({
-        id: 415, name: 'NoIntel', allianceId: null, playerLevel: 1, pointsScored: 0,
+        id: 415, name: 'NoIntel', allianceId: null, playerLevelDetails: { level: 1 }, pointsScored: 0,
         rank: null, playsFromCountryCode: null, isActivePlayer: true, joinedAt: null,
         numberOfLogins: null, lastActivityAt: null, lastLoginAt: null, resignedAt: null,
         numberOfBattles: null, battleLuckiness: null, multiStatus: null,
@@ -420,6 +424,21 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
     ok('has_intel is 0 and every intel/race field is null when there is no intelligenceReport',
         noIntelDetail.has_intel === 0 && noIntelDetail.biology === null && noIntelDetail.race_growth === null,
         noIntelDetail);
+
+    // Regression: a detail object still carrying the pre-2026-09-21 bare playerLevel int
+    // (or missing playerLevelDetails entirely) must map level to null, not throw or read
+    // the stale field — the API no longer sends it, so trusting it would silently mask a
+    // future re-break.
+    const missingLevelDetails = AWApi.mapPlayerDetailToSyncPayload({
+        id: 416, name: 'StaleShape', allianceId: null, playerLevel: 5, pointsScored: 0,
+        rank: null, playsFromCountryCode: null, isActivePlayer: true, joinedAt: null,
+        numberOfLogins: null, lastActivityAt: null, lastLoginAt: null, resignedAt: null,
+        numberOfBattles: null, battleLuckiness: null, multiStatus: null,
+        isTopPermanentRanker: false, hasSupporterBadge: false, supporterType: null,
+        intelligenceReport: null,
+    });
+    ok('a bare playerLevel with no playerLevelDetails maps level to null, not the stale int',
+        missingLevelDetails.level === null, missingLevelDetails.level);
 
     console.log('\n── Source scan: the rules this file lives under ' + '─'.repeat(28));
     // Comments stripped first so a comment describing an old rule can never trip these.
