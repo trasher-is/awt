@@ -22,12 +22,15 @@
 // hole in our intel into a claim about the galaxy, so unscanned systems are hollow rings
 // and scanned ones are filled.
 import { esc } from '../utils/escape.js';
+import '../utils/fleet-traffic.js';   // side-effect import: the ship-position rule, defined once
 import '../utils/vision-model.js';   // side-effect import: the !vision rule, defined once
 import '../utils/travel-model.js';   // side-effect import: THE travel formula, defined once
 
 const { coverage: visionCoverage, visionRadius, bioNeededFor, systemDistance } = globalThis.AWVision;
 // All travel math comes from the shared model — this file holds no formula constants.
 const { calcTravelSeconds, isochroneRadius } = globalThis.AWTravelModel;
+// The ship-position rule, shared with the server that answers /routes/traffic.
+const fleetTraffic = globalThis.AWFleetTraffic;
 
 const PREFS_KEY = 'awt.galaxyMap.layers.v1';
 
@@ -40,6 +43,7 @@ const DEFAULT_LAYERS = {
     isochrones: false,
     claims: false,
     strike: false,
+    traffic: false,
 };
 
 // Isochrone controls: origin system, the fleet the rings are drawn for, and the three
@@ -451,6 +455,91 @@ function draw() {
         }
     }
 
+    // --- Traffic: our fleets, where the plan says they are ------------------
+    // Positions are recomputed here rather than taken from the payload, using the same
+    // module the server answered from, so a ship moves smoothly between the once-a-minute
+    // refreshes instead of teleporting when one lands.
+    if (layers.traffic) {
+        const now = Date.now();
+
+        for (const route of state.traffic.ships) {
+            const live = fleetTraffic.shipsFor([route], { now })[0];
+            if (!live) continue;
+
+            // The course, faint, so a ship is read as being somewhere along a path.
+            ctx.strokeStyle = live.status === 'unscheduled' ? 'rgba(148,163,184,0.35)' : 'rgba(34,211,238,0.35)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash(live.status === 'unscheduled' ? [2, 5] : [7, 5]);
+            ctx.beginPath();
+            const first = toScreen(live.legs[0].from.x, live.legs[0].from.y);
+            ctx.moveTo(first.sx, first.sy);
+            for (const leg of live.legs) {
+                const end = toScreen(leg.to.x, leg.to.y);
+                ctx.lineTo(end.sx, end.sy);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            if (!live.position) continue;
+            const { sx, sy } = toScreen(live.position.x, live.position.y);
+            const heading = live.heading || 0;
+            const flying = live.status === 'flying';
+
+            // A wake behind a moving ship: short, and only while it is actually moving.
+            if (flying) {
+                const tail = 22;
+                const grad = ctx.createLinearGradient(sx, sy, sx - Math.cos(heading) * tail, sy - Math.sin(heading) * tail);
+                grad.addColorStop(0, 'rgba(34,211,238,0.55)');
+                grad.addColorStop(1, 'rgba(34,211,238,0)');
+                ctx.strokeStyle = grad;
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.moveTo(sx, sy);
+                ctx.lineTo(sx - Math.cos(heading) * tail, sy - Math.sin(heading) * tail);
+                ctx.stroke();
+            }
+
+            ctx.save();
+            ctx.translate(sx, sy);
+            ctx.rotate(heading);
+            ctx.fillStyle = flying ? 'rgba(165,243,252,0.95)' : 'rgba(148,163,184,0.8)';
+            ctx.beginPath();
+            ctx.moveTo(8, 0);
+            ctx.lineTo(-5, 4.5);
+            ctx.lineTo(-2.5, 0);
+            ctx.lineTo(-5, -4.5);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // Sighted fleets: a destination and a countdown. No course is drawn, because the
+        // scrape never saw where they left from — see fleet-traffic.js.
+        for (const marker of state.traffic.inbound) {
+            const eta = marker.arrivesAt - now;
+            if (eta <= 0) continue;
+            const { sx, sy } = toScreen(marker.x, marker.y);
+            // One pulse per second, tightening as the landing approaches.
+            const phase = (now % 1000) / 1000;
+            ctx.strokeStyle = `rgba(34,211,238,${0.55 * (1 - phase)})`;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(sx, sy, 8 + phase * 12, 0, Math.PI * 2);
+            ctx.stroke();
+
+            if (state.scale > 10) {
+                const text = fmtCountdown(eta);
+                ctx.font = `${desktop ? 11 : 9}px ui-monospace, monospace`;
+                ctx.textAlign = 'center';
+                const width = ctx.measureText(text).width;
+                ctx.fillStyle = 'rgba(0,0,0,0.65)';
+                ctx.fillRect(sx - width / 2 - 3, sy + 12, width + 6, 13);
+                ctx.fillStyle = 'rgba(165,243,252,0.95)';
+                ctx.fillText(text, sx, sy + 22);
+            }
+        }
+    }
+
     // Claim link labels last, on top of every dot/ring so the number is never occluded.
     if (layers.claims && state.claimLinks.length) {
         ctx.font = `${desktop ? 11 : 9}px ui-sans-serif, system-ui, sans-serif`;
@@ -571,6 +660,24 @@ function tooltipHtml(s) {
                 + ` ${esc(plan.origin_owner || '?')} · ${fmtHours(plan.travelHours)} flight`
                 + ` · lands ${esc(fmtClock(plan.arriveAt))}</div>`);
             if (!t.sampled) lines.push('<div class="text-amber-500/90">never sampled — scored at the 50% prior, not measured</div>');
+        }
+    }
+
+    if (state.layers.traffic) {
+        const arriving = state.traffic.inbound.filter(f => f.system_id === s.id);
+        for (const f of arriving.slice(0, 3)) {
+            const ships = [
+                f.ships.destroyers ? `${f.ships.destroyers} D` : null,
+                f.ships.cruisers ? `${f.ships.cruisers} C` : null,
+                f.ships.battleships ? `${f.ships.battleships} B` : null,
+            ].filter(Boolean).join(' ');
+            lines.push(`<div class="mt-1 text-cyan-300">${esc(f.owner || 'a fleet')} landing on #${f.planet_index}`
+                + ` in ${esc(fmtCountdown(f.arrivesAt - Date.now()))}${ships ? ` — ${esc(ships)}` : ''}</div>`);
+        }
+        const heading = state.traffic.ships.filter(r => (r.legs || []).some(l => l.to.system_id === s.id));
+        for (const r of heading.slice(0, 3)) {
+            lines.push(`<div class="mt-1 text-cyan-300/80">Route “${esc(r.title || 'untitled')}”`
+                + `${r.author ? ` (${esc(r.author)})` : ''} — ${esc(r.status)}</div>`);
         }
     }
 
@@ -1320,6 +1427,81 @@ function wireStrikeControls() {
     document.getElementById('gm-strike-replan')?.addEventListener('click', () => { onChange(); recomputeStrike(); });
 }
 
+// ─── TRAFFIC ─────────────────────────────────────────────────────────────────
+// Our own fleets, drawn where the plan says they are. Two sources, deliberately drawn
+// differently: a saved route is a path the hub knows both ends of, so a ship moves along
+// it; a sighted fleet is a destination and a clock with no origin, so it gets a countdown
+// and no course. public/js/utils/fleet-traffic.js has the reasoning.
+//
+// The data is refreshed once a minute. The POSITIONS are recomputed every frame from the
+// same module, because a fleet that only moved when the fetch landed would look broken and
+// would be wrong in between.
+
+const TRAFFIC_REFRESH_MS = 60 * 1000;
+// Ships cross the galaxy over hours, so sixty frames a second buys nothing but a warm
+// laptop. Eight is smooth enough for something moving a few pixels a minute.
+const TRAFFIC_FRAME_MS = 125;
+
+function fmtCountdown(ms) {
+    if (!(ms > 0)) return 'landing';
+    const total = Math.round(ms / 1000);
+    const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60);
+    if (h >= 1) return `${h}h${String(m).padStart(2, '0')}`;
+    const sec = total % 60;
+    return `${m}m${String(sec).padStart(2, '0')}`;
+}
+
+function stopTrafficLoop() {
+    if (state.trafficTimer) { clearInterval(state.trafficTimer); state.trafficTimer = null; }
+    if (state.trafficFrame) { cancelAnimationFrame(state.trafficFrame); state.trafficFrame = null; }
+}
+
+function startTrafficLoop() {
+    stopTrafficLoop();
+    // requestAnimationFrame rather than a bare interval: the browser stops calling it when
+    // the tab is hidden, so a dashboard left open in a background tab does not animate a
+    // canvas nobody is looking at. The timestamp gate keeps it off the 60Hz treadmill.
+    let last = 0;
+    const tick = (ts) => {
+        if (!state.layers.traffic) { state.trafficFrame = null; return; }
+        if (ts - last >= TRAFFIC_FRAME_MS) { last = ts; draw(); updateTrafficStatus(); }
+        state.trafficFrame = requestAnimationFrame(tick);
+    };
+    state.trafficFrame = requestAnimationFrame(tick);
+    state.trafficTimer = setInterval(loadTraffic, TRAFFIC_REFRESH_MS);
+}
+
+// Recomputed from the live positions, not read off the payload: the status the server sent
+// is a minute old at worst, and a fleet that landed thirty seconds after the fetch would
+// still be counted "on course" until the next one.
+function updateTrafficStatus() {
+    const status = document.getElementById('gm-traffic-status');
+    if (!status) return;
+    const now = Date.now();
+    const live = fleetTraffic.shipsFor(state.traffic.ships, { now });
+    const flying = live.filter(s => s.status === 'flying').length;
+    const landing = state.traffic.inbound.filter(f => f.arrivesAt > now).length;
+    status.textContent = live.length || landing
+        ? `${flying} on course · ${live.length - flying} planned · ${landing} landing`
+        : 'nothing of ours is moving';
+}
+
+async function loadTraffic() {
+    if (!state.layers.traffic) return;
+    const status = document.getElementById('gm-traffic-status');
+    try {
+        const res = await fetch('/hub-api/routes/traffic');
+        const body = await res.json();
+        if (!body.success) throw new Error(body.error || 'failed');
+        state.traffic = { ships: body.ships || [], inbound: body.inbound || [] };
+        updateTrafficStatus();
+    } catch (err) {
+        state.traffic = { ships: [], inbound: [] };
+        if (status) status.textContent = 'traffic unavailable';
+    }
+    draw();
+}
+
 // ─── SETUP ───────────────────────────────────────────────────────────────────
 
 export async function initGalaxyMap(userId) {
@@ -1350,6 +1532,9 @@ export async function initGalaxyMap(userId) {
         iso: sanitizeIso(savedIso),
         strikeCfg: sanitizeStrike(savedStrike),
         strike: { origins: [], targets: [] },
+        traffic: { ships: [], inbound: [] },
+        trafficTimer: null,
+        trafficFrame: null,
         isoOrigin: null,
         isoRings: [],
         isoBands: new Map(),
@@ -1380,6 +1565,10 @@ export async function initGalaxyMap(userId) {
             if (key === 'isochrones') { syncIsoControlsVisibility(); recomputeIsochrones(); }
             if (key === 'claims') syncClaimsControlsVisibility();
             if (key === 'strike') { syncStrikeControlsVisibility(); recomputeStrike(); }
+            if (key === 'traffic') {
+                document.getElementById('gm-traffic-controls')?.classList.toggle('hidden', !state.layers.traffic);
+                if (state.layers.traffic) { loadTraffic(); startTrafficLoop(); } else { stopTrafficLoop(); }
+            }
             renderLegend();
             renderCoverage();
             draw();
@@ -1393,6 +1582,8 @@ export async function initGalaxyMap(userId) {
     syncStrikeControlsVisibility();
     reflectStrikeControls();
     wireStrikeControls();
+    document.getElementById('gm-traffic-controls')?.classList.toggle('hidden', !state.layers.traffic);
+    if (state.layers.traffic) { loadTraffic(); startTrafficLoop(); }
     syncClaimsControlsVisibility();
     wireClaimsSystemPicker();
     wireClaimsControls();
@@ -1411,6 +1602,8 @@ export async function initGalaxyMap(userId) {
     document.getElementById('gm-refresh')?.addEventListener('click', loadData);
     document.getElementById('close-galaxy-map-btn')?.addEventListener('click', () => {
         document.getElementById('galaxy-map-panel')?.classList.replace('translate-x-0', 'translate-x-full');
+        // A closed panel must not keep animating a canvas nobody can see.
+        stopTrafficLoop();
     });
 
     // --- pan / zoom / hover ---
