@@ -19,6 +19,9 @@ const { parseTimestamp } = require('../public/js/utils/sqlite-time.js');
 const battlePointsRepo = require('./repositories/battlePoints');
 const battleReportsRepo = require('./repositories/battleReports');
 const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
+// A player name is chosen by another player, so it reaches Discord through the same
+// mention defuser every other posted name does.
+const { defuseMentions } = require('./utils/discord-post');
 const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require('./utils/covering');
 // The battle model — the same physical file the dashboard calculator imports, so
 // !battle and the web calculator cannot drift apart again. See docs/battle-model.md.
@@ -568,7 +571,8 @@ async function handleMessage(message) {
                 { name: '`!lastseen <player_name>`', value: 'Shows up to 5 recent system/planet locations a player was involved in a battle report or News-page bombardment at, on either side, newest first.\n*Example: `!lastseen Hkiller89`*' },
                 { name: '`!8ball <question>`', value: 'Ask the magic 8-ball a question.\n*Example: `!8ball will we win this round?`*' }
             )
-            .setFooter({ text: 'AWT Intelligence Hub' });
+            // The eggs (!42, !hail, !warp) are deliberately not listed. This is the hint.
+            .setFooter({ text: 'AWT Intelligence Hub · not everything it answers to is on this list' });
 
         return message.reply({ embeds: [embed] });
     }
@@ -816,6 +820,102 @@ async function handleMessage(message) {
                     `${rows}\n\`\`\`\n${tail.join('\n')}`)
                 .setColor('#10b981')
                 .setFooter({ text: `${curve.battles} recorded battles${curve.skipped ? `, ${curve.skipped} without both combat values` : ''}. !price <your CV> <their CV> for one attack.` })],
+        });
+    }
+
+    // ----------------------------------------------------
+    // EASTER EGGS - not in !help on purpose; its footer hints that they exist
+    // ----------------------------------------------------
+    // Three rules they keep, so a joke cannot cost anything:
+    //   • they read the local database and never call the game. The rate limit is a
+    //     promise to the game's administrator and a gag is not a reason to spend it.
+    //   • they never write anything, never ping anyone, and never post on their own.
+    //   • the numbers in them are real. An egg that made statistics up would be a small
+    //     lie sitting inside a tool whose whole value is that its numbers are checkable.
+
+    // !42 — the answer, plus what this hub has actually been watching.
+    if (command === '42' || command === 'answer') {
+        const one = (sql) => { try { return db.prepare(sql).get(); } catch (err) { return null; } };
+        const battles = one(`SELECT COUNT(*) AS n, MIN(started_at) AS first FROM battle_reports`) || {};
+        const owners = one(`SELECT COUNT(*) AS n FROM planet_events WHERE event_type_id =
+            (SELECT id FROM event_types WHERE name = 'OWNER_CHANGE')`) || {};
+        const systems = one(`SELECT COUNT(*) AS n FROM systems`) || {};
+        const samples = one(`SELECT COUNT(*) AS n FROM player_login_samples`) || {};
+        const firstMs = battles.first ? Date.parse(battles.first) : NaN;
+        const days = Number.isFinite(firstMs) ? Math.max(0, Math.round((Date.now() - firstMs) / 86400000)) : null;
+
+        return message.reply({
+            embeds: [new EmbedBuilder()
+                .setTitle('42')
+                .setDescription([
+                    'The Answer to the Ultimate Question of Life, the Universe, and Everything.',
+                    '',
+                    'The Question is still unknown. In the meantime, this hub has been paying attention:',
+                    days === null ? null : `• watching for **${days}** day${days === 1 ? '' : 's'}`,
+                    `• **${(battles.n || 0).toLocaleString()}** battles on record`,
+                    `• **${(owners.n || 0).toLocaleString()}** planets seen changing hands`,
+                    `• **${(systems.n || 0).toLocaleString()}** systems mapped`,
+                    `• **${(samples.n || 0).toLocaleString()}** scans of who was awake`,
+                ].filter(Boolean).join('\n'))
+                .setColor('#5865F2')
+                .setFooter({ text: 'Mostly harmless.' })],
+        });
+    }
+
+    // !hail <player> — opens hailing frequencies, and answers with the real last-activity
+    // the hub has on file, because a joke that also answers the question is a better joke.
+    if (command === 'hail') {
+        const name = args.join(' ').trim();
+        if (!name) return message.reply('📡 Hailing frequencies open. To whom? `!hail <player>`');
+
+        const player = playersRepo.getPlayerFullByName(name);
+        if (!player) {
+            return message.reply(`📡 Hailing **${defuseMentions(name)}**… no such vessel on any chart we hold.`);
+        }
+
+        const seenAt = player.last_activity_at || player.last_login_at || null;
+        const seenMs = seenAt ? Date.parse(String(seenAt).replace(' ', 'T') + (String(seenAt).endsWith('Z') || /[+-]\d\d:?\d\d$/.test(String(seenAt)) ? '' : 'Z')) : NaN;
+        const relative = Number.isFinite(seenMs) ? `<t:${Math.floor(seenMs / 1000)}:R>` : null;
+        const quiet = Number.isFinite(seenMs) ? (Date.now() - seenMs) / 3600000 : null;
+
+        const line = !relative
+            ? 'No response. We have never caught them at the keyboard.'
+            : quiet < 1 ? `**Response received.** They were active ${relative}.`
+                : quiet < 24 ? `Faint carrier signal. Last active ${relative}.`
+                    : `No response. Last active ${relative} — the lights are on and nobody is aboard.`;
+
+        return message.reply({
+            embeds: [new EmbedBuilder()
+                .setTitle(`📡 Hailing ${defuseMentions(player.name)}`)
+                .setDescription(line)
+                .setColor(quiet !== null && quiet < 1 ? '#22c55e' : quiet !== null && quiet < 24 ? '#f59e0b' : '#64748b')
+                .setFooter({ text: 'Hailing frequencies closed.' })],
+        });
+    }
+
+    // !warp <factor> — the Star Trek speed, against what this galaxy actually costs to
+    // cross. The second number is not a joke: it comes from the same travel model !tt uses.
+    if (command === 'warp') {
+        const factor = Number(args[0]);
+        if (!Number.isFinite(factor) || factor <= 0 || factor >= 10) {
+            return message.reply('🚀 `!warp <factor>` — warp 1 to 9.9. Warp 10 is not a speed, it is a boundary condition.');
+        }
+        // The original series scale: v = w^(10/3) x c.
+        const c = Math.pow(factor, 10 / 3);
+        // One map unit between two systems, planet 1 to planet 1, standing fleet.
+        const seconds = calcTravelSeconds(0, 0, 1, 1, 0, 1, 0, 0, false);
+        return message.reply({
+            embeds: [new EmbedBuilder()
+                .setTitle(`🚀 Warp ${factor}`)
+                .setDescription([
+                    `**${c.toFixed(1)}×** the speed of light, on the original scale.`,
+                    '',
+                    `Out here, one map unit between two systems takes a standing fleet **${formatTime(seconds)}**`,
+                    'at energy 0 and race speed 0. The galaxy is not impressed by your warp core.',
+                    '',
+                    '_Energy levels are the only warp drive this game has: `!tt` will do the real sums._',
+                ].join('\n'))
+                .setColor('#22d3ee')],
         });
     }
 
