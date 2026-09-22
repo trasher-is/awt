@@ -1,5 +1,6 @@
 import { initSpy } from './core/spy.js';
 import { reloadWrapperIfPreVersionWatch } from './core/stale-wrapper-reload.js';
+import { initEasterEggs } from './core/easter-eggs.js';
 
 console.log("[Alliance Tools] Extension Core Engine Loaded.");
 
@@ -15,6 +16,11 @@ if (reloadWrapperIfPreVersionWatch()) {
 }
 
 initSpy();
+
+// One deliberate, harmless decoration: ten keys in the right order fly a squadron across
+// the page. It never touches the network or the game's DOM — see the rules at the top of
+// easter-eggs.js, which its own test enforces by scanning the source.
+initEasterEggs();
 
 // The alliance scrape walks every member's profile one request at a time, so it has to run
 // once per visit to that page - not once per DOM mutation. The observer below fires on
