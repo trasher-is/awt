@@ -496,6 +496,182 @@ router.get('/routes', requireAuth, (req, res) => {
     }
 });
 
+// NOTE ON ORDER: this must be registered BEFORE `GET /routes/:id` below. Express matches
+// in registration order and ':id' happily matches the literal string 'jump-windows', so
+// with this block at the bottom of the file every request here answered the route-planner's
+// own 404 instead. routes-jump-windows.test.js asserts the order by asking for the URL.
+// ─── JUMP WINDOWS: WHERE TO LAUNCH FROM SO THE FLEET LANDS IN THE DARK ────────
+//
+// The Sleep Map panel answers "when is this player away" for the whole roster, and the
+// route planner answers "how long does this flight take". This joins them across every
+// planet we hold: with the launch time fixed at now, each jump point is a different arrival
+// hour, so choosing the origin IS choosing when the fleet lands. src/utils/jump-windows.js
+// has the reasoning, including why the alliance travel halving must not be applied here.
+//
+// Lives in this file rather than intel.js because a launch origin and a flight time are
+// exactly what this router is about.
+const jumpWindows = require('../utils/jump-windows');
+const sleepMap = require('../utils/sleep-map');
+const { ownAllianceTags } = require('../utils/friendly-alliance-tags');
+
+// Planets held by our own alliance: the places a fleet can actually leave from. Allied
+// (NAP) planets are deliberately NOT included — a launch point is somewhere we can put a
+// fleet, which is a stronger relationship than a non-aggression pact.
+const JUMP_POINTS_SQL = `
+    SELECT pl.system_id, pl.planet_index, s.name AS system_name, s.x, s.y,
+           p.id AS owner_id, p.name AS owner_name
+    FROM planets pl
+    JOIN players p ON p.id = pl.owner_id
+    JOIN alliances a ON a.id = p.alliance_id
+    JOIN systems s ON s.id = pl.system_id
+    WHERE UPPER(a.tag) IN (SELECT value FROM json_each(?))
+      AND s.x IS NOT NULL AND s.y IS NOT NULL
+`;
+
+// Everything we could hit: a planet whose owner is not in our own alliance. One row per
+// planet, because a player with six planets offers six different arrival hours.
+const TARGETS_SQL = `
+    SELECT pl.system_id, pl.planet_index, s.name AS system_name, s.x, s.y,
+           pl.population, pl.starbase,
+           p.id AS player_id, p.name AS player_name, p.points, p.level, p.resigned_at,
+           a.tag AS tag
+    FROM planets pl
+    JOIN players p ON p.id = pl.owner_id
+    JOIN systems s ON s.id = pl.system_id
+    LEFT JOIN alliances a ON a.id = p.alliance_id
+    WHERE s.x IS NOT NULL AND s.y IS NOT NULL
+      AND (a.tag IS NULL OR UPPER(a.tag) NOT IN (SELECT value FROM json_each(?)))
+`;
+
+// Building 137 players' hour profiles walks two weeks of login samples — a six-figure row
+// scan, ~1.5s of the ~1.7s this route costs. The profiles depend only on the window in
+// days, NOT on the energy/speed the caller is planning with, so nudging the speed selector
+// on the map rebuilt something that could not have changed. Memoised for two minutes, which
+// is far shorter than the interval at which a scan adds a sample and long enough to cover a
+// member playing with the controls.
+const PROFILE_CACHE_TTL_MS = 2 * 60 * 1000;
+let profileCache = null;   // { days, builtAt, profiles }
+
+const TARGET_SAMPLES_SQL = `
+    SELECT player_id, observed_at, total_logins
+    FROM player_login_samples
+    WHERE observed_at >= datetime('now', ?)
+    ORDER BY player_id, observed_at
+`;
+
+// Every sampled player's hour profile, keyed by player id. Streamed and grouped as the
+// rows arrive: two weeks of samples for the whole galaxy has no reason to be resident.
+function buildProfiles(now, days) {
+    const profiles = new Map();
+    let current = null, samples = [];
+    const flush = () => {
+        if (current === null || samples.length < 20) return;
+        const profile = sleepMap.hourProfile(samples, { now, days });
+        profiles.set(current, { hours: profile.hours, trough: sleepMap.troughWindow(profile.hours) });
+    };
+    for (const row of db.prepare(TARGET_SAMPLES_SQL).iterate(`-${days} days`)) {
+        if (current !== row.player_id) { flush(); current = row.player_id; samples = []; }
+        samples.push({ t: row.observed_at, n: row.total_logins });
+    }
+    flush();
+    return profiles;
+}
+
+router.get('/routes/jump-windows', requireAuth, (req, res) => {
+    // strictInt, not parseInt: this file keeps exactly one parseInt and routes-validation
+    // .test.js asserts that by scanning the source, because parseInt('12abc') === 12 is the
+    // silent misread the strict parser exists to prevent. Out of range or unparseable falls
+    // back to the default rather than being clamped — a caller who sent nonsense has not
+    // asked for the nearest legal value.
+    const intOr = (raw, fallback, min, max) => {
+        const n = strictInt(raw);
+        return Number.isFinite(n) && n >= min && n <= max ? n : fallback;
+    };
+    const energy = intOr(req.query.energy, 0, 0, 100);
+    const raceSpeed = intOr(req.query.speed, 0, RACE_PICK_MIN, RACE_PICK_MAX);
+    const days = intOr(req.query.days, 14, 1, 30);
+    const horizonHours = intOr(req.query.horizon, 48, 1, 168);
+    const limit = intOr(req.query.limit, 120, 1, 500);
+    const minScoreRaw = Number(req.query.minScore);
+    const minScore = Number.isFinite(minScoreRaw) && minScoreRaw >= 0 && minScoreRaw <= 1 ? minScoreRaw : 0;
+
+    try {
+        const now = Date.now();
+        const ownTags = [...ownAllianceTags()].map(t => String(t).toUpperCase());
+        if (!ownTags.length) {
+            return res.json({
+                success: true, generatedAt: now, energy, raceSpeed, days,
+                origins: [], targets: [], reason: 'The hub does not know which alliance is ours yet.',
+            });
+        }
+        const tagsJson = JSON.stringify(ownTags);
+
+        const origins = db.prepare(JUMP_POINTS_SQL).all(tagsJson);
+        const targets = db.prepare(TARGETS_SQL).all(tagsJson);
+
+        const cached = profileCache && profileCache.days === days && (now - profileCache.builtAt) < PROFILE_CACHE_TTL_MS;
+        const profiles = cached ? profileCache.profiles : buildProfiles(now, days);
+        if (!cached) profileCache = { days, builtAt: now, profiles };
+
+        const ranked = jumpWindows.rankTargets(origins, targets, profiles,
+            { now, energy, raceSpeed, horizonHours, minScore });
+
+        // The viewer's own planets are marked so the panel can say "you can send this one"
+        // rather than "somebody in the alliance can".
+        const mine = (req.session.gameName || '').toLowerCase();
+
+        res.json({
+            success: true,
+            generatedAt: now,
+            energy, raceSpeed, days, horizonHours,
+            ownTags,
+            origins: origins.map(o => ({
+                system_id: o.system_id, planet_index: o.planet_index, system_name: o.system_name,
+                x: o.x, y: o.y, owner_name: o.owner_name,
+                is_mine: !!mine && String(o.owner_name || '').toLowerCase() === mine,
+            })),
+            profiledPlayers: profiles.size,
+            profilesCached: !!cached,
+            targets: ranked.slice(0, limit).map(t => ({
+                player_id: t.player_id, player_name: t.player_name, tag: t.tag || null,
+                system_id: t.system_id, system_name: t.system_name, planet_index: t.planet_index,
+                x: t.x, y: t.y, population: t.population, starbase: t.starbase,
+                points: t.points, level: t.level, resigned: !!t.resigned_at,
+                sampled: t.sampled, trough: t.trough,
+                launchNow: t.launchNow && {
+                    origin_system_id: t.launchNow.origin.system_id,
+                    origin_planet_index: t.launchNow.origin.planet_index,
+                    origin_system_name: t.launchNow.origin.system_name,
+                    origin_owner: t.launchNow.origin.owner_name,
+                    origin_x: t.launchNow.origin.x, origin_y: t.launchNow.origin.y,
+                    travelHours: t.launchNow.travelHours,
+                    arriveAt: t.launchNow.arriveAt,
+                    arrivalHour: t.launchNow.arrivalHour,
+                    awayScore: t.launchNow.awayScore,
+                    observedDays: t.launchNow.observedDays,
+                },
+                scheduled: t.scheduled && {
+                    origin_system_id: t.scheduled.origin.system_id,
+                    origin_planet_index: t.scheduled.origin.planet_index,
+                    origin_system_name: t.scheduled.origin.system_name,
+                    origin_owner: t.scheduled.origin.owner_name,
+                    origin_x: t.scheduled.origin.x, origin_y: t.scheduled.origin.y,
+                    travelHours: t.scheduled.travelHours,
+                    launchAt: t.scheduled.launchAt,
+                    arriveAt: t.scheduled.arriveAt,
+                    arrivalHour: t.scheduled.arrivalHour,
+                    awayScore: t.scheduled.awayScore,
+                    waitHours: t.scheduled.waitHours,
+                },
+            })),
+            targetsConsidered: ranked.length,
+        });
+    } catch (err) {
+        console.error('[Routes] Jump windows failed:', err);
+        res.status(500).json({ error: 'Jump window planning failed' });
+    }
+});
+
 router.get('/routes/:id', requireAuth, (req, res) => {
     try {
         const row = routingRepo.getRouteById(req.params.id);
@@ -662,3 +838,5 @@ module.exports.expiryFor = expiryFor;
 module.exports.validateRouteInput = validateRouteInput;
 module.exports.strictInt = strictInt;
 module.exports.MAX_PLANET_INDEX = MAX_PLANET_INDEX;
+// The test needs to be able to age the memo without waiting two minutes.
+module.exports.__clearProfileCache = () => { profileCache = null; };

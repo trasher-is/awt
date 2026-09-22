@@ -39,6 +39,7 @@ const DEFAULT_LAYERS = {
     labels: false,
     isochrones: false,
     claims: false,
+    strike: false,
 };
 
 // Isochrone controls: origin system, the fleet the rings are drawn for, and the three
@@ -60,6 +61,27 @@ const ISO_BANDS = [
     { stroke: 'rgba(251,191,36,0.6)',  wash: 'rgba(251,191,36,0.17)' },
     { stroke: 'rgba(248,113,113,0.55)', wash: 'rgba(248,113,113,0.14)' },
 ];
+
+// Jump-window controls (the "strike" layer). The fleet these are planned for is the
+// caller's — energy and race speed change the flight time and therefore the arrival hour,
+// which is the whole point — and minScore is how sure we insist on being that the target is
+// away when the fleet lands.
+const DEFAULT_STRIKE = {
+    energy: 0,
+    speed: 0,
+    minScore: 0.8,     // 0..1, the away-frequency floor
+    mode: 'now',       // 'now' = launch immediately from the best-timed jump point
+                       // 'wait' = shortest flight, launched at the right moment
+    arcs: 12,          // how many plans to draw at once; more is unreadable
+};
+
+// Away-score to colour, matching the Sleep Map's steps so the two panels agree at a glance.
+function strikeColour(score) {
+    if (score >= 0.9) return 'rgba(34,197,94,0.95)';
+    if (score >= 0.75) return 'rgba(132,204,22,0.9)';
+    if (score >= 0.5) return 'rgba(251,191,36,0.85)';
+    return 'rgba(148,163,184,0.7)';
+}
 
 // Colour for an alliance tag. The game's own API exposes Alliance.color, but the map does
 // not sync a colour feed — it derives a stable hue from the tag instead: the same alliance
@@ -123,7 +145,7 @@ function sanitizeIso(saved) {
 }
 
 function persistPrefs() {
-    savePrefs(state.userId, { ...state.layers, iso: state.iso });
+    savePrefs(state.userId, { ...state.layers, iso: state.iso, strikeCfg: state.strikeCfg });
 }
 
 function ageDays(iso) {
@@ -364,6 +386,71 @@ function draw() {
         }
     }
 
+    // --- Jump windows -------------------------------------------------------
+    // Drawn after the system dots so the arcs read as movement over the map rather than
+    // as part of it, and before the claim labels, which stay on top of everything.
+    if (layers.strike && state.strike.targets.length) {
+        const plans = state.strike.targets.slice(0, state.strikeCfg.arcs);
+
+        // Our jump points: the planets a fleet can actually leave from.
+        for (const o of state.strike.origins) {
+            const { sx, sy } = toScreen(o.x, o.y);
+            ctx.strokeStyle = o.is_mine ? 'rgba(34,211,238,0.95)' : 'rgba(34,211,238,0.45)';
+            ctx.lineWidth = o.is_mine ? 2 : 1;
+            ctx.beginPath();
+            ctx.moveTo(sx, sy - 7); ctx.lineTo(sx + 7, sy); ctx.lineTo(sx, sy + 7); ctx.lineTo(sx - 7, sy);
+            ctx.closePath();
+            ctx.stroke();
+        }
+
+        for (const t of plans) {
+            const plan = state.strikeCfg.mode === 'wait' ? (t.scheduled || t.launchNow) : t.launchNow;
+            if (!plan) continue;
+            const a = toScreen(plan.origin_x, plan.origin_y);
+            const b = toScreen(t.x, t.y);
+            const colour = strikeColour(plan.awayScore);
+
+            // A bowed line rather than a straight one: several plans converging on the same
+            // target system would otherwise draw exactly on top of each other.
+            const mx = (a.sx + b.sx) / 2, my = (a.sy + b.sy) / 2;
+            const dx = b.sx - a.sx, dy = b.sy - a.sy;
+            const len = Math.hypot(dx, dy) || 1;
+            const bow = Math.min(40, len * 0.12);
+            const cx = mx - (dy / len) * bow, cy = my + (dx / len) * bow;
+
+            ctx.strokeStyle = colour;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([5, 4]);
+            ctx.beginPath();
+            ctx.moveTo(a.sx, a.sy);
+            ctx.quadraticCurveTo(cx, cy, b.sx, b.sy);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Arrowhead at the target, pointing along the curve's final tangent.
+            const angle = Math.atan2(b.sy - cy, b.sx - cx);
+            ctx.fillStyle = colour;
+            ctx.beginPath();
+            ctx.moveTo(b.sx, b.sy);
+            ctx.lineTo(b.sx - 9 * Math.cos(angle - 0.4), b.sy - 9 * Math.sin(angle - 0.4));
+            ctx.lineTo(b.sx - 9 * Math.cos(angle + 0.4), b.sy - 9 * Math.sin(angle + 0.4));
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // The target ring goes on last so it is never hidden under an arc.
+        for (const t of plans) {
+            const plan = state.strikeCfg.mode === 'wait' ? (t.scheduled || t.launchNow) : t.launchNow;
+            if (!plan) continue;
+            const { sx, sy } = toScreen(t.x, t.y);
+            ctx.strokeStyle = strikeColour(plan.awayScore);
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(sx, sy, 11, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+    }
+
     // Claim link labels last, on top of every dot/ring so the number is never occluded.
     if (layers.claims && state.claimLinks.length) {
         ctx.font = `${desktop ? 11 : 9}px ui-sans-serif, system-ui, sans-serif`;
@@ -464,6 +551,27 @@ function tooltipHtml(s) {
         }
     } else if (state.layers.vision) {
         lines.push('<div class="mt-1 text-zinc-500">No member is modelled as seeing this.</div>');
+    }
+
+    if (state.layers.strike) {
+        const here = state.strike.targets.filter(t => t.system_id === s.id).slice(0, 3);
+        const jump = state.strike.origins.filter(o => o.system_id === s.id);
+        if (jump.length) {
+            lines.push(`<div class="mt-1 text-cyan-300">Jump point — ${jump.map(o => esc(o.owner_name || '?')).join(', ')}</div>`);
+        }
+        for (const t of here) {
+            const plan = state.strikeCfg.mode === 'wait' ? (t.scheduled || t.launchNow) : t.launchNow;
+            if (!plan) continue;
+            const when = state.strikeCfg.mode === 'wait' && t.scheduled
+                ? `launch in ${fmtHours(t.scheduled.waitHours)}`
+                : 'launch now';
+            lines.push(`<div class="mt-1 text-foreground">${esc(t.player_name)} #${t.planet_index}`
+                + `<span class="text-muted-foreground"> — away ${Math.round(plan.awayScore * 100)}% when it lands</span></div>`);
+            lines.push(`<div class="text-zinc-400">${when} from [${plan.origin_system_id}]`
+                + ` ${esc(plan.origin_owner || '?')} · ${fmtHours(plan.travelHours)} flight`
+                + ` · lands ${esc(fmtClock(plan.arriveAt))}</div>`);
+            if (!t.sampled) lines.push('<div class="text-amber-500/90">never sampled — scored at the 50% prior, not measured</div>');
+        }
     }
 
     if (state.layers.claims) {
@@ -1104,6 +1212,114 @@ async function seedPlanetsFromSectors() {
     }
 }
 
+// ─── JUMP WINDOWS ────────────────────────────────────────────────────────────
+// The layer that answers "which of our planets do I launch from so this lands while they
+// are asleep". Everything is computed server-side (/hub-api/routes/jump-windows, over
+// src/utils/jump-windows.js); this fetches it and draws it.
+//
+// Worth knowing while reading the map: with the launch time fixed at now, a DIFFERENT jump
+// point is a different arrival hour. The arc you see is not the shortest flight, it is the
+// one that lands in the dark — which is why the layer draws the origin it chose rather than
+// leaving you to assume the nearest.
+
+function fmtHours(h) {
+    if (!Number.isFinite(h)) return '—';
+    if (h < 1) return `${Math.round(h * 60)}m`;
+    const whole = Math.floor(h);
+    const mins = Math.round((h - whole) * 60);
+    return mins ? `${whole}h${String(mins).padStart(2, '0')}` : `${whole}h`;
+}
+
+function fmtClock(ms) {
+    const d = new Date(ms);
+    const today = d.toDateString() === new Date().toDateString();
+    const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    return today ? time : `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${time}`;
+}
+
+function sanitizeStrike(saved) {
+    const cfg = { ...DEFAULT_STRIKE, ...(saved && typeof saved === 'object' ? saved : {}) };
+    const int = (v, lo, hi, fallback) => {
+        const n = parseInt(v, 10);
+        return Number.isFinite(n) && n >= lo && n <= hi ? n : fallback;
+    };
+    cfg.energy = int(cfg.energy, 0, 100, DEFAULT_STRIKE.energy);
+    cfg.speed = int(cfg.speed, -4, 4, DEFAULT_STRIKE.speed);
+    cfg.arcs = int(cfg.arcs, 1, 60, DEFAULT_STRIKE.arcs);
+    const score = Number(cfg.minScore);
+    cfg.minScore = Number.isFinite(score) && score >= 0 && score <= 1 ? score : DEFAULT_STRIKE.minScore;
+    cfg.mode = cfg.mode === 'wait' ? 'wait' : 'now';
+    return cfg;
+}
+
+function syncStrikeControlsVisibility() {
+    document.getElementById('gm-strike-controls')?.classList.toggle('hidden', !state.layers.strike);
+}
+
+function reflectStrikeControls() {
+    const cfg = state.strikeCfg;
+    const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = value; };
+    set('gm-strike-energy', cfg.energy);
+    set('gm-strike-speed', cfg.speed);
+    set('gm-strike-score', Math.round(cfg.minScore * 100));
+    set('gm-strike-mode', cfg.mode);
+}
+
+async function recomputeStrike() {
+    if (!state.layers.strike) { state.strike = { origins: [], targets: [] }; return; }
+    const status = document.getElementById('gm-strike-status');
+    const cfg = state.strikeCfg;
+    if (status) status.textContent = 'planning…';
+    try {
+        const query = new URLSearchParams({
+            energy: String(cfg.energy),
+            speed: String(cfg.speed),
+            minScore: String(cfg.minScore),
+            limit: '200',
+        });
+        const res = await fetch(`/hub-api/routes/jump-windows?${query}`);
+        const body = await res.json();
+        if (!body.success) throw new Error(body.error || 'failed');
+        state.strike = { origins: body.origins || [], targets: body.targets || [] };
+        if (status) {
+            status.textContent = body.origins.length
+                ? `${body.targets.length} target${body.targets.length === 1 ? '' : 's'} from ${body.origins.length} jump point${body.origins.length === 1 ? '' : 's'}`
+                    + (body.reason ? ` · ${body.reason}` : '')
+                : (body.reason || 'no jump points on record');
+        }
+    } catch (err) {
+        state.strike = { origins: [], targets: [] };
+        if (status) status.textContent = 'planning failed';
+    }
+    draw();
+}
+
+function wireStrikeControls() {
+    const onChange = () => {
+        const num = (id, fallback) => {
+            const el = document.getElementById(id);
+            const n = el ? parseInt(el.value, 10) : NaN;
+            return Number.isFinite(n) ? n : fallback;
+        };
+        state.strikeCfg = sanitizeStrike({
+            ...state.strikeCfg,
+            energy: num('gm-strike-energy', state.strikeCfg.energy),
+            speed: num('gm-strike-speed', state.strikeCfg.speed),
+            minScore: num('gm-strike-score', state.strikeCfg.minScore * 100) / 100,
+            mode: document.getElementById('gm-strike-mode')?.value,
+        });
+        persistPrefs();
+        // Only the mode is a pure redraw: it picks between two plans the server already
+        // sent. Everything else changes a flight time, so it has to be replanned.
+        if (state.strikeCfg.mode !== undefined) draw();
+    };
+    for (const id of ['gm-strike-energy', 'gm-strike-speed', 'gm-strike-score']) {
+        document.getElementById(id)?.addEventListener('change', () => { onChange(); recomputeStrike(); });
+    }
+    document.getElementById('gm-strike-mode')?.addEventListener('change', () => { onChange(); draw(); });
+    document.getElementById('gm-strike-replan')?.addEventListener('click', () => { onChange(); recomputeStrike(); });
+}
+
 // ─── SETUP ───────────────────────────────────────────────────────────────────
 
 export async function initGalaxyMap(userId) {
@@ -1116,7 +1332,9 @@ export async function initGalaxyMap(userId) {
     // state.layers so the checkbox loops below only ever see real layers.
     const prefs = loadPrefs(userId);
     const savedIso = prefs.iso;
+    const savedStrike = prefs.strikeCfg;
     delete prefs.iso;
+    delete prefs.strikeCfg;
 
     state = {
         canvas,
@@ -1130,6 +1348,8 @@ export async function initGalaxyMap(userId) {
         coverage: null,
         layers: prefs,
         iso: sanitizeIso(savedIso),
+        strikeCfg: sanitizeStrike(savedStrike),
+        strike: { origins: [], targets: [] },
         isoOrigin: null,
         isoRings: [],
         isoBands: new Map(),
@@ -1159,6 +1379,7 @@ export async function initGalaxyMap(userId) {
             if (key === 'vision') recomputeVision();
             if (key === 'isochrones') { syncIsoControlsVisibility(); recomputeIsochrones(); }
             if (key === 'claims') syncClaimsControlsVisibility();
+            if (key === 'strike') { syncStrikeControlsVisibility(); recomputeStrike(); }
             renderLegend();
             renderCoverage();
             draw();
@@ -1169,6 +1390,9 @@ export async function initGalaxyMap(userId) {
     reflectIsoControls();
     wireIsoOriginPicker();
     wireIsoInputs();
+    syncStrikeControlsVisibility();
+    reflectStrikeControls();
+    wireStrikeControls();
     syncClaimsControlsVisibility();
     wireClaimsSystemPicker();
     wireClaimsControls();
