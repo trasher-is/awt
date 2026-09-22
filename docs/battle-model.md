@@ -247,3 +247,48 @@ alongside a fleet (mean ~0.06pp error across the harvested data) and a large mat
 gap (mean ~0.00pp — the "iterative resolution" suspected here turned out to be the
 absolute-level/gap mislabeling described above, not anything iterative). Both are now
 modelled exactly rather than skipped past.
+
+## What the model is *not* asked, and what the archive answers instead
+
+The model answers "who wins". The hub's own battle archive says that question is, for most
+real attacks, already decided before anyone presses launch. Taking every recorded report
+that carries both fleets' combat values and sorting by the attacker's CV over the
+defender's (968 battles as of 2026-09-22, produced by `!price` — see
+`src/utils/battle-ledger.js`):
+
+| attacker CV / defender CV | battles | attacker won | attacker's fleet lost |
+|---|---:|---:|---:|
+| under 0.9x | 557 | 1.8% | 99.8% |
+| 0.9–1.2x | 34 | 82.4% | 69.7% |
+| 1.2–1.6x | 50 | 96.0% | 59.4% |
+| 1.6–2.5x | 100 | 100.0% | 40.6% |
+| 2.5–5x | 105 | 100.0% | 26.4% |
+| 5–10x | 63 | 100.0% | 14.6% |
+| 10x+ | 59 | 100.0% | 3.3% |
+
+From 1.6x upward the attacker has not lost once in this archive. The column that still
+varies — and that no calculator in this tool reports — is the one on the right: what
+overkill buys is not the win, it is the fleet that comes home.
+
+These are observed frequencies over one round's reports, not a law of the game. They are
+also not a substitute for the model: the model knows about race bonuses, sciences and
+starbases, which a CV ratio flattens. Where they disagree about a specific fight, the model
+is the one with the mechanism; where the model has never been checked against outcomes,
+this table is the check.
+
+### The `win_chance` column is the dice roll
+
+`battle_reports.win_chance` is scraped from the report's "Victory" row
+(`public/js/scrapers/battle-report-parser.js`, whose comment calls that cell
+"dice/win-chance"). It does not behave like a win chance:
+
+- battles where it read 0–10 were won by the attacker **44%** of the time; battles where it
+  read 90–100 were won **45%** of the time
+- its Brier score against the outcome is **0.338**, worse than always guessing the base rate
+  (**0.243**) — a calibrated probability scores below that, not above it
+- it tracks `random_number` instead: mean absolute difference **0.47** over 1025 rows, and
+  **42%** of rows match it exactly
+
+Nothing renders the column today, so nothing is currently lying to anyone. It must not be
+wired to a "win chance" label later. `!price check` re-runs all three checks against live
+rows, so this section can be verified rather than believed.
