@@ -9,7 +9,7 @@
 // else one step down, which is one tap rather than a hunt:
 //
 //   /intel  player · system · bio · alliance
-//   /calc   travel · battle · distance
+//   /calc   travel · battle · distance · price
 //   /plan   add · list
 //   /scan   holes · vision · ghosts
 //   /link, /timer, /help          (single-purpose, no group)
@@ -117,6 +117,12 @@ function buildCommands() {
                 .addIntegerOption(o => o.setName('starbase').setDescription('Defender starbase level').setMinValue(0).setMaxValue(50))
                 .addStringOption(o => o.setName('defender_player').setDescription('Fill defender stats from a player').setAutocomplete(true))
                 .addStringOption(o => o.setName('attacker_player').setDescription('Fill attacker stats from a player').setAutocomplete(true)))
+            // The other two calculators simulate. This one only reports what the hub's own
+            // battle archive already recorded at that strength ratio — including the
+            // number no calculator gives you, which is how much of the fleet came home.
+            .addSubcommand(s => s.setName('price').setDescription('What an attack at this strength ratio has actually cost')
+                .addNumberOption(o => o.setName('your_cv').setDescription('Your attacking combat value').setMinValue(0))
+                .addNumberOption(o => o.setName('their_cv').setDescription('The defender\'s combat value').setMinValue(0)))
             .addSubcommand(s => s.setName('distance').setDescription('Distance and biology needed between two systems')
                 .addStringOption(o => systemOption(o, 'from', 'First system'))
                 .addStringOption(o => systemOption(o, 'to', 'Second system'))),

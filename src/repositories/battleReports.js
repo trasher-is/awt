@@ -515,6 +515,20 @@ function getBattleReportsExport({ scope = 'all', q = '', sort = 'occurred_at', d
     return { columns, rows };
 }
 
+// --- THE COST LEDGER (src/utils/battle-ledger.js) ---
+// Every recorded battle reduced to the columns that answer "what did an attack at this
+// strength ratio actually cost". Whole-archive on purpose: it is ~1k rows for a round, and
+// a window would quietly change the answer as the round aged without anyone asking it to.
+const getBattleLedgerRowsStmt = db.prepare(`
+    SELECT att_combat_value, def_combat_value, att_has_won,
+           att_pct_cv_lost, def_pct_cv_lost, att_lost_cv, def_lost_cv,
+           win_chance, random_number, started_at
+    FROM battle_reports
+`);
+function getBattleLedgerRows() {
+    return getBattleLedgerRowsStmt.all();
+}
+
 module.exports = {
     deleteAllBattleReports,
     getPendingAnnouncements,
@@ -534,4 +548,5 @@ module.exports = {
     getBattleReportsFeed,
     searchBattleReportsFeed,
     getBattleReportsExport,
+    getBattleLedgerRows,
 };

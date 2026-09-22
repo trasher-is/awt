@@ -23,6 +23,7 @@ const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require
 // The battle model — the same physical file the dashboard calculator imports, so
 // !battle and the web calculator cannot drift apart again. See docs/battle-model.md.
 const battleModel = require('../public/js/utils/battle-model.js');
+const battleLedger = require('./utils/battle-ledger');
 const visionModel = require('../public/js/utils/vision-model.js');
 const { buildCommands, suggestPlayers, suggestSystems, isEphemeral } = require('./discord-commands');
 const { shouldRestartProcess, OFFLINE_CHECKS_BEFORE_RESTART } = require('./utils/discord-connection');
@@ -563,6 +564,7 @@ async function handleMessage(message) {
                 { name: '`!cvkills` / `!cvkillsday` / `!cvkillsweek` `[all|<alliance_tag>]`', value: 'Pure CV-killed ranking — the raw number only, no points. Same scope rules as `!mortal`.\n*Example: `!cvkillsweek nsa`*' },
                 { name: '`!popkills` / `!popkillsday` / `!popkillsweek` `[all|<alliance_tag>]`', value: 'Pure population-killed ranking — the raw number only, no points. Same scope rules as `!mortal`.\n*Example: `!popkillsweek nsa`*' },
                 { name: '`!glory` / `!gloryday` / `!gloryweek`', value: 'Combined CV + population points leaderboard (plus any bonus-goal points), weighted so a bigger single kill is worth disproportionately more per unit. Alliance-only — no `[all|<alliance_tag>]` option, unlike `!mortal`.' },
+                { name: '`!price [<your CV> <their CV>]`', value: 'What an attack at that strength ratio has actually cost, from the hub\'s own recorded battles — win rate AND how much of the attacking fleet came home. No arguments: the whole table. `!price check` re-proves on live rows that the stored win_chance column is a dice roll, not a probability.\n*Example: `!price 4200 1800`*' },
                 { name: '`!lastseen <player_name>`', value: 'Shows up to 5 recent system/planet locations a player was involved in a battle report or News-page bombardment at, on either side, newest first.\n*Example: `!lastseen Hkiller89`*' },
                 { name: '`!8ball <question>`', value: 'Ask the magic 8-ball a question.\n*Example: `!8ball will we win this round?`*' }
             )
@@ -737,6 +739,84 @@ async function handleMessage(message) {
             .setColor('#f59e0b');
 
         return message.reply({ embeds: [embed] });
+    }
+
+    // ----------------------------------------------------
+    // !price - WHAT AN ATTACK AT THIS STRENGTH RATIO HAS ACTUALLY COST
+    // ----------------------------------------------------
+    // !battle answers "who wins". The archive says that question is nearly always already
+    // decided — above 1.6x the attacker has never lost — and that the number nobody can
+    // look up is the one that matters: how much of the attacking fleet comes home.
+    // src/utils/battle-ledger.js has the reasoning; this is the counter over it.
+    if (command === 'price') {
+        const curve = battleLedger.costCurve(battleReportsRepo.getBattleLedgerRows());
+
+        if (!curve.battles) {
+            return message.reply('📭 No battle report on record carries both fleets\' combat values yet — nothing to price against.');
+        }
+
+        // `!price check` re-proves, on live rows, that the stored win_chance column is a
+        // dice roll rather than a probability. Kept as a command instead of a comment
+        // because a claim about data should be checkable against the data.
+        if ((args[0] || '').toLowerCase() === 'check') {
+            const c = battleLedger.storedWinChanceCheck(battleReportsRepo.getBattleLedgerRows());
+            if (!c.battles) return message.reply('📭 No battle report carries a win_chance value yet.');
+            const lines = [
+                `Battles scored: **${c.battles}**`,
+                `Brier score of the stored column: **${c.brier.toFixed(3)}**`,
+                `Brier score of just guessing the base rate (${(c.baseRate * 100).toFixed(1)}%): **${c.baseRateBrier.toFixed(3)}**`,
+                `Behaves like a probability: **${c.behavesLikeAProbability ? 'yes' : 'no'}** _(lower is better; a real probability beats the base rate)_`,
+                c.diceMeanAbsDiff === null ? null
+                    : `Mean distance to \`random_number\`: **${c.diceMeanAbsDiff.toFixed(2)}**, identical in **${(c.diceMatchRate * 100).toFixed(0)}%** of rows`,
+            ].filter(Boolean);
+            return message.reply({
+                embeds: [new EmbedBuilder()
+                    .setTitle('🎲 Is the stored win_chance a win chance?')
+                    .setDescription(lines.join('\n'))
+                    .setColor(c.behavesLikeAProbability ? '#22c55e' : '#ef4444')
+                    .setFooter({ text: 'Scraped from the report\'s Victory row. Nothing renders it — it must not be wired to a "win chance" label.' })],
+            });
+        }
+
+        // One planned attack: two combat values, or a bare ratio.
+        const nums = args.map(a => Number(a)).filter(n => Number.isFinite(n) && n > 0);
+        if (nums.length >= 2 || nums.length === 1) {
+            const [att, def] = nums.length >= 2 ? [nums[0], nums[1]] : [nums[0], 1];
+            const answer = battleLedger.lookup(curve, att, def);
+            return message.reply({
+                embeds: [new EmbedBuilder()
+                    .setTitle('💸 What the archive says this attack costs')
+                    .setDescription(answer.verdict)
+                    .setColor(answer.confident ? '#22c55e' : '#f59e0b')
+                    .setFooter({ text: `From ${curve.battles} recorded battles. Observed outcomes, not a simulation — use !battle for that.` })],
+            });
+        }
+
+        const pct = n => (n === null ? '   -  ' : `${n.toFixed(1)}%`.padStart(6));
+        const rows = curve.bands.map(b => [
+            b.label.padEnd(11),
+            String(b.battles).padStart(4),
+            b.winRate === null ? '   -  ' : `${(b.winRate * 100).toFixed(1)}%`.padStart(6),
+            pct(b.attackerLossPct),
+            b.thin ? ' thin' : '',
+        ].join(' ')).join('\n');
+
+        const t = battleLedger.thresholds(curve);
+        const cheapest = battleLedger.cheapestCertainBand(curve);
+        const tail = [];
+        if (t.alwaysWonFrom !== null) tail.push(`From **${t.alwaysWonFrom}x** upward the attacker has not lost once in this archive.`);
+        if (cheapest) tail.push(`What overkill buys is not the win, it is the fleet you keep: **${cheapest.attackerLossPct.toFixed(1)}%** lost at ${cheapest.label} against **${curve.bands.find(b => b.from === 1.6) ? curve.bands.find(b => b.from === 1.6).attackerLossPct.toFixed(1) + '%' : '—'}** at 1.6-2.5x.`);
+
+        return message.reply({
+            embeds: [new EmbedBuilder()
+                .setTitle('💸 The price of winning')
+                .setDescription(
+                    '```\nattacker CV   battles  att won  fleet lost\n' +
+                    'over def CV\n' +
+                    `${rows}\n\`\`\`\n${tail.join('\n')}`)
+                .setColor('#10b981')
+                .setFooter({ text: `${curve.battles} recorded battles${curve.skipped ? `, ${curve.skipped} without both combat values` : ''}. !price <your CV> <their CV> for one attack.` })],
+        });
     }
 
     // ----------------------------------------------------
@@ -2004,6 +2084,7 @@ function slashToPrefix(interaction) {
     const sub = interaction.options.getSubcommand(false);
     const s = (key) => interaction.options.getString(key);
     const i = (key) => interaction.options.getInteger(key);
+    const n = (key) => interaction.options.getNumber(key);
 
     if (name === 'help') return '!help';
     if (name === 'intel') {
@@ -2035,6 +2116,12 @@ function slashToPrefix(interaction) {
                 parts.push(String(i('speed') ?? 0), String(i('energy') ?? 0));
             }
             return parts.join(' ');
+        }
+        if (sub === 'price') {
+            // Both numbers or neither: one alone would be read as a ratio against 1, which
+            // is a different question from the one a half-filled form was asking.
+            const mine = n('your_cv'), theirs = n('their_cv');
+            return mine != null && theirs != null ? `!price ${mine} ${theirs}` : '!price';
         }
         if (sub === 'distance') return `!dist ${s('from')} ${s('to')}`;
         if (sub === 'battle') {
