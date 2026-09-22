@@ -576,7 +576,7 @@ router.get('/routes/traffic', requireAuth, (req, res) => {
 // Lives in this file rather than intel.js because a launch origin and a flight time are
 // exactly what this router is about.
 const jumpWindows = require('../utils/jump-windows');
-const sleepMap = require('../utils/sleep-map');
+const { sleepProfiles, clearSleepProfileCache } = require('../utils/sleep-profiles');
 const { ownAllianceTags } = require('../utils/friendly-alliance-tags');
 
 // Planets held by our own alliance: the places a fleet can actually leave from. Allied
@@ -607,40 +607,6 @@ const TARGETS_SQL = `
     WHERE s.x IS NOT NULL AND s.y IS NOT NULL
       AND (a.tag IS NULL OR UPPER(a.tag) NOT IN (SELECT value FROM json_each(?)))
 `;
-
-// Building 137 players' hour profiles walks two weeks of login samples — a six-figure row
-// scan, ~1.5s of the ~1.7s this route costs. The profiles depend only on the window in
-// days, NOT on the energy/speed the caller is planning with, so nudging the speed selector
-// on the map rebuilt something that could not have changed. Memoised for two minutes, which
-// is far shorter than the interval at which a scan adds a sample and long enough to cover a
-// member playing with the controls.
-const PROFILE_CACHE_TTL_MS = 2 * 60 * 1000;
-let profileCache = null;   // { days, builtAt, profiles }
-
-const TARGET_SAMPLES_SQL = `
-    SELECT player_id, observed_at, total_logins
-    FROM player_login_samples
-    WHERE observed_at >= datetime('now', ?)
-    ORDER BY player_id, observed_at
-`;
-
-// Every sampled player's hour profile, keyed by player id. Streamed and grouped as the
-// rows arrive: two weeks of samples for the whole galaxy has no reason to be resident.
-function buildProfiles(now, days) {
-    const profiles = new Map();
-    let current = null, samples = [];
-    const flush = () => {
-        if (current === null || samples.length < 20) return;
-        const profile = sleepMap.hourProfile(samples, { now, days });
-        profiles.set(current, { hours: profile.hours, trough: sleepMap.troughWindow(profile.hours) });
-    };
-    for (const row of db.prepare(TARGET_SAMPLES_SQL).iterate(`-${days} days`)) {
-        if (current !== row.player_id) { flush(); current = row.player_id; samples = []; }
-        samples.push({ t: row.observed_at, n: row.total_logins });
-    }
-    flush();
-    return profiles;
-}
 
 router.get('/routes/jump-windows', requireAuth, (req, res) => {
     // strictInt, not parseInt: this file keeps exactly one parseInt and routes-validation
@@ -674,9 +640,10 @@ router.get('/routes/jump-windows', requireAuth, (req, res) => {
         const origins = db.prepare(JUMP_POINTS_SQL).all(tagsJson);
         const targets = db.prepare(TARGETS_SQL).all(tagsJson);
 
-        const cached = profileCache && profileCache.days === days && (now - profileCache.builtAt) < PROFILE_CACHE_TTL_MS;
-        const profiles = cached ? profileCache.profiles : buildProfiles(now, days);
-        if (!cached) profileCache = { days, builtAt: now, profiles };
+        // One shared build, memoised in src/utils/sleep-profiles.js: the fleet-dispatch
+        // route needs exactly the same profiles, and two caches would have meant the second
+        // panel paying a six-figure row scan while a perfectly good answer sat in the first.
+        const { profiles, cached } = sleepProfiles({ now, days });
 
         const ranked = jumpWindows.rankTargets(origins, targets, profiles,
             { now, energy, raceSpeed, horizonHours, minScore });
@@ -904,4 +871,4 @@ module.exports.validateRouteInput = validateRouteInput;
 module.exports.strictInt = strictInt;
 module.exports.MAX_PLANET_INDEX = MAX_PLANET_INDEX;
 // The test needs to be able to age the memo without waiting two minutes.
-module.exports.__clearProfileCache = () => { profileCache = null; };
+module.exports.__clearProfileCache = clearSleepProfileCache;

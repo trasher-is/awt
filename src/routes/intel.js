@@ -1085,4 +1085,200 @@ router.get('/intel/sleep-map', requireAuth, (req, res) => {
     }
 });
 
+// --- FLEET DISPATCH: WHAT TO SEND THE FLEET YOU ARE LOOKING AT AGAINST ---
+//
+// Feeds the injection on the game's own Fleets page (public/js/core/fleet-dispatch.js).
+// That page lists what you have and says nothing about what any of it is for; every
+// question you actually have there is answered elsewhere in this hub, on another screen.
+// src/utils/fleet-dispatch.js joins the four answers — flight time, who is away, what is
+// known to be defending, what winning has historically cost — and returns a shortlist.
+//
+// NOTHING HERE TOUCHES THE GAME. It is a read over data the hub already holds; the member
+// still opens the game's own Launch form and fills it in themselves. See the injection's
+// own header for why that line matters and how it is enforced.
+const fleetDispatch = require('../utils/fleet-dispatch');
+const battleLedgerUtil = require('../utils/battle-ledger');
+const { sleepProfiles } = require('../utils/sleep-profiles');
+
+// Everything we could send a fleet at: a planet whose owner is not in our own alliance,
+// carrying the owner's strongest fleet as the game's ranking page last published it. That
+// number is an upper bound on their main force and says nothing about where it is — the
+// util's header is explicit about this, and the panel repeats it.
+// Two independent readings of how strong an owner is, joined per planet:
+//   • strongest_fleet — what the game's ranking page published, an upper bound on their
+//     main force (69 players)
+//   • the combat value they were last actually seen fielding in a recorded battle, from
+//     either side of it (145 players)
+// Together they give an estimate for 998 of the 1014 enemy planets instead of 506. The
+// LARGER of the two is used and the source is named; being wrong in the attacker's favour
+// is the expensive direction, and the two facts are not the same fact.
+const DISPATCH_TARGETS_SQL = `
+    WITH last_battle AS (
+        SELECT player_id, cv, started_at FROM (
+            SELECT player_id, cv, started_at,
+                   ROW_NUMBER() OVER (PARTITION BY player_id ORDER BY started_at DESC) AS rn
+            FROM (
+                SELECT att_player_id AS player_id, att_combat_value AS cv, started_at
+                FROM battle_reports WHERE att_player_id IS NOT NULL AND att_combat_value > 0
+                UNION ALL
+                SELECT def_player_id, def_combat_value, started_at
+                FROM battle_reports WHERE def_player_id IS NOT NULL AND def_combat_value > 0
+            )
+        ) WHERE rn = 1
+    )
+    SELECT pl.system_id, pl.planet_index, pl.population, pl.starbase,
+           s.name AS system_name, s.x, s.y,
+           p.id AS player_id, p.name AS player_name, p.points, p.resigned_at,
+           a.tag AS tag,
+           MAX(COALESCE(sf.cv, 0), COALESCE(lb.cv, 0)) AS defender_cv,
+           CASE
+               WHEN sf.cv IS NOT NULL AND (lb.cv IS NULL OR sf.cv >= lb.cv) THEN 'rankings'
+               WHEN lb.cv IS NOT NULL THEN 'battle'
+               ELSE NULL
+           END AS defender_source,
+           CASE
+               WHEN sf.cv IS NOT NULL AND (lb.cv IS NULL OR sf.cv >= lb.cv) THEN sf.updated_at
+               ELSE lb.started_at
+           END AS defender_seen_at
+    FROM planets pl
+    JOIN players p ON p.id = pl.owner_id
+    JOIN systems s ON s.id = pl.system_id
+    LEFT JOIN alliances a ON a.id = p.alliance_id
+    LEFT JOIN strongest_fleet sf ON sf.player_id = p.id
+    LEFT JOIN last_battle lb ON lb.player_id = p.id
+    WHERE s.x IS NOT NULL AND s.y IS NOT NULL
+      AND (a.tag IS NULL OR UPPER(a.tag) NOT IN (SELECT value FROM json_each(?)))
+`;
+
+// Where a colony ship could go. Same honesty as the Land Rush panel: the observation age
+// travels with the row, because "free" is a fact about the hub's last look, not about the
+// galaxy, and planets get taken rather than released.
+const DISPATCH_FREE_SQL = `
+    SELECT pl.system_id, pl.planet_index, s.name AS system_name, s.x, s.y,
+           COALESCE(pl.population_observed_at, pl.updated_at) AS observed_at
+    FROM planets pl
+    JOIN systems s ON s.id = pl.system_id
+    WHERE pl.owner_id IS NULL AND s.x IS NOT NULL AND s.y IS NOT NULL
+`;
+
+// "40:5:0:1,70:7:69:0" — system, planet, combat value, colony ships, per fleet, straight
+// off the page's own table. Anything malformed is dropped rather than guessed at: a fleet
+// parsed wrong would produce flight times from the wrong place, which is worse than one
+// missing row.
+function parseFleetsParam(raw) {
+    const out = [];
+    for (const part of String(raw || '').split(',')) {
+        const bits = part.split(':');
+        if (bits.length < 3 || bits.length > 4) continue;
+        const [systemId, planetIndex, cv, colony] = bits.map(b => parseInt(b, 10));
+        if (!Number.isInteger(systemId) || systemId <= 0) continue;
+        if (!Number.isInteger(planetIndex) || planetIndex < 1 || planetIndex > 12) continue;
+        if (!Number.isInteger(cv) || cv < 0) continue;
+        const colonyShips = Number.isInteger(colony) && colony >= 0 ? colony : 0;
+        out.push({
+            key: `${systemId}:${planetIndex}:${cv}:${colonyShips}`,
+            system_id: systemId, planet_index: planetIndex, cv, colonyShips,
+        });
+        if (out.length >= 30) break;   // a page cannot show more fleets than this
+    }
+    return out;
+}
+
+router.get('/intel/fleet-dispatch', requireAuth, (req, res) => {
+    const intOr = (raw, fallback, min, max) => {
+        const n = parseInt(raw, 10);
+        return Number.isFinite(n) && n >= min && n <= max ? n : fallback;
+    };
+    const fleets = parseFleetsParam(req.query.fleets);
+    const days = intOr(req.query.days, 14, 1, 30);
+    const maxHours = intOr(req.query.maxHours, 24, 1, 240);
+    const limit = intOr(req.query.limit, 5, 1, 20);
+
+    try {
+        const now = Date.now();
+        if (!fleets.length) {
+            return res.json({ success: true, generatedAt: now, fleets: [], reason: 'no usable fleet was named' });
+        }
+
+        // The flight times are the VIEWER's: energy and race speed change them, and a
+        // suggested arrival hour computed for somebody else's ship is the wrong hour.
+        const me = playersRepo.getPlayerFullByName((req.session.gameName || '').toLowerCase()) || null;
+        const energy = intOr(req.query.energy, me ? (me.energy || 0) : 0, 0, 100);
+        const raceSpeed = intOr(req.query.speed, me ? (me.race_speed || 0) : 0, -4, 4);
+
+        const ownTags = [...ownAllianceTags()].map(t => String(t).toUpperCase());
+        const targets = db.prepare(DISPATCH_TARGETS_SQL).all(JSON.stringify(ownTags.length ? ownTags : ['\u0000']));
+
+        // Where the fleets are: the page gives a system and a planet, the coordinates come
+        // from the archive. A fleet sitting in a system nobody has indexed cannot be
+        // planned from, and is answered with an empty shortlist rather than dropped.
+        const coords = new Map(db.prepare(`SELECT id, x, y, name FROM systems WHERE x IS NOT NULL AND y IS NOT NULL`)
+            .all().map(s => [s.id, s]));
+        const placed = fleets.map(f => {
+            const system = coords.get(f.system_id) || null;
+            return system ? { ...f, x: system.x, y: system.y, system_name: system.name } : { ...f, x: null, y: null };
+        });
+
+        const { profiles, cached } = sleepProfiles({ now, days });
+        const curve = battleLedgerUtil.costCurve(battleReportsRepo.getBattleLedgerRows());
+
+        // Only queried when something on the page is actually carrying colony ships.
+        const wantsColonies = placed.some(f => (f.colonyShips || 0) > 0);
+        const freePlanets = wantsColonies ? db.prepare(DISPATCH_FREE_SQL).all() : [];
+
+        const answers = fleetDispatch.dispatch(
+            placed.filter(f => Number.isFinite(f.x)), targets, profiles, curve,
+            { now, energy, raceSpeed, maxHours, limit },
+            freePlanets,
+        );
+        const byKey = new Map(answers.map(a => [a.key, a]));
+
+        res.json({
+            success: true,
+            generatedAt: now,
+            energy, raceSpeed, maxHours, days,
+            profilesCached: cached,
+            // The archive the cost sentences come from, so the panel can say how much
+            // evidence is behind them rather than implying certainty.
+            archiveBattles: curve.battles,
+            alwaysWonFrom: battleLedgerUtil.thresholds(curve).alwaysWonFrom,
+            fleets: placed.map(f => {
+                const answer = byKey.get(f.key);
+                return {
+                    key: f.key,
+                    system_id: f.system_id,
+                    system_name: f.system_name || null,
+                    planet_index: f.planet_index,
+                    cv: f.cv,
+                    colonyShips: f.colonyShips || 0,
+                    unplaceable: !Number.isFinite(f.x),
+                    canFight: answer ? answer.canFight : false,
+                    canSettle: answer ? answer.canSettle : false,
+                    inRange: answer ? answer.inRange : 0,
+                    riskyExcluded: answer ? answer.riskyExcluded : 0,
+                    outOfRange: answer ? answer.outOfRange : 0,
+                    coloniesInRange: answer ? answer.coloniesInRange : 0,
+                    colonies: answer ? answer.colonies.map(c => ({
+                        system_id: c.system_id, system_name: c.system_name, planet_index: c.planet_index,
+                        travelHours: c.travelHours, arriveAt: c.arriveAt, observedAgeHours: c.observedAgeHours,
+                    })) : [],
+                    targets: answer ? answer.targets.map(t => ({
+                        system_id: t.system_id, system_name: t.system_name, planet_index: t.planet_index,
+                        player_name: t.player_name, tag: t.tag || null,
+                        population: t.population, starbase: t.starbase,
+                        travelHours: t.travelHours, arriveAt: t.arriveAt, arrivalHour: t.arrivalHour,
+                        awayScore: t.awayScore, sampled: t.sampled, trough: t.trough,
+                        defenderCv: t.defenderCv, defenderSource: t.defenderSource, defenderSeenAt: t.defenderSeenAt,
+                        defenderAgeHours: t.defenderAgeHours, ratio: t.ratio,
+                        verdict: t.verdict, cost: t.cost, costConfident: t.costConfident,
+                    })) : [],
+                };
+            }),
+        });
+    } catch (err) {
+        console.error('[API] Fleet dispatch failed:', err);
+        res.status(500).json({ success: false, error: 'Server error' });
+    }
+});
+
 module.exports = router;
