@@ -67,8 +67,22 @@ db.prepare(`INSERT INTO players (id, name) VALUES (6, 'Unsampled')`).run();
 db.prepare(`INSERT INTO alliance_member_stats (player_id) VALUES (1)`).run();
 db.prepare(`INSERT INTO alliance_member_stats (player_id) VALUES (2)`).run();
 
+// The three jump points are placed one map unit apart from each other, which at energy 0
+// makes their flight times 11.75h, 21.75h and 31.75h: three arrival hours spread around
+// the clock with no gap wider than ten hours between them. The sleeper below is away for
+// sixteen, so at least one of the three always lands inside the window — checked by
+// running this geometry through hourProfile()/bestOriginNow() at all 96 quarter-hours of
+// a day, not by reasoning about it: 0 misses.
+//
+// That property is the whole point of the arrangement. The first version of this fixture
+// had two origins and a four-hour sleep window, which made the "it lands in the dark"
+// assertion depend on the wall clock: it passed all afternoon and failed at 18:00 UTC on
+// the merged branch, because at that hour neither of the two available arrival hours fell
+// inside the window. The code was right — it picked the best arrival available — and the
+// test was wrong to demand a specific one.
 const system = db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (?, ?, ?, ?)`);
 system.run(1, 'HomeNear', 1, 0);
+system.run(6, 'HomeMid', 2, 0);
 system.run(2, 'HomeFar', 3, 0);
 system.run(3, 'NapWorld', 5, 0);
 system.run(4, 'TargetSpace', 0, 0);
@@ -76,6 +90,7 @@ system.run(5, 'NoCoords', null, null);
 
 const planet = db.prepare(`INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id) VALUES (?, ?, ?, ?)`);
 planet.run(1, 1, 6, 1);     // ours (the viewer's own)
+planet.run(8, 6, 6, 2);     // ours (a team-mate's), the middle jump point
 planet.run(2, 2, 6, 2);     // ours (a team-mate's)
 planet.run(3, 3, 6, 3);     // an ally's — NOT a place we can launch from
 planet.run(4, 4, 6, 4);     // Sleeper's planet
@@ -83,14 +98,15 @@ planet.run(5, 4, 7, 5);     // Insomniac's planet
 planet.run(6, 4, 8, 6);     // an unsampled player's planet
 planet.run(7, 5, 1, 4);     // Sleeper again, in a system with no coordinates
 
-// Fourteen days of scans every 15 minutes. Sleeper is away 02:00-05:00 UTC; Insomniac
-// never is. Both get far more than the 20-sample floor.
+// Fourteen days of scans every 15 minutes. Sleeper is away 00:00-15:59 UTC, a window wide
+// enough that one of the three arrival hours above always falls inside it; Insomniac is
+// never away. Both get far more than the 20-sample floor.
 const sample = db.prepare(`INSERT INTO player_login_samples (player_id, total_logins, observed_at) VALUES (?, ?, ?)`);
 const NOW = Date.now();
 let counters = { 4: 500, 5: 900 };
 for (let t = NOW - 14 * 24 * HOUR; t <= NOW; t += 15 * 60 * 1000) {
     const hour = new Date(t).getUTCHours();
-    if (!(hour >= 2 && hour <= 5)) counters[4] += 1;
+    if (hour >= 16) counters[4] += 1;
     counters[5] += 1;
     sample.run(4, counters[4], sqlTime(t));
     sample.run(5, counters[5], sqlTime(t));
@@ -133,9 +149,14 @@ for (let t = NOW - 14 * 24 * HOUR; t <= NOW; t += 15 * 60 * 1000) {
     ok('the sleeper outranks the player who is never away',
         body.targets.indexOf(sleeper) < body.targets.indexOf(insomniac),
         body.targets.map(t => [t.player_name, t.launchNow.awayScore]));
+    // Deterministic by the geometry above, not by luck: the three jump points are never
+    // more than ten hours apart on the clock and the window is fourteen.
     ok('the launch-now plan lands in the hours the sleeper is away',
-        sleeper.launchNow.arrivalHour >= 2 && sleeper.launchNow.arrivalHour <= 5,
+        sleeper.launchNow.arrivalHour >= 0 && sleeper.launchNow.arrivalHour <= 14,
         { hour: sleeper.launchNow.arrivalHour, from: sleeper.launchNow.origin_system_id });
+    ok('the arrival hour is the hour the arrival instant actually falls in',
+        sleeper.launchNow.arrivalHour === new Date(sleeper.launchNow.arriveAt).getUTCHours(),
+        { hour: sleeper.launchNow.arrivalHour, at: new Date(sleeper.launchNow.arriveAt).toISOString() });
     ok('the launch-now plan names which planet to launch from, and whose it is',
         Number.isInteger(sleeper.launchNow.origin_system_id) && !!sleeper.launchNow.origin_owner, sleeper.launchNow);
     ok('the launch-now plan carries the origin coordinates for the map to draw an arc',
