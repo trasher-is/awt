@@ -22,6 +22,7 @@ import '../utils/sqlite-time.js';    // side-effect import: puts the model on gl
 import '../utils/vision-model.js';   // side-effect import: the !vision rule, defined once
 import { initVersionWatch } from './version-watch.js';
 import { initAwtPresence } from './awt-presence.js';
+import { openSleepMapPanel } from './sleep-map.js';
 
 const { formatSqliteUtc, formatLocalDateTime } = globalThis.AWSqliteTime;
 
@@ -53,6 +54,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('open-alliance-stats-btn')?.addEventListener('click', openAllianceStatsPanel);
     document.getElementById('open-trade-agreements-btn')?.addEventListener('click', openTradeAgreementsPanel);
     document.getElementById('open-road-to-ta-btn')?.addEventListener('click', openRoadToTaPanel);
+    document.getElementById('open-sleep-map-btn')?.addEventListener('click', openSleepMapPanel);
     document.getElementById('open-players-db-btn')?.addEventListener('click', openDatabasePanel);
     document.getElementById('open-systems-db-btn')?.addEventListener('click', openSystemDatabasePanel);
     document.getElementById('open-planets-db-btn')?.addEventListener('click', openPlanetDatabasePanel);
