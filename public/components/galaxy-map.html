@@ -46,6 +46,10 @@
                 <input type="checkbox" id="gm-layer-claims" class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
                 <span class="text-muted-foreground">Claims <span class="text-amber-500/80">(negotiation)</span></span>
             </label>
+            <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                <input type="checkbox" id="gm-layer-strike" class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
+                <span class="text-muted-foreground">Jump windows <span class="text-emerald-500/80">(who is asleep)</span></span>
+            </label>
         </div>
 
         <div class="flex items-center gap-1 ml-auto">
@@ -65,6 +69,35 @@
                 <i class="fa-solid fa-globe mr-1"></i>Seed galaxy
             </button>
         </div>
+    </div>
+
+    <!-- JUMP-WINDOW CONTROLS (shown while the Jump windows layer is on) -->
+    <!-- The fleet these are planned for is yours: energy and race speed set the flight
+         time, and the flight time IS the arrival hour once the launch is "now". -->
+    <div id="gm-strike-controls" class="hidden border-b border-border bg-zinc-950 px-3 md:px-6 py-2 flex items-center gap-x-4 gap-y-2 flex-wrap shrink-0 text-xs">
+        <label class="flex items-center gap-1.5">
+            <span class="text-muted-foreground">Energy</span>
+            <input type="number" id="gm-strike-energy" min="0" max="100" value="0" class="h-7 w-14 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+        </label>
+        <label class="flex items-center gap-1.5">
+            <span class="text-muted-foreground">Race speed</span>
+            <input type="number" id="gm-strike-speed" min="-4" max="4" value="0" class="h-7 w-14 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+        </label>
+        <label class="flex items-center gap-1.5">
+            <span class="text-muted-foreground">Away at least</span>
+            <input type="number" id="gm-strike-score" min="0" max="100" step="5" value="80" class="h-7 w-16 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+            <span class="text-muted-foreground">%</span>
+        </label>
+        <label class="flex items-center gap-1.5">
+            <span class="text-muted-foreground">Plan</span>
+            <select id="gm-strike-mode" class="h-7 rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+                <option value="now">launch now — pick the jump point that lands in the dark</option>
+                <option value="wait">wait — shortest flight, launched at the right moment</option>
+            </select>
+        </label>
+        <button id="gm-strike-replan" class="h-7 px-2 rounded border border-input bg-zinc-950 text-xs text-foreground hover:bg-accent transition-colors">Replan</button>
+        <span id="gm-strike-status" class="text-muted-foreground font-mono"></span>
+        <span class="text-muted-foreground/70">◇ jump point · arc = the flight that lands while they are away · colour = how often they were away in that hour</span>
     </div>
 
     <!-- ISOCHRONE CONTROLS (shown while the Isochrones layer is on) -->
