@@ -987,4 +987,102 @@ router.post('/intel/takeover', requireAuth, (req, res) => {
     }
 });
 
+// --- SLEEP MAP: the whole roster's hour-of-day activity, and when to make a fleet land ---
+//
+// The profile card already answers "is THIS player away right now" from the scan-counter
+// samples (public/js/utils/login-gaps.js). What nobody could ask was the comparative
+// question — of everyone I could hit, who is least likely to be at the keyboard, and at
+// what hour — because that needs every player's samples reclassified at once, and because
+// the proof rule the card uses returns nothing for most people (one login at 04:00 in two
+// weeks disqualifies 04:00). src/utils/sleep-map.js keeps the evidence rule and counts the
+// days instead of requiring all of them; its own comment has the reasoning.
+//
+// `travel` (hours, fractional welcome — paste it from the travel calculator) turns the
+// profile into launch times: the hub knew when a target was away and knew how long a fleet
+// takes, and never multiplied the two. Arrival is what has to land in the quiet hours.
+//
+// Hours in the response are UTC hours of the day; every proposed time is an epoch ms, so
+// the browser renders them in the viewer's own zone.
+const sleepMap = require('../utils/sleep-map');
+
+const SLEEP_MAP_SAMPLES_SQL = `
+    SELECT player_id, observed_at, total_logins
+    FROM player_login_samples
+    WHERE observed_at >= datetime('now', ?)
+    ORDER BY player_id, observed_at
+`;
+
+router.get('/intel/sleep-map', requireAuth, (req, res) => {
+    const days = Math.min(30, Math.max(1, parseInt(req.query.days, 10) || 14));
+    const minSamples = Math.max(2, parseInt(req.query.minSamples, 10) || 20);
+    const travelRaw = req.query.travel === undefined || req.query.travel === '' ? null : Number(req.query.travel);
+    const travelHours = Number.isFinite(travelRaw) && travelRaw >= 0 ? travelRaw : null;
+
+    try {
+        const now = Date.now();
+        const roster = new Map();
+        for (const row of db.prepare(`
+            SELECT p.id, p.name, p.alliance_id, p.country, p.points, p.level,
+                   p.is_active_player, p.resigned_at, a.tag
+            FROM players p LEFT JOIN alliances a ON a.id = p.alliance_id
+        `).iterate()) {
+            roster.set(row.id, row);
+        }
+
+        // Streamed and grouped as it arrives: two weeks of samples for the whole galaxy is
+        // a six-figure row count, and there is no reason for all of it to be resident.
+        const out = [];
+        let current = null, currentSamples = [];
+        const flush = () => {
+            if (!current || currentSamples.length < minSamples) return;
+            const a = sleepMap.analysePlayer(currentSamples, { now, days, travelHours });
+            out.push({
+                id: current.id,
+                name: current.name,
+                tag: current.tag || null,
+                alliance_id: current.alliance_id || null,
+                country: current.country || null,
+                points: current.points || 0,
+                level: current.level || 0,
+                is_active_player: current.is_active_player,
+                resigned: !!current.resigned_at,
+                sampleCount: a.sampleCount,
+                coverage: Math.round(a.coverage * 1000) / 1000,
+                scores: a.hours.map(h => Math.round(h.sleepScore * 1000) / 1000),
+                observed: a.hours.map(h => h.observedDays),
+                active: a.hours.map(h => h.activeDays),
+                trough: a.trough,
+                currentScore: Math.round(a.currentHour.sleepScore * 1000) / 1000,
+                quietForHours: a.quietSince ? Math.round(a.quietSince.confirmedQuietMs / 360000) / 10 : null,
+                launchWindows: a.launchWindows,
+            });
+        };
+
+        for (const row of db.prepare(SLEEP_MAP_SAMPLES_SQL).iterate(`-${days} days`)) {
+            if (!current || current.id !== row.player_id) {
+                flush();
+                current = roster.get(row.player_id) || { id: row.player_id, name: `#${row.player_id}` };
+                currentSamples = [];
+            }
+            currentSamples.push({ t: row.observed_at, n: row.total_logins });
+        }
+        flush();
+
+        // Quietest right now first: the panel's default question is "who can I hit today".
+        out.sort((a, b) => b.currentScore - a.currentScore || b.points - a.points);
+
+        res.json({
+            success: true,
+            generatedAt: now,
+            days,
+            travelHours,
+            nowHourUtc: new Date(now).getUTCHours(),
+            players: out,
+        });
+    } catch (err) {
+        console.error('[API] Sleep map failed:', err);
+        res.status(500).json({ success: false, error: 'Server error' });
+    }
+});
+
 module.exports = router;
