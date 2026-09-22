@@ -21,6 +21,7 @@ router.use(require('./myPlanets'));
 router.use(require('./search'));
 router.use(require('./incoming'));
 router.use(require('./routes'));
+router.use(require('./landRush'));
 
 // A fingerprint of the client assets this process serves. An open tab polls it to notice
 // that it is running code the server has replaced, and reloads itself once doing so costs
