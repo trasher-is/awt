@@ -496,8 +496,73 @@ router.get('/routes', requireAuth, (req, res) => {
     }
 });
 
+// ─── TRAFFIC: WHERE OUR FLEETS ARE RIGHT NOW ─────────────────────────────────
+//
+// Feeds the map's moving-ships layer. Two sources that must not be blurred together, and
+// src/utils/fleet-traffic.js explains why at length:
+//
+//   • a saved route is a PATH — both ends of every leg, a duration from the travel model,
+//     and, once scheduled, a departure and an arrival. A ship can be drawn on it because
+//     the hub knows the course.
+//   • a sighted fleet is a DESTINATION AND A CLOCK. The scrape saw a landing time, never
+//     an origin. It gets a countdown where it is going, and no line, because a line on a
+//     war map is read as a fact about where something came from.
+//
+// A route here is a plan, not telemetry: nothing reports that the fleet actually launched.
+// The map labels it as a plan for exactly that reason.
+const fleetTraffic = require('../../public/js/utils/fleet-traffic.js');
+
+// Our own alliance's fleets with a landing time. Enemy sightings are deliberately not
+// included: this layer is about coordinating our own movement, and the incoming-alert
+// pipeline is what handles hostile arrivals.
+const ALLY_FLEETS_SQL = `
+    SELECT f.system_id, s.name AS system_name, f.planet_index, s.x, s.y,
+           f.destroyers, f.cruisers, f.battleships, f.transports, f.colony_ships,
+           f.combat_value, f.arrival_at,
+           p.name AS owner_name, a.tag
+    FROM fleets f
+    JOIN players p ON p.id = f.owner_id
+    JOIN alliances a ON a.id = p.alliance_id
+    JOIN systems s ON s.id = f.system_id
+    WHERE UPPER(a.tag) IN (SELECT value FROM json_each(?))
+      AND f.arrival_at IS NOT NULL
+`;
+
+router.get('/routes/traffic', requireAuth, (req, res) => {
+    try {
+        purgeExpired();
+        const now = Date.now();
+
+        // The same visibility rule the route list uses — a member sees their own routes
+        // plus the alliance-visible ones, and this layer must not widen that.
+        const routes = hydrate(routingRepo.getRoutesForUser(req.session.userId));
+        const ships = fleetTraffic.shipsFor(routes.map(r => ({
+            id: r.id,
+            title: r.title,
+            author: r.author,
+            isAllianceMove: r.isAllianceMove,
+            legs: (r.legs || []).map(l => ({
+                from: { system_id: l.from.systemId, system_name: l.from.systemName, planet_index: l.from.planetIndex, x: l.from.x, y: l.from.y },
+                to: { system_id: l.to.systemId, system_name: l.to.systemName, planet_index: l.to.planetIndex, x: l.to.x, y: l.to.y },
+                departsAt: l.departsAt,
+                arrivesAt: l.arrivesAt,
+            })),
+        })), { now });
+
+        const ownTags = [...ownAllianceTags()].map(t => String(t).toUpperCase());
+        const fleets = ownTags.length ? db.prepare(ALLY_FLEETS_SQL).all(JSON.stringify(ownTags)) : [];
+        const inbound = fleetTraffic.inboundMarkers(fleets, { now });
+
+        res.json({ success: true, generatedAt: now, ships, inbound });
+    } catch (err) {
+        console.error('[Routes] Traffic failed:', err);
+        res.status(500).json({ error: 'Traffic lookup failed' });
+    }
+});
+
 // NOTE ON ORDER: this must be registered BEFORE `GET /routes/:id` below. Express matches
-// in registration order and ':id' happily matches the literal string 'jump-windows', so
+// in registration order and ':id' happily matches the literal strings 'jump-windows' and
+// 'traffic', so
 // with this block at the bottom of the file every request here answered the route-planner's
 // own 404 instead. routes-jump-windows.test.js asserts the order by asking for the URL.
 // ─── JUMP WINDOWS: WHERE TO LAUNCH FROM SO THE FLEET LANDS IN THE DARK ────────

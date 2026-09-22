@@ -153,6 +153,7 @@ Current dual-runtime modules and their globals:
 | `scrape-report.js` | `AWScrape` | Scraper failure reporting, label synonyms |
 | `game-rate-limit.js` | `AWGameRate` | The 5/s gate |
 | `aw-api.js` | `AWApi` | Game REST API client (`/api/v1`); every call rides `AWGameRate.gameFetch` |
+| `fleet-traffic.js` | `AWFleetTraffic` | Where a fleet is on a scheduled route; the map animates from the same copy the server answers from |
 
 **Do not "modernise" these to ESM.** Adding an `import` breaks Node; adding `export`
 breaks the tests. Files in `public/js/ui/` and `public/js/scrapers/` are plain ESM and are

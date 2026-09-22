@@ -50,6 +50,10 @@
                 <input type="checkbox" id="gm-layer-strike" class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
                 <span class="text-muted-foreground">Jump windows <span class="text-emerald-500/80">(who is asleep)</span></span>
             </label>
+            <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                <input type="checkbox" id="gm-layer-traffic" class="w-3.5 h-3.5 rounded border-border bg-transparent text-primary focus:ring-0 cursor-pointer">
+                <span class="text-muted-foreground">Traffic <span class="text-cyan-400/80">(our fleets)</span></span>
+            </label>
         </div>
 
         <div class="flex items-center gap-1 ml-auto">
@@ -69,6 +73,15 @@
                 <i class="fa-solid fa-globe mr-1"></i>Seed galaxy
             </button>
         </div>
+    </div>
+
+    <!-- TRAFFIC STATUS (shown while the Traffic layer is on) -->
+    <div id="gm-traffic-controls" class="hidden border-b border-border bg-zinc-950 px-3 md:px-6 py-2 flex items-center gap-x-4 gap-y-2 flex-wrap shrink-0 text-xs">
+        <span id="gm-traffic-status" class="text-muted-foreground font-mono">—</span>
+        <span class="text-muted-foreground/70">
+            ▸ a ship on a dashed course is a saved route, drawn where its schedule says it is — a plan, not a live feed.
+            ◎ a pulsing ring is a fleet the scrape saw landing there; no course is drawn for it, because none was ever observed.
+        </span>
     </div>
 
     <!-- JUMP-WINDOW CONTROLS (shown while the Jump windows layer is on) -->
