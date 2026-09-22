@@ -1,0 +1,78 @@
+<div id="land-rush-panel" class="absolute top-0 left-0 md:left-14 right-0 h-full bg-background/95 backdrop-blur-md border-l border-border z-40 transform translate-x-full transition-transform duration-300 flex flex-col shadow-2xl">
+    <div class="h-14 border-b border-border flex items-center justify-between px-6 bg-card shrink-0">
+        <div class="flex items-center gap-3 text-foreground font-semibold">
+            <i class="fa-solid fa-flag text-aw-warning text-xl"></i>
+            <span class="tracking-wider uppercase">Land Rush</span>
+            <span class="text-xs font-normal text-muted-foreground normal-case">how much free galaxy is left, and how long it lasts</span>
+        </div>
+        <button id="land-rush-close-btn" class="text-muted-foreground hover:text-foreground transition-colors p-2 rounded hover:bg-accent"><i class="fa-solid fa-xmark text-xl"></i></button>
+    </div>
+
+    <div class="flex-1 overflow-auto p-4 md:p-6 flex flex-col gap-4">
+
+        <!-- The headline: two projections, never one. -->
+        <div id="land-rush-headline" class="grid grid-cols-1 md:grid-cols-4 gap-3"></div>
+
+        <div class="flex flex-wrap items-center gap-3">
+            <select id="land-rush-days" class="h-9 px-2 rounded-md bg-card border border-border text-sm">
+                <option value="3">rate over 3 days</option>
+                <option value="7" selected>rate over 7 days</option>
+                <option value="14">rate over 14 days</option>
+            </select>
+            <select id="land-rush-fresh" class="h-9 px-2 rounded-md bg-card border border-border text-sm">
+                <option value="24">confirmed free in 24h</option>
+                <option value="72" selected>confirmed free in 3 days</option>
+                <option value="168">confirmed free in 7 days</option>
+            </select>
+            <input id="land-rush-search" type="text" placeholder="Filter systems..."
+                   class="h-9 px-3 rounded-md bg-card border border-border text-sm w-56 focus:outline-none focus:ring-1 focus:ring-ring">
+            <span id="land-rush-status" class="text-sm text-muted-foreground font-mono"></span>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <!-- Where the land still is -->
+            <div class="lg:col-span-2 border border-border rounded-lg bg-card overflow-hidden">
+                <div class="px-4 py-2 border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
+                    The last frontier — free planets by system, nearest-to-us first among equals
+                </div>
+                <div class="max-h-[46vh] overflow-auto">
+                    <table class="w-full text-left text-sm whitespace-nowrap">
+                        <thead class="sticky top-0 bg-secondary text-secondary-foreground text-xs uppercase">
+                            <tr>
+                                <th class="p-2">System</th>
+                                <th class="p-2 text-right">Free</th>
+                                <th class="p-2 text-right">Last looked</th>
+                                <th class="p-2 text-right">Distance</th>
+                                <th class="p-2 text-right">Claims (window)</th>
+                                <th class="p-2">Who is settling it</th>
+                            </tr>
+                        </thead>
+                        <tbody id="land-rush-frontier" class="divide-y divide-border font-mono text-xs"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-4">
+                <div class="border border-border rounded-lg bg-card overflow-hidden">
+                    <div class="px-4 py-2 border-b border-border text-xs uppercase tracking-wider text-muted-foreground">Claims per day</div>
+                    <div id="land-rush-spark" class="p-3"></div>
+                </div>
+                <div class="border border-border rounded-lg bg-card overflow-hidden">
+                    <div class="px-4 py-2 border-b border-border text-xs uppercase tracking-wider text-muted-foreground">Contested — two or more alliances settling the same system</div>
+                    <div id="land-rush-contested" class="p-3 text-xs font-mono flex flex-col gap-1"></div>
+                </div>
+                <div class="border border-border rounded-lg bg-card overflow-hidden">
+                    <div class="px-4 py-2 border-b border-border text-xs uppercase tracking-wider text-muted-foreground">Planets taken from someone (not free land)</div>
+                    <div id="land-rush-conquests" class="p-3 text-xs font-mono flex flex-col gap-1"></div>
+                </div>
+            </div>
+        </div>
+
+        <p class="text-[11px] text-muted-foreground">
+            The claim rate is counted from recorded owner-change events, which are observed transitions with timestamps.
+            The free-planet count is the hub's last look at each planet, so it is split by how recently that look happened —
+            planets get taken, not released, and a stale observation can only ever make the galaxy look emptier than it is.
+            The projection is a straight line through the window and nothing more.
+        </p>
+    </div>
+</div>

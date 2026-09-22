@@ -1,6 +1,10 @@
 // public/js/ui/archives.js
 import { esc } from '../utils/escape.js';
 import { navToIframe } from './search.js';
+// Reached from the Planets panel's toolbar: "how much free land is left, and for how long"
+// is a different question about the same rows, and it does not belong in this file's 1600
+// lines any more than the galaxy map does.
+import { openLandRushPanel } from './land-rush.js';
 // The three player-stats tables (players archive, war room, alliance stats) are column-
 // driven: header, rows, sort and the column picker all come from one definition per column.
 import { STAT_TABLES, renderHeaderCells, renderRowCells, sortRows, enrichWarRoomRow, hasIntelTimestamp } from './stat-columns.js';
@@ -169,6 +173,7 @@ export async function openPlanetDatabasePanel() {
         document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
         panel = document.getElementById('planet-database-panel');
         convertLegacyClickAttributes(panel, 'planet');
+        panel.querySelector('#open-land-rush-btn')?.addEventListener('click', openLandRushPanel);
     }
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
     closeOtherPanels('planet-database-panel');
