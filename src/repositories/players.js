@@ -1038,6 +1038,7 @@ const saveManualIntelStmt = db.prepare(`
         race_growth = @race_growth, race_science = @race_science, race_culture = @race_culture,
         race_production = @race_production, race_speed = @race_speed,
         race_attack = @race_attack, race_defense = @race_defense,
+        race_trader = @race_trader, race_sul = @race_sul,
         has_intel = 1,
         intel_updated_at = CURRENT_TIMESTAMP,
         intel_source = @intel_source,

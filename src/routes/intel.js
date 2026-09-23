@@ -788,6 +788,13 @@ const SCIENCE_FIELDS = ['biology', 'economy', 'energy', 'mathematics', 'physics'
 const RACE_PICK_FIELDS = ['race_growth', 'race_science', 'race_culture', 'race_production',
     'race_speed', 'race_attack', 'race_defense'];
 
+// Trader and Start Up Lab are toggles with a FIXED point cost (docs/game-rules.md), not
+// scalable traits, so the only values the game can produce are the cost or nothing. They
+// are validated against exactly those two rather than a range: "race_trader: 3" is not a
+// misread number, it is a number the game cannot print, and storing it would quietly break
+// `race_trader > 0` for everything that asks who can accept a trade agreement for free.
+const RACE_TOGGLE_COSTS = { race_trader: 6, race_sul: 1 };
+
 function readBoundedInt(raw, min, max) {
     const n = typeof raw === 'number' ? raw : parseInt(String(raw ?? '').trim(), 10);
     if (!Number.isInteger(n) || n < min || n > max) return null;
@@ -817,6 +824,20 @@ router.post('/intel/manual', requireAuth, (req, res) => {
         if (v === null) return res.status(400).json({ error: `${f} must be a whole number between -10 and 10` });
         values[f] = v;
     }
+    for (const [field, cost] of Object.entries(RACE_TOGGLE_COSTS)) {
+        // Absent means not taken, exactly as a blank number box does for every other field
+        // here. That matters for one specific reader: a browser tab opened before this form
+        // grew the checkboxes posts without them, and it must keep being able to save the
+        // rest of the intel rather than being rejected over a field it has never heard of.
+        const raw = body[field];
+        if (raw === undefined || raw === null || raw === '') { values[field] = 0; continue; }
+        const v = readBoundedInt(raw, 0, cost);
+        if (v === null || (v !== 0 && v !== cost)) {
+            return res.status(400).json({ error: `${field} must be 0 or ${cost} — it is a toggle, not a scale` });
+        }
+        values[field] = v;
+    }
+
     const trade = readBoundedInt(body.trade_revenue, 0, 999);
     if (trade === null) return res.status(400).json({ error: 'trade_revenue must be a whole number between 0 and 999' });
     values.trade_revenue = trade;
