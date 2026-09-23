@@ -23,6 +23,7 @@ import '../utils/vision-model.js';   // side-effect import: the !vision rule, de
 import { initVersionWatch } from './version-watch.js';
 import { initAwtPresence } from './awt-presence.js';
 import { openSleepMapPanel } from './sleep-map.js';
+import { openGalaxyDashboardPanel } from './galaxy-dashboard.js';
 
 const { formatSqliteUtc, formatLocalDateTime } = globalThis.AWSqliteTime;
 
@@ -50,6 +51,7 @@ window.addEventListener('DOMContentLoaded', () => {
         window.location.href = '/admin';
     });
 
+    document.getElementById('open-galaxy-dashboard-btn')?.addEventListener('click', () => openGalaxyDashboardPanel());
     document.getElementById('open-war-room-btn')?.addEventListener('click', openEnemyIntelPanel);
     document.getElementById('open-alliance-stats-btn')?.addEventListener('click', openAllianceStatsPanel);
     document.getElementById('open-trade-agreements-btn')?.addEventListener('click', openTradeAgreementsPanel);

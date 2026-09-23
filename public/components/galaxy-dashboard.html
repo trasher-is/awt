@@ -1,0 +1,75 @@
+<div id="galaxy-dashboard-panel" class="fixed top-0 right-0 h-full w-full md:w-[calc(100%-3.5rem)] bg-black border-l border-border transform translate-x-full transition-transform duration-300 z-40 flex flex-col shadow-2xl">
+
+    <div class="h-14 border-b border-border flex items-center justify-between px-4 md:px-6 bg-zinc-900 shrink-0 gap-2">
+        <div class="flex items-center gap-3 min-w-0">
+            <div class="w-8 h-8 rounded-md bg-white/5 flex items-center justify-center text-primary">
+                <i class="fa-solid fa-gauge-high text-base"></i>
+            </div>
+            <div>
+                <h2 class="font-bold text-foreground tracking-wide">Galaxy Dashboard</h2>
+                <p class="hidden md:block text-sm text-muted-foreground">Who holds the galaxy, who is fighting, and who leads — from what the hub has already scanned</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+            <span id="galaxy-dash-status" class="hidden sm:inline text-sm text-muted-foreground font-mono bg-zinc-900 px-2.5 py-1.5 rounded border border-border/40">—</span>
+            <button id="galaxy-dash-reload" class="w-8 h-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors" title="Reload">
+                <i class="fa-solid fa-rotate text-sm"></i>
+            </button>
+            <button id="galaxy-dash-close-btn" class="w-8 h-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors" title="Close">
+                <i class="fa-solid fa-xmark text-base"></i>
+            </button>
+        </div>
+    </div>
+
+    <div class="flex-1 overflow-auto bg-black p-3 md:p-4 space-y-4">
+        <div id="galaxy-dash-tiles" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3"></div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-5 gap-4">
+            <section class="xl:col-span-2 rounded-lg border border-border bg-zinc-950 p-4 flex flex-col gap-3">
+                <div class="flex items-baseline justify-between gap-2">
+                    <h3 class="text-sm font-semibold text-foreground">Battles per day</h3>
+                    <span class="flex items-center gap-3 text-[11px] text-muted-foreground">
+                        <span class="flex items-center gap-1"><i class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#38bdf8"></i>conquest</span>
+                        <span class="flex items-center gap-1"><i class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#52525b"></i>other battle</span>
+                    </span>
+                </div>
+                <div id="galaxy-dash-chart" class="h-44"></div>
+                <p id="galaxy-dash-chart-note" class="text-[11px] text-muted-foreground"></p>
+            </section>
+            <section class="xl:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="rounded-lg border border-border bg-zinc-950 p-4 min-w-0">
+                    <h3 class="text-sm font-semibold text-foreground mb-2">Strongest fleet</h3>
+                    <ol id="galaxy-dash-top-fleet" class="text-xs font-mono flex flex-col gap-1"></ol>
+                    <p id="galaxy-dash-fleet-asof" class="mt-2 text-[11px] text-muted-foreground"></p>
+                </div>
+                <div class="rounded-lg border border-border bg-zinc-950 p-4 min-w-0">
+                    <h3 class="text-sm font-semibold text-foreground mb-2">Highest level</h3>
+                    <ol id="galaxy-dash-top-level" class="text-xs font-mono flex flex-col gap-1"></ol>
+                </div>
+                <div class="rounded-lg border border-border bg-zinc-950 p-4 min-w-0">
+                    <h3 class="text-sm font-semibold text-foreground mb-2">Most population</h3>
+                    <ol id="galaxy-dash-top-pop" class="text-xs font-mono flex flex-col gap-1"></ol>
+                </div>
+            </section>
+        </div>
+
+        <section class="rounded-lg border border-border bg-zinc-950">
+            <div class="px-4 py-3 flex items-baseline justify-between gap-2 border-b border-border">
+                <h3 class="text-sm font-semibold text-foreground">Alliance standings</h3>
+                <span class="text-[11px] text-muted-foreground">click a column to sort · ± is planets gained / lost</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr id="galaxy-dash-head" class="border-b border-border bg-zinc-900 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider"></tr>
+                    </thead>
+                    <tbody id="galaxy-dash-body" class="divide-y divide-border/40 text-xs font-mono"></tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <div class="hidden md:block border-t border-border bg-zinc-950 px-6 py-2 text-[11px] text-muted-foreground shrink-0">
+        Planets and holdings: latest system scans. Gains and losses follow each player's current alliance. Battles: synced battle reports, tagged as they were at the time. No game requests are made to draw this.
+    </div>
+</div>
