@@ -1106,4 +1106,24 @@ router.get('/intel/sleep-map', requireAuth, (req, res) => {
     }
 });
 
+// --- GALAXY DASHBOARD ---
+// Galaxy-wide standings, war tempo and leaderboards, read from
+// what is already on disk (src/utils/galaxy-stats.js). No game request is made here.
+const { computeGalaxyStats } = require('../utils/galaxy-stats');
+
+router.get('/intel/galaxy-stats', requireAuth, (req, res) => {
+    try {
+        const stats = computeGalaxyStats(db, { now: Date.now() });
+        res.json({
+            success: true,
+            ...stats,
+            ownTags: [...ownAllianceTags()],
+            friendlyTags: [...friendlyAllianceTags()],
+        });
+    } catch (err) {
+        console.error('[API] Galaxy stats failed:', err);
+        res.status(500).json({ success: false, error: 'Server error' });
+    }
+});
+
 module.exports = router;
