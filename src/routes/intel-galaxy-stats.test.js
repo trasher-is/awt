@@ -66,6 +66,7 @@ addEvent.run(ownerChangeType, 1, 2, sqlTime(NOW - 4 * HOUR));           // Alpha
 addEvent.run(ownerChangeType, 1, 3, sqlTime(NOW - 3 * 24 * HOUR));      // Bravo takes from Alpha (7d only)
 addEvent.run(ownerChangeType, 3, null, sqlTime(NOW - 2 * 24 * HOUR));   // Bravo planet dies (7d only)
 addEvent.run(ownerChangeType, null, 3, sqlTime(NOW - 9 * 24 * HOUR));   // outside 7d
+addEvent.run(ownerChangeType, 2, null, sqlTime(NOW - 30 * HOUR));       // lost, but outside 24h
 
 const addBattle = db.prepare(`INSERT INTO battle_reports (id, started_at, conquered_planet, att_alliance_tag, att_has_won, def_alliance_tag, def_has_won) VALUES (?, ?, ?, ?, ?, ?, ?)`);
 addBattle.run(1, gameTime(NOW - 1 * HOUR), 1, 'ALP', 1, 'BRV', 0);           // Alpha conquers (24h)
@@ -96,8 +97,9 @@ ok('unaligned players get their own row', none && none.members === 1, none);
 
 ok('24h: Alpha gained 2 (colonise + take), intra-alliance move ignored', alpha.gained24h === 2 && alpha.lost24h === 0, alpha);
 ok('24h: Bravo lost the planet Alpha took', bravo.gained24h === 0 && bravo.lost24h === 1, bravo);
-ok('7d: includes older changes, excludes the 9-day-old one', alpha.gained7d === 2 && alpha.lost7d === 1 && bravo.gained7d === 1 && bravo.lost7d === 2, [alpha, bravo]);
+ok('7d: includes older changes, excludes the 9-day-old one', alpha.gained7d === 2 && alpha.lost7d === 2 && bravo.gained7d === 1 && bravo.lost7d === 2, [alpha, bravo]);
 ok('owner changes in 24h counts every event, including internal moves', h.ownerChanges24h === 3, h.ownerChanges24h);
+ok('24h breakdown: settled free planet is colonised, player-to-player is taken', h.changes24h.colonised === 1 && h.changes24h.taken === 2 && h.changes24h.lost === 0, h.changes24h);
 
 ok('battles in 24h: 1, with 1 conquest', h.battles24h === 1 && h.conquests24h === 1, h);
 ok('7d battle record per alliance, tag match is case-insensitive', alpha.battles7d === 3 && alpha.won7d === 2 && alpha.lostBattles7d === 1 && bravo.battles7d === 3 && bravo.won7d === 1, [alpha, bravo]);

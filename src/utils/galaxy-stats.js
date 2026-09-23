@@ -101,10 +101,18 @@ function computeGalaxyStats(db, { now = Date.now(), days = 14 } = {}) {
         FROM planet_events pe JOIN event_types et ON et.id = pe.event_type_id
         WHERE et.name = 'OWNER_CHANGE' AND pe.timestamp >= ?
     `).all(since7d);
+    // What happened to each planet, for the headline: a free planet settled is colonised,
+    // one moved from one player to another is taken, one left with no owner is lost.
+    const changes24h = { colonised: 0, taken: 0, lost: 0 };
     let ownerChanges24h = 0;
     for (const ev of ownerChanges) {
         const recent = ev.timestamp >= since24h;
-        if (recent) ownerChanges24h++;
+        if (recent) {
+            ownerChanges24h++;
+            if (ev.old_value == null) changes24h.colonised++;
+            else if (ev.new_value == null) changes24h.lost++;
+            else changes24h.taken++;
+        }
         const from = ev.old_value != null ? allianceKeyOf(Number(ev.old_value)) : null;
         const to = ev.new_value != null ? allianceKeyOf(Number(ev.new_value)) : null;
         if (from === to) continue; // moved inside one alliance: nobody's map changed
@@ -204,6 +212,7 @@ function computeGalaxyStats(db, { now = Date.now(), days = 14 } = {}) {
             battles24h,
             conquests24h,
             ownerChanges24h,
+            changes24h,
             latestBattleAt: latestBattleAt ? Date.parse(latestBattleAt) : null,
             oldestPlanetScan: planetTotals.oldestScan || null,
         },

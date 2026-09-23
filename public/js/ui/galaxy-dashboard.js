@@ -50,7 +50,7 @@ function renderTiles() {
         tile('Planets under siege', fmt(h.siegedPlanets), `${pct(h.siegedPlanets, h.ownedPlanets)}% of owned planets`),
         tile('Players active', `${fmt(h.active1h)}<span class="text-sm text-muted-foreground"> now</span>`, `${fmt(h.active24h)} in 24h · ${fmt(h.players)} players · ${fmt(h.alliances)} alliances`),
         tile('Battles, 24h', fmt(h.battles24h), battlesStale ? `latest report ${ago(h.latestBattleAt)} — battle sync behind` : `${fmt(h.conquests24h)} conquests`, battlesStale),
-        tile('Planets changed hands, 24h', fmt(h.ownerChanges24h), 'colonised, taken or lost'),
+        tile('Planets changed hands, 24h', fmt(h.ownerChanges24h), `${fmt(h.changes24h.colonised)} colonised · ${fmt(h.changes24h.taken)} taken · ${fmt(h.changes24h.lost)} lost`),
     ].join('');
 }
 
@@ -115,7 +115,7 @@ function board(listId, rows, valueOf) {
 function renderBoards() {
     const t = data.top;
     board('galaxy-dash-top-fleet', t.fleet, r => `<span title="${escAttr(`${fmt(r.destroyers)} DS · ${fmt(r.cruisers)} CR · ${fmt(r.battleships)} BS`)}">${fmt(r.cv)} cv</span>`);
-    board('galaxy-dash-top-level', t.level, r => `L${r.level} <span class="text-muted-foreground">${fmt(r.xp)}xp</span>`);
+    board('galaxy-dash-top-level', t.level, r => `PL ${r.level} <span class="text-muted-foreground">${fmt(r.xp)}xp</span>`);
     board('galaxy-dash-top-pop', t.population, r => `${fmt(r.population)} <span class="text-muted-foreground">${r.planets}p</span>`);
     document.getElementById('galaxy-dash-fleet-asof').textContent = t.fleetAsOf ? `Ranking snapshot ${ago(Date.parse(t.fleetAsOf))}` : '';
 }
@@ -126,7 +126,7 @@ const COLUMNS = [
     ['tag', 'Alliance', r => (r.tag || '~').toLowerCase(), r => `${tagHtml(r.tag)} <span class="text-muted-foreground font-sans">${esc(r.name || '')}</span>`, 'asc'],
     ['points', 'Pts', r => r.points ?? -1, r => fmt(r.points), 'desc'],
     ['members', 'Members', r => r.members, r => `${r.members} <span class="text-muted-foreground" title="active in the last 24h">(${r.active24h})</span>`, 'desc'],
-    ['avgLevel', 'Avg lvl', r => r.avgLevel ?? -1, r => r.avgLevel ?? '—', 'desc'],
+    ['avgLevel', 'Avg PL', r => r.avgLevel ?? -1, r => r.avgLevel ?? '—', 'desc'],
     ['planets', 'Planets', r => r.planets, r => fmt(r.planets), 'desc'],
     ['share', 'Share', r => r.share, r => `<div class="flex items-center gap-2"><div class="w-16 h-1.5 bg-zinc-800 rounded"><div class="h-1.5 rounded" style="width:${Math.min(100, r.share * 4)}%;background:#a1a1aa"></div></div>${r.share}%</div>`, 'desc'],
     ['population', 'Pop', r => r.population, r => fmt(r.population), 'desc'],
@@ -172,7 +172,7 @@ async function load() {
         renderChart();
         renderBoards();
         renderStandings();
-        if (status) status.textContent = `updated ${new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        if (status) status.textContent = `updated ${new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}`;
     } catch (err) {
         document.getElementById('galaxy-dash-tiles').innerHTML = '<div class="col-span-full text-center py-8 text-red-500">Failed to load the galaxy dashboard.</div>';
         if (status) status.textContent = 'error';
