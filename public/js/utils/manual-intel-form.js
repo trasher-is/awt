@@ -39,9 +39,7 @@
 
     // The game shows two traits per row with Defence alone at the end, and prints each as
     // "-16% Growth -2" — the percentage is derived, the PICK (-2) is the number worth typing,
-    // so that is what the form asks for. race_trader and race_sul are absent because the
-    // Race Summary does not show them: a screenshot cannot contain them and a 0 would be a
-    // fabrication rather than a reading.
+    // so that is what the form asks for.
     const RACE_FIELDS = [
         { field: 'race_growth', label: 'Growth' },
         { field: 'race_science', label: 'Science' },
@@ -51,6 +49,44 @@
         { field: 'race_attack', label: 'Attack' },
         { field: 'race_defense', label: 'Defence' },
     ];
+
+    // Trader and Start Up Lab are the other two picks, and they were missing from this form
+    // until 2026-09-23 on the reasoning that "the Race Summary does not show them, so a
+    // screenshot cannot contain them". That was simply wrong: the summary prints "Trader +6"
+    // alongside the seven traits, player-parser.js has always read both from that same
+    // block, and the cost of the omission was not cosmetic — a manually entered trader was
+    // stored with race_trader = 0, and routes/trade.js decides who can accept an agreement
+    // for free with `race_trader > 0`. Ikki [ZOD] was on file as a non-trader for exactly
+    // this reason.
+    //
+    // They are checkboxes rather than number boxes because they are toggles with a FIXED
+    // cost (docs/game-rules.md): taken or not, 6 points or 1. A free number box would accept
+    // "Trader 3", which is not a thing the game can produce.
+    const TOGGLE_FIELDS = [
+        { field: 'race_trader', label: 'Trader', cost: 6 },
+        { field: 'race_sul', label: 'Start Up Lab', cost: 1 },
+    ];
+
+    /**
+     * The game's own consistency rule, from docs/game-rules.md:
+     *
+     *     (sum of the 7 trait picks) + (1 if SUL) + (6 if Trader) = 0
+     *
+     * Worth showing while typing, because a race that does not add up means a digit was
+     * misread off the screenshot, and finding that out at entry time is far cheaper than
+     * finding it out from a battle. It is a HINT, not a gate: a patch could change a cost,
+     * and refusing to record real intel because this file is out of date would be worse
+     * than recording it with a warning.
+     */
+    function racePointTotal(values = {}) {
+        const pick = (f) => {
+            const n = Number(values[f]);
+            return Number.isFinite(n) ? n : 0;
+        };
+        const traits = RACE_FIELDS.reduce((sum, f) => sum + pick(f.field), 0);
+        const toggles = TOGGLE_FIELDS.reduce((sum, f) => sum + (pick(f.field) ? f.cost : 0), 0);
+        return traits + toggles;
+    }
 
     const num = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : '');
 
@@ -76,6 +112,16 @@
             </tr>`;
         }).join('');
 
+        // Both toggles on one row under the traits, in the order the game lists them.
+        const toggleCells = TOGGLE_FIELDS.map(f => `
+            <td style="padding:2px 4px;">${esc(f.label)}</td>
+            <td style="padding:2px 4px;">
+                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
+                    <input type="checkbox" data-mi="${f.field}" data-mi-cost="${f.cost}" ${Number(p[f.field]) > 0 ? 'checked' : ''}>
+                    <span style="color:#888;">costs ${f.cost}</span>
+                </label>
+            </td>`).join('');
+
         return `
         <div class="aw-manual-intel" style="border:1px solid #556;border-radius:4px;padding:8px;margin-bottom:8px;background:#15151c;">
             <div style="font-weight:bold;margin-bottom:6px;">Enter intel from a screenshot</div>
@@ -90,8 +136,11 @@
             </tbody></table>
             <table class="table" style="margin-bottom:6px;">
                 <thead><tr><th colspan="4">Race Summary (the pick, e.g. -2)</th></tr></thead>
-                <tbody>${raceRows}</tbody>
+                <tbody>${raceRows}
+                    <tr>${toggleCells}</tr>
+                </tbody>
             </table>
+            <div data-mi-race-total style="font-size:11px;margin-bottom:6px;color:#aaa;"></div>
             <div style="margin-bottom:6px;">
                 <label style="display:block;font-size:11px;color:#aaa;margin-bottom:2px;">
                     Where did this come from? (required — it is shown wherever these numbers are)
@@ -123,11 +172,19 @@
             const raw = String(get(f.field) || '').trim();
             body[f.field] = raw === '' ? 0 : Number(raw);
         }
+        // A toggle sends its documented cost when ticked and 0 when not — the same numbers
+        // the scraper writes for a synced player, so a manual entry and a scraped one are
+        // indistinguishable downstream.
+        for (const f of TOGGLE_FIELDS) {
+            const el = root.querySelector(`[data-mi="${f.field}"]`);
+            body[f.field] = el && el.checked ? f.cost : 0;
+        }
         const trade = String(get('trade_revenue') || '').trim();
         body.trade_revenue = trade === '' ? 0 : Number(trade);
         body.artefact = String(get('artefact') || '').trim();
         return body;
     }
 
-    return { buildManualIntelFormHtml, readManualIntelForm, SCIENCE_FIELDS, RACE_FIELDS, esc };
+    return { buildManualIntelFormHtml, readManualIntelForm, racePointTotal,
+        SCIENCE_FIELDS, RACE_FIELDS, TOGGLE_FIELDS, esc };
 });

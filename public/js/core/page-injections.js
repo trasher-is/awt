@@ -1489,7 +1489,32 @@ const RACE_TRAITS = [
     { label: 'Attack', field: 'race_attack', pct: 'attack' },
     { label: 'Defence', field: 'race_defense', pct: 'defence' },
 ];
-const RACE_ROWS = [[0, 1], [2, 3], [4, 5], [6, null]].map(([a, b]) => [RACE_TRAITS[a], b == null ? null : RACE_TRAITS[b]]);
+// Trader and Start Up Lab are the other two picks — toggles with a fixed point cost rather
+// than scalable traits (docs/game-rules.md). The game prints a taken one as a plain
+// "Trader +6" with no percentage, as the FIRST cell of the grid, and omits it entirely when
+// it was not taken; everything else then flows on two per row.
+//
+// This card did not render them until 2026-09-23, which was the other half of the manual
+// form's missing checkboxes: even once a member could enter "Ikki is a trader", the card
+// they were looking at could not show it back, so a correct entry would have looked like it
+// had not saved.
+const RACE_TOGGLES = [
+    { label: 'Trader', field: 'race_trader' },
+    { label: 'Start Up Lab', field: 'race_sul' },
+];
+
+// The grid the game draws: taken toggles first, then the seven traits, two cells per row.
+// With nothing taken that is seven cells and the last partner is empty, exactly as before.
+function raceGridRows(values, cellFn, toggleCellFn) {
+    const cells = [];
+    for (const toggle of RACE_TOGGLES) {
+        if (values && Number(values[toggle.field]) > 0) cells.push(toggleCellFn(toggle, values[toggle.field]));
+    }
+    for (const trait of RACE_TRAITS) cells.push(cellFn(trait, values && values[trait.field]));
+    const rows = [];
+    for (let i = 0; i < cells.length; i += 2) rows.push([cells[i], cells[i + 1] ?? null]);
+    return rows;
+}
 
 // "-32% Growth -4" — the game's own format: percent first (its own sign), trait name,
 // then the raw per-level value (also signed, including +0).
@@ -1511,11 +1536,21 @@ function buildIrTable(caption, rows) {
         </table>`;
 }
 
-function buildRaceTable(cellFn, values) {
-    const rows = RACE_ROWS.map(([a, b]) => `
+// A taken toggle prints as the game prints it: name and cost, no percentage, because there
+// is no per-level rate to derive one from.
+function raceToggleCellKnown(toggle, value) {
+    const v = Number(value) || 0;
+    return `${toggle.label} ${v >= 0 ? '+' : ''}${v}`;
+}
+
+// The no-intel card lists every trait as unknown; a toggle cannot be listed that way,
+// because "not shown" and "not taken" look identical on the game's own page and inventing
+// an "X" row for one would claim knowledge the hub does not have.
+function buildRaceTable(cellFn, values, toggleCellFn = raceToggleCellKnown) {
+    const rows = raceGridRows(values, cellFn, toggleCellFn).map(([a, b]) => `
         <tr>
-            <td>${esc(cellFn(a, values && values[a.field]))}</td>
-            <td>${b ? esc(cellFn(b, values && values[b.field])) : ''}</td>
+            <td>${esc(a)}</td>
+            <td>${b == null ? '' : esc(b)}</td>
         </tr>`).join('');
     return `
         <table class="table mb-2">
@@ -1565,7 +1600,7 @@ function buildStaleIntelCard(p) {
 // The form lives under the card rather than replacing it, so the values already on record
 // stay readable while they are being corrected against a fresh screenshot.
 function mountManualIntelEntry(wrap, player) {
-    const { buildManualIntelFormHtml, readManualIntelForm } = globalThis.AWManualIntelForm;
+    const { buildManualIntelFormHtml, readManualIntelForm, racePointTotal } = globalThis.AWManualIntelForm;
     const host = document.createElement('div');
     host.id = 'aw-manual-intel-host';
     const toggle = document.createElement('button');
@@ -1581,6 +1616,24 @@ function mountManualIntelEntry(wrap, player) {
         host.insertAdjacentHTML('beforeend', buildManualIntelFormHtml(player));
         const form = host.querySelector('.aw-manual-intel');
         const status = form.querySelector('[data-mi-status]');
+
+        // The game's own rule is that the seven picks plus the toggles' costs sum to zero
+        // (docs/game-rules.md). Showing the running total while typing turns a misread digit
+        // into something visible at entry time instead of something discovered in a battle.
+        // A hint, never a gate: a patch could change a cost, and refusing to record real
+        // intel because this file is out of date would be the worse failure.
+        const totalLine = form.querySelector('[data-mi-race-total]');
+        const refreshTotal = () => {
+            if (!totalLine) return;
+            const total = racePointTotal(readManualIntelForm(form, player.id));
+            totalLine.textContent = total === 0
+                ? 'Race points: 0 ✓ (the seven picks plus Trader/SUL costs balance)'
+                : `Race points: ${total > 0 ? '+' : ''}${total} — the game only issues races that sum to 0, so something here is misread`;
+            totalLine.style.color = total === 0 ? '#4ade80' : '#fbbf24';
+        };
+        form.addEventListener('input', refreshTotal);
+        form.addEventListener('change', refreshTotal);
+        refreshTotal();
 
         form.querySelector('[data-mi-action="cancel"]').addEventListener('click', () => form.remove());
         form.querySelector('[data-mi-action="save"]').addEventListener('click', async (e) => {

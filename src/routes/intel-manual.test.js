@@ -137,6 +137,37 @@ const STARIUS = {
         const row2 = db.prepare('SELECT biology, intel_source FROM players WHERE id = 415').get();
         ok('a re-entry overwrites the values and the source together',
             fixed.status === 200 && row2.biology === 9 && row2.intel_source === 'corrected screenshot from Harpyie', row2);
+
+    // --- Trader and Start Up Lab ---------------------------------------------------
+    // They were missing from this route until 2026-09-23. The cost was not cosmetic: a
+    // manually entered trader was stored with race_trader = 0, and routes/trade.js decides who
+    // can accept an agreement for free with `race_trader > 0`.
+    {
+        const saved = await postJson(server, '/hub-api/intel/manual', { ...STARIUS, race_trader: 6, race_sul: 1 });
+        ok('a trader entered by hand is recorded as one', saved.status === 200, saved.body);
+        const row = db.prepare('SELECT race_trader, race_sul FROM players WHERE id = ?').get(415);
+        ok('and stored as the cost the scraper would have written',
+            row.race_trader === 6 && row.race_sul === 1, row);
+
+        // A toggle is taken or not. "Trader 3" is not a misread number, it is a number the game
+        // cannot print, and storing it would quietly corrupt every `race_trader > 0` check.
+        const bad = await postJson(server, '/hub-api/intel/manual', { ...STARIUS, race_trader: 3 });
+        ok('a value the game cannot produce is refused', bad.status === 400, bad.body);
+        ok('and the message says what the field actually is',
+            /toggle, not a scale/.test((bad.body && bad.body.error) || ''), bad.body);
+        const negative = await postJson(server, '/hub-api/intel/manual', { ...STARIUS, race_sul: -1 });
+        ok('a negative toggle is refused too', negative.status === 400, negative.body);
+
+        const cleared = await postJson(server, '/hub-api/intel/manual', { ...STARIUS, race_trader: 0, race_sul: 0 });
+        const clearedRow = db.prepare('SELECT race_trader, race_sul FROM players WHERE id = ?').get(415);
+        ok('unticking them clears the flags rather than leaving stale ones',
+            cleared.status === 200 && clearedRow.race_trader === 0 && clearedRow.race_sul === 0, clearedRow);
+
+        // A browser tab opened before the form grew these checkboxes posts without them. It
+        // must still be able to save the rest of the intel.
+        const stale = await postJson(server, '/hub-api/intel/manual', { ...STARIUS });
+        ok('a client that has never heard of these fields can still save', stale.status === 200, stale.body);
+    }
     } finally {
         server.close();
     }
@@ -144,5 +175,6 @@ const STARIUS = {
     fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
     if (failed > 0) { console.error(`${failed} check(s) failed`); process.exit(1); }
-    console.log('All checks passed');
+    
+console.log('All checks passed');
 })().catch(err => { console.error('Test run crashed:', err); process.exit(1); });
