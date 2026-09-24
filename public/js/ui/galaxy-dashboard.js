@@ -46,7 +46,7 @@ function renderTiles() {
     const battlesStale = h.latestBattleAt && Date.now() - h.latestBattleAt > 6 * HOUR;
     document.getElementById('galaxy-dash-tiles').innerHTML = [
         tile('Planets owned', `${fmt(h.ownedPlanets)}<span class="text-sm text-muted-foreground"> / ${fmt(h.planets)}</span>`, `${pct(h.ownedPlanets, h.planets)}% colonised · ${fmt(h.freePlanets)} free`),
-        tile('Systems occupied', `${fmt(h.occupiedSystems)}<span class="text-sm text-muted-foreground"> / ${fmt(h.systems)}</span>`, `${fmt(h.systems - h.occupiedSystems)} untouched`),
+        tile('Systems spawned', `${fmt(h.occupiedSystems)}<span class="text-sm text-muted-foreground"> / ${fmt(h.systems)}</span>`, `${fmt(h.systems - h.occupiedSystems)} still closed`),
         tile('Planets under siege', fmt(h.siegedPlanets), `${pct(h.siegedPlanets, h.ownedPlanets)}% of owned planets`),
         tile('Players active', `${fmt(h.active1h)}<span class="text-sm text-muted-foreground"> now</span>`, `${fmt(h.active24h)} in 24h · ${fmt(h.players)} players · ${fmt(h.alliances)} alliances`),
         tile('Battles, 24h', fmt(h.battles24h), battlesStale ? `latest report ${ago(h.latestBattleAt)} — battle sync behind` : `${fmt(h.conquests24h)} conquests`, battlesStale),
