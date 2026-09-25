@@ -454,6 +454,94 @@ const jsonRes = (data, status = 200) => respond(status, JSON.stringify(data), 'a
         && missingLevelDetails.xp_remaining_to_next_level === null && missingLevelDetails.total_xp === null,
         missingLevelDetails);
 
+    console.log('\n── Map payload reduction: ids only, names resolved by batch ' + '─'.repeat(15));
+    // The game dropped ownerName/allianceTag from planets, alliances[]/players[] from
+    // sectors and name/info from Map/sectors systems. Synthetic data throughout.
+    AWApi._resetNameCache();
+    const byIdsHandler = (url) => {
+        const ids = [...new URL('http://x' + url).searchParams.getAll('ids')].map(Number);
+        if (url.startsWith('/api/v1/Player/byIds')) {
+            // 999 is "unknown to the game": silently omitted, like the real endpoint.
+            return respond(200, JSON.stringify(ids.filter(id => id !== 999)
+                .map(id => ({ id, name: 'Pilot' + id, allianceId: 7, allianceTag: 'OLD' }))), 'application/json');
+        }
+        if (url.startsWith('/api/v1/Alliance/byIds')) {
+            return respond(200, JSON.stringify(ids.map(id => ({ id, name: 'Band' + id, tag: 'T' + id, color: '#abcdef' }))), 'application/json');
+        }
+        return respond(404, '', 'application/json');
+    };
+    nextResponse = byIdsHandler;
+    const idOnlySectors = [{ id: '0/0', rectangle: {}, solarSystems: [{
+        id: 12, fullName: 'Sample Star [12] (-3/14)', x: -3, y: 14, isInVision: true, planets: [
+            { id: 1, index: 1, name: 'Sample Star #1', ownerId: 41, allianceId: 7, isUnknownOwner: false },
+            { id: 2, index: 2, name: 'Sample Star #2', ownerId: 42, allianceId: null, isUnknownOwner: false },
+            { id: 3, index: 3, name: 'Sample Star #3', ownerId: 999, allianceId: 8, isUnknownOwner: false },
+            { id: 4, index: 4, name: 'Sample Star #4', ownerId: null, allianceId: null, isUnknownOwner: false },
+        ] }] }];
+    const before = calls.length;
+    const resolved = await AWApi.resolveSectorOwners(idOnlySectors);
+    const pls = idOnlySectors[0].solarSystems[0].planets;
+    ok('resolveSectorOwners asks once per endpoint', calls.length - before === 2, calls.slice(before).map(c => c.url));
+    ok('Player/byIds gets each owner id once, as repeated ids= params',
+        calls[before].url === '/api/v1/Player/byIds?ids=41&ids=42&ids=999', calls[before].url);
+    ok('Alliance/byIds gets the planets\' alliance ids', calls[before + 1].url === '/api/v1/Alliance/byIds?ids=7&ids=8', calls[before + 1].url);
+    ok('ownerName is filled from Player/byIds', pls[0].ownerName === 'Pilot41' && pls[1].ownerName === 'Pilot42', pls);
+    ok('allianceTag comes from the PLANET\'s allianceId, not the player\'s own allianceTag', pls[0].allianceTag === 'T7', pls[0]);
+    ok('an id the game omits stays unresolved rather than invented', !('ownerName' in pls[2]) && pls[2].allianceTag === 'T8', pls[2]);
+    ok('an unowned planet gets no owner name', !('ownerName' in pls[3]), pls[3]);
+    ok('it returns every alliance it saw, for alliances-from-map', resolved.ok && resolved.alliances.length === 2
+        && resolved.alliances[0].color === '#abcdef', resolved);
+    const alPayload = AWApi.mapSectorAlliancesToSyncPayload(idOnlySectors, resolved.alliances);
+    ok('mapSectorAlliancesToSyncPayload takes the resolved alliances when sectors carry none',
+        alPayload.alliances.length === 2 && alPayload.alliances[0].tag === 'T7', alPayload);
+    const planetPayload = AWApi.mapPlanetsToSyncPayload(12, pls, null, true);
+    ok('the resolved planets map to a normal owner block',
+        planetPayload.planets[0].owner.name === 'Pilot41' && planetPayload.planets[0].owner.alliance_tag === 'T7', planetPayload.planets[0]);
+
+    const cached = calls.length;
+    const again = [{ solarSystems: [{ id: 12, planets: [{ id: 1, index: 1, ownerId: 41, allianceId: 7 }] }] }];
+    await AWApi.resolveSectorOwners(again);
+    ok('a second pass within the hour is served from cache — zero requests', calls.length === cached, calls.slice(cached).map(c => c.url));
+    ok('and still fills the name', again[0].solarSystems[0].planets[0].ownerName === 'Pilot41', again[0]);
+
+    const later = [{ solarSystems: [{ id: 12, planets: [{ id: 1, index: 1, ownerId: 41, allianceId: 7 }] }] }];
+    await AWApi.resolveSectorOwners(later, Date.now() + 61 * 60 * 1000);
+    ok('after an hour the cache is re-asked (renames catch up)', calls.length === cached + 2, calls.slice(cached).map(c => c.url));
+
+    AWApi._resetNameCache();
+    const many = Array.from({ length: 205 }, (_, i) => ({ ownerId: 1000 + i, allianceId: null }));
+    const chunkStart = calls.length;
+    await AWApi.resolvePlanetOwners(many);
+    const chunkUrls = calls.slice(chunkStart).map(c => c.url);
+    ok('more than 100 ids go out in chunks of 100 (the game truncates silently past that)',
+        chunkUrls.length === 3 && chunkUrls.map(u => (u.match(/ids=/g) || []).length).join() === '100,100,5', chunkUrls.map(u => (u.match(/ids=/g) || []).length));
+    ok('every chunk\'s answer lands', many.every(p => p.ownerName === 'Pilot' + p.ownerId));
+
+    AWApi._resetNameCache();
+    const oldShapeStart = calls.length;
+    const oldShape = [{ alliances: [{ id: 7, name: 'Band7', tag: 'T7', color: null }], solarSystems: [{ id: 12, planets: [
+        { id: 1, index: 1, ownerId: 41, ownerName: 'Pilot41 [T7]', allianceId: 7, allianceTag: 'T7' }] }] }];
+    const oldResolved = await AWApi.resolveSectorOwners(oldShape);
+    ok('the old shape (ownerName present) costs zero requests — safe to ship before the game changes',
+        calls.length === oldShapeStart && oldResolved.ok, calls.slice(oldShapeStart).map(c => c.url));
+    ok('and leaves the planet untouched', oldShape[0].solarSystems[0].planets[0].ownerName === 'Pilot41 [T7]');
+
+    AWApi._resetNameCache();
+    nextResponse = respond(404, '', 'application/json');
+    const failing = [{ ownerId: 41, allianceId: 7 }];
+    const failed = await AWApi.resolvePlanetOwners(failing);
+    ok('a failed byIds call (the live server before the change 404s) resolves ok:false, never throws',
+        failed.ok === false && !('ownerName' in failing[0]), failed);
+
+    const idOnlySys = AWApi.mapSolarSystemsToSyncPayload([{ id: 12, fullName: 'Sample Star [12] (-3/14)', x: -3, y: 14 }]);
+    ok('a Map/sectors system without name/info gets them back out of fullName',
+        idOnlySys.systems[0].name === 'Sample Star' && idOnlySys.systems[0].info === '[12] (-3/14)', idOnlySys.systems[0]);
+    const listPayload = AWApi.mapSolarSystemsToSyncPayload([{ id: 12, name: 'Given', info: 'i', fullName: 'Other [12] (-3/14)', x: -3, y: 14 }]);
+    ok('the list endpoints\' own name/info still win', listPayload.systems[0].name === 'Given' && listPayload.systems[0].info === 'i', listPayload.systems[0]);
+    ok('a fullName that does not match the pattern is kept whole as the name',
+        AWApi.systemNameParts('Odd Name').name === 'Odd Name' && AWApi.systemNameParts('Odd Name').info === null);
+    ok('no fullName at all gives nulls, not undefined', AWApi.systemNameParts(undefined).name === null);
+
     console.log('\n── Source scan: the rules this file lives under ' + '─'.repeat(28));
     // Comments stripped first so a comment describing an old rule can never trip these.
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'utils', 'aw-api.js'), 'utf8')

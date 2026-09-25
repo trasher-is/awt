@@ -44,24 +44,30 @@ function getAllPlanIndex() {
     return getAllPlanIndexStmt.all();
 }
 
-// Plans worth showing an "optimal colony ship launch time" for: the target planet must
-// have a confirmed-empty row in `planets` (owner_id IS NULL covers both a genuine Free
-// Planet and the game's real "Unknown" owner state alike — see routes/sync.js's 2026-09-02
-// fix, both are equally colonizable) AND that row must actually exist (a plan on a planet
-// the hub has never scanned is excluded — "confirmed empty", not "presumed empty", since a
-// stale/never-synced row could just as easily be someone's active home). Scoped to ONE
-// author (2026-09-02, per the user: "I don't want to launch to other people's Plans, only
-// to mine, everyone should see their own planned planet times") — every hub member sees
-// only their own plans' launch windows here, not the whole alliance's.
-const getColonizablePlansStmt = db.prepare(`
-    SELECT pp.system_id, pp.planet_index, pp.note, s.name AS system_name, s.x, s.y
+// Plans to show a launch window for on the Science page: every plan this member authored,
+// whatever currently sits on the target. Scoped to ONE author (2026-09-02, per the user: "I
+// don't want to launch to other people's Plans, only to mine, everyone should see their
+// own planned planet times").
+//
+// This used to require a confirmed-empty planets row (owner_id IS NULL). That hid exactly
+// the plans members care about most: on 2026-09-25 a member's target turned out to be held
+// by another player, so his launch window vanished with no explanation. A colonization
+// force can take an occupied planet as well as settle a free one, and the culture slot has
+// to be open on landing either way, so the timing question is the same. owner_name is
+// returned so the page can say the landing will be contested. A planet the hub has never
+// scanned is included too (LEFT JOIN): travel time only needs the system's coordinates.
+const getLaunchWindowPlansStmt = db.prepare(`
+    SELECT pp.system_id, pp.planet_index, pp.note, s.name AS system_name, s.x, s.y,
+           owner.name AS owner_name
     FROM planet_plans pp
-    JOIN planets p ON p.system_id = pp.system_id AND p.planet_index = pp.planet_index
     JOIN systems s ON s.id = pp.system_id
-    WHERE pp.author_id = ? AND p.owner_id IS NULL AND s.x IS NOT NULL AND s.y IS NOT NULL
+    LEFT JOIN planets p ON p.system_id = pp.system_id AND p.planet_index = pp.planet_index
+    LEFT JOIN players owner ON owner.id = p.owner_id
+    WHERE pp.author_id = ? AND s.x IS NOT NULL AND s.y IS NOT NULL
+    ORDER BY pp.system_id, pp.planet_index
 `);
-function getColonizablePlans(authorId) {
-    return getColonizablePlansStmt.all(authorId);
+function getLaunchWindowPlans(authorId) {
+    return getLaunchWindowPlansStmt.all(authorId);
 }
 
 // Used by both search.js's POST /plans and discord_bot.js's !plan command — a genuine
@@ -100,6 +106,6 @@ function deleteAllPlans() {
 
 module.exports = {
     getPlansForSystem, getPlansForSystemDetailed, getPlansForSystemForBot, getAllPlanIndex,
-    getColonizablePlans,
+    getLaunchWindowPlans,
     createPlan, deletePlanAsAdmin, deletePlanAsAuthor, planExists, deleteAllPlans,
 };

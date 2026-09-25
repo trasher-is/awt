@@ -164,6 +164,25 @@ router.post('/sync/system', requireAuth, (req, res) => {
             if (p.game_planet_id != null && (!Number.isInteger(p.game_planet_id) || p.game_planet_id <= 0)) continue;
             if (!Number.isInteger(p.planet_index) || p.planet_index < 1 || p.planet_index > 99) continue;
 
+            // Id-only owners (the game's "map payload reduction" API change): the client
+            // resolves names through Player/byIds and Alliance/byIds, but a lookup can miss
+            // (outage, an id the game omits, an old cached client). Never write that through
+            // as a NULL — players.name is NOT NULL, so one nameless owner used to roll back
+            // the whole system, and a missing tag would wipe the alliance's known tag. Use
+            // what the hub already has on record; an owner we have never seen at all is held
+            // at last-known (the same freeze as an out-of-vision planet) until a later scan
+            // or the player sweep brings the name.
+            if (p.owner && !p.vision_uncertain) {
+                if (typeof p.owner.name !== 'string' || !p.owner.name) {
+                    const known = playersRepo.getPlayerName(p.owner.id);
+                    if (known && known.name) p.owner.name = known.name;
+                    else p.vision_uncertain = true;
+                }
+                if (p.owner.alliance_id && typeof p.owner.alliance_tag !== 'string') {
+                    p.owner.alliance_tag = alliancesRepo.getAllianceTagById(p.owner.alliance_id);
+                }
+            }
+
             // Check for history events BEFORE upserting
             const oldP = systemsRepo.getOldPlanet(system_id, p.planet_index);
 
