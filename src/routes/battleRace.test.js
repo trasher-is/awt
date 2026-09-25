@@ -24,9 +24,11 @@ app.use((req, res, next) => {
     next();
 });
 app.use('/hub-api', blockGuestWrites, router);
+// Intel is recorded two hours before the synthetic battle below, inside the known-side window.
 const insertPlayer = db.prepare(`INSERT INTO players
-    (id, name, has_intel, race_attack, race_defense, physics, mathematics, intel_updated_at, joined)
-    VALUES (?, ?, ?, ?, ?, 20, 21, '2026-09-01 00:00:00', '2026-08-29T00:00:00Z')`);
+    (id, name, has_intel, race_attack, race_defense, physics, mathematics, intel_updated_at, joined,
+     science_level, level)
+    VALUES (?, ?, ?, ?, ?, 20, 21, '2026-09-05 10:00:00', '2026-08-29T00:00:00Z', 15, 20)`);
 insertPlayer.run(1, 'Synthetic unknown', 0, 0, 0);
 insertPlayer.run(2, 'Synthetic bio', 1, 0, 0);
 insertPlayer.run(3, 'Synthetic restart', 0, 0, 0);
@@ -89,12 +91,27 @@ const getPlayer = id => db.prepare('SELECT * FROM players WHERE id = ?').get(id)
         }
         db.prepare(`INSERT INTO battle_reports (${Object.keys(report).join(',')})
             VALUES (${Object.keys(report).map(key => '@' + key).join(',')})`).run(report);
+        // The same winner against a player the hub has no row for: no known side.
+        db.prepare(`INSERT INTO battle_reports (${Object.keys(report).join(',')})
+            VALUES (${Object.keys(report).map(key => '@' + key).join(',')})`).run({ ...report, id: 102, def_player_id: 4 });
         const evidenceResult = await request(3, 'POST');
         ok('stored winning ship evidence narrows a DEF range through the real HTTP path',
             evidenceResult.body.inference.defense.status === 'compatible'
             && evidenceResult.body.inference.eligible_report_count === 1, evidenceResult);
+        ok('the opponent\'s stored bio intel is the known side, and a positive pick can be shown',
+            evidenceResult.body.inference.defense.candidates.join(',') === '1', evidenceResult.body.inference.defense);
+        ok('a report against a player without bio is skipped, not guessed',
+            evidenceResult.body.inference.skipped.no_known_side === 1, evidenceResult.body.inference.skipped);
         ok('another player cannot borrow the winning-side evidence',
             evidenceResult.body.inference.used_report_ids.join(',') === '101');
+        const saved = JSON.parse(getPlayer(3).battle_race_inference);
+        db.prepare('UPDATE players SET battle_race_inference = ? WHERE id = 3')
+            .run(JSON.stringify({ ...saved, version: 1 }));
+        ok('a result saved by the one-sided version 1 is not shown as current', repo.getBattleRace(3).inference === null);
+        db.prepare("UPDATE players SET science_level = 0 WHERE id = 3").run();
+        ok('an unfilled public science level blocks narrowing instead of acting as a zero ceiling',
+            (await request(3, 'POST')).body.inference.skipped.science_level_unknown === 1);
+        db.prepare("UPDATE players SET science_level = 15 WHERE id = 3").run();
 
         await request(3, 'POST');
         db.prepare("UPDATE players SET joined = '2026-09-10T00:00:00Z' WHERE id = 3").run();
@@ -102,10 +119,16 @@ const getPlayer = id => db.prepare('SELECT * FROM players WHERE id = ?').get(id)
         const refreshed = await request(3, 'POST');
         ok('recalculation uses the later Joined timestamp', refreshed.body.inference.not_before === '2026-09-10T00:00:00.000Z');
         ok('battles before the new race do not constrain the range', refreshed.body.inference.eligible_report_count === 0
-            && refreshed.body.inference.skipped.before_current_player === 1);
+            && refreshed.body.inference.skipped.before_current_player === 2);
+        db.prepare("UPDATE players SET joined = '2026-08-29T00:00:00Z' WHERE id = 3").run();
         players.resetPlayerOnRestart(3);
         ok('restart clears the inference and records a new evidence boundary', getPlayer(3).battle_race_inference === null && !!getPlayer(3).battle_race_not_before);
         ok('restart cannot promote unknown race to bio', core(3).has_intel === 0);
+        db.prepare("UPDATE players SET science_level = 15, level = 20 WHERE id = 3").run();
+        const afterRestart = await request(3, 'POST');
+        ok('battles before a detected restart do not constrain the new race',
+            afterRestart.body.inference.eligible_report_count === 0
+            && afterRestart.body.inference.skipped.before_current_player === 2, afterRestart.body.inference);
 
         db.prepare("UPDATE players SET battle_race_inference = '{broken' WHERE id = 3").run();
         ok('malformed old saved analysis degrades to no estimate', (await request(3)).body.inference === null);

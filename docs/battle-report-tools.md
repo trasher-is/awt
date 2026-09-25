@@ -33,7 +33,8 @@ them, attach them to public issues, or use captured reports as test fixtures.
 
 Player profiles now include **Race evidence from battle reports** and an **Update from
 battle reports** button. The action recalculates from that player's stored reports and
-saves a separate, dated assessment. It shows percentage ranges for Attack and Defence,
+saves a separate, dated assessment. A result saved by an earlier version of the method is
+not shown; press the button again to recalculate. It shows percentage ranges for Attack and Defence,
 the number of usable reports, links to evidence, and reasons other reports were excluded.
 
 These are **conditional compatibility ranges**, not confidence intervals or probabilities.
@@ -83,25 +84,57 @@ formula. The live [GameOptions](https://astrowars.games/About/GameOptions), chec
 2026-09-12, has no standard-server PL cap (`MaxPlayerLevelBonus=null`) and disables combat
 artefacts (`CombatArtefacts=False`).
 
-Reports do not record historical sciences or player levels. Using today's values for an
-older battle would create false precision. Instead, historical Math has no assumed upper
-bound, the worst Math bracket is allowed, and positive PL toughness is allowed at any
-size. Under this model, the toughness multiplier is at least `0.75 × (1 + 0.12 × DEF)`.
-Observed winning losses supply an upper bound on that multiplier. High losses can exclude
-high Defence picks; good survival alone cannot distinguish Defence from science or PL.
-The method currently produces **Defence upper bounds**, not guaranteed two-sided narrowing.
+Reports do not record historical sciences or player levels, and the hub keeps only
+current values, not their history (#277). Using today's values as the values at an older
+battle would create false precision. The inference therefore measures each report against
+a **known side** and treats the player's own historical stats as unknowns under ceilings:
 
-Attack remains at the full supported range: historical Physics, effective PL, and the
-opponent's Attack are unknown, and the stored `win_chance` field has no verified side
-orientation. Wins, losses, dice, or combat variance cannot replace those missing inputs.
-More reports with the same missing information do not resolve this ambiguity.
+- **Known side.** The opponent in the report must have bio intel recorded within 48 hours
+  of the battle: our own member (same alliance means full intel) or a scouted player
+  outside the alliance. That intel supplies the opponent's race, Physics, Mathematics and
+  player level. A report whose opponent has no bio is skipped as `no_known_side`; one whose
+  opponent intel is further than 48 hours from the battle is skipped as
+  `ally_stats_unknown`. The largest gap used is saved as `known_side_intel_max_age_hours`.
+- **Ceilings for the player.** Their Mathematics at the battle is anywhere from 0 to their
+  current public science level, and their player level anywhere from 0 to their current
+  level. Both are assumed not to go down within one incarnation of an account; the resign
+  cutoff below ends an incarnation. An unfilled or zero science level is unknown, not a
+  ceiling of zero (`science_level_unknown`). Player level matters only when the player's
+  fleet fields all three fighting ship types; then a missing level is
+  `player_level_unknown`.
+- **The model, backwards.** For each Defence pick, the card runs `AWBattleModel.simulate`
+  with the known side's stats and every Mathematics level up to the ceiling (and both ends
+  of the player-level range). A pick stays when some combination reproduces the player's
+  surviving ships of every type within 1.5 ships. The model's constants are reused, not
+  copied into a second formula.
+
+Because the opponent's Mathematics and the player's ceiling are known, the Mathematics
+bracket and the player-level bonus are bounded on both sides. Observed winning losses then
+exclude high **and** low Defence picks: heavy losses rule out high picks, good survival
+rules out low ones. With large, clean reports a single compatible pick is common. It is
+still a model-based estimate, not confirmed bio.
+
+Attack remains at the full supported range. The stored `win_chance` column holds the dice
+roll, not the win chance (see [battle-model.md](battle-model.md#the-win_chance-column-is-the-dice-roll)),
+so the stored reports carry no usable win chance. Attack can be estimated only after the
+report-page capture records the real win chance (#277). Wins, losses and dice are not used
+as a substitute.
 
 Only published, consistently identified winning sides with complete fleet and loss counts
-are eligible. Both fleets must have internally consistent CV; starbases (their stored
-count is not a verified level), civilian ships, unopposed encounters, winners with fewer
-than four fighting ships, annihilated winners, and losses below rounding resolution are
-excluded. Each fighting ship type allows 1.5
-ships of rounding/model tolerance. No real player data is used in tests.
+are eligible. Losing-side losses are approximate in the game and are not used. Both fleets
+must have internally consistent CV. A defender's starbase is allowed: its fleet's losses do
+not depend on the starbase level. An attacker's losses do, so the starbase level must follow
+from the defender's stored CV (fleet CV plus the CV of exactly one starbase level); when the
+stored CV covers the fleet only, the report is skipped as `starbase_level_unknown`. Civilian
+ships, an attacking starbase, unopposed encounters, winners with fewer than four fighting
+ships, annihilated winners, and losses below rounding resolution are excluded. Each
+fighting ship type allows 1.5 ships of rounding/model tolerance. No real player data is
+used in tests.
+
+To see how the current method behaves on real data without publishing it, run
+`node scripts/battle-race-measure.js <copy-of-awt.db>` on a copy of the hub database. It
+opens the file read-only and prints counts only: players narrowed, skip reasons, and the
+results saved by earlier versions as a baseline.
 
 The [official changelog](https://astrowars.games/Changelog), checked on 2026-09-12, confirms
 the v6 race coefficients changed on 2026-08-28. The deployment hour is unknown, so inference

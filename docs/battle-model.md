@@ -292,3 +292,19 @@ this table is the check.
 Nothing renders the column today, so nothing is currently lying to anyone. It must not be
 wired to a "win chance" label later. `!price check` re-runs all three checks against live
 rows, so this section can be verified rather than believed.
+
+### Race evidence runs the survivor model backwards
+
+The battle-report race card (`src/utils/battle-race-inference.js`,
+[battle-report-tools.md](battle-report-tools.md#why-science-and-player-level-do-not-become-a-false-race-bonus))
+does not carry its own formula. For each Defence pick it calls `simulate` with the
+opponent's recorded intel and every Mathematics level up to the player's public science
+level, and keeps the pick when the winner's surviving ships come out within 1.5 ships of the
+report. It uses only the survivor half of the model: Attack waits for a real win chance
+(above).
+
+Only the **winner's** losses are used. The official changelog calls losing-side losses
+approximate, and they have not been checked against stored reports yet: comparing the
+loser's losses with the model, for fights that were not at the certainty cap and did not
+annihilate the loser, needs a copy of the production database (#282). Until that check is
+done and written down here, the loser's losses stay out of the inference.
