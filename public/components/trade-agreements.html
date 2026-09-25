@@ -98,6 +98,17 @@
                 <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider">Banking rate</div><div id="savings-rate" class="text-lg font-bold text-sky-400">--</div></div>
                 <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider" title="Astro Dollars + Production Points at market price — not counting artifacts or supply units">Saved so far</div><div id="savings-saved" class="text-lg font-bold text-emerald-400">--</div></div>
                 <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider" title="Saved so far, plus your Trade inventory hoard (artifacts + supply units) valued as if sold right now">Saved (if sold)</div><div id="savings-saved-sold" class="text-lg font-bold text-amber-400">--</div></div>
+                <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider" title="Planned expenses below, set aside on top of the 20,000 A$ trade agreement — Ready in counts them">Reserved</div><div id="savings-reserved" class="text-lg font-bold text-rose-400">--</div></div>
+            </div>
+            <div class="p-4 border-b border-border/40 flex flex-col gap-2">
+                <div class="flex items-center justify-between gap-2">
+                    <div>
+                        <div class="text-sm font-semibold text-foreground">Planned expenses</div>
+                        <div class="text-[11px] text-muted-foreground">A$ you will need soon (an artifact, a fee). Set aside before the trade agreement; remove a row once it is paid.</div>
+                    </div>
+                    <button id="btn-add-expense" type="button" title="Add an expense" class="h-9 w-9 shrink-0 rounded-md border border-border hover:bg-accent inline-flex items-center justify-center"><i class="fa-solid fa-plus"></i></button>
+                </div>
+                <div id="savings-expenses" class="flex flex-col gap-2"></div>
             </div>
             <div id="savings-planets" class="p-4 flex flex-col gap-2"></div>
         </div>
