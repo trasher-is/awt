@@ -115,10 +115,14 @@ db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (30, 'FOE', 'Enemies')`
 db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (301, 'kralgar', 30), (302, 'Victim', 30)`).run();
 db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (400, 'Praepes', 0, 0), (401, 'Maasym', 1, 1), (402, 'OldSystem', 9, 9)`).run();
 db.prepare(`INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id) VALUES (40001, 400, 6, 301)`).run();
-db.prepare(`INSERT INTO best_guarded (game_planet_id, cv, updated_at) VALUES (40001, '975', '2026-09-19T22:00:00.000Z')`).run();
+// Timestamps are relative to now, not calendar dates: this history reads a 5-day window
+// back from the real clock, so fixed dates written on 2026-09-21 aged out of it on
+// 2026-09-25 and the suite started failing on every branch. Same order and gaps as before.
+const hoursAgo = h => new Date(Date.now() - h * 3600 * 1000).toISOString();
+db.prepare(`INSERT INTO best_guarded (game_planet_id, cv, updated_at) VALUES (40001, '975', ?)`).run(hoursAgo(26));
 
 // Rankings sighting: home, fresh.
-fleets.upsertStrongestFleet(301, 1, 325, 0, 0, 975, '2026-09-20T18:00:00.000Z');
+fleets.upsertStrongestFleet(301, 1, 325, 0, 0, 975, hoursAgo(6));
 
 // Battle-report sighting: kralgar is the ATTACKER, more recent than the rankings sighting.
 // He fielded 300 destroyers and lost 50 of them, plus 10 transports (none lost) -- the
@@ -126,19 +130,19 @@ fleets.upsertStrongestFleet(301, 1, 325, 0, 0, 975, '2026-09-20T18:00:00.000Z');
 db.prepare(`
     INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, system_id, planet_index,
         att_destroyers, att_destroyers_lost, att_cruisers, att_battleships, att_transports, att_colony_ships)
-    VALUES (8001, '2026-09-20T20:00:00.000Z', 301, 302, 401, 3, 300, 50, 0, 0, 10, 0)
-`).run();
+    VALUES (8001, ?, 301, 302, 401, 3, 300, 50, 0, 0, 10, 0)
+`).run(hoursAgo(4));
 
 // A second battle report where kralgar lost EVERYTHING -- this must not appear at all.
 db.prepare(`
     INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, system_id, planet_index,
         att_destroyers, att_destroyers_lost)
-    VALUES (8003, '2026-09-20T21:00:00.000Z', 301, 302, 401, 3, 20, 20)
-`).run();
+    VALUES (8003, ?, 301, 302, 401, 3, 20, 20)
+`).run(hoursAgo(3));
 
 // Vision sighting: oldest of the three but still inside the 5-day window.
 db.prepare(`INSERT INTO fleets (owner_id, system_id, planet_index, destroyers, cruisers, battleships, updated_at)
-            VALUES (301, 400, 6, 300, 0, 0, '2026-09-19T10:00:00.000Z')`).run();
+            VALUES (301, 400, 6, 300, 0, 0, ?)`).run(hoursAgo(38));
 
 // A stale battle report from 6 days ago -- must NOT appear in a 5-day history.
 db.prepare(`
