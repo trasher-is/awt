@@ -1005,6 +1005,7 @@ export async function openTradeAgreementsPanel() {
         TA_TABS.forEach(tab => panel.querySelector(`#ta-tab-${tab}`)?.addEventListener('click', () => switchTaTab(tab)));
         panel.querySelector('#ta-admin-set')?.addEventListener('click', adminSetPair);
         panel.querySelector('#btn-reload-savings')?.addEventListener('click', reloadMySavings);
+        panel.querySelector('#btn-add-expense')?.addEventListener('click', addSavingsExpense);
     }
 
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
@@ -1422,11 +1423,17 @@ async function loadMySavings() {
     const list = document.getElementById('savings-planets');
     if (list) list.innerHTML = '<p class="text-center py-8 text-muted-foreground text-sm"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading your planets...</p>';
     mySavingsLoad = (async () => {
-        const [planetsRes, econRes] = await Promise.all([
+        const [planetsRes, econRes, expensesRes] = await Promise.all([
             fetch('/hub-api/my-planets'),
             fetch('/hub-api/intel/trade-analysis'),
+            fetch('/hub-api/my-planets/expenses'),
         ]);
         if (!planetsRes.ok || !econRes.ok) throw new Error('load failed');
+        // Expenses are an add-on: a failure there must not hide the planets list.
+        try {
+            const expensesData = await expensesRes.json();
+            mySavingsExpenses = expensesData.success ? expensesData.expenses : [];
+        } catch (e) { mySavingsExpenses = []; }
         const planetsData = await planetsRes.json();
         const econData = await econRes.json();
         if (!planetsData.success) throw new Error(planetsData.error || 'load failed');
@@ -1485,13 +1492,12 @@ function renderMySavings(planets, econData) {
     const savedWithSelling = saved + (economy ? (economy.hoarded_au || 0) : 0);
     const bankingRate = bankingRateOf(planets);
     const auPerH = bankingRate * ppPrice;
-    const needed = TA_TRADE_COST - saved;
+    savingsContext = { saved, auPerH };
 
-    const readyEl = document.getElementById('savings-ready-in');
     const rateEl = document.getElementById('savings-rate');
     const savedEl = document.getElementById('savings-saved');
     const savedSoldEl = document.getElementById('savings-saved-sold');
-    if (readyEl) readyEl.textContent = fmtReady(needed, auPerH);
+    renderSavingsExpenses();
     if (rateEl) rateEl.textContent = `${bankingRate.toFixed(1)} PP/h (~${fmtAU(auPerH)} A$/h)`;
     if (savedEl) savedEl.textContent = `${fmtAUExact(saved)} A$`;
     if (savedSoldEl) savedSoldEl.textContent = `${fmtAUExact(savedWithSelling)} A$`;
@@ -1513,6 +1519,118 @@ function renderMySavings(planets, econData) {
             <span class="text-xs ${p.banking ? 'text-emerald-400' : 'text-aw-warning'} w-24 text-right">${p.banking ? 'banking' : 'still building'}</span>
         </label>`).join('');
     list.querySelectorAll('[data-planet-toggle]').forEach(box => box.addEventListener('change', () => toggleSavingsPlanet(box)));
+}
+
+// ---------- My Savings: planned expenses ----------
+// A$ the member already knows they will spend soon. All of it is reserved on top of the
+// trade-agreement cost, so "Ready in" never counts money that is already spoken for. Each
+// row also says whether savings will have caught up by its own due time, counting every
+// row due before it first — the same order the money will actually leave.
+let mySavingsExpenses = [];
+let savingsContext = { saved: 0, auPerH: 0 };
+const EXPENSE_STEP_MS = 6 * 3600 * 1000;
+
+function fmtDueIn(ms) {
+    const h = (ms - Date.now()) / 3600000;
+    if (h <= 0) return 'due now';
+    if (h < 24) return `in ${Math.round(h)}h`;
+    const d = Math.floor(h / 24), rest = Math.round(h - d * 24);
+    return rest ? `in ${d}d ${rest}h` : `in ${d}d`;
+}
+
+function renderSavingsExpenses() {
+    const { saved, auPerH } = savingsContext;
+    const rows = [...mySavingsExpenses].sort((a, b) => a.due_at - b.due_at || a.id - b.id);
+    const reserved = rows.reduce((sum, e) => sum + (e.amount || 0), 0);
+
+    const readyEl = document.getElementById('savings-ready-in');
+    if (readyEl) readyEl.textContent = fmtReady(TA_TRADE_COST + reserved - saved, auPerH);
+    const reservedEl = document.getElementById('savings-reserved');
+    if (reservedEl) reservedEl.textContent = `${fmtAUExact(reserved)} A$`;
+
+    const list = document.getElementById('savings-expenses');
+    if (!list) return;
+    if (!rows.length) {
+        list.innerHTML = '<p class="text-xs text-muted-foreground/70">None planned. Use + to add one.</p>';
+        return;
+    }
+    let spentBefore = 0;
+    list.innerHTML = rows.map(e => {
+        spentBefore += e.amount || 0;
+        const hours = Math.max(0, (e.due_at - Date.now()) / 3600000);
+        const shortBy = spentBefore - (saved + auPerH * hours);
+        const status = !e.amount ? '<span class="text-muted-foreground/60">enter an amount</span>'
+            : shortBy <= 0 ? '<span class="text-emerald-400">covered</span>'
+            : `<span class="text-rose-400" title="Savings by then, minus this and every expense due before it">short ${fmtAUExact(shortBy)} A$</span>`;
+        const when = formatLocalDateTime(new Date(e.due_at), { weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+        return `<div class="flex flex-wrap items-center gap-2 bg-zinc-950 border border-border rounded-md px-3 py-2" data-expense="${e.id}">
+            <input type="number" min="0" step="1" inputmode="numeric" value="${e.amount || ''}" placeholder="A$" data-expense-amount
+                class="h-8 w-24 sm:w-28 px-2 rounded-md bg-zinc-900 border border-border text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring">
+            <span class="text-xs text-muted-foreground">A$</span>
+            <div class="flex items-center gap-1 order-last w-full sm:order-none sm:w-auto sm:ml-1">
+                <button type="button" data-expense-step="-1" title="6 hours sooner" class="h-8 px-2 rounded-md border border-border text-xs hover:bg-accent">−6h</button>
+                <span class="text-xs text-foreground font-mono w-24 text-center" title="${esc(when)}">${esc(fmtDueIn(e.due_at))}</span>
+                <button type="button" data-expense-step="1" title="6 hours later" class="h-8 px-2 rounded-md border border-border text-xs hover:bg-accent">+6h</button>
+            </div>
+            <span class="ml-auto flex items-center gap-1">
+                <span class="text-xs">${status}</span>
+                <button type="button" data-expense-remove title="Remove (paid or no longer needed)" class="h-8 w-8 rounded-md hover:bg-red-950/40 text-red-400 inline-flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
+            </span>
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('[data-expense]').forEach(row => {
+        const id = Number(row.dataset.expense);
+        row.querySelector('[data-expense-amount]')?.addEventListener('change', ev => {
+            const amount = Math.max(0, Math.round(Number(ev.target.value) || 0));
+            updateSavingsExpense(id, { amount });
+        });
+        row.querySelectorAll('[data-expense-step]').forEach(btn => btn.addEventListener('click', () => {
+            const current = mySavingsExpenses.find(x => x.id === id);
+            if (!current) return;
+            // Never step into the past: "due now" is as early as an expense can be.
+            const dueAt = Math.max(Date.now(), current.due_at + Number(btn.dataset.expenseStep) * EXPENSE_STEP_MS);
+            updateSavingsExpense(id, { due_at: dueAt });
+        }));
+        row.querySelector('[data-expense-remove]')?.addEventListener('click', () => removeSavingsExpense(id));
+    });
+}
+
+async function savingsExpenseRequest(method, url, body) {
+    try {
+        const res = await fetch(url, {
+            method,
+            headers: body ? { 'Content-Type': 'application/json' } : {},
+            body: body ? JSON.stringify(body) : undefined,
+        });
+        const data = await res.json();
+        if (!data.success) { if (typeof window.showToast === 'function') window.showToast(data.error || 'Failed to save'); return null; }
+        return data;
+    } catch (e) {
+        if (typeof window.showToast === 'function') window.showToast('Network error');
+        return null;
+    }
+}
+
+async function addSavingsExpense() {
+    const data = await savingsExpenseRequest('POST', '/hub-api/my-planets/expenses', {});
+    if (!data) return;
+    mySavingsExpenses.push(data.expense);
+    renderSavingsExpenses();
+    document.querySelector(`[data-expense="${data.expense.id}"] [data-expense-amount]`)?.focus();
+}
+
+async function updateSavingsExpense(id, patch) {
+    const data = await savingsExpenseRequest('PATCH', `/hub-api/my-planets/expenses/${id}`, patch);
+    if (data) mySavingsExpenses = mySavingsExpenses.map(e => (e.id === id ? data.expense : e));
+    renderSavingsExpenses(); // on failure this puts the stored value back in the box
+}
+
+async function removeSavingsExpense(id) {
+    const data = await savingsExpenseRequest('DELETE', `/hub-api/my-planets/expenses/${id}`);
+    if (!data) return;
+    mySavingsExpenses = mySavingsExpenses.filter(e => e.id !== id);
+    renderSavingsExpenses();
 }
 
 async function toggleSavingsPlanet(box) {

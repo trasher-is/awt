@@ -2,6 +2,7 @@ const express = require('express');
 const usersRepo = require('../repositories/users');
 const planetBankingRepo = require('../repositories/planetBanking');
 const alliancesRepo = require('../repositories/alliances');
+const savingsExpensesRepo = require('../repositories/savingsExpenses');
 const { requireAuth } = require('./_middleware');
 const router = express.Router();
 
@@ -102,6 +103,79 @@ router.get('/trade-agreements/tr-outlook', requireAuth, (req, res) => {
     } catch (err) {
         console.error('[DB Error] Failed to load TR outlook:', err);
         res.status(500).json({ success: false, error: 'Failed to load TR outlook' });
+    }
+});
+
+// --- MY SAVINGS: PLANNED EXPENSES (2026-09-25) ---
+// A$ a member knows they will spend soon, each with a due time. The panel reserves them on
+// top of the trade-agreement cost. Scoped to the hub account (req.session.userId), not the
+// player bridge: a member with no player on record yet can still note what they need.
+const MAX_EXPENSES = 20;
+const MAX_AMOUNT = 1e9;
+const DUE_WINDOW_MS = 60 * 24 * 3600 * 1000; // due times beyond two months either way are typos
+
+function readAmount(value) {
+    const n = Number(value);
+    return Number.isInteger(n) && n >= 0 && n <= MAX_AMOUNT ? n : null;
+}
+function readDueAt(value) {
+    const n = Number(value);
+    return Number.isFinite(n) && Math.abs(n - Date.now()) <= DUE_WINDOW_MS ? Math.round(n) : null;
+}
+
+router.get('/my-planets/expenses', requireAuth, (req, res) => {
+    try {
+        res.json({ success: true, expenses: savingsExpensesRepo.listExpenses(req.session.userId) });
+    } catch (err) {
+        console.error('[DB Error] Failed to load savings expenses:', err);
+        res.status(500).json({ success: false, error: 'Failed to load expenses' });
+    }
+});
+
+router.post('/my-planets/expenses', requireAuth, (req, res) => {
+    const body = req.body || {};
+    const amount = body.amount === undefined ? 0 : readAmount(body.amount);
+    const dueAt = body.due_at === undefined ? Date.now() + 6 * 3600 * 1000 : readDueAt(body.due_at);
+    if (amount === null) return res.status(400).json({ success: false, error: 'Amount must be a whole number of A$ from 0 up.' });
+    if (dueAt === null) return res.status(400).json({ success: false, error: 'Due time must be within two months of now.' });
+    try {
+        if (savingsExpensesRepo.countExpenses(req.session.userId) >= MAX_EXPENSES) {
+            return res.status(400).json({ success: false, error: `At most ${MAX_EXPENSES} expenses — remove one that is done first.` });
+        }
+        res.json({ success: true, expense: savingsExpensesRepo.createExpense(req.session.userId, amount, dueAt) });
+    } catch (err) {
+        console.error('[DB Error] Failed to add savings expense:', err);
+        res.status(500).json({ success: false, error: 'Failed to add expense' });
+    }
+});
+
+router.patch('/my-planets/expenses/:id', requireAuth, (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const body = req.body || {};
+    try {
+        const current = Number.isInteger(id) ? savingsExpensesRepo.getExpense(id, req.session.userId) : null;
+        if (!current) return res.status(404).json({ success: false, error: 'No such expense.' });
+        const amount = body.amount === undefined ? current.amount : readAmount(body.amount);
+        const dueAt = body.due_at === undefined ? current.due_at : readDueAt(body.due_at);
+        if (amount === null) return res.status(400).json({ success: false, error: 'Amount must be a whole number of A$ from 0 up.' });
+        if (dueAt === null) return res.status(400).json({ success: false, error: 'Due time must be within two months of now.' });
+        res.json({ success: true, expense: savingsExpensesRepo.updateExpense(id, req.session.userId, amount, dueAt) });
+    } catch (err) {
+        console.error('[DB Error] Failed to update savings expense:', err);
+        res.status(500).json({ success: false, error: 'Failed to update expense' });
+    }
+});
+
+router.delete('/my-planets/expenses/:id', requireAuth, (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    try {
+        if (!Number.isInteger(id) || !savingsExpensesRepo.deleteExpense(id, req.session.userId)) {
+            return res.status(404).json({ success: false, error: 'No such expense.' });
+        }
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[DB Error] Failed to delete savings expense:', err);
+        res.status(500).json({ success: false, error: 'Failed to delete expense' });
     }
 });
 
