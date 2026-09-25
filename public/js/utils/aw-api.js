@@ -124,8 +124,10 @@
         return requestJson('/api/v1/SolarSystem/' + encodeURIComponent(id));
     }
 
-    // A system's planets: [{id, index, name, ownerId, ownerName, allianceId, allianceTag,
-    // populationLevel, starbaseLevel, isUnknownOwner, hasSiege, starbaseOrders}].
+    // A system's planets: [{id, index, name, ownerId, allianceId, populationLevel,
+    // starbaseLevel, isUnknownOwner, hasSiege, starbaseOrders}]. ownerName/allianceTag are
+    // gone in the "map payload reduction" API change (test server 2026-09-25) — run the
+    // result through resolvePlanetOwners before mapping it.
     function getSystemPlanets(id) {
         return requestJson('/api/v1/SolarSystem/' + encodeURIComponent(id) + '/planets');
     }
@@ -153,9 +155,11 @@
         return requestJson('/api/v1/Player/search' + query({ q, limit }));
     }
 
-    // A rectangular area of the map: [{id, rectangle, alliances, players, solarSystems}].
-    // Each solarSystems[] entry additionally carries {capturedAt, format, isInVision,
-    // planets[]} on top of the base SolarSystem shape.
+    // A rectangular area of the map: [{id, rectangle, solarSystems}]. Each solarSystems[]
+    // entry is {id, fullName, populationLevel, x, y, capturedAt, isInVision, planets[]}.
+    // The "map payload reduction" API change (test server 2026-09-25) dropped the sector's
+    // alliances[]/players[] and the system's name/info/format/systemOwnerships, and the
+    // planets carry ids only — see resolvePlanetOwners and systemNameParts.
     function getMapSectors({ x1, y1, x2, y2 } = {}) {
         return requestJson('/api/v1/Map/sectors' + query({ x1, y1, x2, y2 }));
     }
@@ -179,12 +183,109 @@
             + query({ fromSystem, fromPlanetIndex, toSystem, toPlanetIndex, energyLevel }));
     }
 
+    // Batch lookups by id, added with the "map payload reduction" change: Player/byIds ->
+    // ListPlayer[], Alliance/byIds -> [{id, name, tag, color}]. The game caps a request at
+    // 100 ids and silently drops the rest, so bigger sets go out in chunks of 100 (each
+    // chunk is one request through the rate gate). Unknown ids are silently omitted, so a
+    // short answer is normal, not an error. Any failed chunk fails the whole call.
+    const BY_IDS_CHUNK = 100;
+    async function getByIds(path, ids) {
+        const unique = [...new Set((ids || []).filter(Number.isInteger))];
+        const out = [];
+        for (let i = 0; i < unique.length; i += BY_IDS_CHUNK) {
+            const q = unique.slice(i, i + BY_IDS_CHUNK).map(id => 'ids=' + id).join('&');
+            const res = await requestJson(path + '?' + q);
+            if (!res.ok) return res;
+            if (Array.isArray(res.data)) out.push(...res.data);
+        }
+        return { ok: true, data: out };
+    }
+    function getPlayersByIds(ids) { return getByIds('/api/v1/Player/byIds', ids); }
+    function getAlliancesByIds(ids) { return getByIds('/api/v1/Alliance/byIds', ids); }
+
     // Battle-report search. `params` uses the spec's dotted names verbatim, e.g.
     // {'FirstParty.AllianceId': 7, OrderBy: 'DateTime', OrderDirection: 'Descending',
     //  Take: 50, BattleDateFrom: '2026-08-01T00:00:00Z'}.
     function searchBattleReports(params) {
         return requestJson('/api/v1/BattleReport/search' + query(params));
     }
+
+    // ─── ID RESOLUTION ────────────────────────────────────────────────────────
+
+    // Names by id, kept for the life of the page so the 5-minute galaxy seed only asks
+    // about owners it has not met yet (the changelog's own migration advice). An hour is
+    // long enough that a steady-state tick costs zero extra requests and short enough that
+    // a renamed player or a retagged alliance catches up the same session.
+    const NAME_CACHE_TTL_MS = 60 * 60 * 1000;
+    const playerNames = new Map();   // id -> { name, at }
+    const allianceInfo = new Map();  // id -> { id, name, tag, color, at }
+    const fresh = (entry, now) => entry && now - entry.at < NAME_CACHE_TTL_MS;
+
+    // Puts ownerName/allianceTag back onto planets that arrive without them, in place, so
+    // mapPlanetsToSyncPayload and everything downstream keep working unchanged. Only acts
+    // on the new id-only shape: a planet that still has an ownerName key (the live server
+    // before the change) is left alone and costs no requests, so this is safe to ship
+    // ahead of the game's rollout.
+    //
+    // A lookup that fails (network, or the old server's 404 for byIds) or an id the game
+    // omits leaves that planet's ownerName undefined; /sync/system then falls back to the
+    // name the hub already has on record rather than guessing. Resolves to
+    // { ok, alliances } — alliances is every alliance seen on these planets, in the
+    // Alliance/byIds shape, for callers that also seed the alliances table.
+    async function resolvePlanetOwners(planets, now = Date.now()) {
+        const list = (Array.isArray(planets) ? planets : []).filter(p => p && typeof p === 'object');
+        const needsOwner = list.filter(p => p.ownerId != null && !('ownerName' in p));
+        const needsTag = list.filter(p => p.allianceId != null && !('allianceTag' in p));
+        const allianceIds = [...new Set(list.map(p => p.allianceId).filter(Number.isInteger))];
+        if (!needsOwner.length && !needsTag.length) return { ok: true, alliances: [] };
+
+        let ok = true;
+        const missingPlayers = [...new Set(needsOwner.map(p => p.ownerId))].filter(id => !fresh(playerNames.get(id), now));
+        if (missingPlayers.length) {
+            const res = await getPlayersByIds(missingPlayers);
+            if (res.ok) for (const pl of res.data) {
+                if (pl && Number.isInteger(pl.id) && typeof pl.name === 'string') playerNames.set(pl.id, { name: pl.name, at: now });
+            } else ok = false;
+        }
+        const missingAlliances = allianceIds.filter(id => !fresh(allianceInfo.get(id), now));
+        if (missingAlliances.length) {
+            const res = await getAlliancesByIds(missingAlliances);
+            if (res.ok) for (const a of res.data) {
+                if (a && Number.isInteger(a.id)) allianceInfo.set(a.id, {
+                    id: a.id,
+                    name: typeof a.name === 'string' ? a.name : null,
+                    tag: typeof a.tag === 'string' ? a.tag : null,
+                    color: typeof a.color === 'string' ? a.color : null,
+                    at: now,
+                });
+            } else ok = false;
+        }
+
+        for (const p of needsOwner) {
+            const hit = playerNames.get(p.ownerId);
+            if (hit) p.ownerName = hit.name;
+        }
+        for (const p of needsTag) {
+            const hit = allianceInfo.get(p.allianceId);
+            if (hit) p.allianceTag = hit.tag;
+        }
+        const alliances = allianceIds.map(id => allianceInfo.get(id)).filter(Boolean)
+            .map(({ id, name, tag, color }) => ({ id, name, tag, color }));
+        return { ok, alliances };
+    }
+
+    // Map/sectors flavour of the above: every planet of every system in every sector.
+    function resolveSectorOwners(sectors, now) {
+        const planets = [];
+        for (const sec of (Array.isArray(sectors) ? sectors : [])) {
+            for (const sys of (Array.isArray(sec && sec.solarSystems) ? sec.solarSystems : [])) {
+                if (sys && Array.isArray(sys.planets)) planets.push(...sys.planets);
+            }
+        }
+        return resolvePlanetOwners(planets, now);
+    }
+
+    function _resetNameCache() { playerNames.clear(); allianceInfo.clear(); }
 
     // ─── MAPPING ──────────────────────────────────────────────────────────────
 
@@ -254,13 +355,26 @@
     // payload can never drift between call sites. Systems without coordinates are dropped — x/y land in
     // INTEGER-affinity columns and /sync/galaxy's own coord() guard would skip them
     // anyway, but there is no reason to ship rows the server will just discard.
+    //
+    // Map/sectors systems no longer carry name/info (the "map payload reduction" change), only
+    // fullName — which has always been exactly "<name> <info>", e.g. "Rana [1] (0/0)" with
+    // info "[1] (0/0)". systemNameParts splits it back apart so the archive keeps real system
+    // names; without it every seed tick would overwrite systems.name with NULL. The list and
+    // search endpoints still send name/info and those win when present.
+    function systemNameParts(fullName) {
+        if (typeof fullName !== 'string') return { name: null, info: null };
+        const m = fullName.match(/^(.*\S)\s+(\[\d+\]\s*\(-?\d+\/-?\d+\))\s*$/);
+        return m ? { name: m[1], info: m[2] } : { name: fullName.trim() || null, info: null };
+    }
     function mapSolarSystemsToSyncPayload(apiSystems) {
         const systems = (Array.isArray(apiSystems) ? apiSystems : [])
             .filter(s => s && s.x != null && s.y != null)
             .map(s => ({
-                id: s.id, name: s.name, x: s.x, y: s.y,
+                id: s.id,
+                name: typeof s.name === 'string' ? s.name : systemNameParts(s.fullName).name,
+                x: s.x, y: s.y,
                 full_name: typeof s.fullName === 'string' ? s.fullName : null,
-                info: typeof s.info === 'string' ? s.info : null,
+                info: typeof s.info === 'string' ? s.info : systemNameParts(s.fullName).info,
                 population_level: Number.isInteger(s.populationLevel) ? s.populationLevel : null,
             }));
         return { systems };
@@ -273,10 +387,18 @@
     // several), so this dedupes by id before it ever reaches the wire. Confirmed against a
     // real response (2026-08-30): a sector alliance object is {id, name, tag, color} — no
     // full_name/member_count, unlike Alliance/search.
-    function mapSectorAlliancesToSyncPayload(apiSectors) {
+    //
+    // The "map payload reduction" change removed sector alliances[]; the same {id, name, tag,
+    // color} objects now come from Alliance/byIds, which resolveSectorOwners already fetched
+    // — pass its `alliances` as extraAlliances. Both sources are read, so this works on
+    // either API shape.
+    function mapSectorAlliancesToSyncPayload(apiSectors, extraAlliances = []) {
         const byId = new Map();
-        for (const sec of (Array.isArray(apiSectors) ? apiSectors : [])) {
-            for (const a of (Array.isArray(sec && sec.alliances) ? sec.alliances : [])) {
+        const sources = (Array.isArray(apiSectors) ? apiSectors : [])
+            .map(sec => (Array.isArray(sec && sec.alliances) ? sec.alliances : []));
+        sources.push(Array.isArray(extraAlliances) ? extraAlliances : []);
+        for (const list of sources) {
+            for (const a of list) {
                 if (!a || !Number.isInteger(a.id) || byId.has(a.id)) continue;
                 byId.set(a.id, {
                     id: a.id,
@@ -406,9 +528,10 @@
         getTravelTime, searchBattleReports,
         searchAlliances, searchSolarSystems,
         getPlayers, getPlayer, searchPlayers,
-        mapPlanetsToSyncPayload, mapSolarSystemsToSyncPayload, mapPlayersToSyncPayload,
+        getPlayersByIds, getAlliancesByIds, resolvePlanetOwners, resolveSectorOwners,
+        systemNameParts, mapPlanetsToSyncPayload, mapSolarSystemsToSyncPayload, mapPlayersToSyncPayload,
         mapSectorAlliancesToSyncPayload,
         mapPlayerDetailToSyncPayload,
-        _setFetch,
+        _setFetch, _resetNameCache,
     };
 });
