@@ -111,14 +111,19 @@ db.prepare(`DELETE FROM alliances`).run();
 // --- getFleetSightingHistory: merging rankings/battle-report/vision sightings ---
 console.log('\n── getFleetSightingHistory ' + '─'.repeat(40));
 
+// The history window is measured back from the real clock (datetime('now') in SQL), so
+// every sighting here is placed relative to it. Fixed dates made this block fail once
+// they were more than 5 days old.
+const hoursAgo = hours => new Date(Date.now() - hours * 3600 * 1000).toISOString();
+
 db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (30, 'FOE', 'Enemies')`).run();
 db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (301, 'kralgar', 30), (302, 'Victim', 30)`).run();
 db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (400, 'Praepes', 0, 0), (401, 'Maasym', 1, 1), (402, 'OldSystem', 9, 9)`).run();
 db.prepare(`INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id) VALUES (40001, 400, 6, 301)`).run();
-db.prepare(`INSERT INTO best_guarded (game_planet_id, cv, updated_at) VALUES (40001, '975', '2026-09-19T22:00:00.000Z')`).run();
+db.prepare(`INSERT INTO best_guarded (game_planet_id, cv, updated_at) VALUES (40001, '975', ?)`).run(hoursAgo(44));
 
 // Rankings sighting: home, fresh.
-fleets.upsertStrongestFleet(301, 1, 325, 0, 0, 975, '2026-09-20T18:00:00.000Z');
+fleets.upsertStrongestFleet(301, 1, 325, 0, 0, 975, hoursAgo(28));
 
 // Battle-report sighting: kralgar is the ATTACKER, more recent than the rankings sighting.
 // He fielded 300 destroyers and lost 50 of them, plus 10 transports (none lost) -- the
@@ -126,19 +131,19 @@ fleets.upsertStrongestFleet(301, 1, 325, 0, 0, 975, '2026-09-20T18:00:00.000Z');
 db.prepare(`
     INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, system_id, planet_index,
         att_destroyers, att_destroyers_lost, att_cruisers, att_battleships, att_transports, att_colony_ships)
-    VALUES (8001, '2026-09-20T20:00:00.000Z', 301, 302, 401, 3, 300, 50, 0, 0, 10, 0)
-`).run();
+    VALUES (8001, ?, 301, 302, 401, 3, 300, 50, 0, 0, 10, 0)
+`).run(hoursAgo(26));
 
 // A second battle report where kralgar lost EVERYTHING -- this must not appear at all.
 db.prepare(`
     INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, system_id, planet_index,
         att_destroyers, att_destroyers_lost)
-    VALUES (8003, '2026-09-20T21:00:00.000Z', 301, 302, 401, 3, 20, 20)
-`).run();
+    VALUES (8003, ?, 301, 302, 401, 3, 20, 20)
+`).run(hoursAgo(25));
 
 // Vision sighting: oldest of the three but still inside the 5-day window.
 db.prepare(`INSERT INTO fleets (owner_id, system_id, planet_index, destroyers, cruisers, battleships, updated_at)
-            VALUES (301, 400, 6, 300, 0, 0, '2026-09-19T10:00:00.000Z')`).run();
+            VALUES (301, 400, 6, 300, 0, 0, ?)`).run(hoursAgo(56));
 
 // A stale battle report from 6 days ago -- must NOT appear in a 5-day history.
 db.prepare(`
@@ -166,7 +171,7 @@ ok('the vision entry carries its own system/planet directly, no location_status'
 // home planet rather than showing a bare dash -- Last Seen already carries the "how sure
 // are we" signal, so an unconfirmed-but-plausible location beats no location at all.
 db.prepare(`INSERT INTO players (id, name, alliance_id, origin_system) VALUES (303, 'Loner', 30, 400)`).run();
-fleets.upsertStrongestFleet(303, 2, 1, 0, 0, 3, '2026-09-20T18:00:00.000Z');
+fleets.upsertStrongestFleet(303, 2, 1, 0, 0, 3, hoursAgo(28));
 const awayHistory = fleets.getFleetSightingHistory(303, 5);
 ok('an away rankings fleet falls back to the player\'s registered home system, marked unconfirmed',
     awayHistory.length === 1 && awayHistory[0].source === 'rankings'
