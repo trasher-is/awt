@@ -368,6 +368,38 @@ function postJson(server, urlPath, body) {
         ok('the stale enemy sighting (603) is gone', !afterSecondDom500.includes(603), afterSecondDom500);
         ok('the new enemy sighting (604) is present', afterSecondDom500.includes(604), afterSecondDom500);
         ok('still exactly one fleet row — no accumulation', afterSecondDom500.length === 1, afterSecondDom500);
+
+        console.log('\n── (k) an id-only owner the client could not name never writes a NULL ' + '─'.repeat(6));
+        // The game's "map payload reduction" change sends ownerId without ownerName; when the
+        // byIds lookup misses, the client's owner block has no name. players.name is NOT NULL,
+        // so this used to roll back the entire system with SQLITE_CONSTRAINT_NOTNULL.
+        db.prepare(`INSERT INTO alliances (id, tag, name) VALUES (710, 'KNWN', 'Known Band')`).run();
+        db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (711, 'KnownPilot', 710)`).run();
+        const namelessRes = await postJson(server, '/hub-api/sync/system', {
+            system_id: 700,
+            planets: [
+                // known player, no name and no tag in the payload
+                { planet_index: 1, owner: { id: 711, alliance_id: 710 }, population: 5, starbase: 0 },
+                // never-seen player, no name
+                { planet_index: 2, owner: { id: 712, name: null, alliance_id: null }, population: 4, starbase: 0 },
+                // an ordinary named owner in the same system must still land
+                { planet_index: 3, owner: { id: 713, name: 'NamedPilot', alliance_id: null }, population: 3, starbase: 0 },
+            ],
+            fleets: [],
+            observation_live: true,
+        });
+        ok('the system is accepted, not rolled back', namelessRes.status === 200, namelessRes);
+        const p700 = (i) => db.prepare('SELECT owner_id FROM planets WHERE system_id = 700 AND planet_index = ?').get(i);
+        ok('a known owner is written with the name the hub already had',
+            p700(1) && p700(1).owner_id === 711
+            && db.prepare('SELECT name FROM players WHERE id = 711').get().name === 'KnownPilot', p700(1));
+        ok('the alliance keeps its tag instead of being wiped to NULL',
+            db.prepare('SELECT tag FROM alliances WHERE id = 710').get().tag === 'KNWN');
+        ok('a never-seen nameless owner creates no player row',
+            db.prepare('SELECT 1 FROM players WHERE id = 712').get() === undefined);
+        ok('and that planet is held at last-known (none yet) rather than pointed at a missing player',
+            !p700(2) || p700(2).owner_id === null, p700(2));
+        ok('the named owner in the same payload still lands', p700(3) && p700(3).owner_id === 713, p700(3));
     } finally {
         server.close();
     }
