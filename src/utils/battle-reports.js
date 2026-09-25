@@ -12,9 +12,9 @@
 // skipped — one bad row must never abort a sync batch.
 //
 // `attacker` is mapped to att_ (the side that initiated the battle) and `defender` to
-// def_. `conqueredPlanet` is a plain boolean in the real response (there is no planet-id
-// field on this endpoint at all, despite the column's original "game planet id" framing
-// in formatBattleEmbed below) — mapped with bool01, not int.
+// def_. `conqueredPlanet` is a plain boolean in the real response — mapped with bool01,
+// not int. The planet itself (solarSystemId/planetIndex) only arrived with the game's
+// BattleReport change; see mapApiDetail below.
 
 // Coercion helpers: the API is typed by its spec, but the payload has travelled through
 // a member's browser. Anything that is not the expected shape becomes NULL, not a throw.
@@ -174,4 +174,70 @@ function formatBattleEmbed(row) {
     };
 }
 
-module.exports = { mapApiReport, upsertReports, formatBattleEmbed };
+// ─── Location + ship detail straight from the API ────────────────────────────
+// The game's BattleReport change (test server 2026-09-25) added planetId/planetIndex/
+// planetName/solarSystemId per report and shipTypeStats[]/starbaseStats per side — the
+// same things the /About/BattleReport/{id} page fetch (battle-report-parser.js) exists to
+// dig out. mapApiDetail turns them into the exact columns that parser fills, so the
+// detail sweep can skip the page for reports the API already describes in full.
+//
+// The shipType strings have not been observed yet (the search endpoint needs a session),
+// so they are matched loosely ("Colony Ship", "ColonyShip", "colony_ships" all work) and
+// ONE unrecognised type makes `ships` null: the report then keeps its page fetch rather
+// than being marked done with a hole in it. The page shows every ship row, 0 included,
+// so a type the API leaves out is 0; the attacker's Starbase cells are blank on the page,
+// so att_starbases stays null. win_chance is not produced — it is the dice roll the page
+// prints (see battle-ledger.js), and random_number already stores the API's own value.
+const API_SHIP_COLS = {
+    destroyer: 'destroyers', cruiser: 'cruisers', battleship: 'battleships',
+    transport: 'transports', colonyship: 'colony_ships',
+};
+const shipKey = t => (typeof t === 'string' ? t.toLowerCase().replace(/[^a-z]/g, '').replace(/s$/, '') : '');
+
+function sideShips(side, prefix, out) {
+    const stats = side && side.shipTypeStats;
+    if (!Array.isArray(stats) || !stats.length) return false;
+    for (const col of Object.values(API_SHIP_COLS)) {
+        out[`${prefix}${col}`] = 0;
+        out[`${prefix}${col}_lost`] = 0;
+    }
+    for (const st of stats) {
+        const col = st && API_SHIP_COLS[shipKey(st.shipType)];
+        if (!col) return false;
+        const amount = int(st.amount), lost = int(st.lost);
+        if (amount == null || lost == null) return false;
+        out[`${prefix}${col}`] = amount;
+        out[`${prefix}${col}_lost`] = lost;
+    }
+    return true;
+}
+
+/**
+ * Location and per-ship-type detail from one API report, or null when it carries neither
+ * (the live API before the change). `ships` is null unless both sides map completely.
+ */
+function mapApiDetail(api) {
+    if (!api || typeof api !== 'object') return null;
+    const systemId = int(api.solarSystemId);
+    const planetIndex = int(api.planetIndex);
+    const location = systemId != null && systemId > 0 && planetIndex != null && planetIndex > 0
+        ? { system_id: systemId, planet_index: planetIndex } : null;
+
+    let ships = {};
+    const att = api.attacker && typeof api.attacker === 'object' ? api.attacker : null;
+    const def = api.defender && typeof api.defender === 'object' ? api.defender : null;
+    if (sideShips(att, 'att_', ships) && sideShips(def, 'def_', ships)) {
+        ships.att_starbases = null;
+        ships.att_starbases_lost = null;
+        const sb = def.starbaseStats;
+        ships.def_starbases = sb && typeof sb === 'object' ? int(sb.amount) : null;
+        ships.def_starbases_lost = sb && typeof sb === 'object' ? int(sb.lost) : null;
+    } else {
+        ships = null;
+    }
+
+    if (!location && !ships) return null;
+    return { location, ships };
+}
+
+module.exports = { mapApiReport, mapApiDetail, upsertReports, formatBattleEmbed };

@@ -8,6 +8,12 @@
 // unchanged by that: it self-limits (the claim query only ever returns what still needs
 // scraping), so it quietly drains each day's new batch over a couple of hours and then
 // goes idle until the next one, with no need for its own once-a-day schedule.
+//
+// Since the game's BattleReport change the search response carries the planet and the
+// ship table itself, and /sync/battle-reports marks those reports done on arrival — so
+// this sweep only still fetches pages for reports the API could not describe in full
+// (older reports, the live API before the change, or a ship type mapApiDetail does not
+// recognise). It needs no change of its own for that: the claim query simply finds less.
 
 import '../utils/game-rate-limit.js'; // must load before either gameFetch or aw-api resolves the gate
 import '../scrapers/battle-report-parser.js';

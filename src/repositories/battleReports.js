@@ -86,6 +86,46 @@ function updateShipDetail(id, detail) {
     updateShipDetailStmt.run({ id, ...detail });
 }
 
+// Detail that arrived with the search API itself (see battle-reports.js's mapApiDetail).
+// Only ever fills a report the page sweep has not done yet — a report already scraped
+// keeps what its page said, and win_chance is left alone (the API has no such field).
+// Marking ship_detail_scraped_at is what takes it out of the page sweep's claim queue.
+const applyApiShipDetailStmt = db.prepare(`
+    UPDATE battle_reports SET
+        att_destroyers=@att_destroyers, att_destroyers_lost=@att_destroyers_lost,
+        att_cruisers=@att_cruisers, att_cruisers_lost=@att_cruisers_lost,
+        att_battleships=@att_battleships, att_battleships_lost=@att_battleships_lost,
+        att_transports=@att_transports, att_transports_lost=@att_transports_lost,
+        att_colony_ships=@att_colony_ships, att_colony_ships_lost=@att_colony_ships_lost,
+        att_starbases=@att_starbases, att_starbases_lost=@att_starbases_lost,
+        def_destroyers=@def_destroyers, def_destroyers_lost=@def_destroyers_lost,
+        def_cruisers=@def_cruisers, def_cruisers_lost=@def_cruisers_lost,
+        def_battleships=@def_battleships, def_battleships_lost=@def_battleships_lost,
+        def_transports=@def_transports, def_transports_lost=@def_transports_lost,
+        def_colony_ships=@def_colony_ships, def_colony_ships_lost=@def_colony_ships_lost,
+        def_starbases=@def_starbases, def_starbases_lost=@def_starbases_lost,
+        system_id=COALESCE(@system_id, system_id), planet_index=COALESCE(@planet_index, planet_index),
+        ship_detail_scraped_at=CURRENT_TIMESTAMP
+    WHERE id=@id AND ship_detail_scraped_at IS NULL
+`);
+function applyApiShipDetail(id, ships, location) {
+    return applyApiShipDetailStmt.run({
+        id, ...ships,
+        system_id: location ? location.system_id : null,
+        planet_index: location ? location.planet_index : null,
+    }).changes > 0;
+}
+
+// Location only (ship stats missing or unrecognised): fill it where still unknown, and
+// leave ship_detail_scraped_at alone so the page sweep still fetches the ship table.
+const applyApiLocationStmt = db.prepare(`
+    UPDATE battle_reports SET system_id=@system_id, planet_index=@planet_index
+    WHERE id=@id AND system_id IS NULL
+`);
+function applyApiLocation(id, location) {
+    return applyApiLocationStmt.run({ id, ...location }).changes > 0;
+}
+
 // "Last seen" for a player: the most recent events of ANY kind that name them, on either
 // side (attacker/defender in battle_reports; either party in news_events — see
 // news-battle-matching.js's other_player_id/player_id convention), newest first. Two
@@ -538,7 +578,7 @@ module.exports = {
     markShipDetailScraped,
     getReportsNeedingLocationBackfill,
     markLocationBackfillAttempted,
-    updateShipDetail,
+    updateShipDetail, applyApiShipDetail, applyApiLocation,
     findByPlayerPairNear,
     findRecentAttackerAtPlanet,
     getRecentBattlesAtPlanet,

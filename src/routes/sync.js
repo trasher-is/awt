@@ -14,7 +14,7 @@ const fleetsRepo = require('../repositories/fleets');
 const playersRepo = require('../repositories/players');
 const alliancesRepo = require('../repositories/alliances');
 const settingsRepo = require('../repositories/settings');
-const { mapApiReport, upsertReports, formatBattleEmbed } = require('../utils/battle-reports');
+const { mapApiReport, mapApiDetail, upsertReports, formatBattleEmbed } = require('../utils/battle-reports');
 const battleReportsRepo = require('../repositories/battleReports');
 const newsEventsRepo = require('../repositories/newsEvents');
 const { resolveBombardmentCredit } = require('../utils/news-battle-matching');
@@ -1551,6 +1551,32 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
     try {
         const { inserted, skipped } = upsertReports(db, rows);
 
+        // Planet and ship detail now ride along on the search response (the game's
+        // BattleReport change) — store them here so the page sweep never has to fetch
+        // /About/BattleReport/{id} for these. A no-op for reports without the fields (the
+        // live API before the change) and for reports the sweep already filled.
+        let detailFromApi = 0;
+        const located = [];
+        db.transaction(() => {
+            for (const r of list) {
+                const id = r && Number.isInteger(r.id) ? r.id : null;
+                const detail = id ? mapApiDetail(r) : null;
+                if (!detail) continue;
+                const changed = detail.ships
+                    ? battleReportsRepo.applyApiShipDetail(id, detail.ships, detail.location)
+                    : battleReportsRepo.applyApiLocation(id, detail.location);
+                if (!changed) continue;
+                if (detail.ships) detailFromApi++;
+                if (detail.location) located.push(id);
+            }
+        })();
+        // Same hook the page sweep's receiver runs once a report's planet is known.
+        for (const id of located) {
+            try { bonusGoalsRepo.evaluateBattleReportForGoals(id); } catch (err) {
+                console.error(`[DB Error] Bonus-goal evaluation failed for report ${id}:`, err.message);
+            }
+        }
+
         // Announce the ones the alliance has not seen yet. The pass is driven from the
         // table (WHERE announced = 0), not just this batch's freshly inserted rows, so a
         // report that was synced BEFORE the Discord channel was configured still gets
@@ -1638,7 +1664,7 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
         settingsRepo.setSetting('battle_sync_last_run_at', new Date().toISOString());
         settingsRepo.setSetting('battle_sync_last_inserted_count', String(inserted.length));
 
-        res.json({ success: true, inserted: inserted.length, skipped, newest_started_at: newest });
+        res.json({ success: true, inserted: inserted.length, skipped, detail_from_api: detailFromApi, newest_started_at: newest });
     } catch (err) {
         console.error('[DB Error] Battle report sync failed:', err);
         res.status(500).json({ error: 'Database sync failed' });
