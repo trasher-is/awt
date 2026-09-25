@@ -231,12 +231,13 @@ export async function initScienceCultureCalc() {
 }
 
 // ---------------------------------------------------------------
-// COLONY SHIP LAUNCH WINDOWS (Science page, next to the Culture row)
-// "When do I need to launch, so the ship lands only after the next culture slot is
-// actually open?" A ship that arrives too early just sits there wasted — colonizing
+// COLONIZATION FORCE LAUNCH WINDOWS (Science page, next to the Culture row)
+// "When do I need to launch, so the force lands only after the next culture slot is
+// actually open?" A force that arrives too early just sits there wasted — taking a planet
 // needs a free slot at the moment it lands, not merely by the time it's built — so this
-// computes the EARLIEST safe launch time per planned (Free/Unknown, i.e. actually
-// colonizable) target: arrival must be at or after the next culture level-up AND at or
+// computes the EARLIEST safe launch time per planned target, free or held by another
+// player (2026-09-25: held targets used to be skipped, which hid a member's real target
+// with no explanation): arrival must be at or after the next culture level-up AND at or
 // after the standard server cycle tick that actually applies it (culture level-ups, like
 // every other stat, only take effect when that 5-min cycle runs — landing one second
 // before it does not yet have the slot). Requires: the culture row's own live timer
@@ -352,6 +353,7 @@ export async function initColonizeLaunchWindows() {
             const label = `${plan.system_name} [${plan.system_id}] #${plan.planet_index}`;
             results.push({
                 label,
+                ownerName: plan.owner_name || null,
                 pastDue: launchMs <= Date.now(),
                 dateStr: formatLocalDateTime(launchDate, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
             });
@@ -368,14 +370,16 @@ export async function initColonizeLaunchWindows() {
     container.style.fontSize = '11px';
     container.style.color = '#aaa';
     const header = document.createElement('div');
-    header.innerHTML = '<span style="color:#888;">Earliest time to launch colony ships from home planet<br>to land after culture updates +5mins:</span>';
+    header.innerHTML = '<span style="color:#888;">Earliest time to launch colonization force from home planet<br>to land after culture updates +5mins:</span>';
     container.appendChild(header);
     results.forEach(r => {
         const line = document.createElement('div');
         const timeSpan = r.pastDue
             ? `<span style="color:#e88;font-weight:bold;">launch now</span>`
             : `<span style="color:#fff;font-weight:bold;">${r.dateStr}</span>`;
-        line.innerHTML = `<span style="color:#aaa;">${esc(r.label)}:</span> ${timeSpan}`;
+        // A held target means the force has to win a battle on landing, not just settle.
+        const held = r.ownerName ? ` <span style="color:#e8a;" title="Held by another player: the force must win a battle on landing">held by ${esc(r.ownerName)}</span>` : '';
+        line.innerHTML = `<span style="color:#aaa;">${esc(r.label)}:</span> ${timeSpan}${held}`;
         container.appendChild(line);
     });
 
