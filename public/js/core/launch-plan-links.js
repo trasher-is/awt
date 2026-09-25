@@ -37,17 +37,24 @@ function setField(el, value) {
     return String(el.value) === value;
 }
 
-// Resolves once `el` offers `value` as an option, or false after `timeoutMs`. Used when the
-// planet list is rebuilt by the page after a system is chosen.
-function waitForOption(el, value, timeoutMs, Observer = globalThis.MutationObserver) {
-    if (hasOption(el, value)) return Promise.resolve(true);
-    if (typeof Observer !== 'function') return Promise.resolve(false);
+// Resolves true once the page has rebuilt `el`'s option list AND the rebuilt list offers
+// `value`, or false after `timeoutMs`. A rebuild can come in two steps (list cleared, then
+// refilled after a fetch), so a change that leaves `value` missing keeps it waiting.
+//
+// The real launch form (recorded 2026-09-25) always lists planets 1-12, whatever system is
+// selected, and rebuilds that list asynchronously when System changes (data-update-planets,
+// handled by the game's fleetLaunch.js). So "the option already exists" proves nothing:
+// setting the planet straight away was wiped a moment later by the rebuild. The planet is
+// set only once the rebuild has landed, or after the timeout if the page never rebuilds.
+function waitForRebuild(el, value, timeoutMs, Observer = globalThis.MutationObserver) {
+    if (typeof Observer !== 'function') return new Promise(res => setTimeout(() => res(false), timeoutMs));
     return new Promise(resolve => {
         const observer = new Observer(() => {
-            if (!hasOption(el, value)) return;
+            if (!hasOption(el, value)) return; // cleared, not yet refilled
             observer.disconnect();
             clearTimeout(timer);
-            resolve(true);
+            // Let the page finish its batch of DOM writes before we pick an option.
+            setTimeout(() => resolve(true), 0);
         });
         const timer = setTimeout(() => { observer.disconnect(); resolve(false); }, timeoutMs);
         observer.observe(el, { childList: true, subtree: true });
@@ -61,10 +68,15 @@ function waitForOption(el, value, timeoutMs, Observer = globalThis.MutationObser
 async function applyPlanToLaunchForm(systemEl, planetEl, plan, { waitMs = PLANET_WAIT_MS, Observer } = {}) {
     const systemValue = String(plan.system_id);
     const planetValue = String(plan.planet_index);
-    if (!setField(systemEl, systemValue)) {
-        return { ok: false, message: `System ${systemValue} is not in this form's list — pick it by hand.` };
+    if (String(systemEl.value) !== systemValue) {
+        // Watch before changing System, so a rebuild that starts synchronously is not missed.
+        const rebuilt = waitForRebuild(planetEl, planetValue, waitMs, Observer);
+        if (!setField(systemEl, systemValue)) {
+            return { ok: false, message: `System ${systemValue} is not in this form's list — pick it by hand.` };
+        }
+        await rebuilt;
     }
-    if (!(await waitForOption(planetEl, planetValue, waitMs, Observer)) || !setField(planetEl, planetValue)) {
+    if (!setField(planetEl, planetValue)) {
         return { ok: false, message: `System set; planet #${planetValue} could not be selected — pick it by hand.` };
     }
     return { ok: true, message: `Destination set to ${plan.system_name || `system ${systemValue}`} #${planetValue}. Choose your ships and launch as usual.` };
