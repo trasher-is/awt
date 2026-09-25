@@ -1253,6 +1253,23 @@ function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_battle_reports_def_player ON battle_reports(def_player_id);
     `);
 
+    // savings_expenses (2026-09-25): My Savings' planned spending — A$ a member knows they
+    // will need soon (an artifact, a fee), reserved on top of the trade-agreement cost so
+    // "Ready in" does not promise money that is already spoken for. Keyed by hub account,
+    // not player, so it survives the player row being re-created by a scan. due_at is an
+    // epoch in milliseconds: the panel counts down to it in the viewer's own clock.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS savings_expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            amount INTEGER NOT NULL DEFAULT 0,
+            due_at INTEGER NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_savings_expenses_user ON savings_expenses(user_id);
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

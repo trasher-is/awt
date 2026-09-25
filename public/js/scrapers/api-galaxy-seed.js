@@ -38,6 +38,13 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
         return { ok: false, error: 'The game returned no systems in that area — nothing to seed.' };
     }
 
+    // Planets arrive with owner/alliance ids only since the game's "map payload reduction"
+    // change — put the names back before anything maps them (a no-op on the old shape).
+    // A failed lookup is not fatal: /sync/system keeps the name it already has on record.
+    onProgress('Resolving planet owners…', 0, 0);
+    const owners = await AWApi.resolveSectorOwners(sectors);
+    if (!owners.ok) console.warn('[GalaxySeed] some owner/alliance names could not be resolved this run');
+
     onProgress(`Indexing ${allSystems.length} systems…`, 0, allSystems.length);
     const { systems: indexPayload } = AWApi.mapSolarSystemsToSyncPayload(allSystems);
     if (indexPayload.length) {
@@ -51,10 +58,10 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
         }
     }
 
-    // No dedicated "list every alliance" API exists — each sector's own alliances[] is the
-    // only bulk source, so piggyback it on the call this seed already makes rather than a
-    // separate request.
-    const { alliances: alliancePayload } = AWApi.mapSectorAlliancesToSyncPayload(sectors);
+    // No dedicated "list every alliance" API exists. The old sector alliances[] and, since
+    // the id-only change, the Alliance/byIds answer the resolve step above already paid
+    // for are the only bulk sources — both are read, so no extra request here.
+    const { alliances: alliancePayload } = AWApi.mapSectorAlliancesToSyncPayload(sectors, owners.alliances);
     if (alliancePayload.length) {
         await fetch('/hub-api/sync/alliances-from-map', {
             method: 'POST',

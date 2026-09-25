@@ -58,41 +58,43 @@ plans.createPlan(11, 2, cavemanId, 'note');
 plans.deleteAllPlans();
 ok('deleteAllPlans empties the table', plans.getAllPlanIndex().length === 0);
 
-// ── getColonizablePlans: plans worth a launch-window calc ──
+// ── getLaunchWindowPlans: every plan of the requester's, whatever sits on the target ──
 db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (20, 'ColSys', 5, 5)`).run();
+db.prepare(`INSERT INTO systems (id, name) VALUES (21, 'NoCoords')`).run();
 db.prepare(`INSERT INTO players (id, name) VALUES (900, 'SomePlayer')`).run();
 
-// (a) a plan on a confirmed-empty planet (owner_id NULL, real planets row exists) — included.
+// (a) a free planet — included, no owner.
 db.prepare(`INSERT INTO planets (system_id, planet_index, owner_id) VALUES (20, 1, NULL)`).run();
 plans.createPlan(20, 1, cavemanId, 'colonize this one');
 
-// (b) a plan on a planet that IS owned — excluded, it's not actually colonizable.
+// (b) a planet held by another player — included, with the owner named (2026-09-25: this
+// was excluded, and a member's real target vanished from the Science page because of it).
 db.prepare(`INSERT INTO planets (system_id, planet_index, owner_id) VALUES (20, 2, 900)`).run();
 plans.createPlan(20, 2, cavemanId, 'someone lives here');
 
-// (c) a plan on a planet the hub has never scanned (no planets row at all) — excluded,
-// "confirmed empty" only, not "presumed empty".
+// (c) a planet the hub has never scanned — included: travel only needs the system's x/y.
 plans.createPlan(20, 3, cavemanId, 'never scanned');
 
-// (d) a DIFFERENT author's plan on an equally confirmed-empty planet — excluded. Everyone
-// sees only their own planned-planet launch windows, not the whole alliance's.
+// (d) a system with no coordinates — excluded, there is no travel time to compute.
+plans.createPlan(21, 1, cavemanId, 'unmapped');
+
+// (e) a DIFFERENT author's plan — excluded. Everyone sees only their own launch windows.
 const otherUserResult = db.prepare(`INSERT INTO app_users (game_name, password_hash) VALUES ('otherplayer', 'x')`).run();
 const otherUserId = otherUserResult.lastInsertRowid;
 db.prepare(`INSERT INTO planets (system_id, planet_index, owner_id) VALUES (20, 4, NULL)`).run();
 plans.createPlan(20, 4, otherUserId, 'someone else\'s target');
 
-const colonizable = plans.getColonizablePlans(cavemanId);
-ok('exactly one plan qualifies (confirmed-empty AND authored by the requester)', colonizable.length === 1, colonizable);
-ok('the qualifying plan is the one on the confirmed-empty planet',
-    colonizable[0].system_id === 20 && colonizable[0].planet_index === 1, colonizable);
+const mine = plans.getLaunchWindowPlans(cavemanId);
+ok('free, occupied and never-scanned plans are all included', mine.map(p => p.planet_index).join(',') === '1,2,3', mine);
+ok('an occupied target names its current owner', mine.find(p => p.planet_index === 2).owner_name === 'SomePlayer', mine);
+ok('free and never-scanned targets have no owner', mine.find(p => p.planet_index === 1).owner_name === null && mine.find(p => p.planet_index === 3).owner_name === null, mine);
+ok('a system without coordinates is left out', !mine.some(p => p.system_id === 21), mine);
 ok('it carries the system name and coordinates for a travel-time calc',
-    colonizable[0].system_name === 'ColSys' && colonizable[0].x === 5 && colonizable[0].y === 5, colonizable);
-ok('the other author\'s plan does not leak into caveman\'s results',
-    !colonizable.some(p => p.planet_index === 4), colonizable);
+    mine[0].system_name === 'ColSys' && mine[0].x === 5 && mine[0].y === 5, mine);
+ok('the other author\'s plan does not leak into caveman\'s results', !mine.some(p => p.planet_index === 4), mine);
 
-const otherResults = plans.getColonizablePlans(otherUserId);
-ok('the other author sees only their own colonizable plan',
-    otherResults.length === 1 && otherResults[0].planet_index === 4, otherResults);
+const otherResults = plans.getLaunchWindowPlans(otherUserId);
+ok('the other author sees only their own plan', otherResults.length === 1 && otherResults[0].planet_index === 4, otherResults);
 
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 

@@ -61,6 +61,12 @@ const upsertAllianceBasicStmt = db.prepare(`
     INSERT INTO alliances (id, tag, name) VALUES (?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET tag=excluded.tag, updated_at=CURRENT_TIMESTAMP
 `);
+const getAllianceTagByIdStmt = db.prepare(`SELECT tag FROM alliances WHERE id = ?`);
+function getAllianceTagById(id) {
+    const row = getAllianceTagByIdStmt.get(id);
+    return row ? row.tag : null;
+}
+
 function upsertAllianceBasic(id, tag, name) {
     upsertAllianceBasicStmt.run(id, tag, name);
 }
@@ -367,7 +373,7 @@ function deleteAllAllianceMemberStats() {
 module.exports = {
     getWarRoomAllianceIntelTags, getAllianceIdByTag, countAlliances, getWarRoomAlliances,
     searchAlliancesByTagOrName, upsertAllianceFromApiSearch, upsertAllianceFromMapSector,
-    upsertAllianceBasic, upsertAllianceTagOnly, upsertAllianceFull, deleteAllAlliances,
+    upsertAllianceBasic, getAllianceTagById, upsertAllianceTagOnly, upsertAllianceFull, deleteAllAlliances,
     insertBroadcast, getBroadcasts, updateBroadcast, deleteBroadcast,
     getAllianceMemberStatIds, getTradeAnalysisRows, getAllianceStatsForArchive,
     getTraders, getMembersWithStats, getCanonicalNameFromStats,

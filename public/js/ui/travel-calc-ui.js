@@ -12,7 +12,7 @@ import '../utils/game-rate-limit.js'; // side-effect import: the shared 5/s gate
 import '../utils/aw-api.js';          // side-effect import: game REST client on globalThis
 
 const { calcTravelSeconds, formatTime: fmt, systemDistance } = globalThis.AWTravelModel;
-const { getTravelTime, getSystemPlanets, mapPlanetsToSyncPayload } = globalThis.AWApi;
+const { getTravelTime, getSystemPlanets, resolvePlanetOwners, mapPlanetsToSyncPayload } = globalThis.AWApi;
 
 let sysCache = null, playerCache = null;
 
@@ -261,6 +261,9 @@ async function renderSystemView(sysId) {
             let ok = false;
             const res = await getSystemPlanets(sysId);
             if (res.ok && Array.isArray(res.data)) {
+                // Ids only since the game's "map payload reduction" change — fill the names
+                // back in first (no-op on the old shape; a miss keeps the hub's own name).
+                await resolvePlanetOwners(res.data);
                 // Same payload shape the scraper POSTs, built by the one shared mapper.
                 // No scrape fallback past this point: the sync target is the hub itself,
                 // and the scraper POSTs to the same route — it would fail the same way.
