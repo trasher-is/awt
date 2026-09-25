@@ -77,6 +77,36 @@ const plan = { system_id: 140, planet_index: 4, system_name: 'Vega' };
     ok('waits for a planet list that arrives late, then fills it', r.ok && pl.value === '4', r);
     ok('stops watching once it is done', observers.every(o => !o.active), observers.map(o => o.active));
 
+    // 3b. The real form (recorded 2026-09-25): planets 1-12 are ALWAYS listed, and changing
+    // System makes the page clear and refill that list asynchronously, resetting the pick.
+    // Setting the planet before that rebuild lands gets silently wiped.
+    observers = [];
+    const twelve = () => Array.from({ length: 12 }, (_, i) => ({ value: String(i + 1) }));
+    sys = fakeSelect([40, 70]);
+    sys._value = '40';
+    pl = fakeSelect([]);
+    pl.options = twelve();
+    pl._value = '9';
+    const realPending = applyPlanToLaunchForm(sys, pl, { system_id: 70, planet_index: 10, system_name: 'Aridif' }, { waitMs: 1000, Observer: FakeObserver });
+    await new Promise(res => setTimeout(res, 10));
+    ok('does not pick the planet before the page rebuilds the list', pl.value === '9', pl.value);
+    pl.options = []; pl._value = '';                      // step 1: list cleared
+    observers.forEach(o => o.trigger());
+    await new Promise(res => setTimeout(res, 10));
+    ok('an emptied list is not mistaken for the finished rebuild', pl.value === '', pl.value);
+    pl.options = twelve(); pl._value = '1';               // step 2: refilled, pick reset
+    observers.forEach(o => o.trigger());
+    r = await realPending;
+    ok('after the rebuild, the planned planet is the one selected', r.ok && sys.value === '70' && pl.value === '10', [r, sys.value, pl.value]);
+
+    // 3c. System already the right one: nothing will rebuild, so nothing to wait for.
+    observers = [];
+    sys = fakeSelect([70]); sys._value = '70';
+    pl = fakeSelect([]); pl.options = twelve(); pl._value = '1';
+    const t0 = Date.now();
+    r = await applyPlanToLaunchForm(sys, pl, { system_id: 70, planet_index: 10 }, { waitMs: 1000, Observer: FakeObserver });
+    ok('same system: sets the planet at once, without waiting for a rebuild', r.ok && pl.value === '10' && Date.now() - t0 < 200 && sys.events.length === 0, [r, Date.now() - t0, sys.events]);
+
     // 4. Planet never appears.
     observers = [];
     sys = fakeSelect([140]);
