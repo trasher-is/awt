@@ -621,7 +621,11 @@ router.get('/intel/trade-analysis', requireAuth, (req, res) => {
                 astro_dollars: toInt(r.astro_dollars),
                 production_points: toInt(r.production_points),
                 hoarded_au: Math.round(r.hoarded_au || 0),
-                trade_partners: partners
+                trade_partners: partners,
+                banking_rate: r.banking_rate == null ? null : Number(r.banking_rate),
+                pop10: Number(r.pop10) || 0,
+                trade_revenue: Number(r.trade_revenue) || 0,
+                eco_bonus: Number(r.eco_bonus) || 0,
             };
         });
 

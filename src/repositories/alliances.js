@@ -186,13 +186,29 @@ function getAllianceMemberStatIds() {
     return getAllianceMemberStatIdsStmt.all();
 }
 
+// banking_rate / banking_pop10 / pop10 / trade_revenue / eco_bonus (2026-09-26) feed the
+// Schedule tab's real-clock plan (public/js/utils/ta-schedule-model.js):
+//   - banking_rate: PP/h of the planets this member ticked as banking in My Savings, NULL
+//     when they never opened it (the plan then falls back to total production and says so);
+//   - pop10: planets at population 10+, which is what a partner gains in TR% (1% each).
+//     From My Savings' own sync when present, else from the system scans;
+//   - trade_revenue + eco_bonus: the member's current TR%, so the income boost a new
+//     agreement adds is scaled from where they really are, not from zero.
 const getTradeAnalysisRowsStmt = db.prepare(`
     SELECT p.name,
            ams.production_rate,
            ams.astro_dollars,
            ams.production_points,
            ams.hoarded_au,
-           p.trade_partners
+           p.trade_partners,
+           p.trade_revenue,
+           p.eco_bonus,
+           (SELECT SUM(CASE WHEN pb.banking THEN COALESCE(pb.production_rate, 0) ELSE 0 END)
+              FROM planet_banking pb WHERE pb.player_id = p.id) AS banking_rate,
+           COALESCE(
+               (SELECT SUM(pb.population >= 10) FROM planet_banking pb WHERE pb.player_id = p.id),
+               (SELECT SUM(pl.population >= 10) FROM planets pl WHERE pl.owner_id = p.id),
+               0) AS pop10
     FROM alliance_member_stats ams
     JOIN players p ON p.id = ams.player_id
 `);
