@@ -13,6 +13,9 @@ import '../utils/battle-model.js';   // side-effect import: cvOf, so CV is defin
 import '../utils/parse-number.js';   // side-effect import: locale-aware sorting
 import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
 import '../utils/game-rate-limit.js';
+import '../utils/game-tables.js';        // side-effect imports: the Schedule's trade-cycle clock
+import '../utils/road-to-ta-model.js';   // (AWRoadToTA.nextTradeActivation) and its planner
+import '../utils/ta-schedule-model.js';  // (AWTaSchedule), shared with the tests
 const { gameFetch } = globalThis.AWGameRate;
 
 const { cvOf } = globalThis.AWBattleModel;
@@ -1285,44 +1288,75 @@ async function adminSetPair() {
     } catch (e) {}
 }
 
-// ---------- Schedule tab (execution order for confirmed agreements) ----------
+// ---------- Schedule tab: when each confirmed agreement can really go live ----------
+// The plan itself is public/js/utils/ta-schedule-model.js (AWTaSchedule); this only gathers
+// its inputs and draws it. Inputs per member: saved A$ (+ their Trade stockpile when "Sell
+// stockpiles now" is ticked), income = banking-planet production (total production when they
+// never ticked any planet in My Savings, flagged below) x PP price, current TR% + eco bonus,
+// and planets at population 10+ (what a partner gains). The viewer's own reserved expenses
+// from My Savings are held back too; other members' expenses are private to them.
+let taScheduleInputs = null;
+
 async function runTradeSchedule() {
     const body = document.getElementById('ta-results-body');
-    if (body) body.innerHTML = '<tr><td colspan="4" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Calculating…</td></tr>';
-
+    if (body) body.innerHTML = '<p class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Calculating…</p>';
     try {
-        const [econRes, taRes] = await Promise.all([
+        const [econRes, taRes, expensesRes] = await Promise.all([
             fetch('/hub-api/intel/trade-analysis'),
-            fetch('/hub-api/trade-agreements')
+            fetch('/hub-api/trade-agreements'),
+            fetch('/hub-api/my-planets/expenses'),
         ]);
         const econ = await econRes.json();
         const ta = await taRes.json();
         if (!econ.success || !ta.success) throw new Error('load failed');
+        let myReserved = 0;
+        try {
+            const ex = await expensesRes.json();
+            if (ex.success) myReserved = ex.expenses.reduce((s, e) => s + (e.amount || 0), 0);
+        } catch (e) { /* expenses are optional input */ }
         taPlayerEcon = econ;
-        await ensureMyBankingData();
 
         const ppLabel = document.getElementById('ta-pp-price');
         if (ppLabel) ppLabel.textContent = `PP price: ${econ.pp_price ? '$' + econ.pp_price : 'not scanned'}`;
 
-        // Plan = confirmed agreements not yet done.
-        const pairs = ta.agreements
-            .filter(t => t.status === 'confirmed')
-            .map(t => [t.player_a, t.player_b]);
-        const traders = (ta.traders || []);
-
-        // Once the viewer has used My Savings, any pairing that includes them plans off
-        // their banking-only rate instead of total production — same reasoning as Board.
-        const meLower = (ta.me || taState?.me || '').toLowerCase();
-        const players = (econ.players || []).map(p => (p.name.toLowerCase() === meLower && myPlanetsCache && myPlanetsCache.length > 0)
-            ? { ...p, production_rate: bankingRateOf(myPlanetsCache) }
-            : p);
-
-        computeAndRenderTradeSchedule(players, econ.pp_price || 0, { cost: 20000, traders, pairs });
+        taScheduleInputs = {
+            econ,
+            me: (ta.me || taState?.me || '').toLowerCase(),
+            traders: (ta.traders || []).map(t => t.toLowerCase()),
+            pairs: ta.agreements.filter(t => t.status === 'confirmed').map(t => [t.player_a, t.player_b]),
+            myReserved,
+        };
+        const box = document.getElementById('ta-sell-hoard');
+        if (box && !box.dataset.wired) { box.dataset.wired = '1'; box.addEventListener('change', renderTradeSchedule); }
+        renderTradeSchedule();
     } catch (e) {
-        if (body) body.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-red-500">Failed to load schedule data.</td></tr>`;
+        if (body) body.innerHTML = '<p class="text-center py-8 text-red-500">Failed to load schedule data.</p>';
     }
 }
 
+function scheduleMembers(inputs, sellHoard) {
+    const ppPrice = inputs.econ.pp_price || 0;
+    const estimated = [];
+    const members = (inputs.econ.players || []).map(p => {
+        const lower = p.name.toLowerCase();
+        const usesBanking = p.banking_rate != null && p.banking_rate > 0;
+        if (!usesBanking) estimated.push(p.name);
+        let saved = (p.astro_dollars || 0) + (p.production_points || 0) * ppPrice;
+        if (sellHoard) saved += p.hoarded_au || 0;
+        if (lower === inputs.me) saved -= inputs.myReserved;
+        return {
+            name: p.name,
+            saved,
+            rate: (usesBanking ? p.banking_rate : (p.production_rate || 0)) * ppPrice,
+            trader: inputs.traders.includes(lower),
+            pop10: p.pop10 || 0,
+            tr: (p.trade_revenue || 0) + (p.eco_bonus || 0),
+        };
+    });
+    return { members, estimated };
+}
+
+// Board's TR outlook uses this for "+1% in …" hints.
 function formatTaHours(totalHours) {
     if (totalHours <= 0.001) return 'Instant';
     const d = Math.floor(totalHours / 24);
@@ -1330,87 +1364,68 @@ function formatTaHours(totalHours) {
     return d > 0 ? `+${d}d ${h}h` : `+${h}h`;
 }
 
-function computeAndRenderTradeSchedule(globalPlayers, ppPrice, config) {
-    const COST_NORMAL = config.cost || 20000;
-    const TRADERS = (config.traders || []).map(t => t.toLowerCase());
-    const TRADER_RANKS = {};
-    (config.traders || []).forEach((t, i) => { TRADER_RANKS[t.toLowerCase()] = i + 1; });
-    const MASTER_PAIRS = config.pairs || [];
+function fmtTaWhen(ms) {
+    return formatLocalDateTime(new Date(ms), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
 
-    const getTraderRank = (a, b) => Math.min(TRADER_RANKS[a.toLowerCase()] || 99, TRADER_RANKS[b.toLowerCase()] || 99);
-    const isPlayerPending = (name, pending) => { const n = name.toLowerCase(); return pending.some(p => p[0].toLowerCase() === n || p[1].toLowerCase() === n); };
-    const hasPendingTrader = (name, pending) => { const n = name.toLowerCase(); return pending.some(p => (p[0].toLowerCase() === n && TRADERS.includes(p[1].toLowerCase())) || (p[1].toLowerCase() === n && TRADERS.includes(p[0].toLowerCase()))); };
-
-    const playersMap = {}, foundPlayers = new Set();
-    globalPlayers.forEach(p => {
-        const isTrader = TRADERS.includes(p.name.toLowerCase());
-        playersMap[p.name.toLowerCase()] = {
-            name: p.name, base_prod: p.production_rate || 0,
-            ta_cost: isTrader ? 0 : COST_NORMAL,
-            saved: (p.astro_dollars || 0) + (p.production_points || 0) * ppPrice
-        };
-        foundPlayers.add(p.name.toLowerCase());
-    });
-
-    let pending = MASTER_PAIRS.slice();
-    const missingPlayers = new Set();
-    pending.forEach(pair => {
-        if (!foundPlayers.has(pair[0].toLowerCase())) missingPlayers.add(pair[0]);
-        if (!foundPlayers.has(pair[1].toLowerCase())) missingPlayers.add(pair[1]);
-    });
-
-    const schedule = [];
-    let currentTime = 0, guard = 0;
-    while (pending.length > 0 && guard < 1000) {
-        guard++;
-        const candidates = pending.filter(pair => {
-            const isTraderTrade = TRADERS.includes(pair[0].toLowerCase()) || TRADERS.includes(pair[1].toLowerCase());
-            if (isTraderTrade) return true;
-            return !hasPendingTrader(pair[0], pending) && !hasPendingTrader(pair[1], pending);
-        });
-        let bestPair = null, minTime = Infinity, bestRank = 99, bestIsTrader = false;
-        for (const pair of candidates) {
-            const p1 = playersMap[pair[0].toLowerCase()], p2 = playersMap[pair[1].toLowerCase()];
-            if (!p1 || !p2) continue;
-            const t1 = p1.saved < p1.ta_cost ? (p1.ta_cost - p1.saved) / (p1.base_prod || 1e-9) : 0;
-            const t2 = p2.saved < p2.ta_cost ? (p2.ta_cost - p2.saved) / (p2.base_prod || 1e-9) : 0;
-            const time = Math.max(t1, t2);
-            const rank = getTraderRank(p1.name, p2.name);
-            const itp = TRADERS.includes(p1.name.toLowerCase()) || TRADERS.includes(p2.name.toLowerCase());
-            if (time < minTime - 1e-4) { minTime = time; bestPair = pair; bestRank = rank; bestIsTrader = itp; }
-            else if (Math.abs(time - minTime) <= 1e-4 && rank < bestRank) { minTime = time; bestPair = pair; bestRank = rank; bestIsTrader = itp; }
-        }
-        if (!bestPair) break;
-        const dt = minTime; currentTime += dt;
-        for (const pn in playersMap) if (isPlayerPending(pn, pending)) playersMap[pn].saved += playersMap[pn].base_prod * dt;
-        const e1 = playersMap[bestPair[0].toLowerCase()], e2 = playersMap[bestPair[1].toLowerCase()];
-        e1.saved -= e1.ta_cost; e2.saved -= e2.ta_cost;
-        const idx = pending.findIndex(p => p[0] === bestPair[0] && p[1] === bestPair[1]);
-        if (idx > -1) pending.splice(idx, 1);
-        schedule.push({ time: currentTime, p1: e1.name, p2: e2.name, is_trader: bestIsTrader });
-    }
+function renderTradeSchedule() {
+    const inputs = taScheduleInputs;
+    const body = document.getElementById('ta-results-body');
+    if (!inputs || !body) return;
+    const Model = globalThis.AWTaSchedule;
+    const now = Date.now();
+    const sell = !!document.getElementById('ta-sell-hoard')?.checked;
+    const { members, estimated } = scheduleMembers(inputs, sell);
+    const result = Model.plan({ now, members, pairs: inputs.pairs });
 
     const sumTime = document.getElementById('ta-sum-time'), sumTrades = document.getElementById('ta-sum-trades');
-    if (sumTime) sumTime.innerText = formatTaHours(currentTime);
-    if (sumTrades) sumTrades.innerText = schedule.length;
+    // The cycle itself, the same instant each row's "live" shows (activeAt adds the 5-minute
+    // TR recalculation on top).
+    const lastCycle = result.steps.length ? Math.max(...result.steps.map(st => st.cycleAt)) : null;
+    if (sumTime) sumTime.textContent = lastCycle ? fmtTaWhen(lastCycle) : '–';
+    if (sumTrades) sumTrades.textContent = String(inputs.pairs.length);
 
-    const tbody = document.getElementById('ta-results-body');
-    if (!tbody) return;
-    if (schedule.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-green-400">No confirmed agreements pending execution.</td></tr>`;
-        return;
+    // What selling would change, stated against the other setting so the toggle is honest
+    // both ways.
+    const delta = document.getElementById('ta-sell-delta');
+    if (delta) {
+        const other = Model.plan({ now, members: scheduleMembers(inputs, !sell).members, pairs: inputs.pairs });
+        const withSell = sell ? result : other, without = sell ? other : result;
+        const hours = (without.finish && withSell.finish) ? Math.round((without.finish - withSell.finish) / 3600000) : 0;
+        delta.classList.toggle('hidden', !(hours > 0));
+        delta.textContent = hours > 0
+            ? `Selling everyone's stockpiles (artifacts + supply units) would have every agreement live ${hours}h sooner.`
+            : '';
     }
-    const cell = (item, index) => {
-        if (!item) return '<td></td><td></td>';
-        let pair = `<span>${esc(item.p1)}</span> <i class="fa-solid fa-right-left text-muted-foreground mx-2"></i> <span>${esc(item.p2)}</span>`;
-        if (item.is_trader) pair = `<span class="text-yellow-400 font-bold">${pair}</span>`;
-        return `<td class="p-3 text-muted-foreground font-mono">${index + 1}</td><td class="p-3 font-medium text-foreground">${pair} <span class="text-xs text-muted-foreground ml-1">(${formatTaHours(item.time)})</span></td>`;
-    };
-    let rows = '';
-    for (let i = 0; i < schedule.length; i += 2) rows += `<tr class="hover:bg-accent/40">${cell(schedule[i], i)}${cell(schedule[i + 1], i + 1)}</tr>`;
-    let footer = '';
-    if (missingPlayers.size > 0) footer = `<tr><td colspan="4" class="text-center py-2 text-aw-warning bg-yellow-950/30 text-xs">⚠️ No alliance-stats data for: ${esc(Array.from(missingPlayers).join(', '))}</td></tr>`;
-    tbody.innerHTML = rows + footer;
+
+    if (!inputs.pairs.length) {
+        body.innerHTML = '<p class="text-center py-6 text-green-400">No confirmed agreements pending.</p>';
+    } else {
+        body.innerHTML = result.steps.map((s, i) => {
+            const accept = s.acceptorIsTrader
+                ? `<span class="text-yellow-400">${esc(s.acceptor)}</span> accepts free`
+                : `${esc(s.acceptor)} accepts`;
+            const cycle = fmtTaWhen(s.cycleAt);
+            return `<div class="bg-zinc-950 border border-border rounded-md px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span class="text-muted-foreground font-mono w-5">${i + 1}</span>
+                <span class="font-medium text-foreground min-w-[12rem]">${esc(s.sender)} <i class="fa-solid fa-arrow-right text-muted-foreground mx-1"></i> ${esc(s.acceptor)}</span>
+                <span class="text-xs text-muted-foreground"><b class="text-foreground">${esc(s.sender)}</b> sends from <span class="text-foreground font-mono">${esc(fmtTaWhen(s.sendAt))}</span></span>
+                <span class="text-xs text-muted-foreground">${accept} from <span class="text-foreground font-mono">${esc(fmtTaWhen(s.acceptAt))}</span>, before <span class="text-foreground font-mono">${esc(cycle)}</span></span>
+                <span class="text-xs ml-auto"><span class="text-emerald-400 font-mono">live ${esc(cycle)}</span> <span class="text-muted-foreground">+${s.senderGain}% / +${s.acceptorGain}% TR</span></span>
+            </div>`;
+        }).join('');
+    }
+
+    const notes = [];
+    if (result.unfunded.length) notes.push(`<span class="text-red-400">Cannot be funded within 90 days at current income: ${esc(result.unfunded.map(p => p.join(' ↔ ')).join(', '))}</span>`);
+    if (result.missing.length) notes.push(`<span class="text-aw-warning">No alliance-stats data for: ${esc(result.missing.join(', '))}</span>`);
+    const pendingNames = new Set(inputs.pairs.flat().map(n => n.toLowerCase()));
+    const est = estimated.filter(n => pendingNames.has(n.toLowerCase()));
+    if (est.length) notes.push(`Estimated from total production (no banking planets ticked in My Savings): ${esc(est.join(', '))}. Planets still building make these dates optimistic.`);
+    if (inputs.myReserved > 0) notes.push(`Your ${fmtAUExact(inputs.myReserved)} A$ of planned expenses (My Savings) is held back from your side.`);
+    notes.push('Assumes income stays as it is today apart from the TR% each agreement adds; spending on anything else pushes these dates back.');
+    const notesEl = document.getElementById('ta-schedule-notes');
+    if (notesEl) notesEl.innerHTML = notes.map(n => `<div>${n}</div>`).join('');
 }
 
 // ---------- My Savings tab: only counts planets the player has ticked as banking ----------
