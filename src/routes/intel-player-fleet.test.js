@@ -58,8 +58,12 @@ function getJson(server, urlPath) {
         db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (901, 'kralgar', 1), (903, 'NeverRanked', 1)`).run();
         db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (900, 'Praepes', 0, 0)`).run();
         db.prepare(`INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id) VALUES (90001, 900, 6, 901)`).run();
-        db.prepare(`INSERT INTO best_guarded (game_planet_id, cv, updated_at) VALUES (90001, '975', '2026-09-19T22:00:00.000Z')`).run();
-        fleetsRepo.upsertStrongestFleet(901, 1, 325, 0, 0, 975, '2026-09-20T10:00:00.000Z');
+        // Relative to now, not calendar dates: the history reads a 5-day window back from the
+        // real clock, so dates written on 2026-09-20 aged out on 2026-09-26 (same fix as #284
+        // for repositories/fleets.test.js). Same 12h gap as before.
+        const hoursAgo = h => new Date(Date.now() - h * 3600 * 1000).toISOString();
+        db.prepare(`INSERT INTO best_guarded (game_planet_id, cv, updated_at) VALUES (90001, '975', ?)`).run(hoursAgo(24));
+        fleetsRepo.upsertStrongestFleet(901, 1, 325, 0, 0, 975, hoursAgo(12));
 
         console.log('\n── a player with a matched fleet ' + '─'.repeat(42));
         let r = await getJson(server, '/hub-api/intel/player/901');
