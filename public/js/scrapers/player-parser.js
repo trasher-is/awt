@@ -10,11 +10,13 @@ import '../utils/scrape-report.js';
 import '../utils/parse-number.js';
 import '../utils/game-rate-limit.js';
 import '../utils/idle-parse.js';
+import '../utils/intel-freshness.js';
 const { gameFetch } = globalThis.AWGameRate;
 
 const { ScrapeReport, LABELS, labelledValue, headerIndex, matchesLabel } = globalThis.AWScrape;
 const { parseLocaleInt, parseLocaleNumber } = globalThis.AWNumber;
 const { parseIdleStringToSeconds } = globalThis.AWIdleParse;
+const { genuineLiveIntelTables } = globalThis.AWIntelFreshness;
 
 export function extractPlayerData(playerId, doc = document, report = new ScrapeReport('player profile')) {
     const p = {
@@ -51,9 +53,11 @@ export function extractPlayerData(playerId, doc = document, report = new ScrapeR
         cv_limit: 0
     };
 
-    // Verify presence of specialized alliance intelligence blocks
-    const hasIrTable = !!doc.querySelector('table.ir-summary');
-    p.has_intel = hasIrTable ? 1 : 0;
+    // Live intel is the game's own top-of-page report, never a copy pasted into a pinned
+    // Player Note: a document-wide selector read player 144's note as a fresh capture on
+    // every scrape. See intel-freshness.js.
+    const liveIrTable = genuineLiveIntelTables(doc, 'table.ir-summary')[0] || null;
+    p.has_intel = liveIrTable ? 1 : 0;
 
     const nameHeader = doc.querySelector('th[colspan="2"]');
     if (nameHeader) {
@@ -69,8 +73,8 @@ export function extractPlayerData(playerId, doc = document, report = new ScrapeR
 
     // One lookup helper, counted. `which` names the field so a miss is reportable rather
     // than an indistinguishable empty string.
-    const getRowVal = (which, synonyms, { exact = false, accept = null, optional = false } = {}) => {
-        const hit = labelledValue(doc, synonyms, { exact, accept });
+    const getRowVal = (which, synonyms, { exact = false, accept = null, optional = false, root = doc } = {}) => {
+        const hit = labelledValue(root, synonyms, { exact, accept });
         if (!optional) report.label(hit.found, which);
         return hit.found ? hit.value : null;
     };
@@ -134,26 +138,26 @@ export function extractPlayerData(playerId, doc = document, report = new ScrapeR
         // "Economy" the science level and "Economy Bonus" the percentage share a prefix,
         // so the exact match plus a no-percent guard keeps them apart.
         const noPercent = v => !v.includes('%');
-        p.biology = parseLocaleInt(getRowVal('biology', LABELS.biology, { exact: true }));
-        p.economy = parseLocaleInt(getRowVal('economy', LABELS.economy, { exact: true, accept: noPercent }));
-        p.energy = parseLocaleInt(getRowVal('energy', LABELS.energy, { exact: true }));
-        p.mathematics = parseLocaleInt(getRowVal('mathematics', LABELS.mathematics, { exact: true }));
-        p.physics = parseLocaleInt(getRowVal('physics', LABELS.physics, { exact: true }));
-        p.social = parseLocaleInt(getRowVal('social', LABELS.social, { exact: true }));
+        p.biology = parseLocaleInt(getRowVal('biology', LABELS.biology, { exact: true, root: liveIrTable }));
+        p.economy = parseLocaleInt(getRowVal('economy', LABELS.economy, { exact: true, accept: noPercent, root: liveIrTable }));
+        p.energy = parseLocaleInt(getRowVal('energy', LABELS.energy, { exact: true, root: liveIrTable }));
+        p.mathematics = parseLocaleInt(getRowVal('mathematics', LABELS.mathematics, { exact: true, root: liveIrTable }));
+        p.physics = parseLocaleInt(getRowVal('physics', LABELS.physics, { exact: true, root: liveIrTable }));
+        p.social = parseLocaleInt(getRowVal('social', LABELS.social, { exact: true, root: liveIrTable }));
 
         const ecoBonusStr = getRowVal('economy bonus', LABELS.economyBonus, { optional: true });
         if (ecoBonusStr) p.eco_bonus = parseLocaleInt(ecoBonusStr);
 
-        const tradeStr = getRowVal('trade revenue', LABELS.tradeRevenue, { optional: true });
+        const tradeStr = getRowVal('trade revenue', LABELS.tradeRevenue, { optional: true, root: liveIrTable });
         if (tradeStr) p.trade_revenue = parseLocaleInt(tradeStr);
 
-        const artefactHit = labelledValue(doc.querySelector('.ir-summary') || doc, LABELS.artefact, { exact: false });
+        const artefactHit = labelledValue(liveIrTable, LABELS.artefact, { exact: false });
         if (artefactHit.found) {
             p.artefact = artefactHit.value === 'N/A' ? null : (artefactHit.value.split(/\s+/)[0] || null);
         }
 
         const parseRace = (text) => parseInt(text.match(/([+-]\d+)\s*$/)?.[1] || "0", 10);
-        doc.querySelectorAll('.race-summary tbody td').forEach(td => {
+        genuineLiveIntelTables(doc, '.race-summary').flatMap(t => [...t.querySelectorAll('tbody td')]).forEach(td => {
             const text = td.innerText.trim();
             if (text.includes('Growth')) p.race_growth = parseRace(text);
             if (text.includes('Science')) p.race_science = parseRace(text);
