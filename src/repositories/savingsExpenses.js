@@ -21,4 +21,20 @@ function updateExpense(id, userId, amount, dueAt) {
 }
 function deleteExpense(id, userId) { return deleteStmt.run(id, userId).changes > 0; }
 
-module.exports = { listExpenses, countExpenses, createExpense, getExpense, updateExpense, deleteExpense };
+// Each member's planned expenses added up, keyed by lower-cased player name (the account ->
+// player bridge users.js uses). Only the total leaves this file: the Board and the Schedule
+// hold it back from that member's side, the rows themselves stay private.
+const reservedStmt = db.prepare(`
+    SELECT LOWER(p.name) AS name, SUM(e.amount) AS au
+    FROM savings_expenses e
+    JOIN app_users u ON u.id = e.user_id
+    JOIN players p ON LOWER(p.name) = LOWER(u.game_name)
+    GROUP BY p.id
+`);
+function reservedByPlayerName() {
+    const out = new Map();
+    for (const r of reservedStmt.all()) out.set(r.name, Math.round(r.au || 0));
+    return out;
+}
+
+module.exports = { reservedByPlayerName, listExpenses, countExpenses, createExpense, getExpense, updateExpense, deleteExpense };
