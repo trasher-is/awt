@@ -52,6 +52,7 @@ const context = vm.createContext({
     AWScrape: require('../../public/js/utils/scrape-report'),
     AWNumber: require('../../public/js/utils/parse-number'),
     AWIdleParse: require('../../public/js/utils/idle-parse'),
+    AWIntelFreshness: require('../../public/js/utils/intel-freshness'),
     AWGameRate: {}
 });
 const code = fs.readFileSync(path.join(__dirname, '../../public/js/scrapers/player-parser.js'), 'utf8')

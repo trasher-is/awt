@@ -25,9 +25,11 @@ import '../utils/idle-parse.js';     // side-effect import: AWIdleParse.parseIdl
 import '../utils/sqlite-time.js';
 import '../utils/max-combat-value.js'; // side-effect import: AWMaxCombatValue, the CV-ceiling formula
 import '../utils/game-tables.js';    // side-effect import: AWTables.CULTURE, the per-level point costs
+import '../utils/intel-freshness.js'; // side-effect import: AWIntelFreshness.scienceLag, how far behind recorded sciences are
 const { compareNumeric, parseLocaleNumber } = globalThis.AWNumber;
 const { CULTURE } = globalThis.AWTables;
 const { maxCombatValue, maxCombatValueForRow } = globalThis.AWMaxCombatValue;
+const { scienceLag } = globalThis.AWIntelFreshness;
 const { parseIdleStringToSeconds } = globalThis.AWIdleParse;
 const { parseTimestamp, formatLocalDateTime } = globalThis.AWSqliteTime;
 export { parseIdleStringToSeconds };
@@ -98,6 +100,12 @@ export function hasIntelTimestamp(val) {
 function maxCvCell(row) {
     const { value, source } = maxCombatValueForRow(row);
     if (value == null) return Q;
+    // Social behind the player's public science level means the real ceiling is higher —
+    // Social only ever goes up — so the figure is a floor, and says so.
+    const lag = scienceLag(row);
+    if (lag > 0) {
+        return `<span title="${esc(scienceLagTitle(row, lag))} — the real ceiling is likely higher" class="text-zinc-500">≥${fmtInt(value)}</span>`;
+    }
     // A ceiling computed from a four-day-old population is worth flagging as such, rather
     // than letting it read as current alongside one built from last night's scan.
     const stale = source === 'statistics';
@@ -105,6 +113,13 @@ function maxCvCell(row) {
         ? 'Calculated from the game\'s Statistics population, which it publishes ~4 days behind — we have no planet scans for this player'
         : 'Calculated from the planets we have scanned';
     return `<span title="${title}"${stale ? ' class="text-zinc-500"' : ''}>${fmtInt(value)}${stale ? '*' : ''}</span>`;
+}
+
+// The public science level is the player's highest science and always current, so a record
+// whose highest science is below it is out of date however recently it "arrived". See
+// intel-freshness.js.
+function scienceLagTitle(row, lag) {
+    return `Intel is at least ${lag} level${lag === 1 ? '' : 's'} behind: public science level ${num(row.science_level)}, highest science on record ${num(row.science_level) - lag}`;
 }
 
 // True if the intel timestamp is parseable and older than 24h (used to grey stale sciences).
@@ -278,12 +293,18 @@ const gatedNum = (key, label, group, gate, o = {}) => col(key, label, Object.ass
     group, render: r => (gate(r) ? fmtInt(r[key]) : Q),
 }, o));
 
-// Sciences go grey once the captured intel is older than 24h.
+// Sciences go grey once the captured intel is older than 24h, or once the player's public
+// science level shows the record is behind.
+const isScienceStale = (r, intelDateField) => isIntelStale(r[intelDateField]) || scienceLag(r) > 0;
 const scienceCol = (key, label, group, intelField, intelDateField, color, o = {}) => col(key, label, Object.assign({
     group,
-    cell: r => (isIntelStale(r[intelDateField]) ? 'text-zinc-500' : color),
+    cell: r => (isScienceStale(r, intelDateField) ? 'text-zinc-500' : color),
     head: color,
-    render: r => (hasIntel(intelField)(r) ? fmtInt(r[key]) : Q),
+    render: r => {
+        if (!hasIntel(intelField)(r)) return Q;
+        const lag = scienceLag(r);
+        return lag > 0 ? `<span title="${esc(scienceLagTitle(r, lag))}">${fmtInt(r[key])}</span>` : fmtInt(r[key]);
+    },
 }, o));
 
 const buildingCols = (prefix, group, gate, first) => [
@@ -348,7 +369,7 @@ export const PLAYER_COLUMNS = [
     gatedNum('astro_dollars', 'A$', 'Economy', P_INTEL, { default: false }),
     gatedNum('production_points', 'PP', 'Economy', P_INTEL, { default: false }),
 
-    scienceCol('biology', 'Bio', 'Sciences', 'has_intel', 'intel_updated_at', 'text-green-400', { head: 'text-green-400 border-l border-border', cell: r => `${isIntelStale(r.intel_updated_at) ? 'text-zinc-500' : 'text-green-400'} border-l border-border` }),
+    scienceCol('biology', 'Bio', 'Sciences', 'has_intel', 'intel_updated_at', 'text-green-400', { head: 'text-green-400 border-l border-border', cell: r => `${isScienceStale(r, 'intel_updated_at') ? 'text-zinc-500' : 'text-green-400'} border-l border-border` }),
     scienceCol('economy', 'Eco', 'Sciences', 'has_intel', 'intel_updated_at', 'text-yellow-400'),
     scienceCol('energy', 'Nrg', 'Sciences', 'has_intel', 'intel_updated_at', 'text-purple-400'),
     scienceCol('mathematics', 'Math', 'Sciences', 'has_intel', 'intel_updated_at', 'text-orange-400'),
@@ -360,11 +381,15 @@ export const PLAYER_COLUMNS = [
     // is the column a reader checks to decide how much to trust the numbers beside it. The
     // date alone would say "recent" about something that was never ours and may be far older
     // than the day we recorded it.
-    col('intel_updated_at', 'Last Intel', { group: 'Intel', sort: 'string', head: 'border-l border-border', cell: 'text-muted-foreground border-l border-border', render: r => (
-        r.intel_source
+    // The date says when a report last arrived, not how current it is — a lag marker sits
+    // beside it when the public science level shows the sciences are behind.
+    col('intel_updated_at', 'Last Intel', { group: 'Intel', sort: 'string', head: 'border-l border-border', cell: 'text-muted-foreground border-l border-border', render: r => {
+        const date = r.intel_source
             ? `<span title="Not our own capture — from ${esc(r.intel_source)}${r.intel_entered_by ? `, entered by ${esc(r.intel_entered_by)}` : ''}">${fmtIntelDate(r.intel_updated_at)} <span class="text-cyan-400">↗</span></span>`
-            : fmtIntelDate(r.intel_updated_at)
-    ) }),
+            : fmtIntelDate(r.intel_updated_at);
+        const lag = scienceLag(r);
+        return lag > 0 ? `${date} <span class="text-amber-400" title="${esc(scienceLagTitle(r, lag))}">⚠ −${lag}</span>` : date;
+    } }),
     col('stats_scraped_at', 'Stats age', { group: 'Intel', default: false, sort: 'string', cell: 'text-muted-foreground', render: r => fmtIntelDate(r.stats_scraped_at), title: 'When the hub last read this player\'s Statistics page' }),
 ];
 

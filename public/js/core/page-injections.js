@@ -13,6 +13,7 @@ import '../utils/system-plan-panel.js'; // side-effect import: AWSystemPlanPanel
 import '../utils/social-hint.js';    // side-effect import: AWSocialHint, the Science page's Social marker (needs game-tables above)
 import '../utils/research-time.js';  // side-effect import: AWResearch, research time shared by the calculator and the Economy countdown
 import '../utils/fleet-launch-target-dossier.js'; // side-effect import: AWTargetDossier, the launch-form target-info render logic
+import '../utils/intel-freshness.js'; // side-effect import: AWIntelFreshness, which intel tables on a profile are live
 import { scrapeSystemById } from '../scrapers/system-parser.js';
 const { gameFetch } = globalThis.AWGameRate;
 const { formatSqliteUtc, formatLocalDateTime, parseTimestamp } = globalThis.AWSqliteTime;
@@ -1138,10 +1139,10 @@ export async function initProfilePLGrowth() {
 // wrongly concluded the game was showing this player's CURRENT intel and suppressed our
 // fallback card entirely, even though the actual top-of-page layout had none. Note bodies
 // render inside a `.overflow-auto` scroll container that the game's live top-of-page
-// intel tables are never part of, so exclude matches found there.
-function isGenuineLiveIntelTable(el) {
-    return !el.closest('.overflow-auto');
-}
+// intel tables are never part of, so exclude matches found there. The rule lives in
+// intel-freshness.js because player-parser.js must apply the SAME one — it did not, and read
+// the note as a fresh capture on every scrape.
+const { genuineLiveIntelTables } = globalThis.AWIntelFreshness;
 
 // Hub-tracked additions to a player's profile page: an always-shown login-time heatmap
 // ("Activity Log" — Hub-tracked, independent of intel), and, only when the game itself is
@@ -1179,8 +1180,7 @@ export async function initProfileHubIntel() {
     if (!data || !data.success || !data.player) return;
     const p = data.player;
 
-    const hasLiveIntel = [...document.querySelectorAll('.race-summary, .ir-summary')]
-        .some(isGenuineLiveIntelTable);
+    const hasLiveIntel = genuineLiveIntelTables(document, '.race-summary, .ir-summary').length > 0;
 
     const wrap = document.createElement('div');
     wrap.className = 'col-12';
