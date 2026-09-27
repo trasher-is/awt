@@ -1290,8 +1290,9 @@ async function adminSetPair() {
 
 // ---------- Schedule tab: when each confirmed agreement can really go live ----------
 // The plan itself is public/js/utils/ta-schedule-model.js (AWTaSchedule); this only gathers
-// its inputs and draws it. Inputs per member: saved A$ (+ their Trade stockpile when "Sell
-// stockpiles now" is ticked), income = banking-planet production (total production when they
+// its inputs and draws it. Inputs per member: saved A$ (+ what they marked in My Savings as
+// willing to sell anytime, or their whole Trade stockpile when "Sell stockpiles now" is
+// ticked), income = banking-planet production (total production when they
 // never ticked any planet in My Savings, flagged below) x PP price, current TR% + eco bonus,
 // and planets at population 10+ (what a partner gains). The viewer's own reserved expenses
 // from My Savings are held back too; other members' expenses are private to them.
@@ -1342,7 +1343,9 @@ function scheduleMembers(inputs, sellHoard) {
         const usesBanking = p.banking_rate != null && p.banking_rate > 0;
         if (!usesBanking) estimated.push(p.name);
         let saved = (p.astro_dollars || 0) + (p.production_points || 0) * ppPrice;
-        if (sellHoard) saved += p.hoarded_au || 0;
+        // The whole stockpile when ticked; otherwise only what the member said they would sell
+        // anyway. Never both — the picks are part of the stockpile.
+        saved += sellHoard ? (p.hoarded_au || 0) : (p.sellable_au || 0);
         if (lower === inputs.me) saved -= inputs.myReserved;
         return {
             name: p.name,
@@ -1394,7 +1397,7 @@ function renderTradeSchedule() {
         const hours = (without.finish && withSell.finish) ? Math.round((without.finish - withSell.finish) / 3600000) : 0;
         delta.classList.toggle('hidden', !(hours > 0));
         delta.textContent = hours > 0
-            ? `Selling everyone's stockpiles (artifacts + supply units) would have every agreement live ${hours}h sooner.`
+            ? `Selling everyone's whole stockpiles (artifacts + supply units), not just what they marked as willing to sell, would have every agreement live ${hours}h sooner.`
             : '';
     }
 
@@ -1422,6 +1425,10 @@ function renderTradeSchedule() {
     const pendingNames = new Set(inputs.pairs.flat().map(n => n.toLowerCase()));
     const est = estimated.filter(n => pendingNames.has(n.toLowerCase()));
     if (est.length) notes.push(`Estimated from total production (no banking planets ticked in My Savings): ${esc(est.join(', '))}. Planets still building make these dates optimistic.`);
+    if (!sell) {
+        const sellers = (inputs.econ.players || []).filter(p => (p.sellable_au || 0) > 0);
+        if (sellers.length) notes.push(`Counting what members marked as willing to sell (My Savings): ${esc(sellers.map(p => `${p.name} ${fmtAUExact(p.sellable_au)} A$`).join(', '))}.`);
+    }
     if (inputs.myReserved > 0) notes.push(`Your ${fmtAUExact(inputs.myReserved)} A$ of planned expenses (My Savings) is held back from your side.`);
     notes.push('Assumes income stays as it is today apart from the TR% each agreement adds; spending on anything else pushes these dates back.');
     const notesEl = document.getElementById('ta-schedule-notes');
@@ -1438,12 +1445,18 @@ async function loadMySavings() {
     const list = document.getElementById('savings-planets');
     if (list) list.innerHTML = '<p class="text-center py-8 text-muted-foreground text-sm"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading your planets...</p>';
     mySavingsLoad = (async () => {
-        const [planetsRes, econRes, expensesRes] = await Promise.all([
+        const [planetsRes, econRes, expensesRes, sellRes] = await Promise.all([
             fetch('/hub-api/my-planets'),
             fetch('/hub-api/intel/trade-analysis'),
             fetch('/hub-api/my-planets/expenses'),
+            fetch('/hub-api/my-planets/sell-picks'),
         ]);
         if (!planetsRes.ok || !econRes.ok) throw new Error('load failed');
+        // Same as expenses: an add-on whose failure must not hide the planets list.
+        try {
+            const sellData = await sellRes.json();
+            mySellItems = sellData.success ? sellData.items : [];
+        } catch (e) { mySellItems = []; }
         // Expenses are an add-on: a failure there must not hide the planets list.
         try {
             const expensesData = await expensesRes.json();
@@ -1508,6 +1521,7 @@ function renderMySavings(planets, econData) {
     const bankingRate = bankingRateOf(planets);
     const auPerH = bankingRate * ppPrice;
     savingsContext = { saved, auPerH };
+    renderSellItems();
 
     const rateEl = document.getElementById('savings-rate');
     const savedEl = document.getElementById('savings-saved');
@@ -1554,7 +1568,9 @@ function fmtDueIn(ms) {
 }
 
 function renderSavingsExpenses() {
-    const { saved, auPerH } = savingsContext;
+    // What is marked as willing to sell counts as money on hand, same as in the Schedule.
+    const saved = savingsContext.saved + sellableAu(mySellItems);
+    const { auPerH } = savingsContext;
     const rows = [...mySavingsExpenses].sort((a, b) => a.due_at - b.due_at || a.id - b.id);
     const reserved = rows.reduce((sum, e) => sum + (e.amount || 0), 0);
 
@@ -1646,6 +1662,62 @@ async function removeSavingsExpense(id) {
     if (!data) return;
     mySavingsExpenses = mySavingsExpenses.filter(e => e.id !== id);
     renderSavingsExpenses();
+}
+
+// ---------- My Savings: willing to sell anytime ----------
+// Items from the member's own Trade inventory they would sell whenever it helps. A pick with
+// no quantity means "all I hold", so a stock that grows keeps counting in full. Stored on the
+// hub (savings_sell_picks) because the Schedule counts every member's picks, not just the
+// viewer's. Value = min(pick, held) x today's market price — the same rule the server applies
+// for the Schedule (tradeInventory.js sellableByPlayerName).
+let mySellItems = [];
+
+function sellQty(it) {
+    return it.qty == null ? it.held : Math.min(it.qty, it.held);
+}
+function sellableAu(items) {
+    return Math.round(items.filter(it => it.picked).reduce((sum, it) => sum + sellQty(it) * (it.unit_price || 0), 0));
+}
+
+function renderSellItems() {
+    const totalEl = document.getElementById('savings-sellable');
+    if (totalEl) totalEl.textContent = `${fmtAUExact(sellableAu(mySellItems))} A$`;
+    const list = document.getElementById('savings-sell-items');
+    if (!list) return;
+    if (!mySellItems.length) {
+        list.innerHTML = '<p class="text-xs text-muted-foreground/70">Nothing in your Trade inventory yet — Reload syncs it.</p>';
+        return;
+    }
+    const synced = mySellItems[0].synced_at ? formatLocalDateTime(mySellItems[0].synced_at, { weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : null;
+    list.innerHTML = mySellItems.map(it => {
+        const value = sellQty(it) * (it.unit_price || 0);
+        return `<div class="flex items-center gap-2 bg-zinc-950 border border-border rounded-md px-3 py-2" data-sell-item="${esc(it.name)}">
+            <input type="checkbox" data-sell-pick ${it.picked ? 'checked' : ''} class="w-4 h-4 shrink-0" aria-label="Willing to sell ${esc(it.name)}">
+            <span class="flex-1 min-w-0 truncate text-sm text-foreground" title="${esc(it.name)} — ${fmtAUExact(it.unit_price)} A$ each">${esc(it.name)}</span>
+            <input type="number" min="0" max="${it.held}" step="1" inputmode="numeric" value="${it.qty == null ? '' : it.qty}" placeholder="all" data-sell-qty ${it.picked ? '' : 'disabled'}
+                class="h-8 w-14 px-2 rounded-md bg-zinc-900 border border-border text-sm font-mono text-right disabled:opacity-40 focus:outline-none focus:ring-1 focus:ring-ring" aria-label="How many">
+            <span class="text-xs text-muted-foreground w-10 shrink-0">/ ${it.held}</span>
+            <span class="text-xs font-mono w-20 shrink-0 text-right ${it.picked ? 'text-amber-400' : 'text-muted-foreground/50'}">${fmtAUExact(value)} A$</span>
+        </div>`;
+    }).join('') + (synced ? `<p class="text-[11px] text-muted-foreground/70">Inventory and prices as of ${esc(synced)}.</p>` : '');
+
+    list.querySelectorAll('[data-sell-item]').forEach(row => {
+        const name = row.dataset.sellItem;
+        const box = row.querySelector('[data-sell-pick]');
+        const qtyInput = row.querySelector('[data-sell-qty]');
+        box?.addEventListener('change', () => saveSellPick(name, box.checked, null));
+        qtyInput?.addEventListener('change', () => {
+            const raw = qtyInput.value.trim();
+            saveSellPick(name, true, raw === '' ? null : Math.max(0, Math.round(Number(raw) || 0)));
+        });
+    });
+}
+
+async function saveSellPick(name, picked, qty) {
+    const data = await savingsExpenseRequest('PUT', '/hub-api/my-planets/sell-picks', { name, picked, qty });
+    if (data) mySellItems = data.items;
+    renderSellItems();          // on failure this puts the stored pick back
+    renderSavingsExpenses();    // Ready in and "covered" move with it
 }
 
 async function toggleSavingsPlanet(box) {

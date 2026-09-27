@@ -93,7 +93,7 @@
                 </button>
             </div>
             <div class="p-4 flex flex-wrap items-center gap-6 border-b border-border/40">
-                <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider">Ready in</div><div id="savings-ready-in" class="text-lg font-bold text-foreground">--</div></div>
+                <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider" title="Until you hold 20,000 A$ plus your planned expenses — counting Saved so far, what you marked as willing to sell, and your banking rate">Ready in</div><div id="savings-ready-in" class="text-lg font-bold text-foreground">--</div></div>
                 <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider">Banking rate</div><div id="savings-rate" class="text-lg font-bold text-sky-400">--</div></div>
                 <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider" title="Astro Dollars + Production Points at market price — not counting artifacts or supply units">Saved so far</div><div id="savings-saved" class="text-lg font-bold text-emerald-400">--</div></div>
                 <div class="text-center"><div class="text-[10px] text-muted-foreground uppercase tracking-wider" title="Saved so far, plus your Trade inventory hoard (artifacts + supply units) valued as if sold right now">Saved (if sold)</div><div id="savings-saved-sold" class="text-lg font-bold text-amber-400">--</div></div>
@@ -108,6 +108,16 @@
                     <button id="btn-add-expense" type="button" title="Add an expense" class="h-9 w-9 shrink-0 rounded-md border border-border hover:bg-accent inline-flex items-center justify-center"><i class="fa-solid fa-plus"></i></button>
                 </div>
                 <div id="savings-expenses" class="flex flex-col gap-2"></div>
+            </div>
+            <div class="p-4 border-b border-border/40 flex flex-col gap-2">
+                <div class="flex items-center justify-between gap-2">
+                    <div>
+                        <div class="text-sm font-semibold text-foreground">Willing to sell anytime</div>
+                        <div class="text-[11px] text-muted-foreground">Tick what you would sell whenever it helps. Ready in and the alliance Schedule count it at today's market price. Leave the number empty to sell all you hold, or enter fewer.</div>
+                    </div>
+                    <div class="text-right shrink-0"><div class="text-[10px] text-muted-foreground uppercase tracking-wider">Counts</div><div id="savings-sellable" class="text-sm font-bold text-amber-400">--</div></div>
+                </div>
+                <div id="savings-sell-items" class="flex flex-col gap-2"></div>
             </div>
             <div id="savings-planets" class="p-4 flex flex-col gap-2"></div>
         </div>

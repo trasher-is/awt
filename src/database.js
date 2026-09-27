@@ -1270,6 +1270,33 @@ function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_savings_expenses_user ON savings_expenses(user_id);
     `);
 
+    // trade_inventory_items + savings_sell_picks (2026-09-27): what a member is willing to
+    // sell at any time, so the Trade Agreement Schedule can count it without the all-or-
+    // nothing "Sell stockpiles now" toggle. trade_inventory_items is the latest /Game/Trade
+    // inventory snapshot per player (each artifact / Supply Unit held, at that page's market
+    // price), replaced whole on every sync. savings_sell_picks is the member's choice, keyed
+    // by hub account like savings_expenses so it survives a re-created player row; qty NULL
+    // means "all I hold", so a stock that grows is counted as it grows. The value is
+    // computed at read time, capped by what is actually held.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS trade_inventory_items (
+            player_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            held INTEGER NOT NULL DEFAULT 0,
+            unit_price REAL NOT NULL DEFAULT 0,
+            synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (player_id, name),
+            FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS savings_sell_picks (
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            qty INTEGER,
+            PRIMARY KEY (user_id, name),
+            FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE
+        );
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

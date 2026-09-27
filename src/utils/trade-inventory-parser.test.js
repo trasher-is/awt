@@ -64,8 +64,8 @@ function makeDoc({ priceRows = [], invTableFor = null }) {
     const source = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'scrapers', 'trade-inventory-parser.js'), 'utf8')
         .replace(/^import .*$/gm, '').replace(/^export /gm, '');
     const context = vm.createContext({ console });
-    vm.runInContext(`globalThis.__exports = (function(){ ${source}\nreturn { parseTradeInventoryPage }; })();`, context);
-    const { parseTradeInventoryPage } = context.__exports;
+    vm.runInContext(`globalThis.__exports = (function(){ ${source}\nreturn { parseTradeInventoryPage, tradeInventorySyncBody }; })();`, context);
+    const { parseTradeInventoryPage, tradeInventorySyncBody } = context.__exports;
 
     console.log('parseTradeInventoryPage');
 
@@ -151,6 +151,38 @@ function makeDoc({ priceRows = [], invTableFor = null }) {
     {
         const doc = makeDoc({ priceRows: [], invTableFor: null });
         ok('unparseable page reports null so callers keep the old value', parseTradeInventoryPage(doc) === null, parseTradeInventoryPage(doc));
+    }
+
+    // Willing to sell (2026-09-27): the same inventory, item by item, so My Savings can offer
+    // each one. Only held items, Astro Dollars excluded (already money), Supply Units by the
+    // held side of "held/capacity".
+    console.log('\n── Items come back one by one for My Savings ' + '─'.repeat(31));
+    {
+        const inv = table([
+            itemRow([cell('Astro Dollar'), cell('1 500')]),
+            itemRow([cell('Ancient Relic', { span: 'Ancient Relic' }), cell('3')]),
+            itemRow([cell('Empty Vial'), cell('0')]),
+            itemRow([cell('Supply Unit'), cell('2/6')]),
+        ]);
+        const doc = makeDoc({
+            priceRows: [
+                priceRow({ name: 'Ancient Relic', price: '100.00' }),
+                priceRow({ name: 'Empty Vial', price: '5.00' }),
+                priceRow({ name: 'Supply Unit', price: '40.00' }),
+            ],
+            invTableFor: inv,
+        });
+        const r = parseTradeInventoryPage(doc);
+        const items = JSON.parse(JSON.stringify(r.items));
+        ok('held artifacts and supply units listed with held count and unit price',
+            JSON.stringify(items) === JSON.stringify([
+                { name: 'Ancient Relic', held: 3, unit_price: 100 },
+                { name: 'Supply Unit', held: 2, unit_price: 40 },
+            ]), items);
+        ok('items add up to the hoard total', items.reduce((s, it) => s + it.held * it.unit_price, 0) === r.hoarded, r);
+        const body = JSON.parse(tradeInventorySyncBody(r));
+        ok('the sync body carries hoard, astro dollars and items together',
+            body.hoarded_au === 380 && body.astro_dollars === 1500 && body.items.length === 2, body);
     }
 
     console.log('\n' + '─'.repeat(77));

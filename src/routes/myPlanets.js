@@ -3,6 +3,7 @@ const usersRepo = require('../repositories/users');
 const planetBankingRepo = require('../repositories/planetBanking');
 const alliancesRepo = require('../repositories/alliances');
 const savingsExpensesRepo = require('../repositories/savingsExpenses');
+const tradeInventoryRepo = require('../repositories/tradeInventory');
 const { requireAuth } = require('./_middleware');
 const router = express.Router();
 
@@ -176,6 +177,46 @@ router.delete('/my-planets/expenses/:id', requireAuth, (req, res) => {
     } catch (err) {
         console.error('[DB Error] Failed to delete savings expense:', err);
         res.status(500).json({ success: false, error: 'Failed to delete expense' });
+    }
+});
+
+// --- WILLING TO SELL (2026-09-27) ---
+// Items from the member's own Trade inventory they would sell at any time. The Schedule
+// counts their value for every member (see /intel/trade-analysis's sellable_au), so a
+// planned sale no longer needs the all-or-nothing "Sell stockpiles now" toggle.
+router.get('/my-planets/sell-picks', requireAuth, (req, res) => {
+    try {
+        const playerId = resolveOwnPlayerId(req);
+        if (!playerId) return res.json({ success: false, error: 'No player on record for this account yet.' });
+        res.json({ success: true, items: tradeInventoryRepo.listItemsForUser(req.session.userId, playerId) });
+    } catch (err) {
+        console.error('[DB Error] Failed to load sell picks:', err);
+        res.status(500).json({ success: false, error: 'Failed to load your inventory' });
+    }
+});
+
+// Body: { name, picked: bool, qty?: whole number | null }. qty null or absent = all held.
+// A pick is only accepted for an item the member actually holds right now.
+router.put('/my-planets/sell-picks', requireAuth, (req, res) => {
+    const body = req.body || {};
+    const name = typeof body.name === 'string' ? body.name : '';
+    const qty = body.qty === undefined || body.qty === null ? null : Number(body.qty);
+    if (qty !== null && (!Number.isInteger(qty) || qty < 0)) {
+        return res.status(400).json({ success: false, error: 'Quantity must be a whole number from 0 up.' });
+    }
+    try {
+        const playerId = resolveOwnPlayerId(req);
+        if (!playerId) return res.status(404).json({ success: false, error: 'No player on record for this account yet.' });
+        const items = tradeInventoryRepo.listItemsForUser(req.session.userId, playerId);
+        if (!items.some(it => it.name === name)) {
+            return res.status(404).json({ success: false, error: 'That item is not in your inventory.' });
+        }
+        if (body.picked) tradeInventoryRepo.setPick(req.session.userId, name, qty);
+        else tradeInventoryRepo.clearPick(req.session.userId, name);
+        res.json({ success: true, items: tradeInventoryRepo.listItemsForUser(req.session.userId, playerId) });
+    } catch (err) {
+        console.error('[DB Error] Failed to save sell pick:', err);
+        res.status(500).json({ success: false, error: 'Failed to save' });
     }
 });
 
