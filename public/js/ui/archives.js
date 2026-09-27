@@ -936,28 +936,8 @@ function renderAllyStatsTable() {
 let taState = null;       // last fetched { me, isAdmin, maxTas, traders, members, agreements }
 let taPlayerEcon = null;  // last fetched economics for the Schedule tab
 
-// My Savings' banking data, shared with Board and Schedule so "my" rate is consistent
-// everywhere in this panel instead of three different numbers for the same person.
-// null = never loaded this session; [] = loaded, no planets synced. Kept current by
-// loadMySavings() itself (every visit to that tab refreshes it); Board/Schedule only
-// populate it lazily, on demand, if the member never opened My Savings at all.
-let myPlanetsCache = null;
-let myPpPriceCache = 0;
 function bankingRateOf(planets) {
     return (planets || []).filter(p => p.banking).reduce((sum, p) => sum + (p.production_rate || 0), 0);
-}
-async function ensureMyBankingData() {
-    if (myPlanetsCache !== null) return;
-    try {
-        const [planetsRes, econRes] = await Promise.all([
-            fetch('/hub-api/my-planets'),
-            fetch('/hub-api/intel/trade-analysis'),
-        ]);
-        const planetsData = await planetsRes.json();
-        const econData = await econRes.json();
-        myPlanetsCache = planetsData.success ? (planetsData.planets || []) : [];
-        myPpPriceCache = econData.success ? (econData.pp_price || 0) : 0;
-    } catch (e) { myPlanetsCache = []; myPpPriceCache = 0; }
 }
 
 const taShort = (name) => {
@@ -1051,7 +1031,7 @@ async function loadTradeOutlook() {
 
 async function loadTradeAgreements() {
     try {
-        const [response] = await Promise.all([fetch('/hub-api/trade-agreements'), ensureMyBankingData(), loadTradeOutlook()]);
+        const [response] = await Promise.all([fetch('/hub-api/trade-agreements'), loadTradeOutlook()]);
         const data = await response.json();
         if (!data.success) throw new Error(data.error || 'Failed');
         taState = data;
@@ -1153,9 +1133,9 @@ function renderTaBoard() {
     // Trailing wealth columns: a spacer, then A$+PP, Ready in, Hoard A$, Ready (sold), Offers.
     html += `<th class="bg-black border-0" style="min-width:14px"></th>`;
     html += `<th class="bg-zinc-900 px-2 py-1 text-center text-emerald-400 border border-border/40" title="Visible liquidity: Astro Dollars + Production Points valued in A$">A$+PP</th>`;
-    html += `<th class="bg-zinc-900 px-2 py-1 text-center text-sky-400 border border-border/40" title="Time to reach ${TA_TRADE_COST.toLocaleString()} A$ from visible liquidity at current income (Production/h × PP price)">Ready in</th>`;
+    html += `<th class="bg-zinc-900 px-2 py-1 text-center text-sky-400 border border-border/40" title="Time until this member holds ${TA_TRADE_COST.toLocaleString()} A$ plus their planned expenses, counting A$+PP, what they marked as willing to sell, and their banking planets' income — as set up in their My Savings. ~ = no banking planets ticked, estimated from total production">Ready in</th>`;
     html += `<th class="bg-zinc-900 px-2 py-1 text-center text-amber-400 border border-border/40" title="A$ value of artifacts + supply units this member is holding">Hoard A$</th>`;
-    html += `<th class="bg-zinc-900 px-2 py-1 text-center text-sky-300 border border-border/40" title="Time to reach ${TA_TRADE_COST.toLocaleString()} A$ if the hoard is sold now (visible + hoard, then income)">Ready (sold)</th>`;
+    html += `<th class="bg-zinc-900 px-2 py-1 text-center text-sky-300 border border-border/40" title="Same as Ready in, but with the whole hoard sold now instead of only what they marked as willing to sell">Ready (sold)</th>`;
     html += `<th class="bg-zinc-900 px-2 py-1 text-left text-violet-400 border border-border/40" title="Trade revenue this member offers a new partner: 1% per own planet at population 10+, and when their next two population-10 crossings are projected. Requires that member to have opened My Savings at least once; projections assume their current growth rate holds.">Offers</th>`;
     html += `</tr></thead><tbody>`;
 
@@ -1169,21 +1149,20 @@ function renderTaBoard() {
             html += taCell(p1, p2, { me: meLower, isAdmin, maxTas, traderSet, agreements, full1 });
         });
         html += `<td class="bg-black border-0"></td>`;
-        // Ready in: time to reach 20k from visible liquidity. Ready (sold): same once the hoard is sold now.
-        // For the viewer's own row, once they've used My Savings, its banking-only rate
-        // replaces total production — see myPlanetsCache's own comment for why.
-        const isMe = p1.name.toLowerCase() === meLower;
-        const usesBankingRate = isMe && myPlanetsCache && myPlanetsCache.length > 0;
-        const auPerH = usesBankingRate ? bankingRateOf(myPlanetsCache) * myPpPriceCache : p1.au_per_h;
-        const rateNote = usesBankingRate ? ' (banking planets only — see My Savings)' : '';
-        const need1 = Math.max(0, TA_TRADE_COST - (p1.visible_au || 0));
-        const need2 = Math.max(0, TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0));
-        const t1 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0), auPerH);
-        const t2 = fmtReady(TA_TRADE_COST - (p1.visible_au || 0) - (p1.hoarded_au || 0), auPerH);
+        // Ready in / Ready (sold): each member's own My Savings setup, computed on the server
+        // (banking rate, willing to sell, planned expenses) — see boardReadiness.
+        const r = boardReadiness(p1);
+        const est = r.estimated ? '~' : '';
+        const rateNote = r.estimated ? ' (no banking planets ticked in My Savings — estimated from total production)' : ' (banking planets, My Savings)';
+        const parts = [`${fmtAUExact(r.auPerH)} A$/h${rateNote}`];
+        if (p1.sellable_au) parts.push(`${fmtAUExact(p1.sellable_au)} A$ willing to sell`);
+        if (p1.reserved_au) parts.push(`${fmtAUExact(p1.reserved_au)} A$ planned expenses held back`);
+        const t1 = fmtReady(r.need, r.auPerH), t2 = fmtReady(r.needSold, r.auPerH);
+        const withEst = t => (est && t !== 'now' && t !== '–' ? est + t : t);
         html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-center border border-border/40 text-emerald-400" title="${(p1.visible_au || 0).toLocaleString()} A$">${fmtAUExact(p1.visible_au)}</td>`;
-        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-center border border-border/40 text-sky-400 whitespace-nowrap" title="${(auPerH || 0).toLocaleString()} A$/h${rateNote} · need ${need1.toLocaleString()} A$">${t1}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-center border border-border/40 text-sky-400 whitespace-nowrap" title="${esc([...parts, `need ${fmtAUExact(Math.max(0, r.need))} A$ more`].join(' · '))}">${withEst(t1)}</td>`;
         html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-center border border-border/40 text-amber-400 font-semibold" title="${(p1.hoarded_au || 0).toLocaleString()} A$">${fmtAUExact(p1.hoarded_au)}</td>`;
-        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-center border border-border/40 text-sky-300 whitespace-nowrap" title="${(auPerH || 0).toLocaleString()} A$/h${rateNote} · need ${need2.toLocaleString()} A$ after selling ${(p1.hoarded_au || 0).toLocaleString()} A$ hoard">${t2}</td>`;
+        html += `<td class="px-2 py-1 md:px-3 md:py-1.5 text-center border border-border/40 text-sky-300 whitespace-nowrap" title="${esc([parts[0], p1.reserved_au ? parts[parts.length - 1] : null, `need ${fmtAUExact(Math.max(0, r.needSold))} A$ more after selling the whole ${fmtAUExact(p1.hoarded_au)} A$ hoard`].filter(Boolean).join(' · '))}">${withEst(t2)}</td>`;
         const outlook = trOutlook.get(p1.name.toLowerCase());
         if (outlook) {
             const next1 = outlook.next_hours != null ? `+1% ${formatTaHours(outlook.next_hours)}` : '';
@@ -1203,6 +1182,21 @@ function renderTaBoard() {
     table.querySelectorAll('[data-ta-pair]').forEach(btn => {
         btn.addEventListener('click', () => onTaCellClick(btn.dataset.taA, btn.dataset.taB));
     });
+}
+
+// What a Board row needs to reach its next trade agreement, from the member's own My Savings
+// setup: 20k plus their planned expenses, against A$+PP plus what they would sell anyway
+// (Ready in) or plus the whole hoard (Ready (sold) — never both, the picks are part of it),
+// at their banking-planet income. Same inputs the Schedule plans with.
+function boardReadiness(p) {
+    const target = TA_TRADE_COST + (p.reserved_au || 0);
+    const visible = p.visible_au || 0;
+    return {
+        auPerH: p.au_per_h || 0,
+        estimated: !!p.rate_estimated,
+        need: target - visible - (p.sellable_au || 0),
+        needSold: target - visible - (p.hoarded_au || 0),
+    };
 }
 
 function taCell(p1, p2, ctx) {
@@ -1294,27 +1288,21 @@ async function adminSetPair() {
 // willing to sell anytime, or their whole Trade stockpile when "Sell stockpiles now" is
 // ticked), income = banking-planet production (total production when they
 // never ticked any planet in My Savings, flagged below) x PP price, current TR% + eco bonus,
-// and planets at population 10+ (what a partner gains). The viewer's own reserved expenses
-// from My Savings are held back too; other members' expenses are private to them.
+// and planets at population 10+ (what a partner gains). Every member's planned expenses from
+// My Savings are held back from their side (only the total is shared, never the rows).
 let taScheduleInputs = null;
 
 async function runTradeSchedule() {
     const body = document.getElementById('ta-results-body');
     if (body) body.innerHTML = '<p class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Calculating…</p>';
     try {
-        const [econRes, taRes, expensesRes] = await Promise.all([
+        const [econRes, taRes] = await Promise.all([
             fetch('/hub-api/intel/trade-analysis'),
             fetch('/hub-api/trade-agreements'),
-            fetch('/hub-api/my-planets/expenses'),
         ]);
         const econ = await econRes.json();
         const ta = await taRes.json();
         if (!econ.success || !ta.success) throw new Error('load failed');
-        let myReserved = 0;
-        try {
-            const ex = await expensesRes.json();
-            if (ex.success) myReserved = ex.expenses.reduce((s, e) => s + (e.amount || 0), 0);
-        } catch (e) { /* expenses are optional input */ }
         taPlayerEcon = econ;
 
         const ppLabel = document.getElementById('ta-pp-price');
@@ -1325,7 +1313,6 @@ async function runTradeSchedule() {
             me: (ta.me || taState?.me || '').toLowerCase(),
             traders: (ta.traders || []).map(t => t.toLowerCase()),
             pairs: ta.agreements.filter(t => t.status === 'confirmed').map(t => [t.player_a, t.player_b]),
-            myReserved,
         };
         const box = document.getElementById('ta-sell-hoard');
         if (box && !box.dataset.wired) { box.dataset.wired = '1'; box.addEventListener('change', renderTradeSchedule); }
@@ -1346,7 +1333,7 @@ function scheduleMembers(inputs, sellHoard) {
         // The whole stockpile when ticked; otherwise only what the member said they would sell
         // anyway. Never both — the picks are part of the stockpile.
         saved += sellHoard ? (p.hoarded_au || 0) : (p.sellable_au || 0);
-        if (lower === inputs.me) saved -= inputs.myReserved;
+        saved -= p.reserved_au || 0;
         return {
             name: p.name,
             saved,
@@ -1429,7 +1416,8 @@ function renderTradeSchedule() {
         const sellers = (inputs.econ.players || []).filter(p => (p.sellable_au || 0) > 0);
         if (sellers.length) notes.push(`Counting what members marked as willing to sell (My Savings): ${esc(sellers.map(p => `${p.name} ${fmtAUExact(p.sellable_au)} A$`).join(', '))}.`);
     }
-    if (inputs.myReserved > 0) notes.push(`Your ${fmtAUExact(inputs.myReserved)} A$ of planned expenses (My Savings) is held back from your side.`);
+    const reserving = (inputs.econ.players || []).filter(p => (p.reserved_au || 0) > 0);
+    if (reserving.length) notes.push(`Planned expenses (My Savings) held back: ${esc(reserving.map(p => `${p.name} ${fmtAUExact(p.reserved_au)} A$`).join(', '))}.`);
     notes.push('Assumes income stays as it is today apart from the TR% each agreement adds; spending on anything else pushes these dates back.');
     const notesEl = document.getElementById('ta-schedule-notes');
     if (notesEl) notesEl.innerHTML = notes.map(n => `<div>${n}</div>`).join('');
@@ -1465,9 +1453,6 @@ async function loadMySavings() {
         const planetsData = await planetsRes.json();
         const econData = await econRes.json();
         if (!planetsData.success) throw new Error(planetsData.error || 'load failed');
-        // Keep Board and Schedule's "my rate" in sync with whatever this tab just saw.
-        myPlanetsCache = planetsData.planets || [];
-        myPpPriceCache = econData.success ? (econData.pp_price || 0) : myPpPriceCache;
         renderMySavings(planetsData.planets || [], econData.success ? econData : null);
     })();
     try { await mySavingsLoad; }

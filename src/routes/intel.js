@@ -19,6 +19,7 @@ const settingsRepo = require('../repositories/settings');
 const systemClaimsRepo = require('../repositories/systemClaims');
 const systemPlansRepo = require('../repositories/systemPlans');
 const tradeInventoryRepo = require('../repositories/tradeInventory');
+const savingsExpensesRepo = require('../repositories/savingsExpenses');
 const router = express.Router();
 
 // Shared by /intel/fleet-locations and /intel/player/:id (2026-09-20, war-tool groundwork):
@@ -608,6 +609,7 @@ router.get('/intel/trade-analysis', requireAuth, (req, res) => {
 
         const rows = alliancesRepo.getTradeAnalysisRows();
         const sellable = tradeInventoryRepo.sellableByPlayerName();
+        const reserved = savingsExpensesRepo.reservedByPlayerName();
 
         const players = rows.map(r => {
             let partners = [];
@@ -626,6 +628,8 @@ router.get('/intel/trade-analysis', requireAuth, (req, res) => {
                 // What this member marked in My Savings as willing to sell at any time — the
                 // Schedule counts it even with "Sell stockpiles now" off.
                 sellable_au: sellable.get(r.name.toLowerCase()) || 0,
+                // Their planned expenses (My Savings), held back from their side of the plan.
+                reserved_au: reserved.get(r.name.toLowerCase()) || 0,
                 trade_partners: partners,
                 banking_rate: r.banking_rate == null ? null : Number(r.banking_rate),
                 pop10: Number(r.pop10) || 0,

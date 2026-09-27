@@ -257,9 +257,13 @@ function getTraders() {
     return getTradersStmt.all();
 }
 
+// banking_rate: PP/h from the planets the member ticked as banking in My Savings (NULL when
+// they never synced any) — the Board plans on it the same way the Schedule does.
 const getMembersWithStatsStmt = db.prepare(`
     SELECT p.name, p.has_intel, p.race_trader,
-           ams.hoarded_au, ams.astro_dollars, ams.production_points, ams.production_rate
+           ams.hoarded_au, ams.astro_dollars, ams.production_points, ams.production_rate,
+           (SELECT SUM(CASE WHEN pb.banking THEN COALESCE(pb.production_rate, 0) ELSE 0 END)
+              FROM planet_banking pb WHERE pb.player_id = p.id) AS banking_rate
     FROM alliance_member_stats ams
     JOIN players p ON p.id = ams.player_id
     ORDER BY p.name COLLATE NOCASE ASC

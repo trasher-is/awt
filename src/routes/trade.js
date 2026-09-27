@@ -6,6 +6,7 @@ const alliancesRepo = require('../repositories/alliances');
 const tradeRepo = require('../repositories/trade');
 const settingsRepo = require('../repositories/settings');
 const tradeInventoryRepo = require('../repositories/tradeInventory');
+const savingsExpensesRepo = require('../repositories/savingsExpenses');
 const router = express.Router();
 
 const MAX_TAS = 5;
@@ -28,22 +29,35 @@ const { parseLocaleNumber } = require('../../public/js/utils/parse-number.js');
 // Current alliance members (those we have stats for), with trader flag and wealth.
 //   hoarded_au — A$ value of artifacts + supply units held (from /Game/Trade scrape)
 //   visible_au — openly-visible liquidity: Astro Dollars + Production Points × PP price
+// and what each member set up in My Savings (2026-09-27), so the Board shows the same
+// numbers My Savings and the Schedule do:
+//   au_per_h      — banking planets' production × PP price; total production only for a
+//                   member who never ticked a banking planet (rate_estimated), the same
+//                   fallback the Schedule uses
+//   sellable_au   — what they marked as willing to sell anytime
+//   reserved_au   — their planned expenses, held back on top of the 20k
 function getMembers() {
     const ppRow = settingsRepo.getPpPrice();
     const ppPrice = ppRow ? parseFloat(ppRow.value) || 0 : 0;
 
     const rows = alliancesRepo.getMembersWithStats();
+    const sellable = tradeInventoryRepo.sellableByPlayerName();
+    const reserved = savingsExpensesRepo.reservedByPlayerName();
 
     return rows.map(r => {
         const visible = parseLocaleNumber(r.astro_dollars) + parseLocaleNumber(r.production_points) * ppPrice;
-        // A$/hour income: Production Points produced per hour valued at the live PP price.
-        const auPerH = parseLocaleNumber(r.production_rate) * ppPrice;
+        const usesBanking = r.banking_rate != null && r.banking_rate > 0;
+        const ppPerH = usesBanking ? Number(r.banking_rate) : parseLocaleNumber(r.production_rate);
+        const key = r.name.toLowerCase();
         return {
             name: r.name,
             isTrader: r.has_intel === 1 && r.race_trader > 0,
             hoarded_au: Math.round(r.hoarded_au || 0),
             visible_au: Math.round(visible),
-            au_per_h: Math.round(auPerH)
+            au_per_h: Math.round(ppPerH * ppPrice),
+            rate_estimated: !usesBanking,
+            sellable_au: sellable.get(key) || 0,
+            reserved_au: reserved.get(key) || 0,
         };
     });
 }
