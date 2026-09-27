@@ -5,6 +5,7 @@ const playersRepo = require('../repositories/players');
 const alliancesRepo = require('../repositories/alliances');
 const tradeRepo = require('../repositories/trade');
 const settingsRepo = require('../repositories/settings');
+const tradeInventoryRepo = require('../repositories/tradeInventory');
 const router = express.Router();
 
 const MAX_TAS = 5;
@@ -231,8 +232,25 @@ router.post('/sync/trade-partners', requireAuth, (req, res) => {
     }
 });
 
+// Item rows as the scraper sends them -> what trade_inventory_items stores, or null when the
+// body has none (an old cached bundle) or they are malformed — either way the stored
+// snapshot is left alone rather than wiped.
+const MAX_INVENTORY_ITEMS = 100;
+function readInventoryItems(items) {
+    if (!Array.isArray(items) || items.length > MAX_INVENTORY_ITEMS) return null;
+    const out = new Map();
+    for (const it of items) {
+        const name = it && typeof it.name === 'string' ? it.name.trim().slice(0, 80) : '';
+        const held = Number(it && it.held), price = Number(it && it.unit_price);
+        if (!name || !Number.isInteger(held) || held < 0 || !Number.isFinite(price) || price < 0) return null;
+        out.set(name, { name, held, unit_price: price });
+    }
+    return [...out.values()];
+}
+
 // --- HOARD + ASTRO DOLLARS SYNC: both read off the logged-in member's /Game/Trade page ---
-// Body: { hoarded_au: <number>, astro_dollars: <number> }. astro_dollars overwrites the
+// Body: { hoarded_au: <number>, astro_dollars: <number>, items?: [{ name, held, unit_price }] }.
+// items (2026-09-27) is the same inventory item by item, for My Savings' "willing to sell". astro_dollars overwrites the
 // same column the Alliance member-sheet scrape used to own — deliberately: this alliance
 // wants that figure sourced from Trade (exact) rather than Alliance (coarser, and gated on
 // someone opening a page nobody visits). See upsertTradeSync's own comment.
@@ -255,6 +273,8 @@ router.post('/sync/trade-inventory', requireAuth, (req, res) => {
         if (!row) return res.json({ success: true, stored: false });
         if (hasAstroDollars) alliancesRepo.upsertTradeSync(row.id, hoardedAu, astroDollars);
         else alliancesRepo.upsertHoardedAu(row.id, hoardedAu);
+        const items = readInventoryItems(req.body.items);
+        if (items) tradeInventoryRepo.replaceItems(row.id, items);
         res.json({ success: true, stored: true });
     } catch (e) {
         console.error('[DB Error] sync trade-inventory:', e);

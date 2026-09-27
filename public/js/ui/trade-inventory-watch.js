@@ -5,7 +5,7 @@
 // other background syncs (see my-planets-watch.js, which this mirrors exactly).
 
 import '../utils/game-rate-limit.js'; // must load before gameFetch resolves the gate
-import { parseTradeInventoryPage } from '../scrapers/trade-inventory-parser.js';
+import { parseTradeInventoryPage, tradeInventorySyncBody } from '../scrapers/trade-inventory-parser.js';
 const { gameFetch } = globalThis.AWGameRate;
 
 const TRADE_PATH = '/Game/Trade';
@@ -34,11 +34,10 @@ async function syncTradeInventory() {
     const doc = new DOMParser().parseFromString(await pageRes.text(), 'text/html');
     const result = parseTradeInventoryPage(doc);
     if (result == null) return; // page didn't parse the way we expect — leave the old values in place
-    const { hoarded, astroDollars } = result;
     await fetch('/hub-api/sync/trade-inventory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hoarded_au: Math.round(hoarded), astro_dollars: astroDollars }),
+        body: tradeInventorySyncBody(result),
     });
 }
 

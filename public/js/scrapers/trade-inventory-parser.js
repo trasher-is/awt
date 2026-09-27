@@ -65,6 +65,7 @@ export function parseTradeInventoryPage(doc) {
     // 3) Walk rows; value artifacts + supply units until the Orders/Trade Revenue sections,
     // and read the exact Astro Dollar balance off its own row along the way.
     let hoarded = 0, astroDollars = 0, section = 'inventory';
+    const items = [];   // each held artifact / Supply Unit, for My Savings' "willing to sell"
     invTable.querySelectorAll('tbody tr').forEach(row => {
         const cells = row.querySelectorAll('td');
         if (cells.length < 2) return;                       // e.g. "No Orders!" colspan row
@@ -83,12 +84,20 @@ export function parseTradeInventoryPage(doc) {
         } else if (name === 'Supply Unit') {
             const held = parseInt(qtyText.split('/')[0].replace(/[^\d-]/g, ''), 10) || 0;   // "0/6" -> 0
             hoarded += held * suPrice;
+            if (held > 0) items.push({ name, held, unit_price: suPrice });
         } else {
             const qty = parseInt(qtyText.replace(/[^\d-]/g, ''), 10) || 0;
             hoarded += qty * (priceMap[name] || 0);
+            if (qty > 0) items.push({ name, held: qty, unit_price: priceMap[name] || 0 });
         }
     });
-    return { hoarded, astroDollars };
+    return { hoarded, astroDollars, items };
+}
+
+// The one POST body for /hub-api/sync/trade-inventory, shared by the live-page scrape below
+// and trade-inventory-watch.js's background fetch so the two can never send different shapes.
+export function tradeInventorySyncBody({ hoarded, astroDollars, items }) {
+    return JSON.stringify({ hoarded_au: Math.round(hoarded), astro_dollars: astroDollars, items });
 }
 
 export async function scrapeTradeInventory() {
@@ -100,7 +109,7 @@ export async function scrapeTradeInventory() {
         await fetch('/hub-api/sync/trade-inventory', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ hoarded_au: Math.round(hoarded), astro_dollars: astroDollars })
+            body: tradeInventorySyncBody(result)
         });
         console.log(`[Spy] Trade inventory synced (hoarded A$ ${Math.round(hoarded)}, astro dollars ${astroDollars})`);
     } catch (err) {
