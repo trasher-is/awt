@@ -308,7 +308,8 @@ volatility below); the values below are one snapshot, not fixed constants:
 | Research Lab | $168.26 |
 | Robotic Factory | $86.04 |
 
-Not currently used anywhere in awt's code — general reference only.
+The building-value hint uses freshly observed Trade prices, including these building
+refunds. This historical snapshot remains reference only; no price above is a code constant.
 
 **Market volatility**: A$, PP, Supply Unit and artifact prices all move with player demand —
 buying pushes a price up, selling pushes it down — and Supply Units in particular are known
