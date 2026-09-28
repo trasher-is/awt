@@ -553,6 +553,9 @@ export function initSpy() {
                 initSocialHint().catch(err => console.error('[Spy] social hint failed:', err.message));
                 initEconomyMilestone();
                 initBioThreatPills().catch(err => console.error('[Spy] bio threat pills failed:', err.message));
+                import('../scrapers/science-research-parser.js')
+                    .then(module => module.scrapeScienceResearch())
+                    .catch(err => console.error('[Spy] research scrape failed:', err.message));
             }
             if (pathLower.includes('/game/planets/planet/')) {
                 initStarbaseTimer();

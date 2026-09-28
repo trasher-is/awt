@@ -159,6 +159,12 @@ window.addEventListener('DOMContentLoaded', () => {
         .then(({ initMyPlanetsWatch }) => initMyPlanetsWatch())
         .catch(err => console.warn('[MyPlanetsWatch] failed to start:', err));
 
+    // Research tracker: background read of the viewer's own /Game/Science (2026-09-28), so
+    // /intel research in Discord knows what they are researching — same pattern as above.
+    import('./research-watch.js')
+        .then(({ initResearchWatch }) => initResearchWatch())
+        .catch(err => console.warn('[ResearchWatch] failed to start:', err));
+
     // My Savings / Hoard A$: background sync of the viewer's own /Game/Trade inventory
     // value (2026-09-19) — same on-demand-load pattern as the others. Previously this only
     // updated when the member happened to browse to /Game/Trade in the embedded frame.

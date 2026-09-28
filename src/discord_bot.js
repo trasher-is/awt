@@ -10,6 +10,8 @@ const alliancesRepo = require('./repositories/alliances');
 const usersRepo = require('./repositories/users');
 const discordTimersRepo = require('./repositories/discordTimers');
 const incomingRepo = require('./repositories/incoming');
+const scienceResearchRepo = require('./repositories/scienceResearch');
+const { buildResearchOverview, buildResearchDetail } = require('./utils/research-lines');
 const { buildSystemChangeLines, buildSystemMilestoneLines } = require('./utils/system-change-lines');
 const { friendlyAllianceTags } = require('./utils/friendly-alliance-tags');
 const { bestSystemForChannel } = require('./utils/system-channel-match');
@@ -561,6 +563,7 @@ async function handleMessage(message) {
                 { name: '`!holes [alliance_tag]`', value: 'Scans your alliance\'s territory for a per-system breakdown: your own holdings, free unplanned, 🟧 planned (!plan), 🟨 neutral, 🟩 ally, and 🟥 war-list presence, per the Alliance Relations tags set in Admin.\n*Example: `!holes RAID`*' },
                 { name: '`!tt <sysA> <plnA> <sysB> <plnB> <speed> <nrg>`', value: 'Calculates fleet travel time between two coordinates.\n*Example: `!tt 100 1 200 4 10 5`*\n*(You can also swap speed/energy for a player name: `!tt 100 1 200 4 PlayerOne`)*' },
                 { name: '`!ghosts <sys_id> <planet_num> <alliance_tag>`', value: 'Calculates the shortest/longest hidden fleet arrival window from hostile members with radar vision over a system.\n*Example: `!ghosts 1 10 AO`*' },
+                { name: '`!research [player]`', value: 'What each member is researching, how long until the level lands, and what is queued after it — read from their own Science page. With a name: that member\'s whole queue.\n*Example: `!research Harpyie`*' },
                 { name: '`!bio`', value: `Players who can SEE your origin and hold a +${playersRepo.BIO_THREAT_MARGIN_CONFIRMED} confirmed biology, or a +${playersRepo.BIO_THREAT_MARGIN_SUSPECTED} science advantage if never scanned.` },
                 { name: '`!battle <D> <C> <B> vs <D> <C> <B>`', value: 'Simulates a battle. Flags: `--sb N` starbase (0-50), `--dp/--ap N` physics, `--dm/--am N` math, `--dra/--ara N` race atk, `--drd/--ard N` race def, `--dl/--al N` player level. Or `--def Name --atk Name` to auto-fill all stats from DB.\n*Example: `!battle 50 10 0 vs 40 8 2 --dp 5 --ap 3 --dl 12 --al 8`*' },
                 { name: '`!mortal` / `!mortalday` / `!mortalweek` `[all|<alliance_tag>]`', value: 'Shows the CV/population-killed battle leaderboards, each with a simple points column. All-time, last 24 hours, or last 7 days. Defaults to Hub tool users only; `all` lifts that; any alliance tag filters to that alliance (any alliance, not just your own).\n*Example: `!mortalweek nsa`*' },
@@ -1013,6 +1016,31 @@ async function handleMessage(message) {
     // ----------------------------------------------------
     // !bio - BIOLOGY THREAT MATRIX
     // ----------------------------------------------------
+    // ----------------------------------------------------
+    // !research [player] - what allies are researching, and time left to the next level
+    // ----------------------------------------------------
+    // Read from each member's own Science page (research-watch.js); see research-lines.js
+    // for how the reply is built.
+    if (command === 'research') {
+        const name = args.join(' ').trim();
+        const now = Date.now();
+        if (name) {
+            const snap = scienceResearchRepo.findResearchByName(name);
+            if (!snap) {
+                return message.reply(`📭 No research on record for **${defuseMentions(name)}**. It appears once they open the Hub or their Science page.`);
+            }
+            const d = buildResearchDetail(snap, now);
+            return message.reply({ embeds: [new EmbedBuilder().setTitle(d.title).setDescription(d.description).setColor('#a855f7')] });
+        }
+        const snaps = scienceResearchRepo.listResearch();
+        const missing = scienceResearchRepo.listMembersWithoutResearch();
+        if (!snaps.length && !missing.length) return message.reply('📭 No research on record yet.');
+        const o = buildResearchOverview(snaps, missing, now);
+        const embed = new EmbedBuilder().setTitle('🔬 Alliance research').setColor('#a855f7')
+            .addFields(o.fields).setFooter({ text: o.footer });
+        return message.reply({ embeds: [embed] });
+    }
+
     if (command === 'bio') {
         const discordName = message.author.username;
         
@@ -2192,6 +2220,7 @@ function slashToPrefix(interaction) {
         if (sub === 'system') return `!sys ${s('system')}`;
         if (sub === 'bio') return '!bio';
         if (sub === 'alliance') return '!intels';
+        if (sub === 'research') return s('player') ? `!research ${s('player')}` : '!research';
     }
     if (name === 'calc') {
         if (sub === 'travel') {
