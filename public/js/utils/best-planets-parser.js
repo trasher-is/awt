@@ -3,10 +3,10 @@
 import { parseRankingPage } from './ranking-page-parser.js';
 
 const BUILDING_HEADERS = Object.freeze({
-    hf: 'HF', 'hydroponic farm': 'HF',
-    rf: 'RF', 'robotic factory': 'RF',
-    gc: 'GC', 'galactic cybernet': 'GC',
-    rl: 'RL', 'research lab': 'RL',
+    hf: 'HF', 'hydroponic farm': 'HF', farm: 'HF',
+    rf: 'RF', 'robotic factory': 'RF', 'fac.': 'RF',
+    gc: 'GC', 'galactic cybernet': 'GC', 'cyb.': 'GC',
+    rl: 'RL', 'research lab': 'RL', lab: 'RL',
 });
 const PLANET_SELECTOR = 'a[href^="/Game/Map/Planet/"]';
 const PROGRESS_SELECTOR = '.progress, .progress-bar, .progress-text, [role="progressbar"]';

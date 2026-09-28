@@ -80,8 +80,23 @@ const partial = fixture(['Rank', 'Planet', 'HF', 'RF', 'Unknown', 'RL']); partia
 ok('an unrecognized column leaves only that metric unknown', parse(partial.doc)[0].buildings.GC === null && parse(partial.doc)[0].buildings.HF === 11);
 const ambiguous = fixture(['Rank', 'Planet', 'HF', 'Hydroponic Farm', 'GC', 'RL']); ambiguous.row();
 ok('ambiguous repeated semantic header suppresses all building values', Object.values(parse(ambiguous.doc)[0].buildings).every(value => value === null));
-const noKnown = fixture(['Rank', 'Planet', 'Farm', 'Factory', 'Cybernet', 'Lab']); noKnown.row();
-ok('short names not confirmed as headers are never guessed', Object.values(parse(noKnown.doc)[0].buildings).every(value => value === null));
+// Header wording confirmed from the game; all identities and values are synthetic.
+const gameHeaders = fixture(['#', 'Rank +/-', 'Name', 'Planet', 'Farm', 'Fac.', 'Cyb.', 'Lab', 'Σ']);
+for (let rank = 1; rank <= 50; rank++) {
+    const row = gameHeaders.row({ rank, id: 2000 + rank, levels: ['Synthetic name', 'Synthetic location', String(rank), '22', '33', '44', String(rank + 99)] });
+    // Match the real column arrangement: ranking movement, owner, then planet link.
+    const planetCell = row.cells[1], locationCell = row.cells[3];
+    locationCell.childNodes = planetCell.childNodes;
+    for (const child of locationCell.childNodes) child.parentElement = locationCell;
+    planetCell.textContent = '+0';
+}
+const gameRows = parse(gameHeaders.doc);
+ok('confirmed game headers preserve all 50 identities and exact building values', gameRows.length === 50 && gameRows.every(row => row.game_planet_id === 2000 + row.rank && row.buildings.HF === row.rank && row.buildings.RF === 22 && row.buildings.GC === 33 && row.buildings.RL === 44));
+const { normalizeBuildings, summarizeLeaders } = require('./unicorn-ranking');
+const gameLeaders = summarizeLeaders(gameRows.map(row => ({ ...row, ...normalizeBuildings(row.buildings) })));
+ok('confirmed game headers supply complete data for all four leaders', gameLeaders.leaders_status === 'complete' && gameLeaders.leaders.length === 4 && gameLeaders.leaders.find(leader => leader.kind === 'HF').game_planet_id === 2050);
+const unconfirmed = fixture(['Rank', 'Planet', 'Unknown', 'Factory', 'Cybernet', 'Other']); unconfirmed.row();
+ok('unconfirmed short names are still never guessed', Object.values(parse(unconfirmed.doc)[0].buildings).every(value => value === null));
 const spanned = fixture(); const spannedRow = spanned.row(); spanned.header.cells[2].setAttribute('colspan', '2');
 ok('spanning header cannot shift building columns silently', Object.values(parse(spanned.doc)[0].buildings).every(value => value === null));
 spanned.header.cells[2].setAttribute('colspan', '1'); spannedRow.cells[3].setAttribute('rowspan', '2');
