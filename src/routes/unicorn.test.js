@@ -1,5 +1,7 @@
 // Synthetic SQLite data only. The minimal schema deliberately permits duplicate planet
 // locations to cover older/imported databases; normal planets.game_planet_id is UNIQUE.
+// Keep even an accidental uncached database import away from the operator's database.
+process.env.AWT_DB_PATH = ':memory:';
 const Database = require('better-sqlite3');
 const express = require('express');
 const http = require('http');
