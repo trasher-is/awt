@@ -30,6 +30,8 @@ costs say `Same cost`. Starbases and ships are excluded.
 The price beside a building on Trade is the refund obtained when spending an SU, as
 documented in [game-rules.md](game-rules.md#supply-units). It is not an extra purchase fee.
 A missing refund supports only a conservative estimate explicitly marked **before refund**.
+`PP cheaper*` and `Same cost*` are provisional when that refund is unknown; the details
+explain that applying the refund may make SU cheaper.
 No historical price or assumed fee is substituted for an observation.
 
 The existing Trade inventory read supplies a shared browser cache containing only

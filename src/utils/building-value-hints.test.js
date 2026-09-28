@@ -169,7 +169,7 @@ ok('a new complete Trade quote restores advice in the writer document', a.hints(
 const key = a.context.AWBuildingEconomics.STORAGE_KEY;
 const cached = JSON.parse(a.storage.get(key)); cached.suPrice = 99999;
 a.storage.set(key, JSON.stringify(cached)); a.window.dispatchEvent({ type: 'storage', key }); a.advance(60);
-ok('a changed quote from another realm updates visible advice', a.hints().length === 2 && a.badge(factory).textContent === 'PP cheaper' && a.badge(lab).textContent === 'PP cheaper');
+ok('a changed quote updates advice and marks a missing refund as provisional', a.hints().length === 2 && a.badge(factory).textContent === 'PP cheaper' && a.badge(lab).textContent === 'PP cheaper*' && lab.querySelector('[role="region"]').textContent.includes('may make SU cheaper'));
 a.record(); a.advance(60);
 a.advance(a.context.AWBuildingEconomics.MAX_AGE_MS); a.advance(60);
 ok('expiry removes badges even when the game DOM is idle', a.hints().length === 0 && a.neutral().length === 1);

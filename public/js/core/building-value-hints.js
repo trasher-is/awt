@@ -83,13 +83,14 @@ function makeHint(building, comparison) {
     host.setAttribute(OWN, 'hint');
     const percent = comparison.savingPercent < 1 ? '<1' : String(Math.floor(comparison.savingPercent));
     const outcome = comparison.saving > 0 ? 'su' : comparison.saving < 0 ? 'pp' : 'equal';
-    const label = outcome === 'su' ? `SU ↓${percent}%` : outcome === 'pp' ? 'PP cheaper' : 'Same cost';
+    const beforeRefund = comparison.refund === null && outcome !== 'su';
+    const label = (outcome === 'su' ? `SU ↓${percent}%` : outcome === 'pp' ? 'PP cheaper' : 'Same cost') + (beforeRefund ? '*' : '');
     const button = element('button', `${comparison.estimated ? '~ ' : ''}${label}`, 'aw-building-value-badge');
     button.setAttribute('data-outcome', outcome);
     button.type = 'button';
     button.setAttribute('aria-expanded', 'false');
-    button.setAttribute('aria-label', `${building}: ${label}${comparison.estimated ? ', assuming 0 PP already invested' : ''}. Show market-value comparison.`);
-    button.title = comparison.estimated ? 'Full next-level cost; assumes 0 PP already invested' : 'Compare remaining PP with one Supply Unit at the last recorded market prices';
+    button.setAttribute('aria-label', `${building}: ${label}${beforeRefund ? ', before an unknown building refund' : ''}${comparison.estimated ? ', assuming 0 PP already invested' : ''}. Show market-value comparison.`);
+    button.title = (comparison.estimated ? 'Full next-level cost; assumes 0 PP already invested' : 'Compare remaining PP with one Supply Unit at the last recorded market prices') + (beforeRefund ? '. Before building refund; a refund may make SU cheaper.' : '');
     const details = element('span', undefined, 'aw-building-value-details');
     details.id = `aw-building-value-details-${++nextId}`;
     details.hidden = true;
@@ -101,6 +102,7 @@ function makeHint(building, comparison) {
     addLine(`${comparison.remainingPP.toLocaleString('en-US')} ${comparison.estimated ? 'full-level' : 'remaining'} PP × ${price(comparison.ppPrice)} = ${dollars(comparison.ppValue)}`);
     addLine(`Buy 1 SU: ${dollars(comparison.suPrice)}`);
     addLine(comparison.refund === null ? 'Building refund: unknown (estimate before refund)' : `Building refund: −${dollars(comparison.refund)}`);
+    if (beforeRefund) addLine('* Before refund only. The unknown building refund may make SU cheaper.');
     addLine(`SU estimate${comparison.refund === null ? ' before refund' : ' after refund'}: ${dollars(comparison.suValue)}`);
     addLine(comparison.saving === 0 ? 'Same estimated cost.' : `Estimated saving with ${comparison.saving > 0 ? 'SU' : 'PP'}: ${dollars(Math.abs(comparison.saving))}`);
     const age = element('span', ageText(comparison.capturedAt), 'aw-building-value-note');
