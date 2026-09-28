@@ -26,6 +26,14 @@ for (const text of ['N/A', '1/1500', '12.5', '-1', '120 PP', '9007199254740992',
 }
 
 const saving = E.compareUpgrade(1000, 'Robotic Factory', quote, now);
+const tables = require('../../public/js/utils/game-tables');
+ok('fallback uses the shared published next-level cost at every supported level', tables.BUILDING.slice(1).every((cost, level) => E.fullUpgradeCost(level) === cost));
+for (const level of [null, undefined, -1, 1.5, '15', 30, Number.MAX_SAFE_INTEGER]) {
+    ok(`unknown or unsupported level cannot invent a PP cost: ${level}`, E.fullUpgradeCost(level) === null);
+}
+ok('comparison can explicitly report PP cheaper', E.evaluateUpgrade(100, 'Robotic Factory', quote, now).saving === -570);
+ok('zero remaining PP produces finite values and favors PP', E.evaluateUpgrade(0, 'Robotic Factory', quote, now).saving === -650 && E.evaluateUpgrade(0, 'Robotic Factory', quote, now).savingPercent === 0);
+ok('equal costs remain visible to the comparison UI', E.evaluateUpgrade(1, 'Research Lab', { ...quote, ppPrice: 750 }, now).saving === 0);
 ok('compare remaining PP value with SU purchase minus the building refund', saving.ppValue === 800 && saving.suValue === 650 && saving.saving === 150 && saving.savingPercent === 18.75, saving);
 ok('partial funding can make PP cheaper: no full-level cost is substituted', E.compareUpgrade(100, 'Robotic Factory', quote, now) === null);
 ok('zero remaining PP cannot recommend SU', E.compareUpgrade(0, 'Robotic Factory', quote, now) === null);

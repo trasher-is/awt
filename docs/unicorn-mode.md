@@ -42,7 +42,8 @@ wrapper's control and the frame's annotations. All tests use synthetic data.
 
 The existing Best Planets page read now records nullable HF/RF/GC/RL values along with
 rank and planet id. Only exact abbreviations supplied for this feature and the established
-English building names are recognized. Shuffled columns are supported; missing, spanning,
+English building names, plus the game-confirmed headers `Farm`, `Fac.`, `Cyb.`, and `Lab`,
+are recognized. Shuffled columns are supported; missing, spanning,
 duplicate or unrecognized columns stay unknown. The generic parser used by secret bonus
 goals is unchanged. No extra request to the game was introduced.
 
@@ -52,7 +53,8 @@ unknown values. After deployment, refresh the wrapper and let its normal hourly 
 Planets watcher capture the next snapshot. A missing building leader means the required
 50 observations have not been captured; it is not evidence that the maximum is zero.
 
-The production Best Planets column layout has not been inspected in this change. Browser
-verification used a synthetic map/system and ranking fixtures; any unsupported live header
-will leave the corresponding building leaders unavailable until that wording is confirmed.
+The original change used synthetic map/system and ranking fixtures. A subsequent screenshot
+confirmed the Best Planets headers `#`, `Rank +/-`, `Name`, `Planet`, `Farm`, `Fac.`, `Cyb.`,
+`Lab`, and `Σ`; the four building labels now have a synthetic regression test. Unsupported
+live headers still leave the corresponding building leaders unavailable until confirmed.
 All source times are sync times, not a claim that the daily ranking changed at that moment.

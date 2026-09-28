@@ -38,6 +38,7 @@ class Node {
     }
     matches(selector) {
         return selector.split(',').some(piece => {
+            if (piece.trim().startsWith('.')) return (this.attrs.class || '').split(/\s+/).includes(piece.trim().slice(1));
             const match = /^([a-z]+)?(?:\[([\w-]+)(?:="([^"]*)")?\])?$/i.exec(piece.trim());
             if (!match) throw new Error(`Unsupported synthetic selector ${piece}`);
             return (!match[1] || this.tagName === match[1].toUpperCase())
@@ -92,7 +93,7 @@ function setup() {
             disconnect() { this.connected = false; }
         },
     });
-    for (const file of ['public/js/utils/building-economics.js', 'public/js/core/building-value-hints.js']) {
+    for (const file of ['public/js/utils/game-tables.js', 'public/js/utils/building-economics.js', 'public/js/core/building-value-hints.js']) {
         const source = fs.readFileSync(path.join(__dirname, '../..', file), 'utf8').replace(/^import .*$/gm, '').replace(/^export /gm, '');
         vm.runInContext(source, context, { filename: file });
     }
@@ -146,9 +147,16 @@ ok('Escape closes details and restores focus to the badge', region.hidden && a.d
 a.context.initBuildingValueHints();
 ok('repeated view hooks preserve one hint/listener per row', a.hints().length === 2 && a.badge(factory).listeners.click.length === 1 && a.observers.length === 1);
 factory.cells[2].textContent = '100'; a.mutate(factory.cells[2]); a.advance(60);
-ok('changed remaining PP removes a recommendation for a nearly finished building', !a.badge(factory) && a.hints().length === 1);
+ok('nearly finished building explicitly favors PP instead of SU', a.badge(factory).textContent === 'PP cheaper' && a.hints().length === 2);
 factory.cells[2].textContent = 'N/A'; a.mutate(factory.cells[2]); a.advance(60);
-ok('unknown PP suppresses its badge and gives one table-level hint', a.neutral().length === 1 && a.neutral()[0].textContent.includes('remaining PP cost could not be read'));
+ok('unknown remaining PP uses full level cost with an explicit zero-investment assumption', a.neutral().length === 0 && a.badge(factory).textContent === '~ PP cheaper' && factory.querySelector('[role="region"]').textContent.includes('Assuming 0 PP already invested') && factory.querySelector('[role="region"]').textContent.includes('649 full-level PP'));
+factory.cells[1].textContent = '15'; a.mutate(factory.cells[1]); a.advance(60);
+ok('higher known level can favor SU even when the remaining PP column says N/A', a.badge(factory).textContent.startsWith('~ SU ↓') && factory.querySelector('[role="region"]').textContent.includes('2,189 full-level PP'));
+factory.cells[2].textContent = '0'; a.mutate(factory.cells[2]); a.advance(60);
+ok('observed zero is not replaced by the full-level estimate', a.badge(factory).textContent === 'PP cheaper' && !factory.querySelector('[role="region"]').textContent.includes('Assuming'));
+factory.cells[2].textContent = 'N/A'; factory.cells[1].textContent = '30'; a.mutate(factory.cells[1]); a.advance(60);
+ok('unknown costs beyond the published table do not invent a full-level price', !a.badge(factory) && a.neutral().length === 1);
+factory.cells[1].textContent = '15';
 const timersBefore = a.timers.size;
 a.mutate(lab.querySelector('[role="region"]'));
 ok('own details mutations do not enqueue another render', a.timers.size === timersBefore);
@@ -161,7 +169,7 @@ ok('a new complete Trade quote restores advice in the writer document', a.hints(
 const key = a.context.AWBuildingEconomics.STORAGE_KEY;
 const cached = JSON.parse(a.storage.get(key)); cached.suPrice = 99999;
 a.storage.set(key, JSON.stringify(cached)); a.window.dispatchEvent({ type: 'storage', key }); a.advance(60);
-ok('a changed quote from another realm updates visible advice', a.hints().length === 0);
+ok('a changed quote updates advice and marks a missing refund as provisional', a.hints().length === 2 && a.badge(factory).textContent === 'PP cheaper' && a.badge(lab).textContent === 'PP cheaper*' && lab.querySelector('[role="region"]').textContent.includes('may make SU cheaper'));
 a.record(); a.advance(60);
 a.advance(a.context.AWBuildingEconomics.MAX_AGE_MS); a.advance(60);
 ok('expiry removes badges even when the game DOM is idle', a.hints().length === 0 && a.neutral().length === 1);
@@ -186,6 +194,23 @@ moved.cells[1].textContent = '10/1000';
 ok('progress fraction is not mistaken for remaining PP', b.context.readRemainingPP(moved) === null);
 moved.cells[1].textContent = '1000'; b.make('td', 'New column', moved);
 ok('a shifted body without a matching header fails closed', b.context.readRemainingPP(moved) === null);
+
+const c = setup();
+const missing = c.table(['Building', 'Progress', 'Other']);
+const marked = missing.row('Robotic Factory', ['Robotic Factory', '15', 'N/A']);
+marked.cells[1].setAttribute('class', 'building-lvl-up');
+c.record(); c.context.initBuildingValueHints();
+ok('structural level marker supports fallback without a remaining-cost or level header', c.badge(marked).textContent.startsWith('~ SU ↓') && c.neutral().length === 0);
+marked.cells[1].textContent = '15 (80%)'; c.context.initBuildingValueHints();
+ok('mixed level/progress text cannot create a guessed building cost', !c.badge(marked) && c.neutral().length === 1);
+marked.cells[1].textContent = '15';
+c.make('span', '16', marked).setAttribute('class', 'building-lvl-up');
+c.context.initBuildingValueHints();
+ok('multiple level markers cannot create an arbitrary estimate', !c.badge(marked));
+
+const d = setup(); const equalTable = d.table(); const equalRow = equalTable.row('Robotic Factory');
+d.record({ 'Production Point': '$0.65', 'Supply Unit': '$750', 'Robotic Factory': '$100' }); d.context.initBuildingValueHints();
+ok('equal market costs produce an explicit same-cost result', d.badge(equalRow).textContent === 'Same cost');
 
 const source = fs.readFileSync(path.join(__dirname, '../../public/js/core/building-value-hints.js'), 'utf8').replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
 ok('advice has no network or game-action capability', !/\bfetch\s*\(|\bgameFetch\s*\(|\.submit\s*\(|requestSubmit|\.click\s*\(/.test(source));

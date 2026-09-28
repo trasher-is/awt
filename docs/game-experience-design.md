@@ -24,12 +24,14 @@ SU market value = observed Supply Unit price − observed building refund
 
 For example, synthetic prices of 1 A$/PP and 750 A$/SU with a 100 A$ refund make an SU
 worth comparing when 1,200 PP remain: 1,200 A$ versus 650 A$, a 550 A$ difference.
-If only 250 PP remain on the same building, no SU badge appears. Equal displayed costs
-also produce no badge. Starbases and ships are excluded.
+If only 250 PP remain on the same building, the badge says `PP cheaper`. Equal displayed
+costs say `Same cost`. Starbases and ships are excluded.
 
 The price beside a building on Trade is the refund obtained when spending an SU, as
 documented in [game-rules.md](game-rules.md#supply-units). It is not an extra purchase fee.
 A missing refund supports only a conservative estimate explicitly marked **before refund**.
+`PP cheaper*` and `Same cost*` are provisional when that refund is unknown; the details
+explain that applying the refund may make SU cheaper.
 No historical price or assumed fee is substituted for an observation.
 
 The existing Trade inventory read supplies a shared browser cache containing only
@@ -37,10 +39,13 @@ whitelisted prices and its observation timestamp. No new game request is needed.
 expire after 15 minutes, and malformed/new-incomplete quotes invalidate the old advice.
 The hint updates across wrapper and iframe, on changed remaining PP, and at expiry.
 
-Unknown prices or an unrecognized cost column produce a neutral explanation. The parser
-uses the confirmed `PP to next level` header and suppresses advice for ambiguous cells,
-spanning columns, `N/A`, or unsupported wording. It never guesses a translated header or
-derives remaining cost from the full building-cost table.
+The parser uses the confirmed `PP to next level` header. When remaining PP cannot be read,
+it falls back to the shared building-cost table using the current level (`.building-lvl-up`
+or the `Level` column), assuming **0 PP already invested**. A `~` prefix and the details
+disclose this estimate: actual progress can make PP cheaper. An observed zero remains zero.
+The shared table covers target levels 1–30; no cost is invented beyond it or for an unreadable
+level. Missing/expired prices still require a fresh Trade quote. Unknown cost and level
+produce a neutral explanation; no translated headers or column positions are guessed.
 
 This is an observed market-value comparison, not a guaranteed transaction price or a
 recommendation to liquidate production. Prices change; siege affects PP sale proceeds,
