@@ -145,6 +145,9 @@ async function loadEsm(rel, tmp) {
     // before the column picker landed", and mostly still is — every column added since has
     // been opt-in so nobody's layout changes under them.
     //
+    // allyStats gained 'research_now' + 'research_left' on 2026-09-28, the other one: asked for
+    // by name for the Alliance Stats page, and hidden by default they would not be seen.
+    //
     // players swapped 'cv' for 'max_cv' on 2026-09-16, the one deliberate change. The 'cv'
     // column rendered cv_used/cv_limit, which are scraped from a page the game only ever
     // shows you about YOURSELF — so it read 0/0 for all 160 players on record and always
@@ -156,7 +159,7 @@ async function loadEsm(rel, tmp) {
             'trade_revenue', 'biology', 'economy', 'energy', 'mathematics', 'physics', 'social', 'artefact', 'intel_updated_at'],
         warRoom: ['name', 'idle', 'total_planets', 'calculated_prod', 'trade_revenue', 'cv_day', 'max_cv', 'race_speed', 'race_attack', 'race_defense',
             'physics', 'mathematics', 'energy', 'biology', 'social', 'calculated_science', 'intel_updated_at'],
-        allyStats: ['player_name', 'player_id', 'planets_text', 'next_culture_at', 'science_rate', 'culture_rate', 'production_rate', 'astro_dollars',
+        allyStats: ['player_name', 'player_id', 'planets_text', 'next_culture_at', 'research_now', 'research_left', 'science_rate', 'culture_rate', 'production_rate', 'astro_dollars',
             'production_points', 'artefact', 'level_text', 'cv_limit_text', 'economy', 'energy', 'mathematics', 'physics', 'population'],
     };
 
@@ -249,6 +252,45 @@ async function loadEsm(rel, tmp) {
     ok('idle falls back to the scraped string', e.idle_seconds === 3 * 3600 + 10 * 60 && e.idle_display === '3h 10m');
     ok('artefact multipliers: CD/MJ/HOR 1-3 only', SC.artifactProdMultiplier('MJ 2') === 1.2 && SC.artifactProdMultiplier('Memory Jar 3') === 1 && SC.artifactProdMultiplier(null) === 1);
 
+    console.log('\n── Alliance Stats: research now, and time left ' + '─'.repeat(28));
+    {
+        const H = 3600 * 1000, T = Date.UTC(2026, 8, 28, 12, 0, 0);
+        const q = (observedMs, items) => ({ research_observed_at: new Date(observedMs).toISOString(), research_queue_json: JSON.stringify(items) });
+        const item = (science, level, startMs, finishMs, extra = {}) => Object.assign({ science, target_level: level, active: false, repeat: false, starts_at_ms: startMs, finishes_at_ms: finishMs }, extra);
+        // Physics 15 for 2h (in progress at the read), then Math 12 for 3h.
+        const busy = q(T, [item('Physics', 15, T, T + 2 * H, { active: true }), item('Mathematics', 12, T + 2 * H, T + 5 * H)]);
+        ok('shows the science and the level being researched', /Phy 15/.test(SC.formatResearchNow(busy, T + 47 * 60000)), SC.formatResearchNow(busy, T + 47 * 60000));
+        ok('time left is counted from now, not from the read', />1h 13m</.test(SC.formatResearchLeft(busy, T + 47 * 60000)), SC.formatResearchLeft(busy, T + 47 * 60000));
+        ok('the item that was in progress at the read is exact (no ~)', !/~/.test(SC.formatResearchLeft(busy, T + 47 * 60000)));
+        ok('a queued item after it means no warning', !/⚠/.test(SC.formatResearchLeft(busy, T + 47 * 60000)));
+        const rolled = SC.formatResearchLeft(busy, T + 3 * H);
+        ok('once the first level has landed, the next one is shown, approximate', />~2h 0m</.test(rolled) && /Math 12/.test(SC.formatResearchNow(busy, T + 3 * H)), rolled);
+        ok('the last queued item warns that nothing follows it', /⚠/.test(rolled), rolled);
+        ok('the tooltip lists the queue and when it was read', /Then: Math 12/.test(SC.formatResearchNow(busy, T + 47 * 60000)) && /Read 47m ago/.test(SC.formatResearchNow(busy, T + 47 * 60000)));
+
+        const idle = q(T, [item('Physics', 15, T, T + 2 * H, { active: true })]);
+        ok('a queue that ran out reads Idle, with nothing to count down', />Idle</.test(SC.formatResearchNow(idle, T + 3 * H)) && SC.formatResearchLeft(idle, T + 3 * H) === '-');
+        const empty = q(T, []);
+        ok('a member with nothing being researched at the read is Idle too', />Idle</.test(SC.formatResearchNow(empty, T + H)));
+        const repeating = q(T, [item('Biology', 21, T, T + H, { active: true }), item('Biology', 22, T + H, T + 2 * H, { repeat: true })]);
+        ok('an ended queue whose last item repeats says so instead of claiming idle', />Repeats</.test(SC.formatResearchNow(repeating, T + 3 * H)) && SC.researchLeftMs(repeating, T + 3 * H) === null);
+        ok('a member who never reported is "-", not Idle', /^<span[^>]*>-<\/span>$/.test(SC.formatResearchNow({}, T)) && SC.formatResearchLeft({}, T) === '-');
+        ok('a corrupt stored queue does not throw', SC.formatResearchNow({ research_observed_at: 'x', research_queue_json: '{nope' }, T) === SC.formatResearchNow({}, T));
+        const longRun = q(T, [item('Energy', 17, T, T + 9 * H, { active: true })]);
+        ok('a read older than 6h is dimmed (and a recent one is not)', /text-zinc-500/.test(SC.formatResearchLeft(longRun, T + 7 * H)) && !/text-zinc-500/.test(SC.formatResearchLeft(longRun, T + H)));
+
+        const rows = [{ n: 'never' }, Object.assign({ n: 'idle' }, idle), Object.assign({ n: 'soon' }, busy), Object.assign({ n: 'later' }, q(T, [item('Energy', 17, T, T + 9 * H, { active: true })]))];
+        const leftCol = tables.allyStats.columns.find(c => c.key === 'research_left');
+        const at = T + H;
+        const realNow = Date.now;
+        Date.now = () => at;
+        try {
+            ok('ascending: idle first, then soonest, never-reported last',
+                same(SC.sortRows(rows, [leftCol], 'research_left', true).map(r => r.n), ['idle', 'soon', 'later', 'never']));
+            ok('descending: never-reported still last', SC.sortRows(rows, [leftCol], 'research_left', false).map(r => r.n).pop() === 'never');
+        } finally { Date.now = realNow; }
+    }
+
     console.log('\n── Alliance Stats: approximate future culture levels ' + '─'.repeat(22));
     // Level 6 (next_culture_at) is 1h out; level 7 needs CULTURE[7] = 4059 points at 1,000/h
     // -> +4.059h -> 5h 3m 32s total, truncated to whole minutes.
@@ -286,6 +328,9 @@ async function loadEsm(rel, tmp) {
     ok('alliance stats: every pl_ column is an explicit alias in getAllianceStatsForArchive', missingAlly.length === 0, missingAlly);
     ok('alliance stats: no p.* — the duplicate column names would overwrite the sheet values', !/p\.\*/.test(allySql));
     ok('alliance stats: the sheet columns still come from s.*', /s\.\*/.test(allySql));
+    ok('alliance stats: research_* come from the member\'s science_research row, joined by player',
+        /sr\.observed_at AS research_observed_at/.test(allySql) && /sr\.queue_json AS research_queue_json/.test(allySql)
+        && /LEFT JOIN science_research sr ON sr\.player_id = s\.player_id/.test(allySql));
     const playersDbSql = playersSql.slice(playersSql.indexOf('const getFullPlayersDbStmt'), playersSql.indexOf('function getFullPlayersDb('));
     ok('players archive: selects p.* plus alliance_tag and planet_count', /p\.\*/.test(playersDbSql) && /alliance_tag/.test(playersDbSql) && /planet_count/.test(playersDbSql));
 
