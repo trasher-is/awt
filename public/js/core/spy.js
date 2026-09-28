@@ -1,5 +1,6 @@
 import { initLaunchPlanLinks } from './launch-plan-links.js';
 import { initSupplyUnitButtons } from './su-spend-buttons.js';
+import { initBuildingValueHints } from './building-value-hints.js';
 import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates, initColonizeLaunchWindows, initAllianceRelationIcons, initEcoBonusJoinDates, initFleetLaunchModalETA, initSocialHint, initEconomyMilestone, initBioThreatPills, initFleetLaunchTargetDossier, initSystemPlan } from './page-injections.js';
 import { initNewsIncomingTools } from '../ui/news-incoming.js';
 import { initLocalGameTimestamps } from './page-injections.js';
@@ -527,6 +528,7 @@ export function initSpy() {
         try {
             initLocalGameTimestamps();
             const pathLower = viewToken().toLowerCase();
+            initBuildingValueHints();
 
             if (pathLower.includes('/game/map')) {
                 injectMapIndicators();

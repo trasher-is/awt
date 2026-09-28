@@ -6,6 +6,7 @@
 // the Trade Agreements board can show who's sitting on how much — deliberately never the
 // Alliance member-sheet's astro_dollars, which is coarser and only updates when someone
 // opens /Game/Alliance (2026-09-20: this alliance wants Planets + Trade only for this).
+import '../utils/building-economics.js';
 
 // Locale-agnostic number parse: handles both "8 122,72" (comma decimal) and
 // "8,122.72" (dot decimal), plus space/NBSP thousands. When both separators are
@@ -45,11 +46,17 @@ function parseNumber(text) {
 export function parseTradeInventoryPage(doc) {
     // 1) Price map from the "Prices" table: each row has a PriceHistory link + a .text-end price.
     const priceMap = {};
+    const advisoryPrices = Object.create(null);
     doc.querySelectorAll('tr').forEach(row => {
         const link = row.querySelector('a[href*="/Game/Trade/PriceHistory/"]');
         const priceCell = row.querySelector('td.text-end');
-        if (!link || !priceCell) return;
+        if (!link) return;
         const name = (link.textContent || '').trim();
+        if (name === 'Production Point' || name === 'Supply Unit' || globalThis.AWBuildingEconomics?.BUILDINGS.includes(name)) {
+            // Duplicate quotes are ambiguous, even if inventory valuation can use one.
+            advisoryPrices[name] = Object.prototype.hasOwnProperty.call(advisoryPrices, name) ? null : priceCell?.textContent ?? null;
+        }
+        if (!priceCell) return;
         const price = parseNumber(priceCell.textContent);
         if (name && price != null) priceMap[name] = price;
     });
@@ -60,7 +67,10 @@ export function parseTradeInventoryPage(doc) {
     doc.querySelectorAll('td, th').forEach(c => {
         if (!invTable && (c.textContent || '').trim() === 'Inventory') invTable = c.closest('table');
     });
-    if (!invTable) return null;
+    if (!invTable) {
+        globalThis.AWBuildingEconomics?.recordQuote(null);
+        return null;
+    }
 
     // 3) Walk rows; value artifacts + supply units until the Orders/Trade Revenue sections,
     // and read the exact Astro Dollar balance off its own row along the way.
@@ -91,6 +101,9 @@ export function parseTradeInventoryPage(doc) {
             if (qty > 0) items.push({ name, held: qty, unit_price: priceMap[name] || 0 });
         }
     });
+    // Piggyback on this already-fetched page, including when no Supply Units are held.
+    // An incomplete quote replaces the old advisory snapshot with "unknown".
+    globalThis.AWBuildingEconomics?.recordQuote(advisoryPrices);
     return { hoarded, astroDollars, items };
 }
 
