@@ -19,6 +19,7 @@ router.use(require('./battleRace'));
 router.use(require('./trade'));
 router.use(require('./roadToTa'));
 router.use(require('./myPlanets'));
+router.use(require('./scienceResearch'));
 router.use(require('./search'));
 router.use(require('./incoming'));
 router.use(require('./routes'));

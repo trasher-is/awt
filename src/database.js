@@ -1305,6 +1305,23 @@ function initDatabase() {
     addColumn('best_planets_snapshot', 'gc', 'INTEGER');
     addColumn('best_planets_snapshot', 'rl', 'INTEGER');
 
+    // Research tracker (2026-09-28): the latest read of each member's own /Game/Science —
+    // what is being researched and what is queued, which the alliance member sheet does not
+    // show. One row per player, replaced on every read. queue_json holds the scheduled items
+    // (science, target level, finish time) as research-queue.js builds them; levels_json the
+    // six science levels at the read. observed_at is the server's clock at receipt, so a
+    // member's wrong system clock cannot shift anyone's finish times.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS science_research (
+            player_id INTEGER PRIMARY KEY,
+            observed_at DATETIME NOT NULL,
+            science_rate REAL,
+            levels_json TEXT NOT NULL,
+            queue_json TEXT NOT NULL,
+            FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+        )
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

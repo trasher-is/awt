@@ -8,7 +8,7 @@
 // becomes a scroll. Grouping drops the top level to five entries and puts everything
 // else one step down, which is one tap rather than a hunt:
 //
-//   /intel  player · system · bio · alliance
+//   /intel  player · system · bio · alliance · research
 //   /calc   travel · battle · distance · price
 //   /plan   add · list
 //   /scan   holes · vision · ghosts
@@ -89,7 +89,9 @@ function buildCommands() {
             .addSubcommand(s => s.setName('system').setDescription('Planets and fleets in a system')
                 .addStringOption(o => systemOption(o)))
             .addSubcommand(s => s.setName('bio').setDescription('Players with a biology advantage over you'))
-            .addSubcommand(s => s.setName('alliance').setDescription('Members whose intel is going stale')),
+            .addSubcommand(s => s.setName('alliance').setDescription('Members whose intel is going stale'))
+            .addSubcommand(s => s.setName('research').setDescription('What allies are researching and time left to the next level')
+                .addStringOption(o => o.setName('player').setDescription('One member\'s full queue').setAutocomplete(true))),
 
         new SlashCommandBuilder()
             .setName('calc')

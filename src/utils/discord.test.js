@@ -182,6 +182,8 @@ const capture = () => { const out = []; return { out, reply: (t) => { out.push(t
         [fake('intel', 'system', { system: '137' }), '!sys 137'],
         [fake('intel', 'bio'), '!bio'],
         [fake('intel', 'alliance'), '!intels'],
+        [fake('intel', 'research'), '!research'],
+        [fake('intel', 'research', { player: 'Harpyie' }), '!research Harpyie'],
         [fake('calc', 'distance', { from: '10', to: '20' }), '!dist 10 20'],
         // The assertion here used to be '!tt 10 20 9 2' — it encoded the bug rather than
         // catching it. !tt reads sysA planetA sysB planetB speed energy, so that string
