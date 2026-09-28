@@ -16,6 +16,13 @@
     const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
     let storageFailed = false;
 
+    function fullUpgradeCost(level) {
+        if (!Number.isSafeInteger(level) || level < 0) return null;
+        const tables = typeof module === 'object' && module.exports ? require('./game-tables.js') : root.AWTables;
+        const cost = tables?.BUILDING[level + 1];
+        return Number.isSafeInteger(cost) && cost > 0 ? cost : null;
+    }
+
     // Displayed prices have at most two decimal places. Keep the game's existing
     // comma/dot/space grouping conventions, but reject prose, partial values and signs.
     // Unlike inventory valuation, advice must never recover a number from malformed text.
@@ -97,24 +104,29 @@
         return storageFailed ? null : quote;
     }
 
-    function compareUpgrade(remainingPP, building, value, now = Date.now()) {
+    function evaluateUpgrade(remainingPP, building, value, now = Date.now()) {
         const quote = validateQuote(value, now);
-        if (!quote || !BUILDINGS.includes(building) || !Number.isSafeInteger(remainingPP) || remainingPP <= 0) return null;
+        if (!quote || !BUILDINGS.includes(building) || !Number.isSafeInteger(remainingPP) || remainingPP < 0) return null;
         const hasRefund = own(quote.refunds, building);
         const refund = hasRefund ? quote.refunds[building] : 0;
         const cents = amount => Math.round((amount + Number.EPSILON) * 100);
         const ppCents = cents(remainingPP * quote.ppPrice);
         const suCents = cents(quote.suPrice - refund);
-        if (!Number.isSafeInteger(ppCents) || !Number.isSafeInteger(suCents) || ppCents <= suCents) return null;
+        if (!Number.isSafeInteger(ppCents) || !Number.isSafeInteger(suCents)) return null;
         const savingCents = ppCents - suCents;
         return {
             remainingPP, ppPrice: quote.ppPrice, ppValue: ppCents / 100,
             suPrice: quote.suPrice, refund: hasRefund ? refund : null, suValue: suCents / 100,
-            saving: savingCents / 100, savingPercent: savingCents / ppCents * 100,
+            saving: savingCents / 100, savingPercent: ppCents > 0 ? savingCents / ppCents * 100 : 0,
             capturedAt: quote.capturedAt,
         };
     }
 
+    function compareUpgrade(remainingPP, building, value, now = Date.now()) {
+        const result = evaluateUpgrade(remainingPP, building, value, now);
+        return result && result.saving > 0 ? result : null;
+    }
+
     return { BUILDINGS, STORAGE_KEY, QUOTE_EVENT, MAX_AGE_MS, parsePrice, parseRemainingPP,
-        quoteFromPrices, validateQuote, readQuote, recordQuote, compareUpgrade };
+        quoteFromPrices, validateQuote, readQuote, recordQuote, compareUpgrade, evaluateUpgrade, fullUpgradeCost };
 });

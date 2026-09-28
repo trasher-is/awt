@@ -1,5 +1,6 @@
 // Read-only hints beside the game's building rows. Prices come from an existing Trade
 // inventory read; this module never fetches or submits anything to the game or hub.
+import '../utils/game-tables.js';
 import '../utils/building-economics.js';
 
 const E = globalThis.AWBuildingEconomics;
@@ -13,13 +14,13 @@ const directCells = row => Array.from(row.cells || []);
 const unspanned = cells => cells.every(cell => Number(cell.colSpan || 1) === 1 && Number(cell.rowSpan || 1) === 1);
 
 // "PP to next level" is the game-confirmed header in the repository's glossary.
-// Do not guess other labels, fall back to an index, or substitute the full level cost:
-// an almost-complete building may be cheaper to finish with its remaining PP.
-export function readRemainingPP(row) {
+// Read by meaning, never by column position. Keep unknown observations as null;
+// the separately labelled estimate below must not masquerade as a measured cost.
+function readColumn(row, label) {
     const table = row.closest('table');
     if (!table) return null;
     const headers = Array.from(table.querySelectorAll('th, td')).filter(cell =>
-        cell.closest('table') === table && !cell.closest(`[${OWN}]`) && normalized(cell.textContent) === 'pp to next level');
+        cell.closest('table') === table && !cell.closest(`[${OWN}]`) && normalized(cell.textContent) === label);
     if (headers.length !== 1) return null;
     const headerRow = headers[0].closest('tr');
     const headerCells = directCells(headerRow);
@@ -27,6 +28,19 @@ export function readRemainingPP(row) {
     if (headerRow === row || headerCells.length !== cells.length || !unspanned(headerCells) || !unspanned(cells)) return null;
     const index = headerCells.indexOf(headers[0]);
     return index < 0 ? null : E.parseRemainingPP(cells[index].textContent);
+}
+
+export function readRemainingPP(row) { return readColumn(row, 'pp to next level'); }
+
+export function readUpgradeCost(row) {
+    const remainingPP = readRemainingPP(row);
+    if (remainingPP !== null) return { remainingPP, estimated: false };
+    // The game uses this level marker on building rows (also used by the SB timer).
+    const markers = Array.from(row.querySelectorAll('.building-lvl-up'));
+    const level = markers.length === 1 ? E.parseRemainingPP(markers[0].textContent)
+        : markers.length ? null : readColumn(row, 'level');
+    const cost = E.fullUpgradeCost(level);
+    return cost === null ? null : { remainingPP: cost, estimated: true, level };
 }
 
 function installStyle() {
@@ -38,6 +52,7 @@ function installStyle() {
         .aw-building-value { margin-left: .45rem; white-space: normal; }
         .aw-building-value-badge { display: inline-flex; align-items: center; min-height: 25px; padding: 1px 6px; border: 1px solid #5ac8a6; border-radius: 5px; background: #13392f; color: #c6ffe9; font-family: inherit; font-weight: 600; font-size: 11px; line-height: 1.4; white-space: nowrap; cursor: pointer; vertical-align: middle; }
         .aw-building-value-badge:hover { background: #205344; }
+        .aw-building-value-badge[data-outcome="pp"], .aw-building-value-badge[data-outcome="equal"] { border-color: #8d9ba7; background: #26323c; color: #e4edf3; }
         .aw-building-value-badge:focus-visible, .aw-building-value-details a:focus-visible, .aw-building-value-neutral a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
         .aw-building-value-details { display: block; box-sizing: border-box; width: max-content; max-width: min(360px, calc(100vw - 180px)); margin: 7px 0; padding: 10px 12px; border: 1px solid #426258; border-radius: 6px; color: #e3eee9; background: #182521; font-size: 12px; line-height: 1.55; text-align: left; white-space: normal; overflow-wrap: anywhere; }
         .aw-building-value-details[hidden] { display: none; }
@@ -67,11 +82,14 @@ function makeHint(building, comparison) {
     const host = element('span', undefined, 'aw-building-value');
     host.setAttribute(OWN, 'hint');
     const percent = comparison.savingPercent < 1 ? '<1' : String(Math.floor(comparison.savingPercent));
-    const button = element('button', `SU ↓${percent}%`, 'aw-building-value-badge');
+    const outcome = comparison.saving > 0 ? 'su' : comparison.saving < 0 ? 'pp' : 'equal';
+    const label = outcome === 'su' ? `SU ↓${percent}%` : outcome === 'pp' ? 'PP cheaper' : 'Same cost';
+    const button = element('button', `${comparison.estimated ? '~ ' : ''}${label}`, 'aw-building-value-badge');
+    button.setAttribute('data-outcome', outcome);
     button.type = 'button';
     button.setAttribute('aria-expanded', 'false');
-    button.setAttribute('aria-label', `${building}: a Supply Unit is an estimated ${dollars(comparison.saving)} cheaper. Show market-value comparison.`);
-    button.title = 'Compare remaining PP with one Supply Unit at the last recorded market prices';
+    button.setAttribute('aria-label', `${building}: ${label}${comparison.estimated ? ', assuming 0 PP already invested' : ''}. Show market-value comparison.`);
+    button.title = comparison.estimated ? 'Full next-level cost; assumes 0 PP already invested' : 'Compare remaining PP with one Supply Unit at the last recorded market prices';
     const details = element('span', undefined, 'aw-building-value-details');
     details.id = `aw-building-value-details-${++nextId}`;
     details.hidden = true;
@@ -79,11 +97,12 @@ function makeHint(building, comparison) {
     details.setAttribute('aria-label', `${building} market-value comparison`);
     button.setAttribute('aria-controls', details.id);
     const addLine = text => details.appendChild(element('span', text, 'aw-building-value-line'));
-    addLine(`${comparison.remainingPP.toLocaleString('en-US')} remaining PP × ${price(comparison.ppPrice)} = ${dollars(comparison.ppValue)}`);
+    if (comparison.estimated) addLine(`Remaining PP unavailable. Assuming 0 PP already invested for level ${comparison.level} → ${comparison.level + 1}. Actual progress may make PP cheaper.`);
+    addLine(`${comparison.remainingPP.toLocaleString('en-US')} ${comparison.estimated ? 'full-level' : 'remaining'} PP × ${price(comparison.ppPrice)} = ${dollars(comparison.ppValue)}`);
     addLine(`Buy 1 SU: ${dollars(comparison.suPrice)}`);
     addLine(comparison.refund === null ? 'Building refund: unknown (estimate before refund)' : `Building refund: −${dollars(comparison.refund)}`);
     addLine(`SU estimate${comparison.refund === null ? ' before refund' : ' after refund'}: ${dollars(comparison.suValue)}`);
-    addLine(`Estimated saving: ${dollars(comparison.saving)}`);
+    addLine(comparison.saving === 0 ? 'Same estimated cost.' : `Estimated saving with ${comparison.saving > 0 ? 'SU' : 'PP'}: ${dollars(Math.abs(comparison.saving))}`);
     const age = element('span', ageText(comparison.capturedAt), 'aw-building-value-note');
     age.setAttribute('data-aw-quote-age', '');
     details.appendChild(age);
@@ -160,11 +179,12 @@ function render(state) {
         if (!present.has(row)) { entry.host.remove(); state.rows.delete(row); }
     }
     for (const row of rows) {
-        const remainingPP = readRemainingPP(row);
+        const cost = readUpgradeCost(row);
         const table = row.closest('table');
-        if (table && (remainingPP === null || !quote)) reasons.set(table, remainingPP === null ? 'remaining PP cost could not be read' : 'a market quote less than 15 min old is needed');
+        if (table && (!cost || !quote)) reasons.set(table, !quote ? 'a market quote less than 15 min old is needed' : 'remaining PP and a supported building level could not be read');
         const building = row.getAttribute('data-spend-to');
-        const comparison = E.compareUpgrade(remainingPP, building, quote);
+        const values = cost && E.evaluateUpgrade(cost.remainingPP, building, quote);
+        const comparison = values ? { ...values, ...cost } : null;
         const signature = comparison ? JSON.stringify(comparison) : null;
         const existing = state.rows.get(row);
         if (existing && existing.signature === signature && existing.host.isConnected) {
