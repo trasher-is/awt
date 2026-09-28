@@ -96,6 +96,23 @@ ok('getTradeAnalysisRows returns the stats-joined-to-player rows', tradeRows.len
 const archiveStats = alliances.getAllianceStatsForArchive();
 ok('getAllianceStatsForArchive returns full stats rows with player_name', archiveStats.find(s => s.player_id === 1).player_name === 'caveman');
 
+// Research tracker (2026-09-28): the member's latest read of their own Science page rides
+// along on their stats row. A member who never reported has null research fields — the join
+// must not drop that member's row.
+{
+    const scienceResearch = require('./scienceResearch');
+    const before = archiveStats.length;
+    ok('a member with no research read still appears, with null research fields',
+        archiveStats.find(s => s.player_id === 1).research_queue_json === null && archiveStats.find(s => s.player_id === 1).research_observed_at === null);
+    scienceResearch.saveResearch(1, { observedAtMs: Date.UTC(2026, 8, 28, 12), scienceRate: 250, levels: { Physics: 14 },
+        items: [{ science: 'Physics', target_level: 15, active: true, repeat: false, starts_at_ms: Date.UTC(2026, 8, 28, 12), finishes_at_ms: Date.UTC(2026, 8, 28, 14) }] });
+    const withResearch = alliances.getAllianceStatsForArchive();
+    const mine = withResearch.find(s => s.player_id === 1);
+    ok('after a read, the stats row carries the queue and the read time',
+        JSON.parse(mine.research_queue_json)[0].target_level === 15 && Date.parse(mine.research_observed_at) === Date.UTC(2026, 8, 28, 12), mine);
+    ok('the join adds no rows and overwrites no sheet column', withResearch.length === before && mine.player_name === 'caveman' && mine.player_id === 1);
+}
+
 const staleResult = alliances.deleteStaleAllianceMembers([1]);
 ok('deleteStaleAllianceMembers removes player 2\'s stats row', staleResult.changes === 1);
 ok('deleteStaleAllianceMembers returns {changes: 0} for an empty id list', alliances.deleteStaleAllianceMembers([]).changes === 0);

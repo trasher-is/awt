@@ -222,6 +222,8 @@ function getTradeAnalysisRows() {
 // physics, and an unaliased join would let one silently overwrite the other in the row
 // object — the member-page value (fresh, typed by the member) must never lose to the
 // intel-scrape value (often 0 for a never-scanned member).
+// research_* is the member's latest read of their own Science page (science_research,
+// 2026-09-28); the Research / Left columns turn it into "what, and how long".
 const getAllianceStatsForArchiveStmt = db.prepare(`
     SELECT s.*, p.name as player_name,
            p.points AS pl_points, p.ranking AS pl_ranking, p.level AS pl_level,
@@ -238,9 +240,11 @@ const getAllianceStatsForArchiveStmt = db.prepare(`
            p.last_activity_at AS pl_last_activity_at, p.has_intel AS pl_has_intel,
            p.physics AS pl_physics, p.mathematics AS pl_mathematics,
            p.stats_scraped_at AS pl_stats_scraped_at, p.intel_updated_at AS pl_intel_updated_at,
-           (SELECT COUNT(*) FROM planets WHERE owner_id = s.player_id) AS pl_planet_count
+           (SELECT COUNT(*) FROM planets WHERE owner_id = s.player_id) AS pl_planet_count,
+           sr.observed_at AS research_observed_at, sr.queue_json AS research_queue_json
     FROM alliance_member_stats s
     LEFT JOIN players p ON s.player_id = p.id
+    LEFT JOIN science_research sr ON sr.player_id = s.player_id
     ORDER BY s.player_id ASC
 `);
 function getAllianceStatsForArchive() {

@@ -26,12 +26,14 @@ import '../utils/sqlite-time.js';
 import '../utils/max-combat-value.js'; // side-effect import: AWMaxCombatValue, the CV-ceiling formula
 import '../utils/game-tables.js';    // side-effect import: AWTables.CULTURE, the per-level point costs
 import '../utils/intel-freshness.js'; // side-effect import: AWIntelFreshness.scienceLag, how far behind recorded sciences are
+import '../utils/research-queue.js';  // side-effect import: AWResearchQueue.statusAt / formatDuration
 const { compareNumeric, parseLocaleNumber } = globalThis.AWNumber;
 const { CULTURE } = globalThis.AWTables;
 const { maxCombatValue, maxCombatValueForRow } = globalThis.AWMaxCombatValue;
 const { scienceLag } = globalThis.AWIntelFreshness;
 const { parseIdleStringToSeconds } = globalThis.AWIdleParse;
 const { parseTimestamp, formatLocalDateTime } = globalThis.AWSqliteTime;
+const { statusAt, formatDuration } = globalThis.AWResearchQueue;
 export { parseIdleStringToSeconds };
 
 // ─── FORMATTING HELPERS (shared by archives.js) ───────────────────────────────
@@ -169,6 +171,79 @@ export function formatCultureLookahead(r, levelsAhead, now = Date.now()) {
     const hours = Math.floor((totalSecs % 86400) / 3600);
     const mins = Math.floor((totalSecs % 3600) / 60);
     return `~${days > 0 ? `${days}d ${hours}h` : `${hours}h ${mins}m`}`;
+}
+
+// ─── RESEARCH (Alliance Stats) ────────────────────────────────────────────────
+// What a member is researching and how long until that level lands, from their own Science
+// page (science_research; see research-queue.js). The stored queue holds absolute finish
+// times, so the countdown is worked out here at render time — a snapshot read hours ago
+// still answers correctly, and says so: "~" once the item shown was not the one in progress
+// at the read, and a dimmed cell once the read itself is old.
+const RESEARCH_SHORT = { Biology: 'Bio', Economy: 'Eco', Energy: 'Ene', Mathematics: 'Math', Physics: 'Phy', Social: 'Soc' };
+const RESEARCH_STALE_MS = 6 * 3600 * 1000;
+
+// null = this member has never reported (a different thing from "reported: nothing running").
+function researchOf(r, now) {
+    if (!r || !r.research_queue_json || !r.research_observed_at) return null;
+    let items;
+    try { items = JSON.parse(r.research_queue_json); } catch (_) { return null; }
+    const observed = parseTimestamp(r.research_observed_at);
+    if (!Array.isArray(items) || !observed) return null;
+    const st = statusAt({ items }, now);
+    return { st, items, observedMs: observed.getTime(), stale: now - observed.getTime() > RESEARCH_STALE_MS };
+}
+
+const researchLabel = i => `${RESEARCH_SHORT[i.science] || i.science} ${i.target_level}`;
+
+function researchTitle(res, now) {
+    const { st, items, observedMs } = res;
+    const lines = [];
+    if (st.current) {
+        lines.push(`Now: ${researchLabel(st.current)} — done ${formatLocalDateTime(new Date(st.current.finishes_at_ms), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`);
+        st.upcoming.forEach(i => lines.push(`Then: ${researchLabel(i)}${i.repeat ? ' (repeats)' : ''} — ${formatLocalDateTime(new Date(i.finishes_at_ms), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`));
+        if (!st.upcoming.length && !st.ends_with_repeat) lines.push('Nothing queued after this');
+    } else if (st.ends_with_repeat) {
+        lines.push('Its last queued item repeats — what it is on now is unknown');
+    } else if (items.length) {
+        lines.push(`Queue ran out ${formatDuration(now - st.idle_since_ms)} ago`);
+    } else {
+        lines.push('Nothing was being researched at the last read');
+    }
+    lines.push(`Read ${formatDuration(now - observedMs)} ago${res.stale ? ' — may be out of date' : ''}`);
+    return lines.join('\n');
+}
+
+const NEVER_REPORTED = '<span class="text-zinc-600" title="No research read yet — appears once they open the Hub or their Science page">-</span>';
+
+export function formatResearchNow(r, now = Date.now()) {
+    const res = researchOf(r, now);
+    if (!res) return NEVER_REPORTED;
+    const title = esc(researchTitle(res, now));
+    const dim = res.stale ? ' class="text-zinc-500"' : '';
+    if (res.st.current) return `<span${dim} title="${title}">${esc(researchLabel(res.st.current))}</span>`;
+    if (res.st.ends_with_repeat) return `<span class="text-amber-400" title="${title}">Repeats</span>`;
+    return `<span class="text-amber-400" title="${title}">Idle</span>`;
+}
+
+// Milliseconds until the level in progress lands. An idle member sorts as -1, so the
+// ascending sort puts the people with nothing running (the ones worth acting on) first;
+// a member who never reported has no value and sorts last either way.
+export function researchLeftMs(r, now = Date.now()) {
+    const res = researchOf(r, now);
+    if (!res) return null;
+    if (res.st.current) return res.st.current.finishes_at_ms - now;
+    return res.st.ends_with_repeat ? null : -1;
+}
+
+export function formatResearchLeft(r, now = Date.now()) {
+    const res = researchOf(r, now);
+    if (!res || !res.st.current) return '-';
+    const left = formatDuration(res.st.current.finishes_at_ms - now);
+    const approx = res.st.current_exact ? '' : '~';
+    const warn = !res.st.upcoming.length && !res.st.ends_with_repeat
+        ? ' <span class="text-amber-400" title="Nothing queued after this">⚠</span>' : '';
+    const dim = res.stale ? ' class="text-zinc-500"' : '';
+    return `<span${dim} title="${esc(researchTitle(res, now))}">${approx}${left}</span>${warn}`;
 }
 
 // Production bonus from a player's artifact. Only Cathedral (CD), Major (MJ) and
@@ -475,6 +550,8 @@ export const ALLY_STATS_COLUMNS = [
     col('player_id', 'ID', { group: 'Member', cell: 'text-muted-foreground', render: r => num(r.player_id) }),
     col('planets_text', 'Planets', { group: 'Sheet', sort: 'string', cell: 'text-aw-ally font-semibold', render: r => text(r.planets_text) }),
     col('next_culture_at', 'Next Cult', { group: 'Sheet', sort: 'string', cell: 'font-semibold text-yellow-500 whitespace-nowrap', render: r => formatCultureCountdown(r.next_culture_at) }),
+    col('research_now', 'Research', { group: 'Sheet', sort: 'string', sortValue: r => { const x = researchOf(r, Date.now()); return x && x.st.current ? RESEARCH_SHORT[x.st.current.science] : null; }, cell: 'font-semibold text-fuchsia-400 whitespace-nowrap', title: 'What this member is researching now — read from their own Science page. Hover a cell for the whole queue.', render: r => formatResearchNow(r) }),
+    col('research_left', 'Left', { group: 'Sheet', sort: 'number', sortValue: r => researchLeftMs(r), cell: 'font-semibold text-emerald-300 whitespace-nowrap', title: 'Time until that research level lands. ~ = counted from a later item in the saved queue; ⚠ = nothing queued after it. Sorting ascending puts members with nothing running first.', render: r => formatResearchLeft(r) }),
     col('culture_lvl2_eta', 'Cult +2', { group: 'Sheet', default: false, sort: 'number', sortValue: r => cultureLookaheadMs(r, 2), cell: 'font-semibold text-yellow-600 whitespace-nowrap', title: 'Approximate — from the culture rate on this sheet as of its last update', render: r => formatCultureLookahead(r, 2) }),
     col('culture_lvl3_eta', 'Cult +3', { group: 'Sheet', default: false, sort: 'number', sortValue: r => cultureLookaheadMs(r, 3), cell: 'font-semibold text-yellow-700 whitespace-nowrap', title: 'Approximate — from the culture rate on this sheet as of its last update', render: r => formatCultureLookahead(r, 3) }),
     col('science_rate', 'Sci', { group: 'Sheet', sort: 'numtext', cell: 'text-blue-400 font-semibold', render: r => text(r.science_rate) }),
