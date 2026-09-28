@@ -29,23 +29,33 @@ function hasClass(el, cls) {
     return !!(el && el.classList && el.classList.contains(cls));
 }
 
-// Every reading of the name cell worth trying: the whole text without anything the hub
-// injected (the Social marker and Economy countdown live in this cell), and each child
-// element's own text, because a responsive short/long pair of spans concatenates in
-// textContent ("BioBiology").
+// Every reading of the name cell worth trying, when the row carries no data-change-to: the
+// whole text without anything the hub injected (the Social marker and Economy countdown
+// live in this cell), and the text of EVERY element inside it. The name sits in a
+// responsive short/long pair nested inside a link — <a><span>Bio</span><span>Biology</span></a>
+// — so neither the whole cell nor its direct children read as one name (2026-09-28: that
+// is exactly why the first version recognised no row on the live page).
 function nameCandidates(cell) {
     const out = [];
     let whole = '';
-    (cell.childNodes || []).forEach(node => {
-        if (node.nodeType === 1 && node.hasAttribute && node.hasAttribute('data-hub-inject')) return;
-        whole += node.textContent || '';
-        if (node.nodeType === 1) out.push(node.textContent || '');
-    });
+    const walk = (el, top) => {
+        (el.childNodes || []).forEach(node => {
+            if (node.nodeType === 1 && node.hasAttribute && node.hasAttribute('data-hub-inject')) return;
+            if (top) whole += node.textContent || '';
+            if (node.nodeType === 1) { out.push(node.textContent || ''); walk(node, false); }
+        });
+    };
+    walk(cell, true);
     out.unshift(whole);
     return out.map(t => t.trim().toLowerCase()).filter(Boolean);
 }
 
-function scienceOf(cell) {
+// The row says which science it is: <tr data-change-to="Biology"> (it drives the game's own
+// click-to-change). That is the game's identifier, not display text, so it holds on any
+// screen width and in any language; the name match is only the fallback.
+function scienceOf(row, cell) {
+    const id = row.getAttribute ? row.getAttribute('data-change-to') : null;
+    if (id && Object.prototype.hasOwnProperty.call(ALIASES, id)) return id;
     const candidates = nameCandidates(cell);
     for (const [science, aliases] of Object.entries(ALIASES)) {
         if (candidates.some(c => aliases.includes(c))) return science;
@@ -80,7 +90,7 @@ export function parseScienceResearchPage(doc) {
     doc.querySelectorAll('tr').forEach(row => {
         const cells = row.cells || row.querySelectorAll('td, th');
         if (!cells || cells.length < 2 || !cells[0]) return;
-        const science = scienceOf(cells[0]);
+        const science = scienceOf(row, cells[0]);
         if (!science || seen.has(science)) return;
         const level = parseInt((cells[1].textContent || '').trim(), 10);
         if (!Number.isInteger(level)) return;
