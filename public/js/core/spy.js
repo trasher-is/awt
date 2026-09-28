@@ -1,4 +1,5 @@
 import { initLaunchPlanLinks } from './launch-plan-links.js';
+import { initSupplyUnitButtons } from './su-spend-buttons.js';
 import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates, initColonizeLaunchWindows, initAllianceRelationIcons, initEcoBonusJoinDates, initFleetLaunchModalETA, initSocialHint, initEconomyMilestone, initBioThreatPills, initFleetLaunchTargetDossier, initSystemPlan } from './page-injections.js';
 import { initNewsIncomingTools } from '../ui/news-incoming.js';
 import { initLocalGameTimestamps } from './page-injections.js';
@@ -554,6 +555,7 @@ export function initSpy() {
             if (pathLower.includes('/game/planets/planet/')) {
                 initStarbaseTimer();
                 initAutoProduceFinishDates();
+                initSupplyUnitButtons().catch(err => console.error('[Spy] supply unit buttons failed:', err.message));
             }
 	    if (pathLower.includes('/game/fleets')) {
                 initFleetTimers();
