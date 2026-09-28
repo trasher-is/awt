@@ -5,7 +5,7 @@
 // /sync/best-planets-snapshot's own comment for why the two must never be merged.
 
 import '../utils/game-rate-limit.js'; // must load before gameFetch resolves the gate
-import { parseRankingPage } from '../utils/ranking-page-parser.js';
+import { parseBestPlanetsPage } from '../utils/best-planets-parser.js';
 const { gameFetch } = globalThis.AWGameRate;
 
 const RANKING_PATH = '/Ranking/BestPlanets';
@@ -34,12 +34,12 @@ async function runCheck() {
         const pageRes = await gameFetch(RANKING_PATH);
         if (!pageRes.ok) return;
         const doc = new DOMParser().parseFromString(await pageRes.text(), 'text/html');
-        const rows = parseRankingPage(doc);
+        const rows = parseBestPlanetsPage(doc);
         if (!rows.length) return; // page didn't parse the way we expect — leave the old snapshot in place rather than wiping it with nothing
         await fetch('/hub-api/sync/best-planets-snapshot', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rows: rows.map(r => ({ rank: r.rank, game_planet_id: r.game_planet_id })) }),
+            body: JSON.stringify({ rows: rows.map(r => ({ rank: r.rank, game_planet_id: r.game_planet_id, buildings: r.buildings })) }),
         });
     } catch (err) {
         console.warn('[BestPlanetsWatch] check failed:', err.message);

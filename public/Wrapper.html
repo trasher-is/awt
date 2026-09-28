@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
           integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous">
     <link rel="stylesheet" href="/hub-assets/css/hub.css">
+    <link rel="stylesheet" href="/hub-assets/css/unicorn-mode.css">
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -214,5 +215,9 @@
     </div>
 
     <script type="module" src="/hub-assets/js/ui/dashboard.js"></script>
+    <script type="module">
+        import { initUnicornMode } from '/hub-assets/js/ui/unicorn-mode.js';
+        initUnicornMode();
+    </script>
 </body>
 </html>

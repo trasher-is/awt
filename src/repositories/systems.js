@@ -258,9 +258,14 @@ function clearBestPlanetsSnapshot() {
     clearBestPlanetsSnapshotStmt.run();
 }
 
-const insertBestPlanetsSnapshotStmt = db.prepare(`INSERT INTO best_planets_snapshot (game_planet_id, rank, updated_at) VALUES (?, ?, ?)`);
-function insertBestPlanetsSnapshot(gamePlanetId, rank, updatedAt) {
-    insertBestPlanetsSnapshotStmt.run(gamePlanetId, rank, updatedAt);
+const { normalizeBuildings } = require('../utils/unicorn-ranking');
+const insertBestPlanetsSnapshotStmt = db.prepare(`
+    INSERT INTO best_planets_snapshot (game_planet_id, rank, updated_at, hf, rf, gc, rl)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+`);
+function insertBestPlanetsSnapshot(gamePlanetId, rank, updatedAt, buildings) {
+    const levels = normalizeBuildings(buildings);
+    insertBestPlanetsSnapshotStmt.run(gamePlanetId, rank, updatedAt, levels.hf, levels.rf, levels.gc, levels.rl);
 }
 
 // How many of the CURRENT Best Planets snapshot's planets are friendly-owned right now —
