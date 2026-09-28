@@ -12,6 +12,9 @@ An optional, small `SU ↓23%` badge sits alongside an eligible building on its 
 The member can open the calculation with a mouse, touch, or keyboard. It is advice only;
 the existing `+1 SU` and `+All SU` buttons remain separate game actions.
 
+[Desktop preview](previews/su-value-hint.png) · [Mobile preview](previews/su-value-hint-mobile.png)
+(hand-written synthetic planet and prices, not captured game data).
+
 Compare the **remaining** production cost, not the full cost of the next building level:
 
 ```
