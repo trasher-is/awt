@@ -1303,8 +1303,10 @@ router.post('/sync/best-planets-snapshot', requireAuth, (req, res) => {
     const syncTx = db.transaction((entries) => {
         systemsRepo.clearBestPlanetsSnapshot();
         for (const row of entries) {
-            if (!Number.isInteger(row.game_planet_id) || !Number.isInteger(row.rank)) continue;
-            systemsRepo.insertBestPlanetsSnapshot(row.game_planet_id, row.rank, syncedAt);
+            if (!row || !Number.isInteger(row.game_planet_id) || !Number.isInteger(row.rank)) continue;
+            // Older clients send only rank and ID. Missing/invalid building observations
+            // replace previous values with NULL, never leave yesterday's winner in place.
+            systemsRepo.insertBestPlanetsSnapshot(row.game_planet_id, row.rank, syncedAt, row.buildings);
         }
     });
 

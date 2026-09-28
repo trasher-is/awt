@@ -1297,6 +1297,14 @@ function initDatabase() {
         );
     `);
 
+    // Unicorn mode: building leaders are chosen only within a complete Top 50 Best
+    // Planets snapshot. Nullable columns distinguish an unread cell from a real level 0.
+    // The existing wholesale snapshot replacement also replaces these observations.
+    addColumn('best_planets_snapshot', 'hf', 'INTEGER');
+    addColumn('best_planets_snapshot', 'rf', 'INTEGER');
+    addColumn('best_planets_snapshot', 'gc', 'INTEGER');
+    addColumn('best_planets_snapshot', 'rl', 'INTEGER');
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {
