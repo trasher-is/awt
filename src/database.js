@@ -1322,6 +1322,38 @@ function initDatabase() {
         )
     `);
 
+    // Population trace (2026-09-30): where each population change on a planet came from.
+    // planet_events only ever recorded DROPS, so a wrong figure that entered as a RISE left
+    // no trace of the payload that put it there — the drop that later corrected it was all
+    // anyone could see (a planet held at 10 for five days that the game never showed above
+    // 9, then "lost" a population). One row per accepted rise, per rise the regrowth guard
+    // refused, and per drop, each with the client path that sent it, whether that payload was
+    // a live read or a cached picture, and which member's session carried it. claimed_pop is
+    // what the payload said; stored_pop what the hub kept (they differ only for a refused
+    // rise). Pruned by the repository; cascades from systems so a round reset takes it too.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS population_trace (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            system_id INTEGER NOT NULL,
+            planet_index INTEGER NOT NULL,
+            owner_id INTEGER,
+            outcome TEXT NOT NULL,
+            old_pop INTEGER,
+            claimed_pop,
+            stored_pop,
+            hours_since_change REAL,
+            source TEXT NOT NULL,
+            observation TEXT NOT NULL,
+            captured_at TEXT,
+            actor_user_id INTEGER REFERENCES app_users(id) ON DELETE SET NULL,
+            actor_game_name TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(system_id) REFERENCES systems(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_population_trace_planet  ON population_trace(system_id, planet_index, id);
+        CREATE INDEX IF NOT EXISTS idx_population_trace_created ON population_trace(created_at);
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

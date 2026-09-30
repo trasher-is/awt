@@ -22,6 +22,8 @@ const battlePointsRepo = require('../repositories/battlePoints');
 const bonusGoalsRepo = require('../repositories/bonusGoals');
 const { postEmbed, postBattleEmbed, defuseMentions, settingValue } = require('../utils/discord-post');
 const { ownerChangeKind } = require('../utils/system-change-lines');
+const { normaliseSource, observationKind } = require('../utils/population-trace');
+const populationTraceRepo = require('../repositories/populationTrace');
 const router = express.Router();
 
 // Attribution uses reports after the previous planet sync, capped at three hours.
@@ -153,6 +155,27 @@ router.post('/sync/system', requireAuth, (req, res) => {
             );
         }
     };
+
+    // Who is reporting, and through which client path: stamped onto every population change
+    // below (population_trace) so a wrong figure can be traced back to the payload that put
+    // it there. See src/utils/population-trace.js.
+    const traceContext = {
+        source: normaliseSource(req.body.source),
+        observation: observationKind(req.body),
+        captured_at: typeof captured_at === 'string' ? captured_at.slice(0, 40) : null,
+        actor_user_id: req.session && Number.isInteger(req.session.userId) ? req.session.userId : null,
+        actor_game_name: req.session && req.session.gameName ? String(req.session.gameName).slice(0, 64) : null,
+    };
+    const traceHoursSince = (observedAt) => {
+        const at = parseSqliteUtc(observedAt);
+        return at ? Math.round(((Date.now() - at.getTime()) / 3600000) * 100) / 100 : null;
+    };
+    const tracePopulation = (outcome, planetIndex, ownerId, oldPop, claimedPop, storedPop, hoursSinceChange) =>
+        populationTraceRepo.recordPopulationChange({
+            ...traceContext, outcome, system_id, planet_index: planetIndex, owner_id: ownerId,
+            old_pop: oldPop, claimed_pop: claimedPop, stored_pop: storedPop,
+            hours_since_change: Number.isFinite(hoursSinceChange) ? hoursSinceChange : null,
+        });
 
     const syncTransaction = db.transaction((planetsData, fleetsData, ownMemberIds, fleetsObserved) => {
 
@@ -290,9 +313,17 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 const lastPopObserved = parseSqliteUtc(oldP.population_observed_at);
                 const hoursSinceLastPopObserved = lastPopObserved ? (Date.now() - lastPopObserved.getTime()) / 3600000 : Infinity;
                 const pointsGained = finalPopulation - oldP.population;
-                if (hoursSinceLastPopObserved < pointsGained * MIN_HOURS_PER_POP_POINT_REGROWN) {
+                const claimedPopulation = finalPopulation;
+                const refused = hoursSinceLastPopObserved < pointsGained * MIN_HOURS_PER_POP_POINT_REGROWN;
+                if (refused) {
                     finalPopulation = oldP.population;
                 }
+                // Both outcomes are recorded (population_trace): a refused rise shows a
+                // source pushing a number the guard did not believe, and an accepted one is
+                // the moment a figure the game never showed could enter unnoticed — the drop
+                // that later corrects it is all planet_events ever saw.
+                tracePopulation(refused ? 'rise_rejected' : 'rise', p.planet_index, finalOwnerId,
+                    oldP.population, claimedPopulation, finalPopulation, hoursSinceLastPopObserved);
             }
 
             if (oldP && !p.vision_uncertain) {
@@ -397,6 +428,9 @@ router.post('/sync/system', requireAuth, (req, res) => {
                         });
                     } else if (newPop < oldPop) {
                         systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, newPop); // 2 = POP_DROP
+                        // hours_since_change here is how long the figure being lost had stood.
+                        tracePopulation('drop', p.planet_index, oldP.owner_id, oldPop, newPop, newPop,
+                            traceHoursSince(oldP.population_observed_at));
                         // updated_at also advances on uncertain/fog syncs. It is a
                         // conservative lower bound, not proof of a fresh observation:
                         // if it excludes a real battle, leave attribution unknown.

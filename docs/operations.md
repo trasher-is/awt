@@ -23,6 +23,7 @@ rather than "whatever cascades from `systems`".
 | `alliances`, `alliance_member_stats` | **removed** | this round's alliances; member stats are keyed by the stable player id and would otherwise rejoin as "Unknown" |
 | `fleets` | **removed** | positions on the wiped map |
 | `planet_plans` | **removed** | notes about planets on the wiped map (cascades from `systems`) |
+| `population_trace` | **removed** | where each population change came from, on the wiped map (cascades from `systems`) |
 | `routes`, `route_legs` | **removed** (since #128) | plans over system ids that the next round reuses |
 | `planet_takeovers` | **removed** (since #128) | assignments keyed by `(system_id, planet_index)`, no foreign key to `systems` |
 | `system_claims` | **removed** | territory earmarks for this round's map (cascades from `systems`) |

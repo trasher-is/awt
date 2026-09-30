@@ -91,6 +91,8 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
         // wins server-side. Out of vision with no stamp, we simply do not know: send
         // neither and let the payload be unordered.
         const payload = AWApi.mapPlanetsToSyncPayload(sys.id, planets, sys.capturedAt, isInVision);
+        // Which client path sent this — recorded beside every population change (population_trace).
+        payload.source = 'api-seed';
         if (!isInVision) {
             // Out-of-vision (or in-vision but stale, see isStaleCapture above): the data may
             // not reflect reality right now. This is a SEPARATE concept from is_unknown
