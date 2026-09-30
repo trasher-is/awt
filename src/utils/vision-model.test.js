@@ -75,6 +75,36 @@ const readCode = rel => read(rel)
     ok('a system with no coordinates is not silently placed at the origin',
         V.coverage(observers, [{ id: 9, x: null, y: null }]).size === 0);
 
+    console.log('\n── Biology 25 opens the whole map ' + '─'.repeat(42));
+    // docs/game-rules.md: "At level 25, the whole map opens up". The rule was documented and
+    // the threat-vision header even mentioned it, but nothing implemented it, so a player at
+    // 25 was treated as blind beyond 25 squares.
+    ok('the whole-map level is exported as 25', V.WHOLE_MAP_BIOLOGY === 25);
+    ok('a distance just under 25 still needs 25', V.bioNeededFor(24.2) === 25 && V.bioNeededFor(25) === 25);
+    ok('no distance needs more than 25, however far', V.bioNeededFor(25.1) === 25 && V.bioNeededFor(80) === 25);
+    ok('biology 25 has vision of a system 60 squares away', V.hasVision(25, 60) === true);
+    ok('biology 24 does not — one level short of the whole map', V.hasVision(24, 60) === false);
+
+    const farSystems = [{ id: 1, x: 0, y: 0 }, { id: 2, x: 40, y: 30 }];   // 50 squares apart
+    const wm = V.coverage([
+        { playerId: 1, name: 'Whole', biology: 25, x: 0, y: 0 },
+        { playerId: 2, name: 'Short', biology: 24, x: 0, y: 0 },
+    ], farSystems);
+    ok('biology 25 covers a system 50 squares out', (wm.get(2) || []).some(o => o.playerId === 1));
+    ok('biology 24 does not', !(wm.get(2) || []).some(o => o.playerId === 2));
+    ok('the entry reports 25 as what was needed, not the raw 50',
+        (wm.get(2) || []).find(o => o.playerId === 1).needed === 25);
+
+    // The literal claim: from any corner, at 25, every system on a map this size is seen.
+    const grid = [];
+    for (let x = -30; x <= 30; x += 5) for (let y = -30; y <= 30; y += 5) grid.push({ id: grid.length + 1, x, y });
+    const corners = [[-30, -30], [30, 30], [-30, 30], [30, -30]].map(([x, y], i) => ({ playerId: i, biology: 25, x, y }));
+    ok('biology 25 from any corner sees every system on the map',
+        corners.every(c => V.coverage([c], grid).size === grid.length),
+        corners.map(c => V.coverage([c], grid).size));
+    ok('biology 24 from a corner does not',
+        V.coverage([{ ...corners[0], biology: 24 }], grid).size < grid.length);
+
     console.log('\n── There is exactly ONE copy of the rule ' + '─'.repeat(35));
     // This is the bug the module exists to close: !vision fell back to science_level and
     // the dashboard's "Alliance Map Vision" overlay did not, so members with an unscraped

@@ -29,6 +29,12 @@
 // A player sees a target system when their vision radius is at least the straight-line
 // distance between their ORIGIN system and the target, rounded up. Same ceil() the
 // distance-to-biology rule in !dist uses.
+//
+// ONE EXCEPTION: at biology 25 the whole map opens up (docs/game-rules.md, "Science
+// fields"), so no system needs more than 25 however far away it is. Without that cap a
+// player at 25 is judged to be blind beyond 25 squares, which is wrong for everyone who
+// asks this question — the science-page threat pills, !bio, !vision and the galaxy map's
+// vision layer all come through bioNeededFor().
 (function (root, factory) {
     const api = factory();
     if (typeof module === 'object' && module !== null && module.exports) module.exports = api;
@@ -59,9 +65,15 @@
         return Math.hypot(x2 - x1, y2 - y1);
     }
 
-    /** Biology needed to cover a distance. Whole levels only, so round up. */
+    /** Biology level at which the whole map is visible, however far the system is. */
+    const WHOLE_MAP_BIOLOGY = 25;
+
+    /**
+     * Biology needed to cover a distance. Whole levels only, so round up — and never more
+     * than WHOLE_MAP_BIOLOGY, because that level opens the whole map.
+     */
     function bioNeededFor(distance) {
-        return Math.ceil(distance);
+        return Math.min(Math.ceil(distance), WHOLE_MAP_BIOLOGY);
     }
 
     function hasVision(radius, distance) {
@@ -117,5 +129,5 @@
         return byId;
     }
 
-    return { visionRadius, radiusIsMeasured, systemDistance, bioNeededFor, hasVision, coverage, isCoordinate };
+    return { visionRadius, radiusIsMeasured, systemDistance, bioNeededFor, hasVision, coverage, isCoordinate, WHOLE_MAP_BIOLOGY };
 });
