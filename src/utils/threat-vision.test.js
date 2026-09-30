@@ -172,6 +172,46 @@ console.log('\n── Nobody falls between the two bars ' + '─'.repeat(40));
         u.yellow.length === 1 && u.red.length === 0, u);
 }
 
+console.log('\n── Biology 25 opens the whole map ' + '─'.repeat(42));
+{
+    // The gate above is distance-based, but at biology 25 distance stops mattering: the whole
+    // map is visible (docs/game-rules.md). Before this, a player at 25 forty systems away was
+    // dismissed as "a statistic, not a threat" although he could see your origin.
+    const opts = { myBio: 10, confirmedMargin: 6 };
+    const far = bio => ({ name: `bio${bio}`, biology: bio, has_intel: 1, origin_system: 5, origin_x: 40, origin_y: 0 });
+
+    const whole = assessThreat(far(25), me);
+    ok('biology 25 reaches you from 40 systems away', whole.reaches === true && whole.levelsAway === 0, whole);
+    ok('and the requirement is stated as 25, not the raw 40', whole.required === 25, whole);
+    ok('biology above 25 is the same', assessThreat(far(29), me).reaches === true);
+
+    const short = assessThreat(far(24), me);
+    ok('biology 24 still does not — it is one level from the whole map',
+        short.reaches === false && short.levelsAway === 1, short);
+
+    const seen = splitThreats([far(25)], me, opts);
+    ok('a confirmed 25 far away is RED: he can see you and the gap is decisive',
+        seen.red.length === 1 && seen.yellow.length === 0 && seen.red[0].closing === false, seen);
+
+    const closing = splitThreats([far(24)], me, opts);
+    ok('biology 24 far away is YELLOW and closing: one research tick from seeing everything',
+        closing.yellow.length === 1 && closing.yellow[0].closing === true && closing.yellow[0].vision.levelsAway === 1, closing);
+
+    const two = splitThreats([far(23)], me, opts);
+    ok('biology 23 is two levels out, still inside the closing window', two.yellow.length === 1, two);
+
+    const three = splitThreats([far(22)], me, opts);
+    ok('biology 22 is three levels out and stays off the list', three.red.length + three.yellow.length === 0, three);
+
+    // An unscanned player is judged on the science ceiling, as everywhere else.
+    const ceiling = assessThreat(at(40, { biology: null, science_level: 25 }), me);
+    ok('an unscanned player whose science ceiling is 25 is counted like any other ceiling',
+        ceiling.reaches === true && ceiling.radius === 25, ceiling);
+
+    // Below 25 nothing changed: a distant player is still a statistic.
+    ok('biology 20 forty systems away is still excluded', assessThreat(far(20), me).reaches === false);
+}
+
 console.log('\n' + '─'.repeat(75));
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
