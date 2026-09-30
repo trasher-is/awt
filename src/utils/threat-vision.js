@@ -17,7 +17,7 @@
 // listed, marked unknown — a threat you were never told about is a worse outcome than one
 // you were told about and could dismiss.
 
-const { visionRadius, systemDistance, bioNeededFor } = require('../../public/js/utils/vision-model.js');
+const { visionRadius, systemDistance, bioNeededFor, WHOLE_MAP_BIOLOGY } = require('../../public/js/utils/vision-model.js');
 
 const SOURCE_GAME = 'game';
 const SOURCE_ESTIMATED = 'estimated';
@@ -39,6 +39,14 @@ function hasAnyRadarStat(row) {
     return (Number.isFinite(bio) && bio > 0) || (Number.isFinite(science) && science > 0);
 }
 
+// Whole-map vision is a fact about the radius alone: once the whole map is open it does not
+// matter where anyone sits, so this is answered even for a player we cannot place. It rests on
+// visionRadius(), so an unscanned player's science ceiling counts — the modal words that case
+// as "may", because a ceiling is not a reading.
+function seesWholeMap(row) {
+    return hasAnyRadarStat(row) && visionRadius(row) >= WHOLE_MAP_BIOLOGY;
+}
+
 // A threat row as the repository returns it: the real origin when the game gave us one,
 // otherwise the biggest-planet estimate, otherwise nothing.
 function resolveThreatOrigin(row) {
@@ -55,24 +63,30 @@ function resolveThreatOrigin(row) {
 }
 
 // viewer: { origin_x, origin_y } — your own origin, the thing they would be seeing.
-// Returns { reaches, estimated, unknown, radius, required, origin }.
+// Returns { reaches, estimated, unknown, radius, required, origin, wholeMap, wholeMapLevel }.
 //   reaches   true when their radius covers the distance, and also when we cannot tell
 //   unknown   we could not establish one side of the comparison, so `reaches` is a
 //             precaution rather than a finding
+//   wholeMap  their radius is at the whole-map level, so position no longer matters; set on
+//             every verdict, including the unplaced ones. wholeMapLevel is that level, for the
+//             UI to quote — `required` is capped at it, so a player short of seeing you
+//             because of distance is "short of the whole map" whenever required === it.
 function assessThreat(row, viewer) {
     const origin = resolveThreatOrigin(row);
     const viewerX = coord(viewer && viewer.origin_x);
     const viewerY = coord(viewer && viewer.origin_y);
+    const wholeMap = seesWholeMap(row);
+    const wholeMapLevel = WHOLE_MAP_BIOLOGY;
 
     if (viewerX === null || viewerY === null) {
-        return { reaches: true, estimated: false, unknown: 'your own origin is not on record', radius: null, required: null, origin };
+        return { reaches: true, estimated: false, unknown: 'your own origin is not on record', radius: null, required: null, origin, wholeMap, wholeMapLevel };
     }
     if (origin.x === null || origin.y === null) {
-        return { reaches: true, estimated: false, unknown: 'their origin is unknown and they hold no planets we can see', radius: null, required: null, origin };
+        return { reaches: true, estimated: false, unknown: 'their origin is unknown and they hold no planets we can see', radius: null, required: null, origin, wholeMap, wholeMapLevel };
     }
 
     if (!hasAnyRadarStat(row)) {
-        return { reaches: true, estimated: false, unknown: 'neither biology nor science level recorded', radius: null, required: null, origin };
+        return { reaches: true, estimated: false, unknown: 'neither biology nor science level recorded', radius: null, required: null, origin, wholeMap, wholeMapLevel };
     }
     const radius = visionRadius(row);
 
@@ -89,6 +103,8 @@ function assessThreat(row, viewer) {
         radius,
         required,
         origin,
+        wholeMap,
+        wholeMapLevel,
     };
 }
 
