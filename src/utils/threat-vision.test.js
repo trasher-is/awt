@@ -210,6 +210,24 @@ console.log('\n── Biology 25 opens the whole map ' + '─'.repeat(42));
 
     // Below 25 nothing changed: a distant player is still a statistic.
     ok('biology 20 forty systems away is still excluded', assessThreat(far(20), me).reaches === false);
+
+    // The verdict also hands the modal the facts it words the row from.
+    ok('the verdict says a 25 sees the whole map, and which level that is',
+        whole.wholeMap === true && whole.wholeMapLevel === 25, whole);
+    ok('a 24 does not yet', short.wholeMap === false && short.wholeMapLevel === 25, short);
+    ok('an unscanned science ceiling of 25 is flagged too — the modal words it as "may"',
+        ceiling.wholeMap === true, ceiling);
+
+    // Position is irrelevant once the map is open, so the flag is set even where the verdict
+    // has to give up on placing the player — while `unknown` is left as it was.
+    const ghost = assessThreat({ name: 'Ghost', biology: 30 }, me);
+    const ghostLow = assessThreat({ name: 'Ghost', biology: 10 }, me);
+    ok('a 25+ we cannot place is still flagged whole-map', ghost.wholeMap === true && !!ghost.unknown, ghost);
+    ok('a low one we cannot place is not', ghostLow.wholeMap === false && !!ghostLow.unknown, ghostLow);
+    const noViewer = assessThreat(far(26), { origin_x: null, origin_y: null });
+    ok('nor does not knowing YOUR origin hide it', noViewer.wholeMap === true && !!noViewer.unknown, noViewer);
+    const noStats = assessThreat(at(2, { biology: null, science_level: null }), me);
+    ok('a player with no stats recorded is never flagged', noStats.wholeMap === false, noStats);
 }
 
 console.log('\n' + '─'.repeat(75));

@@ -14,11 +14,13 @@ import '../utils/social-hint.js';    // side-effect import: AWSocialHint, the Sc
 import '../utils/research-time.js';  // side-effect import: AWResearch, research time shared by the calculator and the Economy countdown
 import '../utils/fleet-launch-target-dossier.js'; // side-effect import: AWTargetDossier, the launch-form target-info render logic
 import '../utils/intel-freshness.js'; // side-effect import: AWIntelFreshness, which intel tables on a profile are live
+import '../utils/bio-reach.js';       // side-effect import: AWBioReach, the wording of each Biology threat row
 import { scrapeSystemById } from '../scrapers/system-parser.js';
 const { gameFetch } = globalThis.AWGameRate;
 const { formatSqliteUtc, formatLocalDateTime, parseTimestamp } = globalThis.AWSqliteTime;
 const LoginGaps = globalThis.AWLoginGaps;
 const SocialHint = globalThis.AWSocialHint;
+const BioReach = globalThis.AWBioReach;
 const Research = globalThis.AWResearch;
 const Tables = globalThis.AWTables;
 const { TRAIT_PCT } = globalThis.AWEmpire.constants;
@@ -643,27 +645,16 @@ function showBioThreatModal(title, players, levelKey, color) {
             // for a system we can see, so for distant players their biggest planet stands in
             // — right on every case we could check, but still an inference, and a list that
             // hides which rows are inferred invites more trust than it has earned.
+            // Not for a player at the whole-map level: where his origin is no longer matters.
             let note = '';
-            if (v.estimated) note = `<span title="Origin estimated from their largest planet — the game only shows a real origin for systems you can see" style="color:#888;font-size:10px;margin-left:6px;">~origin</span>`;
+            if (v.estimated && !v.wholeMap) note = `<span title="Origin estimated from their largest planet — the game only shows a real origin for systems you can see" style="color:#888;font-size:10px;margin-left:6px;">~origin</span>`;
 
-            // How far they are from seeing YOUR origin, spelled out per row.
-            //
-            // The gap is only honest when we know their actual biology. For an UNSCANNED
-            // player we do not: the radius used above is their science level, which is the
-            // ceiling biology could be at, not a reading of it. Saying "needs 3 more bio"
-            // there would be inventing the one number we lack, so those rows state the
-            // REQUIREMENT instead and leave the judgement to a reader who knows more.
-            const knownBio = Number.isFinite(Number(p.biology)) && Number(p.biology) > 0 && p.has_intel;
-            let reach;
-            if (v.unknown) {
-                reach = `<span title="${esc(v.unknown)}">position unknown</span>`;
-            } else if (knownBio && v.levelsAway > 0) {
-                reach = `<span style="color:#fb923c;">needs ${v.levelsAway} more bio to see your origin</span>`;
-            } else if (knownBio) {
-                reach = 'can see your origin';
-            } else {
-                reach = `needs bio ${v.required} to see your origin`;
-            }
+            // How far they are from seeing YOUR origin, spelled out per row. The wording —
+            // including what biology 25 (the whole map) changes, and why an unscanned player
+            // only gets a requirement — lives in utils/bio-reach.js, where it is tested.
+            const r = BioReach.describeReach(p);
+            const reachColor = { 'whole-map': '#f87171', closing: '#fb923c' }[r.tone];
+            const reach = `<span${r.title ? ` title="${esc(r.title)}"` : ''}${reachColor ? ` style="color:${reachColor};"` : ''}>${esc(r.text)}</span>`;
 
             return `<a href="/Game/Players/Profile/${p.player_id}" style="color:${color};text-decoration:none;display:block;padding:4px 0;border-bottom:1px solid #333;">
                 <span style="display:flex;justify-content:space-between;">
