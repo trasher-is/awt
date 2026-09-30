@@ -271,7 +271,7 @@ async function renderSystemView(sysId) {
                     const r = await fetch('/hub-api/sync/system', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(mapPlanetsToSyncPayload(sysId, res.data)),
+                        body: JSON.stringify({ ...mapPlanetsToSyncPayload(sysId, res.data), source: 'api-update' }),
                     });
                     const d = await r.json();
                     ok = !!d.success;
