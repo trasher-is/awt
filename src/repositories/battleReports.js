@@ -569,8 +569,71 @@ function getBattleLedgerRows() {
     return getBattleLedgerRowsStmt.all();
 }
 
+// ─── Per-battle stats snapshot (see the stats_snapshot_at comment in database.js) ────────────
+// Called once for the reports a sync has just inserted. What it records is whatever the hub
+// knows about each player RIGHT NOW, which for a freshly synced report is the closest the hub
+// can get to battle time; *_intel_at says how old that knowledge already was. Never touches a
+// row that already carries a snapshot, and is never run over old rows.
+const reportPlayersStmt = db.prepare(`
+    SELECT att_player_id, def_player_id FROM battle_reports WHERE id = ? AND stats_snapshot_at IS NULL
+`);
+const playerStatsStmt = db.prepare(`
+    SELECT has_intel, race_attack, race_defense, physics, mathematics, level, intel_updated_at
+    FROM players WHERE id = ?
+`);
+const snapshotStmt = db.prepare(`
+    UPDATE battle_reports SET
+        stats_snapshot_at = CURRENT_TIMESTAMP,
+        att_race_attack = @att_race_attack, att_race_defense = @att_race_defense,
+        att_physics = @att_physics, att_mathematics = @att_mathematics,
+        att_player_level = @att_player_level, att_intel_at = @att_intel_at,
+        def_race_attack = @def_race_attack, def_race_defense = @def_race_defense,
+        def_physics = @def_physics, def_mathematics = @def_mathematics,
+        def_player_level = @def_player_level, def_intel_at = @def_intel_at
+    WHERE id = @id AND stats_snapshot_at IS NULL
+`);
+
+// A player with no intel (or no row at all) yields NULLs, not zeros: 0 is a legitimate race
+// level and a legitimate science level, and "never observed" must stay distinguishable.
+function sideStats(side, playerId) {
+    const none = {
+        [`${side}_race_attack`]: null, [`${side}_race_defense`]: null, [`${side}_physics`]: null,
+        [`${side}_mathematics`]: null, [`${side}_player_level`]: null, [`${side}_intel_at`]: null,
+    };
+    if (!Number.isInteger(playerId)) return none;
+    const p = playerStatsStmt.get(playerId);
+    if (!p || p.has_intel !== 1) return none;
+    return {
+        [`${side}_race_attack`]: p.race_attack, [`${side}_race_defense`]: p.race_defense,
+        [`${side}_physics`]: p.physics, [`${side}_mathematics`]: p.mathematics,
+        [`${side}_player_level`]: p.level, [`${side}_intel_at`]: p.intel_updated_at || null,
+    };
+}
+
+// Runs inside the /sync/battle-reports request, so it must never throw: a failed diagnostic
+// capture may not cost a member's battle sync (the report is already stored; it just keeps a
+// NULL snapshot, the same as a legacy row). Returns how many reports were captured.
+function snapshotStatsForReports(ids) {
+    let captured = 0;
+    try {
+        db.transaction((list) => {
+            for (const id of list) {
+                const r = reportPlayersStmt.get(id);
+                if (!r) continue;
+                captured += snapshotStmt.run({
+                    id, ...sideStats('att', r.att_player_id), ...sideStats('def', r.def_player_id),
+                }).changes;
+            }
+        })(Array.isArray(ids) ? ids : []);
+    } catch (err) {
+        console.error('[BattleStats] snapshot failed:', err.message);
+    }
+    return captured;
+}
+
 module.exports = {
     deleteAllBattleReports,
+    snapshotStatsForReports,
     getPendingAnnouncements,
     markAnnounced,
     getNewestStartedAt,

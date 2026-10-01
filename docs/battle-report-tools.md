@@ -85,7 +85,10 @@ formula. The live [GameOptions](https://astrowars.games/About/GameOptions), chec
 artefacts (`CombatArtefacts=False`).
 
 Reports do not record historical sciences or player levels, and the hub keeps only
-current values, not their history (#277). Using today's values as the values at an older
+current values, not their history (#277). (Reports stored from 2026-10-01 on carry a
+snapshot of both sides' stats, see [the stats
+snapshot](battle-model.md#per-battle-stats-snapshot); this inference does not use it yet,
+and older reports have none.) Using today's values as the values at an older
 battle would create false precision. The inference therefore measures each report against
 a **known side** and treats the player's own historical stats as unknowns under ceilings:
 

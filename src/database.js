@@ -1026,6 +1026,30 @@ function initDatabase() {
     // getReportsNeedingLocationBackfill/markLocationBackfillAttempted.
     addColumn('battle_reports', 'location_backfill_attempted_at', 'DATETIME');
 
+    // Each side's race and science as the hub knew them when the report was first stored
+    // (2026-10-01). The model inputs a battle needs — race attack/defense, physics,
+    // mathematics, player level — are not on the report, and the players table only holds
+    // the CURRENT value: physics and maths climb several levels in a day or two, so a
+    // report read a day later cannot be replayed through the real in-game calculator with any
+    // confidence. Captured once, right after the insert (never overwritten, never backfilled
+    // onto older rows: today's stats are not the battle's).
+    //   stats_snapshot_at   set when the capture ran. NULL = a legacy row, never captured.
+    //   *_race_* / physics / mathematics / player_level
+    //                       the player's intel values. NULL = no intel on that player at
+    //                       capture time (a real 0 is stored as 0, never as NULL).
+    //   *_intel_at          players.intel_updated_at at capture: how old the read was.
+    //                       Sciences only rise, so a read from before the battle is a lower
+    //                       bound and one from after it an upper bound.
+    addColumn('battle_reports', 'stats_snapshot_at', 'DATETIME');
+    for (const side of ['att', 'def']) {
+        addColumn('battle_reports', `${side}_race_attack`, 'INTEGER');
+        addColumn('battle_reports', `${side}_race_defense`, 'INTEGER');
+        addColumn('battle_reports', `${side}_physics`, 'INTEGER');
+        addColumn('battle_reports', `${side}_mathematics`, 'INTEGER');
+        addColumn('battle_reports', `${side}_player_level`, 'INTEGER');
+        addColumn('battle_reports', `${side}_intel_at`, 'TEXT');
+    }
+
     // --- NEWS-PAGE INGESTION ---
     // Populated by each member's own /Game/News feed (client-side scrape, POSTed through
     // /sync/news). Exists because an undefended-planet conquest or bombardment produces no
