@@ -293,6 +293,45 @@ Nothing renders the column today, so nothing is currently lying to anyone. It mu
 wired to a "win chance" label later. `!price check` re-runs all three checks against live
 rows, so this section can be verified rather than believed.
 
+### Per-battle stats snapshot
+
+The inputs a battle needs beyond its ship counts (race attack and defense, Physics,
+Mathematics, player level) are not on the report, and `players` only holds the **current**
+value. Physics and Mathematics can climb several levels in a day or two, so a report read
+a day later cannot be replayed through the real in-game calculator with any confidence.
+Reports stored from 2026-10-01 on therefore carry a snapshot of both sides, taken in the
+same request that first stores them:
+
+| Column | Meaning |
+|---|---|
+| `stats_snapshot_at` | When the capture ran. **NULL = a legacy row**, never captured and never backfilled |
+| `att_race_attack`, `att_race_defense`, `att_physics`, `att_mathematics`, `att_player_level` (and `def_…`) | The player's intel values at capture. **NULL = no intel on that player then**; a real `0` is stored as `0` |
+| `att_intel_at`, `def_intel_at` | `players.intel_updated_at` at capture: how old the read already was |
+
+Reading it:
+
+- It is captured when the report is *synced*, normally minutes after the battle, not at
+  battle time. Compare `*_intel_at` with `started_at`: sciences and level only rise, so a
+  read from before the battle is a lower bound and one from after it an upper bound.
+- Race attack and defense never change, so they are exact whenever present.
+- The stamp dates the intel read. It does not promise that every science inside was
+  re-read then, so a large gap is a reason for caution and a small one is not a guarantee.
+- Old rows stay NULL on purpose: today's stats are not the stats of a battle last week.
+- Nothing consumes the snapshot yet. It exists so battles can be checked against the
+  real calculator while their stats are still known:
+
+```sql
+-- Reports with both sides' stats captured, newest first, with the calculator inputs
+SELECT id, started_at, winner, random_number, att_luckiness,
+       att_destroyers, att_cruisers, att_battleships,
+       def_destroyers, def_cruisers, def_battleships, def_starbases,
+       att_race_attack, att_physics, att_mathematics, att_player_level, att_intel_at,
+       def_race_attack, def_physics, def_mathematics, def_player_level, def_intel_at
+FROM battle_reports
+WHERE stats_snapshot_at IS NOT NULL AND att_physics IS NOT NULL AND def_physics IS NOT NULL
+ORDER BY id DESC;
+```
+
 ### Race evidence runs the survivor model backwards
 
 The battle-report race card (`src/utils/battle-race-inference.js`,

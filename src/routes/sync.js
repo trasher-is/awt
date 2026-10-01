@@ -1587,6 +1587,12 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
     try {
         const { inserted, skipped } = upsertReports(db, rows);
 
+        // Both sides' race and science as the hub knows them right now — the closest it gets
+        // to battle time, and the only inputs that let a report be checked against the real
+        // in-game calculator later. Only for reports inserted just now (see the
+        // stats_snapshot_at comment in database.js); it cannot fail the sync.
+        battleReportsRepo.snapshotStatsForReports(inserted.map(r => r.id));
+
         // Planet and ship detail now ride along on the search response (the game's
         // BattleReport change) — store them here so the page sweep never has to fetch
         // /About/BattleReport/{id} for these. A no-op for reports without the fields (the
