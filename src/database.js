@@ -1377,6 +1377,21 @@ function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_population_trace_planet  ON population_trace(system_id, planet_index, id);
         CREATE INDEX IF NOT EXISTS idx_population_trace_created ON population_trace(created_at);
     `);
+    // Siege state around each change (2026-10-02). Two planets of one player each lost one
+    // population in a single read while a hostile siege sat on both, and nothing recorded
+    // whether the siege had begun in that same read or hours earlier. planets only holds the
+    // current flag, so the answer has to be written down when the change happens:
+    //   sieged_before / siege_friendly_before   what the hub held before this read
+    //   sieged_after  / siege_friendly_after    what it holds after it
+    //   siege_attacker                          the besieger's name, when a live page named one
+    // sieged_* is 0/1; *_friendly is 1 friendly, 0 hostile, NULL = not settled (the API's
+    // hasSiege is also true for a friendly fleet in orbit). NULL everywhere = a row written
+    // before this existed.
+    addColumn('population_trace', 'sieged_before', 'INTEGER');
+    addColumn('population_trace', 'siege_friendly_before', 'INTEGER');
+    addColumn('population_trace', 'sieged_after', 'INTEGER');
+    addColumn('population_trace', 'siege_friendly_after', 'INTEGER');
+    addColumn('population_trace', 'siege_attacker', 'TEXT');
 
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();

@@ -170,9 +170,24 @@ router.post('/sync/system', requireAuth, (req, res) => {
         const at = parseSqliteUtc(observedAt);
         return at ? Math.round(((Date.now() - at.getTime()) / 3600000) * 100) / 100 : null;
     };
-    const tracePopulation = (outcome, planetIndex, ownerId, oldPop, claimedPop, storedPop, hoursSinceChange) =>
+    // Siege state around the change: what the hub held before this read and what it holds
+    // after it, plus the besieger's name when the page named one. A planet losing population
+    // while under a hostile siege, or in the very read that first shows the siege, is the
+    // pattern worth being able to see (2026-10-02: two planets of one player each lost one
+    // population in a single read while a hostile siege sat on both, and the hub had no record
+    // of when that siege began). NULL = not known: the flag is NULL on a never-seen planet and
+    // the allegiance is NULL until a live page read settles it (the API's hasSiege is also true
+    // for a friendly fleet in orbit).
+    const traceSiege = (oldP, isSieged, siegeIsFriendly, attackerName) => ({
+        sieged_before: oldP && oldP.is_sieged != null ? oldP.is_sieged : null,
+        siege_friendly_before: oldP && oldP.siege_is_friendly != null ? oldP.siege_is_friendly : null,
+        sieged_after: isSieged != null ? (isSieged ? 1 : 0) : null,
+        siege_friendly_after: siegeIsFriendly != null ? siegeIsFriendly : null,
+        siege_attacker: isSieged && typeof attackerName === 'string' && attackerName ? attackerName.slice(0, 64) : null,
+    });
+    const tracePopulation = (outcome, planetIndex, ownerId, oldPop, claimedPop, storedPop, hoursSinceChange, siege) =>
         populationTraceRepo.recordPopulationChange({
-            ...traceContext, outcome, system_id, planet_index: planetIndex, owner_id: ownerId,
+            ...traceContext, ...siege, outcome, system_id, planet_index: planetIndex, owner_id: ownerId,
             old_pop: oldPop, claimed_pop: claimedPop, stored_pop: storedPop,
             hours_since_change: Number.isFinite(hoursSinceChange) ? hoursSinceChange : null,
         });
@@ -323,7 +338,8 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 // the moment a figure the game never showed could enter unnoticed — the drop
                 // that later corrects it is all planet_events ever saw.
                 tracePopulation(refused ? 'rise_rejected' : 'rise', p.planet_index, finalOwnerId,
-                    oldP.population, claimedPopulation, finalPopulation, hoursSinceLastPopObserved);
+                    oldP.population, claimedPopulation, finalPopulation, hoursSinceLastPopObserved,
+                    traceSiege(oldP, finalIsSieged, finalSiegeIsFriendly, p.siege_attacker_name));
             }
 
             if (oldP && !p.vision_uncertain) {
@@ -430,7 +446,8 @@ router.post('/sync/system', requireAuth, (req, res) => {
                         systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, newPop); // 2 = POP_DROP
                         // hours_since_change here is how long the figure being lost had stood.
                         tracePopulation('drop', p.planet_index, oldP.owner_id, oldPop, newPop, newPop,
-                            traceHoursSince(oldP.population_observed_at));
+                            traceHoursSince(oldP.population_observed_at),
+                            traceSiege(oldP, finalIsSieged, finalSiegeIsFriendly, p.siege_attacker_name));
                         // updated_at also advances on uncertain/fog syncs. It is a
                         // conservative lower bound, not proof of a fresh observation:
                         // if it excludes a real battle, leave attribution unknown.
