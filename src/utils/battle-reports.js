@@ -181,12 +181,13 @@ function formatBattleEmbed(row) {
 // dig out. mapApiDetail turns them into the exact columns that parser fills, so the
 // detail sweep can skip the page for reports the API already describes in full.
 //
-// The shipType strings have not been observed yet (the search endpoint needs a session),
-// so they are matched loosely ("Colony Ship", "ColonyShip", "colony_ships" all work) and
-// ONE unrecognised type makes `ships` null: the report then keeps its page fetch rather
-// than being marked done with a hole in it. The page shows every ship row, 0 included,
-// so a type the API leaves out is 0; the attacker's Starbase cells are blank on the page,
-// so att_starbases stays null. win_chance is not produced — it is the dice roll the page
+// The shipType strings are matched loosely ("Colony Ship", "ColonyShip", "colony_ships" all
+// work) and ONE unrecognised type makes `ships` null: the report then keeps its page fetch
+// rather than being marked done with a hole in it. The first real response (2026-10-02)
+// spelled them Destroyer, Cruiser, Battleship, Transport, Colony Ship, all five every time
+// (zero rows included); starbaseStats.amount is the starbase LEVEL. The page shows every
+// ship row, 0 included, so a type the API leaves out is 0; an attacker cannot bring a
+// starbase (API: starbaseStats null, page: blank cell), so att_starbases stays null. win_chance is not produced — it is the dice roll the page
 // prints (see battle-ledger.js), and random_number already stores the API's own value.
 const API_SHIP_COLS = {
     destroyer: 'destroyers', cruiser: 'cruisers', battleship: 'battleships',

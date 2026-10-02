@@ -112,17 +112,24 @@ function defenseObservation(report, playerId, notBefore, { subject, opponents })
         return { skip: 'not_confirmed_winner' };
     }
 
+    // An attacker cannot bring a starbase, so the API sends `starbaseStats: null` for it and
+    // the report page leaves the cell blank: the hub stores att_starbases as NULL, never 0
+    // (every stored row). Read that as the zero it means. A non-zero value is still
+    // rejected below as an impossible composition.
+    const shipCount = (side, ship) => (side === 'att' && ship === 'starbases' && report.att_starbases == null
+        ? 0 : report[`${side}_${ship}`]);
+
     const fleets = {};
     for (const side of SIDES) {
         fleets[side] = battleModel.SHIPS.map(ship => report[`${side}_${ship.key}`]);
         if (fleets[side].some(value => !count(value))
-            || AUXILIARY_SHIPS.some(ship => !count(report[`${side}_${ship}`]))) {
+            || AUXILIARY_SHIPS.some(ship => !count(shipCount(side, ship)))) {
             return { skip: 'missing_ship_counts' };
         }
         // Civilian ships have separate post-battle rules, and an attacker cannot bring a
         // starbase. Either one keeps the report out of this fleet inference.
         if (CIVILIAN_SHIPS.some(ship => report[`${side}_${ship}`] !== 0)
-            || (side === 'att' && report.att_starbases !== 0)) {
+            || (side === 'att' && shipCount('att', 'starbases') !== 0)) {
             return { skip: 'unsupported_ship_composition' };
         }
     }

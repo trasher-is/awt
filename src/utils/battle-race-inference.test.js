@@ -214,6 +214,19 @@ skipped('a starbase CV that matches no level is inconsistent',
     { ...synth({ subjectFleet: [1500, 0, 0], enemyFleet: [300, 0, 0], sbLevel: 7 }), def_combat_value: 900 + 63 },
     'inconsistent_combat_value');
 skipped('an attacking starbase is not a real composition', { ...synth(), att_starbases: 1 }, 'unsupported_ship_composition');
+// Real rows never hold 0 here: the API sends starbaseStats null for an attacker and the report
+// page leaves the cell blank, so the hub stores NULL. synth() writes 0, which hid this.
+const attStarbaseZero = infer([synth()]);
+for (const [label, value] of [['NULL', null], ['absent', undefined]]) {
+    const row = { ...synth(), att_starbases: value, att_starbases_lost: value };
+    if (value === undefined) { delete row.att_starbases; delete row.att_starbases_lost; }
+    const result = infer([row]);
+    ok(`an attacker's ${label} starbase count, as the hub stores it, means none and stays eligible`,
+        result.eligible_report_count === 1 && !result.skipped.missing_ship_counts
+        && equal(result.defense, attStarbaseZero.defense), result);
+}
+skipped('a defender\'s NULL starbase count is still unknown: only the attacker\'s NULL means none',
+    { ...synth(), def_starbases: null }, 'missing_ship_counts');
 skipped('civilian-fleet mechanics are excluded', { ...synth(), att_transports: 1 }, 'unsupported_ship_composition');
 skipped('colony ships are excluded', { ...synth(), def_colony_ships: 2 }, 'unsupported_ship_composition');
 
