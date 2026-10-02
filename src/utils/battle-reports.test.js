@@ -11,7 +11,8 @@ const fs = require('fs');
 const os = require('os');
 const Database = require('better-sqlite3');
 
-const { mapApiReport, upsertReports, formatBattleEmbed } = require('./battle-reports');
+const { mapApiReport, mapApiDetail, upsertReports, formatBattleEmbed } = require('./battle-reports');
+const battleModel = require('../../public/js/utils/battle-model');
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail) => {
@@ -95,6 +96,66 @@ const cleanup = [];
             row.att_combat_value === 12000 && row.att_survived_cv === 9000 && row.att_lost_cv === 3000
             && row.att_pct_cv_lost === 25 && row.att_xp_gained === 340 && row.att_level_gained === 1, row);
         ok('luckiness stays a real', row.att_luckiness === 1.05 && row.def_luckiness === 0.97, row);
+    }
+
+    console.log('\n── The live BattleReport shape with planet + ship detail ' + '─'.repeat(19));
+    // Same structure as the first real response of the game's BattleReport change (2026-10-02):
+    // every key, the five shipType spellings in the game's order with zero rows included, a
+    // null starbaseStats for the attacker, planetId/planetName beside solarSystemId/planetIndex,
+    // two-decimal percentage. Names, ids and the planet are invented (public repository);
+    // the combat numbers are chosen so the CV arithmetic is the game's own — see below.
+    {
+        const shipRows = (destroyers, lost) => [
+            ['Destroyer', destroyers, lost], ['Cruiser', 0, 0], ['Battleship', 0, 0], ['Transport', 0, 0], ['Colony Ship', 0, 0],
+        ].map(([shipType, amount, l]) => ({ amount, lost: l, shipType, survived: amount - l }));
+        const live = {
+            id: 8101, startedAt: '2026-10-03T14:20:00+02:00', isPublic: false, winner: 'Defender',
+            conqueredPlanet: false, killedPopulation: 0,
+            planetId: 9001, planetIndex: 12, planetName: 'Synth Star #12', solarSystemId: 7,
+            randomNumber: 4.2100,
+            attacker: {
+                allianceId: 11, allianceTag: 'ATK', combatValue: 72, experiencePointsGained: 0, hasWon: false,
+                lostCombatValue: 72, luckiness: 0.00, percentageCombatValueLost: 100.0, playerId: 5001,
+                playerLevelGained: 0, playerName: 'Synth Attacker', survivedCombatValue: 0,
+                shipTypeStats: shipRows(24, 24), starbaseStats: null,
+            },
+            defender: {
+                allianceId: 22, allianceTag: 'DEF', combatValue: 227, experiencePointsGained: 72, hasWon: true,
+                lostCombatValue: 77, luckiness: 0.00, percentageCombatValueLost: 33.9200, playerId: 5002,
+                playerLevelGained: 0, playerName: 'Synth Defender', survivedCombatValue: 150,
+                shipTypeStats: shipRows(0, 0), starbaseStats: { amount: 10, lost: 1, survived: 9 },
+            },
+        };
+        const row = mapApiReport(live);
+        const detail = mapApiDetail(live);
+
+        ok('the live shape still maps its report columns',
+            row.id === 8101 && row.winner === 'Defender' && row.random_number === 4.21
+            && row.att_has_won === 0 && row.def_has_won === 1 && row.def_pct_cv_lost === 33.92, row);
+        ok('location comes from solarSystemId/planetIndex', detail && detail.location
+            && detail.location.system_id === 7 && detail.location.planet_index === 12, detail);
+        ok('all five real shipType spellings are recognised, so the detail is complete (ships not null)',
+            detail && detail.ships !== null, detail);
+        ok('attacker ship counts and losses', detail.ships.att_destroyers === 24 && detail.ships.att_destroyers_lost === 24
+            && detail.ships.att_cruisers === 0 && detail.ships.att_battleships === 0
+            && detail.ships.att_transports === 0 && detail.ships.att_colony_ships === 0
+            && detail.ships.att_colony_ships_lost === 0, detail.ships);
+        ok('defender ship rows of zero stay zero', detail.ships.def_destroyers === 0 && detail.ships.def_colony_ships === 0, detail.ships);
+        ok('the defender starbase is stored as amount/lost',
+            detail.ships.def_starbases === 10 && detail.ships.def_starbases_lost === 1, detail.ships);
+        ok('an attacker cannot bring a starbase, so null starbaseStats leaves its columns NULL',
+            detail.ships.att_starbases === null && detail.ships.att_starbases_lost === null, detail.ships);
+        ok('each side\'s survived + lost CV equals its combat value',
+            [live.attacker, live.defender].every(s => s.survivedCombatValue + s.lostCombatValue === s.combatValue));
+        // starbaseStats.amount is the starbase LEVEL, not a count: level 10 is CV 227, the
+        // level it dropped to (9) is CV 150, and the 77 CV it lost is the difference.
+        ok('starbaseStats.amount is a level: the game\'s starbase CV table reproduces the defender\'s CV',
+            battleModel.sbCV(10) === live.defender.combatValue && battleModel.sbCV(9) === live.defender.survivedCombatValue
+            && battleModel.sbCV(10) - battleModel.sbCV(9) === live.defender.lostCombatValue,
+            [battleModel.sbCV(9), battleModel.sbCV(10)]);
+        // NOT asserted: what a defender WITHOUT a starbase sends (null, or amount 0). The
+        // page sweep stores 0 for it; mapApiDetail would store NULL for null. Add a case
+        // here once a real response of that kind has been seen.
     }
 
     console.log('\n── Regression: attacker/defender keys, not the guessed firstParty/secondParty ' + '─'.repeat(3));
