@@ -14,7 +14,7 @@ const fleetsRepo = require('../repositories/fleets');
 const playersRepo = require('../repositories/players');
 const alliancesRepo = require('../repositories/alliances');
 const settingsRepo = require('../repositories/settings');
-const { mapApiReport, mapApiDetail, upsertReports, formatBattleEmbed } = require('../utils/battle-reports');
+const { mapApiReport, mapApiDetail, upsertReports, publishReports, formatBattleEmbed } = require('../utils/battle-reports');
 const battleReportsRepo = require('../repositories/battleReports');
 const newsEventsRepo = require('../repositories/newsEvents');
 const { resolveBombardmentCredit } = require('../utils/news-battle-matching');
@@ -1604,6 +1604,11 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
     try {
         const { inserted, skipped } = upsertReports(db, rows);
 
+        // A report is published at the game's daily reset; one stored from an earlier pull that
+        // day is still is_public=0 here, and the insert above never touches a row it holds.
+        // Raise the flag (only ever up) for the ones the API now says are public.
+        const published = publishReports(db, rows);
+
         // Both sides' race and science as the hub knows them right now — the closest it gets
         // to battle time, and the only inputs that let a report be checked against the real
         // in-game calculator later. Only for reports inserted just now (see the
@@ -1723,7 +1728,7 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
         settingsRepo.setSetting('battle_sync_last_run_at', new Date().toISOString());
         settingsRepo.setSetting('battle_sync_last_inserted_count', String(inserted.length));
 
-        res.json({ success: true, inserted: inserted.length, skipped, detail_from_api: detailFromApi, newest_started_at: newest });
+        res.json({ success: true, inserted: inserted.length, skipped, published: published.length, detail_from_api: detailFromApi, newest_started_at: newest });
     } catch (err) {
         console.error('[DB Error] Battle report sync failed:', err);
         res.status(500).json({ error: 'Database sync failed' });

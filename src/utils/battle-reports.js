@@ -122,6 +122,26 @@ function upsertReports(db, rows) {
     return { inserted, skipped };
 }
 
+/**
+ * Raise is_public from 0/NULL to 1 on reports the hub already holds. A report is published
+ * at the game's daily reset, so a pull made earlier that day stores it as not public, and
+ * the INSERT OR IGNORE above would keep that 0 for good (checked 2026-10-02: the API says
+ * public for reports we still held as 0). Upgrade only: a stored 1 is never lowered, and
+ * nothing but the flag is touched — every other column of a published report matched the
+ * stored row when compared. Never inserts: an id the hub does not hold is left alone.
+ * @returns {number[]} ids whose flag actually changed (a re-sync of settled rows returns []).
+ */
+function publishReports(db, rows) {
+    const stmt = db.prepare('UPDATE battle_reports SET is_public = 1 WHERE id = ? AND (is_public IS NULL OR is_public = 0)');
+    const changed = [];
+    db.transaction((batch) => {
+        for (const row of batch) {
+            if (row.is_public === 1 && stmt.run(row.id).changes > 0) changed.push(row.id);
+        }
+    })(rows);
+    return changed;
+}
+
 // One label for a side: "[TAG] Name", falling back through what is known. Player names
 // and tags are player-controlled strings — the CALLER passes them through defuseMentions
 // before this ever runs (see /sync/battle-reports).
@@ -241,4 +261,4 @@ function mapApiDetail(api) {
     return { location, ships };
 }
 
-module.exports = { mapApiReport, mapApiDetail, upsertReports, formatBattleEmbed };
+module.exports = { mapApiReport, mapApiDetail, upsertReports, publishReports, formatBattleEmbed };
