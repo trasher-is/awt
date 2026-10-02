@@ -10,15 +10,22 @@ let lastPruneAt = 0;
 const insertStmt = db.prepare(`
     INSERT INTO population_trace
         (system_id, planet_index, owner_id, outcome, old_pop, claimed_pop, stored_pop,
-         hours_since_change, source, observation, captured_at, actor_user_id, actor_game_name)
+         hours_since_change, source, observation, captured_at, actor_user_id, actor_game_name,
+         sieged_before, siege_friendly_before, sieged_after, siege_friendly_after, siege_attacker)
     VALUES
         (@system_id, @planet_index, @owner_id, @outcome, @old_pop, @claimed_pop, @stored_pop,
-         @hours_since_change, @source, @observation, @captured_at, @actor_user_id, @actor_game_name)
+         @hours_since_change, @source, @observation, @captured_at, @actor_user_id, @actor_game_name,
+         @sieged_before, @siege_friendly_before, @sieged_after, @siege_friendly_after, @siege_attacker)
 `);
 const lastForPlanetStmt = db.prepare(`
-    SELECT outcome, old_pop, claimed_pop, source, actor_user_id
+    SELECT outcome, old_pop, claimed_pop, source, actor_user_id, sieged_after, siege_friendly_after
     FROM population_trace WHERE system_id = ? AND planet_index = ? ORDER BY id DESC LIMIT 1
 `);
+// A caller that has no siege context (an older call site, a test) still writes the row.
+const NO_SIEGE = {
+    sieged_before: null, siege_friendly_before: null, sieged_after: null,
+    siege_friendly_after: null, siege_attacker: null,
+};
 const pruneStmt = db.prepare(`DELETE FROM population_trace WHERE created_at < datetime('now', ?)`);
 const forPlanetStmt = db.prepare(`
     SELECT * FROM population_trace WHERE system_id = ? AND planet_index = ? ORDER BY id DESC LIMIT ?
@@ -26,20 +33,24 @@ const forPlanetStmt = db.prepare(`
 
 // A refused rise repeats on every scan until the regrowth window passes (a stale source
 // re-sends the same number every few minutes), so an identical refusal from the same
-// source and member as the row before it adds nothing. Accepted rises and drops change the
+// source and member as the row before it adds nothing — unless the siege state changed in
+// between, which is new information about the same claim. Accepted rises and drops change the
 // stored value, so they can never repeat and are always written.
 function isRepeatOfLast(row) {
     if (row.outcome !== 'rise_rejected') return false;
     const last = lastForPlanetStmt.get(row.system_id, row.planet_index);
     return !!last && last.outcome === row.outcome && last.old_pop === row.old_pop
         && last.claimed_pop === row.claimed_pop && last.source === row.source
-        && last.actor_user_id === row.actor_user_id;
+        && last.actor_user_id === row.actor_user_id
+        && last.sieged_after === row.sieged_after
+        && last.siege_friendly_after === row.siege_friendly_after;
 }
 
 // Runs inside /sync/system's transaction, so it must never throw: a failed diagnostic write
 // may not cost a member's whole system sync. Errors are logged and swallowed.
-function recordPopulationChange(row) {
+function recordPopulationChange(input) {
     try {
+        const row = { ...NO_SIEGE, ...input };
         if (isRepeatOfLast(row)) return;
         insertStmt.run(row);
         const now = Date.now();
