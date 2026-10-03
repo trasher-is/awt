@@ -1,5 +1,8 @@
 # New player guide
 
+> Brand new? Start with [Getting started](getting-started.md), a short first-hours version.
+> This page is the longer reference.
+
 This is a plain-language walkthrough of AstroWars for players who are new to the game or new
 to this alliance's tools. It's ordered the way you'll actually encounter things, not by game
 menu. For exact numbers and formulas, this guide links out to
