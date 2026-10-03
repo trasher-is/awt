@@ -171,6 +171,25 @@ inserted column silently shifted every value.
 `AWScrape` exists so a scraper that finds nothing says so loudly instead of writing
 zeroes.
 
+### Members can switch extras and sidebar tools off
+
+Every sidebar tool button and every game-page extra is listed once, with its default, in
+`public/js/utils/hub-settings.js` (global `AWHubSettings`); the Settings panel, the sidebar
+and the server's `/hub-api/settings` all read that list. A member's choices are stored per
+account in `app_users.ui_settings` as only the differences from the defaults.
+
+- **A new sidebar tool**: add its button to `Wrapper.html` and an entry to `TOOLS`. A test
+  fails if an `open-*-btn` button is not in the catalogue, because it could never be hidden.
+- **A new game-page extra**: add it to `INJECTIONS` and gate its call in `runViewHooks()`
+  (`public/js/core/spy.js`) with `enabled('inject.…')` on the same line. A test fails on a
+  hook that is neither gated nor on the short, named list of data feeds.
+- **Do not gate what feeds the alliance's shared data** (map indicators, the News-page
+  incoming-fleet tools and battle-event scrape, the research scrape). Those are not
+  preferences, and the Settings panel says so.
+- Settings, Link Discord and Logout are never in the catalogue: they cannot be hidden.
+- `/settings` is on the guest `SAFE_POST_PATHS` allowlist because it writes only the
+  caller's own row. Do not widen that list for anything that touches shared data.
+
 ### Where things live
 
 | Path | What lives there |

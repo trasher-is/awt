@@ -15,6 +15,7 @@ router.use(require('./sync'));
 router.use(require('./admin'));
 router.use(require('./intel'));
 router.use(require('./unicorn'));
+router.use(require('./userSettings'));
 router.use(require('./battleRace'));
 router.use(require('./trade'));
 router.use(require('./roadToTa'));
