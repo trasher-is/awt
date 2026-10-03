@@ -18,12 +18,117 @@ const { isStaleCapture } = globalThis.AWCaptureFreshness;
 
 const SECTOR_BOUNDS = { x1: -40, y1: -40, x2: 40, y2: 40 }; // known map bounds ~-32..32, padded
 
+// ─── SCAN LOG (diagnostics) ────────────────────────────────────────────────────
+// Each scan reports one summary row to the hub (POST /hub-api/sync/scan-run -> galaxy_scan_runs) and
+// stamps every system it posts with a run id and the age of its data. Why: two hubs recorded phantom
+// population drops (a read one level low right after a growth tick) and nothing could say whether the
+// browser cache, a cache in front of the game, a payload posted long after it was fetched, a throttled
+// tab or a freshly opened one was to blame. See src/utils/scan-run.js for what each field answers.
+// Everything here is best effort: it can never fail, delay or alter a scan.
+let runCounter = 0; // scans started by THIS document; 0 is the first since the tab loaded
+
+function clock() {
+    return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+}
+
+// randomUUID only exists in secure contexts (https): elsewhere it is absent, not a throw.
+function makeRunId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+}
+
+// "Hidden at any moment during the run": a hidden tab has its timers throttled and can be frozen.
+function watchVisibility() {
+    const hasDocument = typeof document !== 'undefined';
+    const hiddenAtStart = hasDocument && document.visibilityState === 'hidden';
+    let wentHidden = hiddenAtStart;
+    const onChange = () => { if (document.visibilityState === 'hidden') wentHidden = true; };
+    if (hasDocument) document.addEventListener('visibilitychange', onChange);
+    return {
+        hiddenAtStart,
+        wentHidden: () => wentHidden,
+        stop: () => { if (hasDocument) document.removeEventListener('visibilitychange', onChange); },
+    };
+}
+
+function createRunContext(opts) {
+    return {
+        runId: makeRunId(),
+        runIndex: runCounter++,
+        trigger: opts && opts.trigger === 'auto' ? 'auto' : 'manual',
+        startedAt: clock(),
+        watch: watchVisibility(),
+        fetchedAt: null, meta: null,
+        systemsTotal: 0, systemsPosted: 0, planetsPosted: 0, inVision: 0,
+        postCount: 0, postMsTotal: 0, postMsMax: 0,
+    };
+}
+
+function reportScanRun(ctx, result) {
+    try {
+        const meta = ctx.meta || {};
+        const body = {
+            run_id: ctx.runId,
+            trigger: ctx.trigger,
+            result: result && result.ok ? 'ok' : 'error',
+            error: result && !result.ok ? String(result.error || '').slice(0, 200) : null,
+            tab_age_s: Math.round(clock() / 1000),
+            run_index: ctx.runIndex,
+            hidden_at_start: ctx.watch.hiddenAtStart,
+            went_hidden: ctx.watch.wentHidden(),
+            systems_total: ctx.systemsTotal,
+            systems_posted: ctx.systemsPosted,
+            planets_posted: ctx.planetsPosted,
+            in_vision: ctx.inVision,
+            duration_ms: Math.round(clock() - ctx.startedAt),
+            fetch_ms: meta.fetch_ms !== undefined ? meta.fetch_ms : null,
+            post_ms_avg: ctx.postCount ? Math.round(ctx.postMsTotal / ctx.postCount) : null,
+            post_ms_max: ctx.postCount ? Math.round(ctx.postMsMax) : null,
+            response_status: meta.status !== undefined ? meta.status : null,
+            cache_state: meta.cache_state || 'unknown',
+            transfer_size: meta.transfer_size !== undefined ? meta.transfer_size : null,
+            encoded_body_size: meta.encoded_body_size !== undefined ? meta.encoded_body_size : null,
+            delivery_type: meta.delivery_type !== undefined ? meta.delivery_type : null,
+            // A duration, not a timestamp, so this browser's clock never matters to the server.
+            fetched_ago_ms: ctx.fetchedAt !== null ? Math.round(clock() - ctx.fetchedAt) : null,
+            headers: meta.headers || {},
+        };
+        fetch('/hub-api/sync/scan-run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            keepalive: true,
+        }).catch(() => {});
+    } catch (err) {
+        // Never breaks a scan, but never silent either: a scan path that swallows errors lets a
+        // partial scan look successful (see scrape-report.js).
+        console.warn('[GalaxyScanLog] could not report this scan:', err && err.message);
+    }
+}
+
 // onProgress(status, current, total) — current/total are 0 for indeterminate steps (the
 // initial fetch, the index POST) and reflect systems-processed-so-far during the per-
-// system planet loop.
-export async function seedGalaxyFromApi(onProgress = () => {}) {
+// system planet loop. opts.trigger is 'auto' for the background tick, 'manual' (the default)
+// for a button.
+export async function seedGalaxyFromApi(onProgress = () => {}, opts = {}) {
+    const ctx = createRunContext(opts);
+    try {
+        const result = await runSeed(onProgress, ctx);
+        reportScanRun(ctx, result);
+        return result;
+    } catch (err) {
+        reportScanRun(ctx, { ok: false, error: err && err.message });
+        throw err;
+    } finally {
+        ctx.watch.stop();
+    }
+}
+
+async function runSeed(onProgress, ctx) {
     onProgress('Asking the game for the map sectors…', 0, 0);
-    const res = await AWApi.getMapSectors(SECTOR_BOUNDS);
+    const res = await AWApi.getMapSectors(SECTOR_BOUNDS, { meta: true });
+    ctx.fetchedAt = clock();
+    ctx.meta = res.meta || null;
     if (!res.ok) {
         return {
             ok: false,
@@ -34,6 +139,7 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
     }
     const sectors = Array.isArray(res.data) ? res.data : [];
     const allSystems = sectors.flatMap(sec => Array.isArray(sec.solarSystems) ? sec.solarSystems : []);
+    ctx.systemsTotal = allSystems.length;
     if (!allSystems.length) {
         return { ok: false, error: 'The game returned no systems in that area — nothing to seed.' };
     }
@@ -112,14 +218,25 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
         // never an actual flood risk; silencing it just meant conquests/pop-kills caught by
         // this seed announced nowhere. See /sync/system's own comment.
 
+        // Which scan this is, and how old its data already is as it is posted: every system in a run
+        // is posted one after another from a single fetch, so the last ones can be a while old.
+        payload.run_id = ctx.runId;
+        payload.fetch_age_ms = Math.round(clock() - ctx.fetchedAt);
+        const postStartedAt = clock();
         const syncRes = await fetch('/hub-api/sync/system', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         });
+        const postMs = clock() - postStartedAt;
+        ctx.postCount++;
+        ctx.postMsTotal += postMs;
+        if (postMs > ctx.postMsMax) ctx.postMsMax = postMs;
         if (syncRes.ok) {
             systemsProcessed++;
             planetsProcessed += payload.planets.length;
+            ctx.systemsPosted = systemsProcessed;
+            ctx.planetsPosted = planetsProcessed;
             // The API reported a siege here that nobody has been able to attribute yet. Its
             // hasSiege flag is a bare boolean, equally true for a friendly fleet in orbit,
             // so acting on it alone once had the bot announcing an allied transit as an
@@ -131,6 +248,7 @@ export async function seedGalaxyFromApi(onProgress = () => {}) {
         onProgress(`Seeding planets… ${systemsProcessed}/${allSystems.length} systems (${planetsProcessed} planets)`, systemsProcessed, allSystems.length);
     }
 
+    ctx.inVision = visionFlags.filter(v => v.is_in_vision).length;
     if (visionFlags.length) {
         await fetch('/hub-api/sync/system-in-vision', {
             method: 'POST',
@@ -206,7 +324,7 @@ function claimAutoSeedLock() {
 async function runAutoSeedTick() {
     if (!claimAutoSeedLock()) return;
     try {
-        const result = await seedGalaxyFromApi();
+        const result = await seedGalaxyFromApi(undefined, { trigger: 'auto' });
         if (!result.ok) console.warn('[GalaxyAutoSeed] tick failed:', result.error);
     } catch (err) {
         console.warn('[GalaxyAutoSeed] tick failed:', err.message);

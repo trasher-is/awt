@@ -35,6 +35,7 @@ rather than "whatever cascades from `systems`".
 | `discord_timers` | kept | a member's `!timer` is not about the map |
 | `rz_plans` | kept | the RedZone planner is a different game |
 | `starbase_order_audit` | kept | an operations record of who sent what through the hub |
+| `galaxy_scan_runs` | kept | an operations record of who ran each galaxy scan and what the game's response looked like (pruned after 30 days) |
 | `rounds`, `round_players`, `round_systems` | kept, **grows by one** | the archive the reset writes to |
 
 The regression test for this list is `src/routes/admin-round-reset.test.js`: it seeds a
@@ -42,6 +43,39 @@ round, runs the real reset endpoint, reseeds the same system ids and checks that
 from the previous round is visible through the route and takeover endpoints. When a table
 is added to the schema, decide which row of this table it belongs in and, if it is
 round-scoped, add its delete to the reset transaction **after** `archiveRound`.
+
+## The scan log: finding out why a read was stale
+
+Every galaxy scan (the automatic five-minute run in each open dashboard, and the Galaxy
+buttons) reports one row to `galaxy_scan_runs`, and stamps each system it posts with a run id
+and the age of its data. A change in `population_trace` can then be lined up with the scan
+that sent it. The fields answer different suspects:
+
+| Suspect | What to look at |
+|---|---|
+| The browser's HTTP cache answered | `cache_state` is `cache` (nothing on the wire) or `revalidated` (a 304) |
+| A cache between the browser and the game | the `Age` header in `headers_json`, or a large `date_lag_s` (how old the game's own copy already was) |
+| The data was fine but posted late | `population_trace.payload_age_ms` on the row; the scan walks every system one after another, so late ones are older. `post_ms_max` and `duration_ms` say how slow the run was |
+| A throttled or frozen tab | `went_hidden`, a long `duration_ms` |
+| The first scan after a tab opened | `run_index` 0 and a small `tab_age_s` |
+| A browser-specific cache rule | `browser` (a coarse family taken from the User-Agent; the string itself is not kept) |
+
+```sql
+-- the latest scans, who ran them and how they went
+SELECT received_at, actor_game_name, started_by, browser, run_index, tab_age_s, went_hidden,
+       cache_state, date_lag_s, duration_ms, post_ms_max, systems_posted
+FROM galaxy_scan_runs ORDER BY id DESC LIMIT 20;
+
+-- every traced change from one scan, next to what that scan looked like
+SELECT t.created_at, t.system_id, t.planet_index, t.outcome, t.old_pop, t.claimed_pop, t.payload_age_ms,
+       r.actor_game_name, r.browser, r.run_index, r.cache_state, r.date_lag_s
+FROM population_trace t JOIN galaxy_scan_runs r ON r.run_id = t.run_id
+WHERE t.outcome IN ('drop_pending', 'drop_blip') ORDER BY t.id DESC LIMIT 20;
+```
+
+Rows from a browser tab that has not reloaded since this shipped carry no run id and join to
+nothing; that is expected for a day or so after a deploy. `cache_state` is `unknown` when the
+browser withheld its timing data (an old engine, or a full timing buffer).
 
 ## Backup and restore
 

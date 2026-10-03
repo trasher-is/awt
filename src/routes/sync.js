@@ -23,6 +23,8 @@ const bonusGoalsRepo = require('../repositories/bonusGoals');
 const { postEmbed, postBattleEmbed, defuseMentions, settingValue } = require('../utils/discord-post');
 const { ownerChangeKind } = require('../utils/system-change-lines');
 const { normaliseSource, observationKind } = require('../utils/population-trace');
+const { sanitizeScanRun, sanitizeRunId, sanitizeAgeMs } = require('../utils/scan-run');
+const scanRunsRepo = require('../repositories/scanRuns');
 const populationTraceRepo = require('../repositories/populationTrace');
 const { createProvisionalDrops, confirmGapFromEnv } = require('../utils/provisional-drop');
 const router = express.Router();
@@ -170,6 +172,10 @@ router.post('/sync/system', requireAuth, (req, res) => {
         captured_at: typeof captured_at === 'string' ? captured_at.slice(0, 40) : null,
         actor_user_id: req.session && Number.isInteger(req.session.userId) ? req.session.userId : null,
         actor_game_name: req.session && req.session.gameName ? String(req.session.gameName).slice(0, 64) : null,
+        // Which scan sent this and how old its data was when it was posted: lets a traced change be
+        // joined to its row in galaxy_scan_runs. Absent from clients that predate them.
+        run_id: sanitizeRunId(req.body.run_id),
+        payload_age_ms: sanitizeAgeMs(req.body.fetch_age_ms),
     };
     const traceHoursSince = (observedAt) => {
         const at = parseSqliteUtc(observedAt);
@@ -1286,6 +1292,22 @@ router.post('/sync/galaxy', requireAuth, (req, res) => {
 // purely a staleness signal for later UI use — it does not affect the fog-of-war merge in
 // /sync/system (the client marks affected planets vision_uncertain before calling that
 // route, see api-galaxy-seed.js); this route only records the flag itself for display.
+// One summary row per galaxy scan (galaxy_scan_runs): who ran it, which browser, whether the game's
+// response came from a cache and what cache headers it carried, how long the run took. Diagnostics
+// only, so a bad payload is a 400 and a failed write is logged and answered 200: the scan that sent
+// it has already done its real work. Fields are vetted in src/utils/scan-run.js.
+router.post('/sync/scan-run', requireAuth, (req, res) => {
+    const row = sanitizeScanRun(req.body, { userAgent: req.get('user-agent'), receivedAtMs: Date.now() });
+    if (!row) return res.status(400).json({ error: 'Invalid scan run' });
+    try {
+        scanRunsRepo.recordScanRun(row, req.session);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[ScanRun] write failed:', err.message);
+        res.json({ success: false });
+    }
+});
+
 router.post('/sync/system-in-vision', requireAuth, (req, res) => {
     const { systems } = req.body;
     if (!Array.isArray(systems) || systems.length === 0) {
