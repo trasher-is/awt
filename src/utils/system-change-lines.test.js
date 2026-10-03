@@ -4,8 +4,8 @@
 //
 // The bot used to post "population 5 → 3" and "Old → New" — numbers without attribution.
 // These cases pin the classification of an owner change and the wording of every line,
-// including the honest "attacker not visible" fallback for a bombardment no battle report
-// has been matched to yet.
+// including the honest "attacker not known yet" fallback for a bombardment no battle report
+// has been matched to yet (reports only arrive after the daily reset).
 
 const path = require('path');
 const { ownerChangeKind, buildSystemChangeLines, buildSystemMilestoneLines } = require(path.join(__dirname, 'system-change-lines.js'));
@@ -65,8 +65,18 @@ ok('a conquest kill is the old owner\'s FULL population, credited to the conquer
     pop[0] === '📉 **Planet 1**: **[NEW] Conqueror** wiped 3 population of [OLD] Caveman (conquest)', pop[0]);
 ok('a bombardment with a matched battle report names the attacker',
     pop[1] === '📉 **Planet 8**: [DEF] Holder lost 2 population (9 → 7) — bombarded by **[ATK] Raider**', pop[1]);
-ok('a bombardment with no matched report says the attacker is not visible, instead of guessing',
-    pop[2] === '📉 **Planet 9**: Holder lost 2 population (5 → 3) — attacker not visible from a system scan', pop[2]);
+ok('a bombardment with no matched report says the attacker is not known yet and why, instead of guessing',
+    pop[2] === '📉 **Planet 9**: Holder lost 2 population (5 → 3) — attacker not known yet — battle reports arrive after the daily reset', pop[2]);
+ok('...and no longer implies there was no attacker ("not visible from a system scan")',
+    !/not visible/i.test(pop[2]), pop[2]);
+ok('...it points at the daily reset, which is when the answer shows up', /daily reset/.test(pop[2]), pop[2]);
+{
+    // The owner-cleared case never tries to attribute from reports (sync.js skips it when ownership
+    // changed), so "cause not visible from a system scan" is still the accurate wording there.
+    const lost = buildSystemChangeLines([{ planet_index: 11, type: 'POP_DROP', kind: 'population_loss', old_pop: 4, new_pop: 2, owner: 'Holder' }]).popLines;
+    ok('an owner-cleared loss keeps its own wording — only the bombardment fallback changed',
+        lost[0] === '📉 **Planet 11**: Holder lost 2 population (4 → 2) — cause not visible from a system scan', lost[0]);
+}
 ok('an unclassified drop keeps the old wording', pop[3] === '📉 **Planet 10**: population 5 → 3', pop[3]);
 
 console.log('\n── Per-system milestone channel ' + '─'.repeat(45));
