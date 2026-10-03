@@ -73,22 +73,111 @@
         return s ? '?' + s : '';
     }
 
-    async function requestJson(path, init) {
+    // ─── FETCH META (diagnostics only) ───────────────────────────────────────
+    // For asking "why was this data old?" of one request: which response headers say whether a
+    // cache answered and how old its copy was, and whether the browser took the bytes from the
+    // network, its own cache, or by revalidation. Opt-in per call (see requestJson's `opts`);
+    // without it nothing here runs and results are exactly what they always were.
+    //
+    // Headers are read by name, not iterated (the test doubles only implement get()), and only
+    // from this list: never cookies or anything credential-shaped.
+    //
+    // Keep this file free of block comments: aw-api.test.js strips comments with a naive
+    // pattern, and this file's first line opens one that only stays harmless while no
+    // block comment closes anywhere below it.
+    const META_HEADERS = ['date', 'age', 'cache-control', 'etag', 'last-modified', 'expires', 'via',
+        'x-cache', 'cf-cache-status', 'server', 'content-encoding', 'content-length', 'vary'];
+    function pickHeaders(headers) {
+        const out = {};
+        if (!headers || typeof headers.get !== 'function') return out;
+        for (const name of META_HEADERS) {
+            let value = null;
+            try { value = headers.get(name); } catch (err) { value = null; }
+            if (value !== null && value !== undefined && value !== '') out[name] = String(value).slice(0, 200);
+        }
+        return out;
+    }
+
+    // From a PerformanceResourceTiming-like entry. transferSize counts headers + body on the wire:
+    // 0 with a body means the cache answered, a few hundred bytes against a large encodedBodySize
+    // is a 304 revalidation, anything at least as big as the body came over the network. Unknown
+    // when the browser gave no entry or sizes (cross-origin without Timing-Allow-Origin, a full
+    // timing buffer, an old engine): "unknown" is an honest answer, not a failure.
+    function classifyTransfer(entry) {
+        const out = { cache_state: 'unknown', transfer_size: null, encoded_body_size: null, delivery_type: null };
+        if (!entry || typeof entry !== 'object') return out;
+        const t = Number(entry.transferSize), e = Number(entry.encodedBodySize);
+        out.transfer_size = Number.isFinite(t) ? t : null;
+        out.encoded_body_size = Number.isFinite(e) ? e : null;
+        out.delivery_type = typeof entry.deliveryType === 'string' ? entry.deliveryType : null;
+        if (entry.deliveryType === 'cache') out.cache_state = 'cache';
+        else if (Number.isFinite(t) && Number.isFinite(e) && e > 0) out.cache_state = t === 0 ? 'cache' : (t < e ? 'revalidated' : 'network');
+        return out;
+    }
+
+    // Browser only. Starts watching for this request's resource-timing entry BEFORE it is sent, so
+    // a full timing buffer cannot hide it; finish() waits briefly for the entry (it is delivered
+    // asynchronously, usually already there). Anywhere it cannot work it answers null.
+    function startTimingCapture(path) {
+        const none = { finish: async () => null };
+        try {
+            if (typeof PerformanceObserver === 'undefined' || typeof location === 'undefined') return none;
+            if (!(PerformanceObserver.supportedEntryTypes || []).includes('resource')) return none;
+            const absolute = new URL(path, location.href).href;
+            let found = null;
+            const observer = new PerformanceObserver(list => {
+                for (const entry of list.getEntries()) if (entry.name === absolute) found = entry;
+            });
+            observer.observe({ type: 'resource' });
+            const done = resolve => {
+                observer.takeRecords().forEach(entry => { if (entry.name === absolute) found = entry; });
+                observer.disconnect();
+                resolve(found);
+            };
+            return { finish: () => new Promise(resolve => (found ? done(resolve) : setTimeout(() => done(resolve), 250))) };
+        } catch (err) {
+            return none;
+        }
+    }
+
+    // opts.meta = true adds `meta` ({fetch_ms, status, headers, cache_state, transfer_size, ...})
+    // to the result, whatever its outcome. Everything else about the result is unchanged.
+    async function requestJson(path, init, opts) {
         // Outside the try below on purpose: a missing rate gate is a programming error
         // (wrong import order) and must fail loudly, not soften into reason 'network'.
         const g = gate();
-        let res;
+        const wantMeta = !!(opts && opts.meta);
+        const clock = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
+        const timing = wantMeta ? startTimingCapture(path) : null;
+        const startedAt = wantMeta ? clock() : 0;
+        let endedAt = null;
+        let res = null;
+        const finish = async (result) => {
+            if (!wantMeta) return result;
+            let entry = null;
+            try { entry = await timing.finish(); } catch (err) { entry = null; }
+            return {
+                ...result,
+                meta: {
+                    fetch_ms: Math.round((endedAt !== null ? endedAt : clock()) - startedAt),
+                    status: res && Number.isFinite(res.status) ? res.status : null,
+                    headers: pickHeaders(res && res.headers),
+                    ...classifyTransfer(entry),
+                },
+            };
+        };
         try {
             res = await (fetchOverride ? g.schedule(() => fetchOverride(path, init)) : g.gameFetch(path, init));
         } catch (err) {
-            return { ok: false, status: 0, reason: 'network' };
+            return finish({ ok: false, status: 0, reason: 'network' });
         }
 
         let text;
         try {
             text = await res.text();
+            endedAt = wantMeta ? clock() : null;
         } catch (err) {
-            return { ok: false, status: res.status || 0, reason: 'network' };
+            return finish({ ok: false, status: res.status || 0, reason: 'network' });
         }
 
         // HTML means a login page: the hub's requireAuth redirect or the game's Identity
@@ -98,16 +187,16 @@
             ? (res.headers.get('content-type') || '')
             : '';
         if (/text\/html/i.test(contentType) || /^\s*</.test(text)) {
-            return { ok: false, status: res.status, reason: 'session' };
+            return finish({ ok: false, status: res.status, reason: 'session' });
         }
 
-        if (!res.ok) return { ok: false, status: res.status, reason: 'http' };
+        if (!res.ok) return finish({ ok: false, status: res.status, reason: 'http' });
 
-        if (!text || !text.trim()) return { ok: true, data: null };
+        if (!text || !text.trim()) return finish({ ok: true, data: null });
         try {
-            return { ok: true, data: JSON.parse(text) };
+            return finish({ ok: true, data: JSON.parse(text) });
         } catch (err) {
-            return { ok: false, status: res.status, reason: 'parse' };
+            return finish({ ok: false, status: res.status, reason: 'parse' });
         }
     }
 
@@ -160,8 +249,10 @@
     // The "map payload reduction" API change (test server 2026-09-25) dropped the sector's
     // alliances[]/players[] and the system's name/info/format/systemOwnerships, and the
     // planets carry ids only — see resolvePlanetOwners and systemNameParts.
-    function getMapSectors({ x1, y1, x2, y2 } = {}) {
-        return requestJson('/api/v1/Map/sectors' + query({ x1, y1, x2, y2 }));
+    // opts.meta = true also returns `meta`: response headers and cache state for this one call
+    // (see requestJson), which is how the scan log learns whether a copy was stale.
+    function getMapSectors({ x1, y1, x2, y2 } = {}, opts) {
+        return requestJson('/api/v1/Map/sectors' + query({ x1, y1, x2, y2 }), undefined, opts);
     }
 
     // Alliance name/tag/id search: [{id, name, tag, fullName, memberCount, pointsScored, rank}].
@@ -532,6 +623,7 @@
         systemNameParts, mapPlanetsToSyncPayload, mapSolarSystemsToSyncPayload, mapPlayersToSyncPayload,
         mapSectorAlliancesToSyncPayload,
         mapPlayerDetailToSyncPayload,
+        pickHeaders, classifyTransfer, META_HEADERS,
         _setFetch, _resetNameCache,
     };
 });

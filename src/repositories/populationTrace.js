@@ -11,20 +11,24 @@ const insertStmt = db.prepare(`
     INSERT INTO population_trace
         (system_id, planet_index, owner_id, outcome, old_pop, claimed_pop, stored_pop,
          hours_since_change, source, observation, captured_at, actor_user_id, actor_game_name,
-         sieged_before, siege_friendly_before, sieged_after, siege_friendly_after, siege_attacker)
+         sieged_before, siege_friendly_before, sieged_after, siege_friendly_after, siege_attacker,
+         run_id, payload_age_ms)
     VALUES
         (@system_id, @planet_index, @owner_id, @outcome, @old_pop, @claimed_pop, @stored_pop,
          @hours_since_change, @source, @observation, @captured_at, @actor_user_id, @actor_game_name,
-         @sieged_before, @siege_friendly_before, @sieged_after, @siege_friendly_after, @siege_attacker)
+         @sieged_before, @siege_friendly_before, @sieged_after, @siege_friendly_after, @siege_attacker,
+         @run_id, @payload_age_ms)
 `);
 const lastForPlanetStmt = db.prepare(`
     SELECT outcome, old_pop, claimed_pop, source, actor_user_id, sieged_after, siege_friendly_after
     FROM population_trace WHERE system_id = ? AND planet_index = ? ORDER BY id DESC LIMIT 1
 `);
-// A caller that has no siege context (an older call site, a test) still writes the row.
+// A caller that has no siege context, scan-run id or payload age (an older call site, a test, a
+// client build that predates them) still writes the row.
 const NO_SIEGE = {
     sieged_before: null, siege_friendly_before: null, sieged_after: null,
     siege_friendly_after: null, siege_attacker: null,
+    run_id: null, payload_age_ms: null,
 };
 const pruneStmt = db.prepare(`DELETE FROM population_trace WHERE created_at < datetime('now', ?)`);
 const forPlanetStmt = db.prepare(`

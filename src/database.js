@@ -1402,6 +1402,54 @@ function initDatabase() {
     addColumn('population_trace', 'siege_friendly_after', 'INTEGER');
     addColumn('population_trace', 'siege_attacker', 'TEXT');
 
+    // Scan log (2026-10-03). Two hubs saw a read show a planet one level low right after a growth
+    // tick, and nothing recorded why a read was stale or who had sent it. Each galaxy scan now
+    // reports one row here (who, when, which browser, whether the response came from a cache and
+    // which cache headers it carried, how long the run took, whether the tab was hidden or brand
+    // new), and every /sync/system payload from a scan carries the run id and the age of its data:
+    //   population_trace.run_id           joins a traced change to the scan that sent it
+    //   population_trace.payload_age_ms   how old that scan's data already was when it was posted
+    // See src/utils/scan-run.js for what each field answers. Survives a round reset on purpose: it
+    // is an operations record of who scanned, like starbase_order_audit. Pruned by the repository.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS galaxy_scan_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            actor_user_id INTEGER REFERENCES app_users(id) ON DELETE SET NULL,
+            actor_game_name TEXT,
+            received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            started_by TEXT NOT NULL,
+            result TEXT NOT NULL,
+            error TEXT,
+            browser TEXT,
+            mobile INTEGER,
+            tab_age_s INTEGER,
+            run_index INTEGER,
+            hidden_at_start INTEGER,
+            went_hidden INTEGER,
+            systems_total INTEGER,
+            systems_posted INTEGER,
+            planets_posted INTEGER,
+            in_vision INTEGER,
+            duration_ms INTEGER,
+            fetch_ms INTEGER,
+            post_ms_avg INTEGER,
+            post_ms_max INTEGER,
+            response_status INTEGER,
+            cache_state TEXT,
+            transfer_size INTEGER,
+            encoded_body_size INTEGER,
+            delivery_type TEXT,
+            date_lag_s REAL,
+            headers_json TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_galaxy_scan_runs_run      ON galaxy_scan_runs(run_id);
+        CREATE INDEX IF NOT EXISTS idx_galaxy_scan_runs_received ON galaxy_scan_runs(received_at);
+    `);
+    addColumn('population_trace', 'run_id', 'TEXT');
+    addColumn('population_trace', 'payload_age_ms', 'INTEGER');
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_population_trace_run ON population_trace(run_id)`);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {
