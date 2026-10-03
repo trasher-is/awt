@@ -5,6 +5,9 @@ const os = require('os');
 const path = require('path');
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awt-sync-population-'));
 process.env.AWT_DB_PATH = path.join(tmpDir, 'test.db');
+// These tests are about what a drop DOES (attribution, alerts, the trace), not about the confirmation delay,
+// so they run with it off. The delay itself is covered by sync-population-provisional-drop.test.js.
+process.env.POP_DROP_CONFIRM_MS = '0';
 process.env.ADMIN_BOOTSTRAP_PASSWORD = 'synthetic-test-password';
 const announcements = [];
 const botPath = require.resolve('../discord_bot');

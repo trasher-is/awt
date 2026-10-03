@@ -23,6 +23,9 @@ const http = require('http');
 
 const tmpDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'awt-sync-system-test-')), 'test.db');
 process.env.AWT_DB_PATH = tmpDb;
+// These tests are about what a drop DOES (attribution, alerts, the trace), not about the confirmation delay,
+// so they run with it off. The delay itself is covered by sync-population-provisional-drop.test.js.
+process.env.POP_DROP_CONFIRM_MS = '0';
 // Never attempt a real Discord login in a test process.
 delete process.env.DISCORD_TOKEN;
 

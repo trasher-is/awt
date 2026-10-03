@@ -1360,6 +1360,10 @@ function initDatabase() {
     // a live read or a cached picture, and which member's session carried it. claimed_pop is
     // what the payload said; stored_pop what the hub kept (they differ only for a refused
     // rise). Pruned by the repository; cascades from systems so a round reset takes it too.
+    // A lower figure is held back until a later read confirms it (provisional-drop.js), and
+    // that adds two outcomes: 'drop_pending' (the first lower claim; nothing stored or
+    // announced) and 'drop_blip' (a later read restored the held figure first, so the claim
+    // was discarded; hours_since_change is how long it stood). A confirmed one is a plain 'drop'.
     db.exec(`
         CREATE TABLE IF NOT EXISTS population_trace (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
