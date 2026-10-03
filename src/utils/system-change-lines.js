@@ -7,7 +7,8 @@
 //   • a population kill names the victim and, when the hub knows it, who inflicted it:
 //     the conqueror on an owner-change tick, or the attacker of a bombardment matched
 //     from a recent battle report at the same planet. A system scan itself cannot see
-//     the attacker, so when no report matches the line SAYS so rather than guessing.
+//     the attacker, so when no report matches the line SAYS so rather than guessing —
+//     and says WHY it is usually missing: see ATTACKER_PENDING below.
 //
 // Pure string building, no Discord client: src/routes/sync.js classifies the change,
 // src/discord_bot.js's announceSystemChanges delivers the lines, and the test drives
@@ -49,6 +50,15 @@ function ownerLine(e) {
     }
 }
 
+// The game posts battle reports once a day, at the 00:00 CET/CEST reset, and the hub pulls them
+// shortly after (public/js/ui/battle-sync.js). A loss seen during the day therefore has no report
+// to match yet, almost always, and this line used to say "attacker not visible from a system
+// scan" — which reads as "there was no attacker". Confirmed 2026-10-02: two planets of one
+// player lost a population each and the alert said that; the next day's batch held both
+// battles, one transport each. The alert is posted once and never edited, so this says where the
+// answer will be instead of implying there is none.
+const ATTACKER_PENDING = 'attacker not known yet — battle reports arrive after the daily reset';
+
 function popLine(e) {
     const planet = `📉 ${bold(`Planet ${e.planet_index}`)}`;
     const oldPop = Number(e.old_pop), newPop = Number(e.new_pop);
@@ -63,7 +73,7 @@ function popLine(e) {
         case 'bombardment': {
             const who = e.attacker
                 ? `bombarded by ${bold(e.attacker)}`
-                : 'attacker not visible from a system scan';
+                : ATTACKER_PENDING;
             return `${planet}: ${e.owner || 'Unknown'} lost ${killed} population (${oldPop} → ${newPop}) — ${who}`;
         }
         default:
