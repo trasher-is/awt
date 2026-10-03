@@ -24,7 +24,12 @@ const { postEmbed, postBattleEmbed, defuseMentions, settingValue } = require('..
 const { ownerChangeKind } = require('../utils/system-change-lines');
 const { normaliseSource, observationKind } = require('../utils/population-trace');
 const populationTraceRepo = require('../repositories/populationTrace');
+const { createProvisionalDrops, confirmGapFromEnv } = require('../utils/provisional-drop');
 const router = express.Router();
+
+// A lower population is held back until a later read confirms it (src/utils/provisional-drop.js).
+// POP_DROP_CONFIRM_MS: unset = 2 minutes, 0 = off (every drop is applied and announced at once).
+const provisionalDrops = createProvisionalDrops({ confirmGapMs: confirmGapFromEnv() });
 
 // Attribution uses reports after the previous planet sync, capped at three hours.
 // A scan only observes a population loss; the repository requires positive evidence
@@ -430,6 +435,34 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 //     resignation can leave all inhabitants alive on an Unknown planet.
                 //     A same-owner loss can be attributed when synced battle reports give
                 //     reliable, unambiguous evidence; ownership clearing alone proves no attack.
+                // PROVISIONAL DROPS (2026-10-03): a lower figure on a planet that kept its owner is
+                // not applied, logged or announced until a later read still shows it lower. A read
+                // landing just after a growth tick can carry the pre-growth number; it used to
+                // become a drop and an alert, and the regrowth guard then refused every correct read
+                // for four hours. A read that shows the held figure (or more) first discards it.
+                // See src/utils/provisional-drop.js. An ownership change is never held: it is an
+                // event of its own, not a figure to second-guess.
+                let dropGate = { kind: 'none' };
+                if (!ownerChanged && Number.isFinite(oldPop) && Number.isFinite(newPop)) {
+                    dropGate = provisionalDrops.observe(`${system_id}:${p.planet_index}`, {
+                        storedPop: oldPop, claimedPop: newPop, ownerId: oldP.owner_id,
+                        actor: traceContext.actor_user_id, now: Date.now(),
+                    });
+                    const siegeNow = traceSiege(oldP, finalIsSieged, finalSiegeIsFriendly, p.siege_attacker_name);
+                    if (dropGate.kind === 'pending') {
+                        finalPopulation = oldPop; // hold: the planet row keeps the figure it has
+                        if (dropGate.created) {
+                            tracePopulation('drop_pending', p.planet_index, oldP.owner_id, oldPop, newPop, oldPop,
+                                traceHoursSince(oldP.population_observed_at), siegeNow);
+                        }
+                    } else if (dropGate.kind === 'blip') {
+                        // hours_since_change on this row is how long the lower claim stood before it
+                        // was contradicted.
+                        tracePopulation('drop_blip', p.planet_index, oldP.owner_id, oldPop, newPop, oldPop,
+                            dropGate.ageMs / 3600000, siegeNow);
+                    }
+                }
+
                 if (Number.isFinite(oldPop) && Number.isFinite(newPop)) {
                     if (ownerChanged && finalOwnerId != null && oldPop > 0) {
                         systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, 0); // 2 = POP_DROP
@@ -442,7 +475,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
                             victim: oldOwnerLabel,
                             by: newOwnerLabel
                         });
-                    } else if (newPop < oldPop) {
+                    } else if (newPop < oldPop && dropGate.kind !== 'pending') {
                         systemsRepo.logPlanetEvent(system_id, p.planet_index, 2, oldPop, newPop); // 2 = POP_DROP
                         // hours_since_change here is how long the figure being lost had stood.
                         tracePopulation('drop', p.planet_index, oldP.owner_id, oldPop, newPop, newPop,

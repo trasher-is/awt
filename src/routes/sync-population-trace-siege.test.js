@@ -15,6 +15,9 @@ const os = require('os');
 const path = require('path');
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awt-sync-trace-siege-'));
 process.env.AWT_DB_PATH = path.join(tmpDir, 'test.db');
+// These tests are about what a drop DOES (attribution, alerts, the trace), not about the confirmation delay,
+// so they run with it off. The delay itself is covered by sync-population-provisional-drop.test.js.
+process.env.POP_DROP_CONFIRM_MS = '0';
 process.env.ADMIN_BOOTSTRAP_PASSWORD = 'synthetic-test-password';
 const botPath = require.resolve('../discord_bot');
 require.cache[botPath] = { id: botPath, filename: botPath, loaded: true, exports: {
@@ -126,10 +129,21 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
         console.log('\n── wiring ' + '─'.repeat(64));
         const strip = src => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
         const sync_js = strip(fs.readFileSync(path.join(__dirname, 'sync.js'), 'utf8'));
-        const callSites = (sync_js.match(/\btracePopulation\(/g) || []).length;
-        const withSiege = (sync_js.match(/traceSiege\(oldP, finalIsSieged, finalSiegeIsFriendly, p\.siege_attacker_name\)/g) || []).length;
+        // Every call to tracePopulation (not its definition) must hand over a siege state built from
+        // THIS planet's values: either traceSiege(oldP, finalIsSieged, ...) inline, or the `siegeNow`
+        // built from exactly that call a few lines earlier (the provisional-drop rows share one).
+        const calls = [];
+        for (let at = sync_js.indexOf('tracePopulation('); at !== -1; at = sync_js.indexOf('tracePopulation(', at + 1)) {
+            if (/const\s+tracePopulation\s*=\s*$/.test(sync_js.slice(Math.max(0, at - 40), at).replace(/\s+$/, '') + '')
+                || /const tracePopulation =/.test(sync_js.slice(Math.max(0, at - 20), at + 16))) continue;
+            calls.push(sync_js.slice(at, sync_js.indexOf(');', at) + 2));
+        }
+        const siegeFromThisPlanet = 'traceSiege(oldP, finalIsSieged, finalSiegeIsFriendly, p.siege_attacker_name)';
+        const builtOnce = (sync_js.match(/const siegeNow = traceSiege\(oldP, finalIsSieged, finalSiegeIsFriendly, p\.siege_attacker_name\)/g) || []).length;
         ok('every population change recorded in /sync/system passes the siege state computed for that same planet',
-            callSites === 2 && withSiege === 2, { callSites, withSiege });
+            calls.length >= 2 && builtOnce === 1
+                && calls.every(c => c.includes(siegeFromThisPlanet) || /,\s*siegeNow\)/.test(c)),
+            { calls: calls.length, builtOnce, offenders: calls.filter(c => !(c.includes(siegeFromThisPlanet) || /,\s*siegeNow\)/.test(c))) });
     } finally {
         await new Promise(resolve => server.close(resolve));
         db.close();
