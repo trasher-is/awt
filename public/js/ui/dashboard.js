@@ -24,6 +24,8 @@ import { initVersionWatch } from './version-watch.js';
 import { initAwtPresence } from './awt-presence.js';
 import { openSleepMapPanel } from './sleep-map.js';
 import { openGalaxyDashboardPanel } from './galaxy-dashboard.js';
+import { openSettingsPanel, initSidebarTools } from './settings-panel.js';
+import { whenReady as whenSettingsReady, clearCache as clearSettingsCache } from './hub-settings-store.js';
 
 const { formatSqliteUtc, formatLocalDateTime } = globalThis.AWSqliteTime;
 
@@ -74,6 +76,13 @@ window.addEventListener('DOMContentLoaded', () => {
         await openGalaxyMapPanel(toolUser && toolUser.id);
     });
     document.getElementById('link-discord-btn')?.addEventListener('click', requestDiscordLinkCode);
+    document.getElementById('open-settings-btn')?.addEventListener('click', openSettingsPanel);
+
+    // Hide the tools this member has switched off (and the ones that start off) before the
+    // first paint of the sidebar settles; the server copy is then read to catch a change made
+    // on another device.
+    initSidebarTools();
+    whenSettingsReady();
 
     document.getElementById('btn-mass-scan')?.addEventListener('click', runMassGalaxyScan);
     document.getElementById('btn-mass-scan-players')?.addEventListener('click', runMassPlayerScan);
@@ -259,6 +268,8 @@ async function requestDiscordLinkCode() {
 }
 
 async function logout() {
+    // The next account on this browser must not start from this one's switches.
+    clearSettingsCache();
     await fetch('/hub-api/logout', { method: 'POST' }); 
     window.location.href = '/hub-assets/login.html'; 
 }

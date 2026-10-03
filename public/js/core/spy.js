@@ -3,6 +3,7 @@ import { initSupplyUnitButtons } from './su-spend-buttons.js';
 import { initBuildingValueHints } from './building-value-hints.js';
 import { initPlanetPopTimers, initScienceCultureCalc, initAllianceNewsAlerts, initStarbaseTimer, initScienceTimers, initScienceLevelCalculator, initProfilePLGrowth, initProfileHubIntel, initFleetTimers, initAutoProduceFinishDates, initColonizeLaunchWindows, initAllianceRelationIcons, initEcoBonusJoinDates, initFleetLaunchModalETA, initSocialHint, initEconomyMilestone, initBioThreatPills, initFleetLaunchTargetDossier, initSystemPlan } from './page-injections.js';
 import { initNewsIncomingTools } from '../ui/news-incoming.js';
+import { isEnabled as enabled, isReady as settingsReady, onChange as onSettingsChange, whenReady as whenSettingsReady } from '../ui/hub-settings-store.js';
 import { initLocalGameTimestamps } from './page-injections.js';
 import { initNewsBattleEvents } from '../ui/news-battle-events.js';
 import '../utils/game-rate-limit.js';
@@ -521,65 +522,72 @@ export function initSpy() {
     // its own output and spin.
     let injecting = false;
 
+    // Each extra below is gated by the member's own switch (Settings panel, catalogue in
+    // utils/hub-settings.js), one `enabled('inject.…')` per hook. What is left ungated feeds
+    // the alliance's shared data — map indicators, the News-page incoming-fleet tools and
+    // battle-event scrape, the research scrape — and is not a preference.
     function runViewHooks() {
         if (injecting) return;
+        // Not before the member's switches are known: an extra they turned off must not be
+        // drawn for a moment and then left behind. See hub-settings-store.js.
+        if (!settingsReady()) return;
         injecting = true;
         spyStats.viewPasses++;
         try {
-            initLocalGameTimestamps();
+            if (enabled('inject.localTimestamps')) initLocalGameTimestamps();
             const pathLower = viewToken().toLowerCase();
-            initBuildingValueHints();
+            if (enabled('inject.buildingHints')) initBuildingValueHints();
 
             if (pathLower.includes('/game/map')) {
                 injectMapIndicators();
-                initFleetLaunchModalETA();
+                if (enabled('inject.launchEta')) initFleetLaunchModalETA();
                 if (pathLower.includes('/game/map/solarsystem') || pathLower.includes('/game/system')) {
-                    initSystemPlan().catch(err => console.error('[Spy] system plan failed:', err.message));
+                    if (enabled('inject.systemPlan')) initSystemPlan().catch(err => console.error('[Spy] system plan failed:', err.message));
                 }
             }
             if (pathLower.includes('/game/news')) {
-                initAllianceNewsAlerts();
+                if (enabled('inject.newsBroadcasts')) initAllianceNewsAlerts();
                 initNewsIncomingTools();
                 initNewsBattleEvents().catch(err => console.error('[News] battle-events scrape failed:', err.message));
             }
             if (pathLower.includes('/game/planets')) {
-                initPlanetPopTimers();
+                if (enabled('inject.popTimers')) initPlanetPopTimers();
             }
             if (pathLower.includes('/game/science')) {
-                initScienceCultureCalc();
-                initScienceTimers();
-                initScienceLevelCalculator();
-                initColonizeLaunchWindows().catch(err => console.error('[Spy] colonize launch windows failed:', err.message));
-                initSocialHint().catch(err => console.error('[Spy] social hint failed:', err.message));
-                initEconomyMilestone();
-                initBioThreatPills().catch(err => console.error('[Spy] bio threat pills failed:', err.message));
+                if (enabled('inject.cultureLookahead')) initScienceCultureCalc();
+                if (enabled('inject.scienceTimers')) initScienceTimers();
+                if (enabled('inject.scienceCalculator')) initScienceLevelCalculator();
+                if (enabled('inject.colonizeWindows')) initColonizeLaunchWindows().catch(err => console.error('[Spy] colonize launch windows failed:', err.message));
+                if (enabled('inject.socialHint')) initSocialHint().catch(err => console.error('[Spy] social hint failed:', err.message));
+                if (enabled('inject.economyMilestone')) initEconomyMilestone();
+                if (enabled('inject.bioThreats')) initBioThreatPills().catch(err => console.error('[Spy] bio threat pills failed:', err.message));
                 import('../scrapers/science-research-parser.js')
                     .then(module => module.scrapeScienceResearch())
                     .catch(err => console.error('[Spy] research scrape failed:', err.message));
             }
             if (pathLower.includes('/game/planets/planet/')) {
-                initStarbaseTimer();
-                initAutoProduceFinishDates();
-                initSupplyUnitButtons().catch(err => console.error('[Spy] supply unit buttons failed:', err.message));
+                if (enabled('inject.starbaseTimer')) initStarbaseTimer();
+                if (enabled('inject.autoProduceDates')) initAutoProduceFinishDates();
+                if (enabled('inject.suButtons')) initSupplyUnitButtons().catch(err => console.error('[Spy] supply unit buttons failed:', err.message));
             }
 	    if (pathLower.includes('/game/fleets')) {
-                initFleetTimers();
+                if (enabled('inject.fleetTimers')) initFleetTimers();
             }
             if (pathLower.includes('/game/fleets/launch/')) {
-                initFleetLaunchTargetDossier().catch(err => console.error('[Spy] fleet-launch target dossier failed:', err.message));
-                initLaunchPlanLinks().catch(err => console.error('[Spy] launch plan links failed:', err.message));
+                if (enabled('inject.launchDossier')) initFleetLaunchTargetDossier().catch(err => console.error('[Spy] fleet-launch target dossier failed:', err.message));
+                if (enabled('inject.launchPlanLinks')) initLaunchPlanLinks().catch(err => console.error('[Spy] launch plan links failed:', err.message));
             }
             if (pathLower.includes('/game/players/profile/')) {
-                initProfilePLGrowth();
-                initProfileHubIntel().catch(err => console.error('[Spy] profile hub-intel injection failed:', err.message));
+                if (enabled('inject.profilePlGrowth')) initProfilePLGrowth();
+                if (enabled('inject.profileIntel')) initProfileHubIntel().catch(err => console.error('[Spy] profile hub-intel injection failed:', err.message));
             }
             if (pathLower.includes('/ranking/ecobonus')) {
-                initEcoBonusJoinDates().catch(err => console.error('[Spy] eco bonus joined-dates injection failed:', err.message));
+                if (enabled('inject.ecoBonusJoined')) initEcoBonusJoinDates().catch(err => console.error('[Spy] eco bonus joined-dates injection failed:', err.message));
             }
 
             // Ungated — every AW page that renders a [TAG] link uses the exact same DOM
             // pattern, so this runs everywhere rather than being gated to one path.
-            initAllianceRelationIcons().catch(err => console.error('[Spy] alliance relation icons failed:', err.message));
+            if (enabled('inject.allianceIcons')) initAllianceRelationIcons().catch(err => console.error('[Spy] alliance relation icons failed:', err.message));
 
             updateTabTitle();
         } catch (err) {
@@ -634,8 +642,12 @@ export function initSpy() {
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
 
-    // First pass for the view we loaded into.
-    runViewHooks();
+    // First pass for the view we loaded into — once the member's switches are known (at
+    // once on a repeat visit). A switch changed later, in Settings or on another device,
+    // runs another pass: an extra turned ON appears at once; one turned OFF is gone when the
+    // next game page loads (the Settings panel offers a reload for that).
+    whenSettingsReady().then(runViewHooks);
+    onSettingsChange(() => scheduleViewHooks(0));
 
     window.addEventListener('message', async (event) => {
         if (event.origin !== window.location.origin) return;

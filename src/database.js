@@ -225,6 +225,11 @@ function initDatabase() {
     // which is GAME activity from the API/DOM scrape — an account can be mid-battle in
     // the game on a stale tab, or sitting idle in-game with the hub tab open and syncing.
     addColumn('app_users', 'last_seen_at', 'DATETIME');
+    // The member's own switches for hub extras and sidebar tools, as a JSON object of only
+    // the choices that differ from the defaults (see public/js/utils/hub-settings.js, which
+    // owns the keys and defaults). NULL means "all defaults". Per account rather than per
+    // browser: people use the hub on a phone and a desktop and expect one set of choices.
+    addColumn('app_users', 'ui_settings', 'TEXT');
     addColumn('players', 'has_intel', 'INTEGER DEFAULT 0');
     // Alliance-wide intel VISIBILITY, as opposed to has_intel above, which latches to 1
     // forever the first time anyone captures a report and can therefore only ever answer

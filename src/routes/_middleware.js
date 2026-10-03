@@ -26,15 +26,18 @@ const requireAdmin = (req, res, next) => {
 const ROLES_THAT_MAY_WRITE = new Set(['user', 'admin']);
 const READ_ONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-// A few POSTs are reads wearing a POST because they take a body. They stay open to
-// guests. Anything not listed here is treated as a write — the safe default when someone
-// adds an endpoint and forgets this file exists.
+// A few POSTs are reads wearing a POST because they take a body, and one writes only the
+// caller's own display switches (/settings: which hub extras and sidebar tools they see —
+// no alliance data, nothing another member can observe). They stay open to guests.
+// Anything not listed here is treated as a write — the safe default when someone adds an
+// endpoint and forgets this file exists.
 const SAFE_POST_PATHS = new Set([
     '/login',              // no session yet; the login handler does its own checking
     '/logout',             // ending your own session is never a privileged act
     '/routes/preview',     // computes travel legs, stores nothing
     '/routes/airports',    // compares recorded friendly jump points, stores nothing
     '/incoming/defenders', // computes who could intercept, stores nothing
+    '/settings',           // a member's own switches for the hub's UI; touches no alliance data
 ]);
 
 function isGuest(req) {

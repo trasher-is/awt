@@ -66,6 +66,19 @@ function getUserAllianceIdBridge(userId) {
     return getUserAllianceIdBridgeStmt.get(userId);
 }
 
+// The raw JSON text, or null when the member has never changed a default. Parsing and
+// validation belong to public/js/utils/hub-settings.js — this only moves the string.
+const getUiSettingsStmt = db.prepare(`SELECT ui_settings FROM app_users WHERE id = ?`);
+function getUiSettings(userId) {
+    const row = getUiSettingsStmt.get(userId);
+    return row ? row.ui_settings : null;
+}
+
+const setUiSettingsStmt = db.prepare(`UPDATE app_users SET ui_settings = ? WHERE id = ?`);
+function setUiSettings(userId, text) {
+    return setUiSettingsStmt.run(text, userId).changes;
+}
+
 const getUserByIdStmt = db.prepare(`SELECT id, game_name, discord_id, discord_name FROM app_users WHERE id = ?`);
 function getUserById(id) {
     return getUserByIdStmt.get(id);
@@ -277,5 +290,5 @@ module.exports = {
     updateUserGameName, deleteUser, createUser, updateUserDiscordName, clearUserDiscordFields,
     setUserActive, setUserRole, setUserPasswordHash, updateUserDiscordLink, banUser,
     deleteExpiredLinkCodes, getLinkCodeWithUser, markLinkCodeUsed, mintLinkCode,
-    deleteUnusedLinkCodesForUser, deleteLinkCodesByUserId,
+    deleteUnusedLinkCodesForUser, deleteLinkCodesByUserId, getUiSettings, setUiSettings,
 };
