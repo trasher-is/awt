@@ -117,6 +117,12 @@
     // constant showed a systematic residual specific to that pairing that
     // neither reweighting it nor adding a defense-ratio third term could close.
     const PAIR_CV_WEIGHT = { 'de,cr': 0.807, 'bs,de': 0.760, 'bs,cr': 0.816 };
+    // Destroyers against a LONE starbase have their own weight too. With the mixed
+    // fallback above, every recorded single-type starbase fight rated the attacker low
+    // (14 of 14, up to 1.9 pp); 0.7745 fits the six recorded lone-starbase points to
+    // 0.08 pp and seven new calculator readings (2026-10-04, levels 4-13, 5-242
+    // destroyers, one with sciences set) to 0.3 pp. Other ships vs a starbase are unfitted.
+    const DE_VS_LONE_SB_CV_WEIGHT = 0.7745;
     const N_EXP = 1.805;             // saturation curve exponent
     const RACE_ATK_PCT = 0.08;       // confirmed exact, 6.0.0-beta (was 0.07)
     const RACE_DEF_PCT = 0.12;       // confirmed exact, 6.0.0-beta (was 0.11)
@@ -143,9 +149,13 @@
     const SHIP_LETTER = { [DE]: 'de', [CR]: 'cr', [BS]: 'bs' };
 
     // The CV-vs-attack-value blend weight for this matchup: pair-specific for a
-    // pure single-type duel with no starbase, the global fallback otherwise.
+    // pure single-type duel with no starbase, or destroyers against a lone starbase;
+    // the global fallback otherwise (including a starbase with a fleet beside it).
     function cvWeight(atkFleet, defFleet, hasStarbase) {
-        if (hasStarbase) return P_CV_WEIGHT;
+        if (hasStarbase) {
+            const loneStarbase = !defFleet.some(n => n > 0);
+            return loneStarbase && singleType(atkFleet) === DE ? DE_VS_LONE_SB_CV_WEIGHT : P_CV_WEIGHT;
+        }
         const a = singleType(atkFleet), d = singleType(defFleet);
         if (a < 0 || d < 0) return P_CV_WEIGHT;
         if (a === d) return 0.5; // CV ratio == attack ratio identically; weight is moot
@@ -280,14 +290,14 @@
 
         const enemyCVtoDef = cvOf(atkFleet);
         const enemyCVtoAtk = cvOf(defFleet) + sbCv;
-        // Starbase toughness is excluded from the denominator when a fleet is ALSO
-        // defending (confirmed: the fleet's own survivors match toughOf(fleet) alone,
-        // and the starbase's survival fraction matches that SAME lossFrac). But a
-        // starbase defending with no fleet at all has nothing else to use, so it falls
-        // back to its own toughness (att+2*def, att=def=floor(cv/2)) — without this,
-        // toughOf([0,0,0])=0 makes a lone starbase take zero losses regardless of the
-        // attacker, which is not what the calculator does.
-        const defTough = defFleet.some(n => n > 0) ? toughOf(defFleet) : (sbLvl > 0 ? sbHalf(sbLvl) * 3 : 0);
+        // The starbase's own toughness (att+2*def, att=def=floor(cv/2)) always counts in
+        // the defender's denominator, with or without a fleet beside it; the fleet and
+        // the starbase then share one loss fraction. An earlier version left it out when
+        // a fleet also defended. Against the 816 recorded starbase + fleet observations
+        // that put the starbase 0.49 levels off on average (and wiped starbases the
+        // calculator leaves at level 6-10); counting it gives 0.13 levels, and 0.01-0.05
+        // on six new calculator readings (2026-10-04). Fleet survivors improve with it too.
+        const defTough = toughOf(defFleet) + (sbLvl > 0 ? sbHalf(sbLvl) * 3 : 0);
         const atkTough = toughOf(atkFleet);
 
         const defMult = toughnessMult(def.math, atk.math, def.rd, defFleet, def.lvl, atk.lvl);
