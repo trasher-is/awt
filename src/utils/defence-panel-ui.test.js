@@ -37,6 +37,9 @@ ok('closing the banner marks that attack seen', /if \(key\) markSeen\(\[key\]\)/
 ok('the pill shows every live attack, seen or not', /el\.textContent = live\.length \? String\(live\.length\) : ''/.test(src));
 ok('the banner only names unseen attacks', /const next = unseen\[0\]/.test(src));
 ok('the live stream is closed with the panel', /function closePanel\(\) \{[\s\S]{0,200}closeStream\(\)/.test(src));
+// The landing planner's numbers: near-certain must not print as 100% (or a sliver as 0%).
+ok('the planner prints probabilities with the no-false-certainty rule', /x > 99\.9 && x < 100\) return '99\.9%'/.test(src) && !/toFixed\(1\)}%`;\s*return `<div class="flex h-3/.test(src));
+ok('the planner refers to fleets by member name, not by row (rows re-sort on refresh)', /encodeURIComponent\(m\.name\)\}:\$\{oi\}/.test(src));
 const wrapper = read('public/Wrapper.html');
 ok('Wrapper has one Defence button and one banner', (wrapper.match(/id="open-defence-btn"/g) || []).length === 1 && (wrapper.match(/id="defence-banner"/g) || []).length === 1);
 ok('the banner can be dismissed', /id="defence-banner-close"/.test(wrapper));

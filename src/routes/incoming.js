@@ -13,6 +13,7 @@ const { toggleCovering, getCovering, renderCoverLine } = require('../utils/cover
 const defenceChoicesRepo = require('../repositories/defenceChoices');
 const defenceLive = require('../utils/defence-live');
 const { planState, planChanged, afterCoverToggle } = require('../utils/defence-plan');
+const { simulateChain, bestSacrifice } = require('../utils/landing-planner');
 const { baseKeyFor, arrivalOf, fleetSigOf, pickAlertKey } = require('../utils/incoming-identity');
 const router = express.Router();
 
@@ -215,31 +216,42 @@ function rankOptions(result, arrivalUnix) {
 // then each defender. An ally lands right AFTER the attacker and fights what the starbase
 // left of it; the planet's owner lands BEFORE it and stands with his own starbase.
 // Attacker race/sciences fall back to worst-case assumptions when unknown/stale.
+// Both sides of an attack, as the battle maths needs them: the attacker's fleet and stats
+// (worst case where unknown, total XP for level-ups), and the planet's owner with his
+// starbase and his ships on it. Shared by the alert and the landing planner, so they can
+// never disagree about who fights.
+function battleSides(data, planet, arrivalUnix) {
+    const s = data.ships || {};
+    const enemyFleet = [s.destroyers || 0, s.cruisers || 0, s.battleships || 0];
+    let enemyRow = null;
+    if (data.attacker && data.attacker.id) {
+        enemyRow = playersRepo.getPlayerCombatStatsById(data.attacker.id);
+    }
+    if (!enemyRow && data.attacker && data.attacker.name) {
+        enemyRow = playersRepo.getPlayerCombatStatsByName(data.attacker.name.toLowerCase());
+    }
+    const enemy = {
+        ...resolveStats(enemyRow),
+        totalXp: incomingDefenceRepo.getTotalXp({
+            id: data.attacker && data.attacker.id,
+            nameLower: data.attacker && data.attacker.name ? data.attacker.name.toLowerCase() : null,
+        }),
+    };
+    const ownerLower = planet && planet.owner_name ? planet.owner_name.toLowerCase() : null;
+    const owner = ownerLower ? allySide(incomingDefenceRepo.getAllyCombatRow(ownerLower)) : null;
+    let garrison = [0, 0, 0];
+    if (planet && owner) {
+        const beforeIso = arrivalUnix ? new Date(arrivalUnix * 1000).toISOString() : '9999';
+        garrison = incomingDefenceRepo.getGarrison(planet.owner_id, data.target.systemId, data.target.planetIndex, beforeIso);
+    }
+    return { enemyFleet, enemy, owner, ownerLower, garrison };
+}
+
 function attachBattle(result, data, planet, arrivalUnix, nowUnix) {
     try {
-        const s = data.ships || {};
-        const enemyFleet = [s.destroyers || 0, s.cruisers || 0, s.battleships || 0];
-        let enemyRow = null;
-        if (data.attacker && data.attacker.id) {
-            enemyRow = playersRepo.getPlayerCombatStatsById(data.attacker.id);
-        }
-        if (!enemyRow && data.attacker && data.attacker.name) {
-            enemyRow = playersRepo.getPlayerCombatStatsByName(data.attacker.name.toLowerCase());
-        }
-        const enemy = {
-            ...resolveStats(enemyRow),
-            totalXp: incomingDefenceRepo.getTotalXp({
-                id: data.attacker && data.attacker.id,
-                nameLower: data.attacker && data.attacker.name ? data.attacker.name.toLowerCase() : null,
-            }),
-        };
-
-        const ownerLower = planet && planet.owner_name ? planet.owner_name.toLowerCase() : null;
-        const owner = ownerLower ? allySide(incomingDefenceRepo.getAllyCombatRow(ownerLower)) : null;
+        const { enemyFleet, enemy, owner, ownerLower, garrison } = battleSides(data, planet, arrivalUnix);
         let fight = null;
         if (planet && owner) {
-            const beforeIso = arrivalUnix ? new Date(arrivalUnix * 1000).toISOString() : '9999';
-            const garrison = incomingDefenceRepo.getGarrison(planet.owner_id, data.target.systemId, data.target.planetIndex, beforeIso);
             const ctx = { enemyFleet, enemy, sbLevel: planet.starbase || 0, garrison, owner };
             fight = planetFight(ctx);
             if (fight) {
@@ -738,6 +750,67 @@ router.post('/defence/choose', requireAuth, async (req, res) => {
     } catch (err) {
         console.error('[Defence] choose failed:', err.message);
         res.status(500).json({ success: false, error: 'Choose failed' });
+    }
+});
+
+// --- LANDING PLANNER (src/utils/landing-planner.js) ---
+// Several landings in the attacker's cycle, in order, and the sacrifice search. Planning
+// only: nothing is saved and nobody is told.
+// POST /hub-api/defence/plan
+//   Body: { key, landings: [{ name, ships: [D,C,B], when: 'before'|'after' }],
+//           sacrifice: { decoy: { name, ships }, closer: { name, ships } } (optional) }
+const MAX_LANDINGS = 12;
+const shipsOf = v => (Array.isArray(v) ? [0, 1, 2].map(i => Math.max(0, Math.min(1e6, Math.floor(Number(v[i]) || 0)))) : null);
+
+function planReply(r) {
+    return { held: r.held, retaken: r.retaken, lost: r.lost, kept: r.kept, enemyEndLevel: r.enemyEndLevel,
+        likely: r.likely.map(st => ({ ...st, pText: pct(st.p) })), likelyP: r.likelyP };
+}
+
+router.post('/defence/plan', requireAuth, (req, res) => {
+    try {
+        const body = req.body || {};
+        const row = incomingRepo.getIncoming(String(body.key || ''));
+        if (!row) return res.status(404).json({ success: false, error: 'No such incoming' });
+        const data = row.payload;
+        const planet = incomingDefenceRepo.getPlanetDefence(data.target.systemId, data.target.planetIndex) || null;
+        const arrival = data.arrivalUnix || row.arrival_unix || 0;
+        const sides = battleSides(data, planet, arrival);
+        const ctx = {
+            planet: { sbLevel: planet ? planet.starbase || 0 : 0, garrison: sides.garrison,
+                owner: sides.owner || allySide(null), ownerName: planet && planet.owner_name ? planet.owner_name : 'owner' },
+            enemy: { name: data.attacker.name, fleet: sides.enemyFleet, stats: sides.enemy },
+        };
+        const party = (p, when) => {
+            const ships = shipsOf(p && p.ships);
+            if (!p || typeof p.name !== 'string' || !ships) return null;
+            const name = p.name.slice(0, 40);
+            return { name, fleet: ships, when, isOwner: !!sides.ownerLower && name.toLowerCase() === sides.ownerLower,
+                stats: allySide(incomingDefenceRepo.getAllyCombatRow(name.toLowerCase())) };
+        };
+
+        const out = { success: true };
+        const landings = (Array.isArray(body.landings) ? body.landings : []).slice(0, MAX_LANDINGS)
+            .map(l => party(l, l && l.when === 'before' ? 'before' : 'after')).filter(Boolean);
+        out.chain = planReply(simulateChain({ ...ctx, landings }));
+
+        if (body.sacrifice) {
+            const decoy = party(body.sacrifice.decoy, 'before'), closer = party(body.sacrifice.closer, 'after');
+            if (!decoy || !closer) return res.status(400).json({ success: false, error: 'Sacrifice needs a decoy and a closer' });
+            const r = bestSacrifice({ ...ctx, decoy, closer });
+            const point = p => p && { when: p.when, share: p.share, fleet: p.fleet, cv: p.cv, notLost: p.notLost, notLostText: pct(p.notLost),
+                held: p.held, enemyEndLevel: p.enemyEndLevel, likely: (p.likely || []).map(st => ({ ...st, pText: pct(st.p) })) };
+            out.sacrifice = {
+                baseline: { ...point({ ...r.baseline, when: null, share: 0, fleet: [0, 0, 0], cv: 0 }) },
+                best: point(r.best), cheapest: point(r.cheapest),
+                table: r.table.map(t => ({ ...t, notLostText: pct(t.notLost) })),
+                enemyStartLevel: sides.enemy.lvl || 0,
+            };
+        }
+        res.json(out);
+    } catch (err) {
+        console.error('[Defence] plan failed:', err.message);
+        res.status(500).json({ success: false, error: 'Plan failed' });
     }
 });
 
