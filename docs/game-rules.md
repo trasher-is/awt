@@ -1053,6 +1053,10 @@ and caps on its buildings — though the exact numbers aren't published.
   one after another, allies included: two allies landing before an attacker fight each other,
   and the winner meets the attacker. Fleets landing on the **same second land in launch
   order**, and the attacker, who launched first, lands first.
+- **An ally landing first on the owner's planet fights everything defending it** — the
+  starbase **and** any of the owner's own ships sitting there. A **starbase that wins a fight
+  but takes damage drops to the level its remaining combat value pays for.** (Both confirmed by
+  the alliance's lead player, 2026-10-04; the landing planner uses them.)
 - **The counter-attack window is the rest of the attacker's fleet cycle.** Cycles are 2 minutes
   (`00:02:00`–`00:03:59`); an attacker landing at `00:02:30` can leave from `00:04:00`, so a
   counter must land between his arrival and the cycle's last second. Attackers who suspect a

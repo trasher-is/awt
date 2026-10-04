@@ -14,9 +14,9 @@
 // our side DOWN — and gains XP equal to the CV the loser lost, so a level-up carries into
 // the next fight (incoming-battle.js has the measured XP rule).
 //
-// Assumed, not confirmed: an ally landing on the owner's planet fights the starbase AND
-// any owner ships on it; a starbase damaged in a fight it wins drops to the level its
-// remaining CV pays for.
+// Confirmed by the alliance's lead player (2026-10-04): an ally landing on the owner's
+// planet fights the starbase AND any owner ships on it; a starbase damaged in a fight it
+// wins drops to the level its remaining CV pays for.
 //
 // Outcomes per branch:
 //   held     — the attacker lost the fight he landed into: the planet never fell
