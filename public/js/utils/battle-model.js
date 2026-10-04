@@ -32,19 +32,19 @@
 // Four mechanics, two outcomes, no cross-interaction between them:
 //
 //   WIN % — Race Attack and Physics, both additive log-odds terms:
-//     lneff = w·ln(CVatk/CVdef) + (1−w)·ln(ATKatk/ATKdef)          [force/attack blend]
+//     lneff = ln(Satk / Sdef)                                        [force]
+//       S = Σ ships·(3·attack + 2·defence) (D 8, C 56, B 156) + starbase 3·att + 2·def,
+//           starbase att = floor(CV/2), def = CV − att
 //           + ln(1+0.08·RAatk) − ln(1+0.08·RAdef)                   [race attack]
-//           + ln(1+0.01491·PHatk) − ln(1+0.01491·PHdef)             [physics, below bracket]
+//           + ln(1+0.015·PHatk) − ln(1+0.015·PHdef)                 [physics, 1.5%/level]
 //           + ln(EDGEatk) − ln(EDGEdef)                             [bracket + player level]
 //     EDGEside = 1 + 0.25 (if this side is 6+ physics ahead)
-//                  + 0.00995·(own PL − enemy PL)  (if ahead AND this side fields all 3 types)
+//                  + 0.01·(own PL − enemy PL)  (if ahead AND this side fields all 3 types)
 //     — the physics bracket and the level advantage ADD inside one factor per side.
 //     capped at |lneff| <= ln(1.5) (a certain win/loss beyond that), then run through
-//     a saturating curve: winFrac = 1 − 0.5·(1−x)^1.805, x = 2·(R−1), R = e^|lneff|.
-//     The blend weight w is 0.813 for any 2-3-type mix, but for a PURE single-type
-//     duel it's pair-specific (0.807 destroyer/cruiser, 0.760 battleship/destroyer,
-//     0.816 battleship/cruiser) — see PAIR_CV_WEIGHT below — and a single ship type
-//     against a starbase has its own (LONE_SB_CV_WEIGHT, SB_FLEET_SHARE_SLOPE).
+//     a saturating curve: winFrac = 1 − 0.5·(1−x)^1.79375, x = 2·(R−1), R = e^|lneff|.
+//     Against 2,956 non-certain calculator readings this is 0.005pp off on average —
+//     the calculator's own display rounding — except sides of 2-3 ships.
 //
 //   SURVIVORS — Mathematics, Race Defense and Player Level on your OWN toughness
 //   (1/lossFraction), independent of win%:
@@ -80,10 +80,7 @@
 //     and looked identical. The ±6 BRACKET, unlike the slope, genuinely is
 //     gap-based (confirmed at 6 different absolute bases from 15 to 40).
 //
-// KNOWN GAP: fleets mixing 2-3 ship types on either side fit a little worse than
-// pure single-type fights (mean ~0.5pp, worst ~2pp across 420 mixed calculator
-// readings with sciences 10-40) — the flat 0.813 blend weight is the remaining
-// approximation. See docs/battle-model.md for what's been ruled out.
+// KNOWN GAP: none measured above 0.3pp in 2,956 non-certain calculator readings.
 (function (root, factory) {
     const api = factory();
     // Node (CommonJS)
@@ -109,28 +106,17 @@
     function sbHalf(n) { return Math.floor(sbCV(n) / 2); }
 
     // ─── fitted constants ──────────────────────────────────────────────────────
-    const P_CV_WEIGHT = 0.813;      // fallback blend weight for a mixed (2-3 type) side
-    // Pure single-type-vs-single-type duels fit this weight EXACTLY per pair
-    // (<0.05pp max error each, vs ~1pp with the one global constant above) —
-    // found via a dense 90-point destroyer-vs-battleship sweep after the global
-    // constant showed a systematic residual specific to that pairing that
-    // neither reweighting it nor adding a defense-ratio third term could close.
-    const PAIR_CV_WEIGHT = { 'de,cr': 0.807, 'bs,de': 0.760, 'bs,cr': 0.816 };
-    // A single ship type against a LONE starbase has its own weight per type (with the
-    // mixed fallback every such fight rated the attacker ~1-2pp low). Destroyers fit 13
-    // calculator points to 0.08pp, cruisers 7 to 0.13pp, battleships 5 to 0.08pp.
-    const LONE_SB_CV_WEIGHT = { [0]: 0.7745, [1]: 0.830, [2]: 0.7845 };
-    // Destroyers against destroyers + a starbase: the destroyer-vs-starbase weight
-    // slides down with the fleet's share of the defender's CV (24 calculator points,
-    // levels 3-12, shares 0.2-0.9: mean 0.01pp). Other starbase + fleet mixes: 0.813.
-    const SB_FLEET_SHARE_SLOPE = 0.026;
-    const N_EXP = 1.805;             // saturation curve exponent
+    // Fight strength: Σ ships × (3·attack + 2·defence). Found 2026-10-04: the old
+    // pair-specific blend weights (0.807 D/C, 0.760 B/D, 0.816 B/C, 0.7745/0.830/0.7845 vs
+    // a lone starbase) are exactly this rule for pure fights, and the mixed-fleet fallback
+    // 0.813 was its approximation; 176 bonus-free mixed readings now fit to 0.002pp.
+    const N_EXP = 1.79375;           // saturation curve exponent (joint fit, 2,956 readings)
     const RACE_ATK_PCT = 0.08;       // confirmed exact, 6.0.0-beta (was 0.07)
     const RACE_DEF_PCT = 0.12;       // confirmed exact, 6.0.0-beta (was 0.11)
-    const PHYS_SLOPE = 0.01491;      // per physics level, below the bracket
+    const PHYS_SLOPE = 0.015;        // 1.5% per physics level (was fitted as 0.01491)
     const PHYS_BRACKET = Math.log(1.25); // fitted 0.2235 ≈ ln(1.25); triggers at |diff| >= 6
     const PHYS_BRACKET_PCT = 0.25;   // the same +25%, as it adds to the level bonus in one factor
-    const PLEVEL_WIN_K = 0.00995;    // per level of ADVANTAGE, for the side ahead — see header
+    const PLEVEL_WIN_K = 0.01;       // 1% per level of ADVANTAGE, for the side ahead — see header
     const PLEVEL_SURV_SLOPE = 0.01;  // toughness ×= 1 + this·max(0, ownPL−enemyPL)
     const MATH_SLOPE = 0.0015;       // toughness ×= 1 + this·OWN absolute math level
     const MATH_BRACKET = 0.25;       // ±25% toughness at a 6+ math GAP (was wrongly 0.125)
@@ -150,25 +136,12 @@
     const singleType = f => { const nz = [DE, CR, BS].filter(i => f[i] > 0); return nz.length === 1 ? nz[0] : -1; };
     const SHIP_LETTER = { [DE]: 'de', [CR]: 'cr', [BS]: 'bs' };
 
-    // The CV-vs-attack-value blend weight for this matchup: pair-specific for a pure
-    // single-type duel with no starbase, per ship type against a lone starbase, sliding
-    // for destroyers against destroyers + a starbase; the global fallback otherwise.
-    function cvWeight(atkFleet, defFleet, sbLevel) {
-        if (sbLevel > 0) {
-            const a = singleType(atkFleet);
-            if (!defFleet.some(n => n > 0)) return a >= 0 ? LONE_SB_CV_WEIGHT[a] : P_CV_WEIGHT;
-            if (a === DE && singleType(defFleet) === DE) {
-                const fleetShare = cvOf(defFleet) / (cvOf(defFleet) + sbCV(sbLevel));
-                return LONE_SB_CV_WEIGHT[DE] - SB_FLEET_SHARE_SLOPE * fleetShare;
-            }
-            return P_CV_WEIGHT;
-        }
-        const a = singleType(atkFleet), d = singleType(defFleet);
-        if (a < 0 || d < 0) return P_CV_WEIGHT;
-        if (a === d) return 0.5; // CV ratio == attack ratio identically; weight is moot
-        const key = [SHIP_LETTER[a], SHIP_LETTER[d]].sort().join(',');
-        return PAIR_CV_WEIGHT[key] !== undefined ? PAIR_CV_WEIGHT[key] : P_CV_WEIGHT;
-    }
+    // Fight strength per ship: 3·attack + 2·defence (destroyer 8, cruiser 56, battleship 156).
+    const strengthOf = f => toFleet(f).reduce((s, n, i) => s + n * (3 * SHIPS[i].att + 2 * SHIPS[i].def), 0);
+    // A starbase's CV splits into attack = floor(CV/2) and defence = the rest; an odd CV
+    // (levels 2, 8, 10, 12, 16, 17...) gives defence the extra point. Using CV/2 each was
+    // 0.36pp off at level 8 and 4.5pp at level 2.
+    const sbStrength = n => { const cv = sbCV(n), att = Math.floor(cv / 2); return 3 * att + 2 * (cv - att); };
 
     const sgn = x => (x > 0 ? 1 : x < 0 ? -1 : 0);
     const norm = s => ({
@@ -243,11 +216,10 @@
         if (dCV === 0) return 1;
         if (aCV === 0) return 0;
 
-        const sbAtkVal = sbLevel > 0 ? sbCV(sbLevel) / 2 : 0;
-        const aAtk = attOf(atkFleet), dAtk = attOf(defFleet) + sbAtkVal;
-
-        const w = cvWeight(atkFleet, defFleet, sbLevel);
-        let lneff = w * Math.log(aCV / dCV) + (1 - w) * Math.log(Math.max(aAtk, 1e-9) / Math.max(dAtk, 1e-9));
+        // Force: each side's strength is Σ ships × (3·attack + 2·defence) — destroyer 8,
+        // cruiser 56, battleship 156 — plus a defending starbase's own 3·attack + 2·defence.
+        // One rule for every mix; it replaced seven fitted blend weights.
+        let lneff = Math.log(strengthOf(atkFleet) / (strengthOf(defFleet) + sbStrength(sbLevel)));
 
         lneff += Math.log(1 + RACE_ATK_PCT * atk.ra) - Math.log(1 + RACE_ATK_PCT * def.ra);
 
@@ -370,23 +342,14 @@
     //   * BASE_ERROR_PP covers single-type and single-type-vs-single-type fights: 97.7%
     //     of ~3200 realistic-scale observations (player level 1-30) land within 1pp, mean
     //     error 0.09pp. 1pp is therefore an honest band for the common case.
-    //   * MIXED_FLEET_EXTRA_PP covers the one remaining gap: a side fielding 2-3 ship
-    //     types uses one flat blend weight. After the 2026-10-04 fixes (level advantage,
-    //     bracket + level adding in one factor) 420 mixed calculator readings with
-    //     sciences 10-40 and level gaps to 40 fit with mean 0.53pp, worst 1.9pp (the
-    //     September harvest's mixed rows: worst 1.6pp), so the mixed band is ±2pp.
-    //   * Not covered: a side of 2-3 ships, where one ship more or less moves the odds a
-    //     lot (2 destroyers vs a level-2 starbase: 4.4pp off).
-    //
-    // The OLD caveats here (starbase alongside a fleet, a 6+ mathematics gap) are GONE:
-    // both are now modelled exactly (mean ~0.06pp and ~0.00pp respectively across the
-    // harvested data) rather than approximated, so they no longer need extra margin.
+    //   * MIXED_FLEET_EXTRA_PP is 0 since the strength rule (2026-10-04): 176 bonus-free and
+    //     401 bonus-carrying mixed readings fit to 0.12pp and 0.13pp at worst.
     //
     // src/utils/battle-calc.test.js asserts that every win fixture's error is inside the
     // band winBand() shows for that fight, so the stated confidence can never drift below
     // the measured one.
     const BASE_ERROR_PP = 1.0;
-    const MIXED_FLEET_EXTRA_PP = 1.0;
+    const MIXED_FLEET_EXTRA_PP = 0;
 
     /**
      * Turn a raw probability into an honest range.
@@ -403,7 +366,7 @@
         const atkFleet = toFleet(context.atkFleet);
         const defTypes = [DE, CR, BS].filter(i => defFleet[i] > 0).length;
         const atkTypes = [DE, CR, BS].filter(i => atkFleet[i] > 0).length;
-        if (defTypes >= 2 || atkTypes >= 2) {
+        if (MIXED_FLEET_EXTRA_PP > 0 && (defTypes >= 2 || atkTypes >= 2)) {
             margin += MIXED_FLEET_EXTRA_PP;
             caveats.push('a side fielding 2-3 ship types is less precisely modelled than a pure single-type fleet');
         }
@@ -424,12 +387,11 @@
         SHIPS, TOUGH, sbCV, sbHalf,
         cvOf, attOf, toughOf, toFleet,
         clampScience, clampRace, clampStarbase, clampLevel, normalizeInputs,
-        resolveStats, simulate, winChance, winBand,
+        resolveStats, simulate, winChance, winBand, strengthOf, sbStrength,
         uncertainty: { BASE_ERROR_PP, MIXED_FLEET_EXTRA_PP },
         constants: {
-            P_CV_WEIGHT, PAIR_CV_WEIGHT, N_EXP,
+            N_EXP,
             RACE_ATK_PCT, RACE_DEF_PCT,
-            LONE_SB_CV_WEIGHT, SB_FLEET_SHARE_SLOPE,
             PHYS_SLOPE, PHYS_BRACKET, PHYS_BRACKET_PCT,
             PLEVEL_WIN_K, PLEVEL_SURV_SLOPE,
             MATH_SLOPE, MATH_BRACKET, LN_CAP

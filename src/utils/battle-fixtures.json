@@ -1077,6 +1077,198 @@
         "level": 5
       },
       "observedDefenderWinPct": 97.21
+    },
+    {
+      "id": "strength-two-type-attacker",
+      "desc": "attacker 50% cruisers + 50% battleships (by CV) vs pure destroyers, no bonuses: strength 3*attack + 2*defence summed over ships (the 0.813 blend was 2.0pp off)",
+      "source": "in-game battle calculator, 2026-10-04 round-2 mixed-fleet sweep through the hub (/root/calc-sweep case M1-033)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          4000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          0,
+          266,
+          107
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 52.32
+    },
+    {
+      "id": "strength-two-type-defender",
+      "desc": "pure destroyers vs defender 50% destroyers + 50% cruisers, no bonuses",
+      "source": "in-game battle calculator, 2026-10-04 round-2 mixed-fleet sweep through the hub (/root/calc-sweep case M2-003)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          2000,
+          250,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          3790,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 48.1
+    },
+    {
+      "id": "strength-three-types",
+      "desc": "attacker 20% D + 60% C + 20% B vs pure destroyers, no bonuses",
+      "source": "in-game battle calculator, 2026-10-04 round-2 mixed-fleet sweep through the hub (/root/calc-sweep case M4-007)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          4000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          860,
+          323,
+          43
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 51.82
+    },
+    {
+      "id": "strength-size-invariant",
+      "desc": "attacker 50% C + 50% B vs pure destroyers at 10x size: the rule does not depend on fleet size",
+      "source": "in-game battle calculator, 2026-10-04 round-2 mixed-fleet sweep through the hub (/root/calc-sweep case M5-006)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          40000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          0,
+          2673,
+          1069
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 51.99
+    },
+    {
+      "id": "strength-away-from-even",
+      "desc": "attacker 50% C + 50% B vs pure destroyers near 80%: the curve exponent 1.79375",
+      "source": "in-game battle calculator, 2026-10-04 round-2 mixed-fleet sweep through the hub (/root/calc-sweep case M6-006)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          4000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          0,
+          320,
+          128
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 21.95
+    },
+    {
+      "id": "starbase-odd-cv-level-2",
+      "desc": "2 destroyers vs a lone level-2 starbase (CV 5): attack 2, defence 3, strength 12 (CV/2 each gave 12.5 and was 4.5pp off)",
+      "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case G3-001)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          0,
+          0,
+          0
+        ],
+        "starbase": 2,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          2,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 6.97
     }
   ],
   "starbaseCv": {
