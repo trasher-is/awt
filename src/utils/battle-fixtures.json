@@ -437,6 +437,326 @@
         "level": 0
       },
       "observedDefenderWinPct": 20.0
+    },
+    {
+      "id": "starbase-11-alone-vs-100-destroyers",
+      "desc": "lone level-11 starbase vs 100 destroyers, no sciences; the same value as the September harvest (block 3-sb-alone), re-read to show the calculator had not changed",
+      "source": "in-game battle calculator, read by hand 2026-10-04 (Starbase Calculator Trials, step 02)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          0,
+          0,
+          0
+        ],
+        "starbase": 11,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          100,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 61.65
+    },
+    {
+      "id": "starbase-8-alone-vs-31-destroyers",
+      "desc": "lone level-8 starbase vs 31 destroyers, no sciences: near-even point for the destroyer-vs-lone-starbase blend weight",
+      "source": "in-game battle calculator, read by hand 2026-10-04 (Starbase Calculator Trials, step 03)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          0,
+          0,
+          0
+        ],
+        "starbase": 8,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          31,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 49.28
+    },
+    {
+      "id": "starbase-13-alone-vs-242-destroyers",
+      "desc": "lone level-13 starbase vs 242 destroyers, no sciences: the same weight at a higher level and larger fleet",
+      "source": "in-game battle calculator, read by hand 2026-10-04 (Starbase Calculator Trials, step 04)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          0,
+          0,
+          0
+        ],
+        "starbase": 13,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          242,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 49.91
+    },
+    {
+      "id": "starbase-4-alone-vs-5-destroyers",
+      "desc": "lone level-4 starbase vs 5 destroyers, no sciences: the same weight at a small level",
+      "source": "in-game battle calculator, read by hand 2026-10-04 (Starbase Calculator Trials, step 15)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          0,
+          0,
+          0
+        ],
+        "starbase": 4,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          5,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 50
+    },
+    {
+      "id": "starbase-8-alone-vs-31-destroyers-sciences",
+      "desc": "lone level-8 starbase vs 31 destroyers with sciences and race set on both sides: the weight still holds once the other win terms are active",
+      "source": "in-game battle calculator, read by hand 2026-10-04 (Starbase Calculator Trials, step 09)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          0,
+          0,
+          0
+        ],
+        "starbase": 8,
+        "physics": 10,
+        "mathematics": 10,
+        "raceAttack": 0,
+        "raceDefense": -1,
+        "level": 5
+      },
+      "atk": {
+        "fleet": [
+          31,
+          0,
+          0
+        ],
+        "physics": 11,
+        "mathematics": 10,
+        "raceAttack": 2,
+        "raceDefense": 0,
+        "level": 5
+      },
+      "observedDefenderWinPct": 22.47
+    },
+    {
+      "id": "starbase-8-physics-gap-6",
+      "desc": "lone level-8 starbase vs 42 destroyers, physics 8 vs 14 (gap 6): the physics bracket acts against a starbase as it does fleet vs fleet",
+      "source": "in-game battle calculator, read by hand 2026-10-04 (Starbase Calculator Trials, step 07)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          0,
+          0,
+          0
+        ],
+        "starbase": 8,
+        "physics": 14,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          42,
+          0,
+          0
+        ],
+        "physics": 8,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 48.7
+    },
+    {
+      "id": "starbase-8-physics-gap-5",
+      "desc": "same as starbase-8-physics-gap-6 with attacker physics 9 (gap 5): the bracket is off",
+      "source": "in-game battle calculator, read by hand 2026-10-04 (Starbase Calculator Trials, step 08)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          0,
+          0,
+          0
+        ],
+        "starbase": 8,
+        "physics": 14,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          42,
+          0,
+          0
+        ],
+        "physics": 9,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 11.84
+    },
+    {
+      "id": "starbase-8-physics-gap-6-50-destroyers",
+      "desc": "lone level-8 starbase vs 50 destroyers, physics 8 vs 14: the fleets of report 31610 with only its physics set",
+      "source": "in-game battle calculator, read by hand 2026-10-04 (Starbase Calculator Trials, step 16)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          0,
+          0,
+          0
+        ],
+        "starbase": 8,
+        "physics": 14,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          50,
+          0,
+          0
+        ],
+        "physics": 8,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 20.1
+    },
+    {
+      "id": "starbase-6-plus-443-destroyers-near-even",
+      "desc": "456 destroyers vs 443 destroyers + level-6 starbase, no sciences: near-even starbase + fleet fight",
+      "source": "in-game battle calculator, read by hand 2026-10-04 (Starbase Calculator Trials, step 05)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          443,
+          0,
+          0
+        ],
+        "starbase": 6,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          456,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 50.05
+    },
+    {
+      "id": "starbase-6-plus-fleet-race-attack",
+      "desc": "as starbase-6-plus-443-destroyers-near-even with maths 5 vs 10, attacker race defence +3 and race attack +3",
+      "source": "in-game battle calculator, read by hand 2026-10-04 (Starbase Calculator Trials, step 14)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          443,
+          0,
+          0
+        ],
+        "starbase": 6,
+        "physics": 0,
+        "mathematics": 10,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          456,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 5,
+        "raceAttack": 3,
+        "raceDefense": 3,
+        "level": 0
+      },
+      "observedDefenderWinPct": 15.51
     }
   ],
   "starbaseCv": {
@@ -802,6 +1122,90 @@
           0
         ],
         "observedDefStarbaseSurvivorFrac": 0
+      },
+      {
+        "id": "starbase-9-plus-destroyers-survival",
+        "desc": "50 destroyers + level-9 starbase defending against 100 destroyers. The starbase survives at displayed level 6.11; leaving its toughness out of the loss fraction wiped it (and all but one destroyer) (calculator shows the starbase row as an effective level; 6.11 converted to a CV fraction here)",
+        "source": "scripts/battle-harvest/results.jsonl, round 1, block 4-sb-plus-fleet",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            50,
+            0,
+            0
+          ],
+          "starbase": 9,
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "atk": {
+          "fleet": [
+            100,
+            0,
+            0
+          ],
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "observedDefSurvivors": [
+          14.71,
+          0,
+          0
+        ],
+        "observedAtkSurvivors": [
+          25,
+          0,
+          0
+        ],
+        "observedDefStarbaseSurvivorFrac": 0.2961
+      },
+      {
+        "id": "starbase-15-plus-cruisers-survival",
+        "desc": "20 cruisers + level-15 starbase defending against 1000 destroyers. Displayed starbase level 9.86; the starbase toughness has to be in the denominator for it to survive at all (calculator shows the starbase row as an effective level; 9.86 converted to a CV fraction here)",
+        "source": "scripts/battle-harvest/results.jsonl, round 1, block 4-sb-plus-fleet",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            0,
+            20,
+            0
+          ],
+          "starbase": 15,
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "atk": {
+          "fleet": [
+            1000,
+            0,
+            0
+          ],
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "observedDefSurvivors": [
+          0,
+          2.47,
+          0
+        ],
+        "observedAtkSurvivors": [
+          443,
+          0,
+          0
+        ],
+        "observedDefStarbaseSurvivorFrac": 0.1237
       }
     ],
     "gate": {

@@ -146,10 +146,11 @@ function defenseObservation(report, playerId, notBefore, { subject, opponents })
     if (fleetSize < 4 || !opposed) {
         return { skip: 'too_small_or_unopposed' };
     }
-    // An attacker's losses depend on the starbase it fought; a defender's fleet losses
-    // do not (the starbase adds to the defender's CV and win chance, not to its fleet's
-    // toughness), so only the attacker needs the level.
-    if (own === 'att' && starbase.level === null) return { skip: 'starbase_level_unknown' };
+    // Both sides' losses depend on the starbase: the attacker's on what it fought, the
+    // defender's fleet on the starbase's toughness, which shares its loss fraction
+    // (battle-model.js, confirmed against the calculator 2026-10-04). Without the level
+    // neither side can be replayed.
+    if (starbase.level === null) return { skip: 'starbase_level_unknown' };
 
     const losses = battleModel.SHIPS.map(ship => report[`${own}_${ship.key}_lost`]);
     if (losses.some((value, index) => !count(value) || value > ownFleet[index])) {

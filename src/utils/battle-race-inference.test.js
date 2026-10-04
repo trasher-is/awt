@@ -200,10 +200,11 @@ console.log('\n── Starbases ──');
 const sbDefence = infer([synth({ role: 'def', subjectFleet: [1000, 0, 0], enemyFleet: [500, 0, 0], sbLevel: 6, rd: 2, math: 8 })]);
 ok('a defending winner with a starbase is eligible and keeps its true pick',
     sbDefence.eligible_report_count === 1 && sbDefence.defense.candidates.includes(2) && narrowed(sbDefence), sbDefence);
-const sbFleetOnlyCv = infer([synth({ role: 'def', subjectFleet: [1000, 0, 0], enemyFleet: [500, 0, 0], sbLevel: 6,
-    rd: 2, math: 8, cvIncludesStarbase: false })]);
-ok('a defender with a starbase is eligible when the stored CV covers the fleet only',
-    sbFleetOnlyCv.eligible_report_count === 1 && sbFleetOnlyCv.defense.candidates.includes(2), sbFleetOnlyCv);
+// The starbase shares the defending fleet's loss fraction, so a defender whose stored CV
+// hides the starbase level cannot be replayed either (it used to be treated as eligible).
+skipped('a defender with a starbase of unknown level is skipped',
+    synth({ role: 'def', subjectFleet: [1000, 0, 0], enemyFleet: [500, 0, 0], sbLevel: 6, rd: 2, math: 8, cvIncludesStarbase: false }),
+    'starbase_level_unknown');
 const sbAttack = infer([synth({ subjectFleet: [1500, 0, 0], enemyFleet: [300, 0, 0], sbLevel: 7, rd: -1, math: 8 })]);
 ok('an attacker against a starbase uses the level implied by the defender CV',
     sbAttack.eligible_report_count === 1 && sbAttack.defense.candidates.includes(-1) && narrowed(sbAttack), sbAttack);

@@ -96,6 +96,13 @@ constant. Reweighting the global constant or adding a defense-ratio third term b
 to close that residual; a dense 90-point destroyer-vs-battleship sweep is what surfaced the
 per-pair weights instead.
 
+Destroyers against a **lone starbase** have their own weight too, `0.7745` (2026-10-04).
+Until then any fight with a starbase used the mixed `0.813`, and every recorded single-type
+starbase fight rated the attacker low (14 of 14, up to 1.9pp). `0.7745` fits the six recorded
+lone-starbase points to 0.08pp and seven new calculator readings (levels 4-13, 5-242
+destroyers, one with sciences and race set) to 0.3pp. A starbase with a fleet beside it, and
+cruisers or battleships against a starbase, still use `0.813`.
+
 **Survivors** — Mathematics, Race Defense and Player Level, all multiplicative on your own
 toughness (`1/lossFraction`), independent of each other and of win%:
 
@@ -108,9 +115,14 @@ toughnessMultiplier = (1 + 0.0015·ownMath)                    OWN ABSOLUTE leve
                      × (1 + 0.01·max(0, ownPL−enemyPL))        only if this side has all 3 types
 ```
 
-`ownToughness = Σ(att + 2·def)` over the fleet, or — for a starbase defending with **no**
-fleet at all — its own `att + 2·def` (`att = def = floor(cv/2)`), since a fleet-only
-denominator is 0 with nothing to fight with. Physics and Race Attack never touch
+`ownToughness = Σ(att + 2·def)` over the fleet, **plus** the defending starbase's own
+`att + 2·def` (`att = def = floor(cv/2)`) whenever there is one, with or without a fleet
+beside it. The fleet and the starbase then lose the same fraction. Before 2026-10-04 the
+starbase was left out whenever a fleet also defended; that put the starbase 0.49 levels off on
+average across the 816 recorded starbase + fleet observations, and wiped starbases the
+calculator leaves standing (100 destroyers vs 50 destroyers + level 9: the calculator shows
+the starbase at level 6.11, the old formula at 0). Counting it gives 0.13 levels there and
+0.01-0.05 on six new calculator readings. Physics and Race Attack never touch
 survivors. Player level never touches anything unless the side has destroyers **and**
 cruisers **and** battleships.
 
@@ -162,12 +174,25 @@ lost. On 2026-09-06 the model was replaced (see above) and the fixtures file gai
   `model.simulate()` (`survivorMaxErrorUnits` gate) — it used to only check the array was
   non-empty.
 
+On 2026-10-04 it gained the starbase shapes real battles use (almost every stored report is
+destroyers against a starbase, alone or with a destroyer fleet):
+
+- 10 `winChance` fixtures read off the in-game calculator by hand: lone starbases at levels
+  4-13 near 50%, one with sciences and race set, the physics ±6 bracket against a starbase
+  (gap 6 vs gap 5), and two near-even starbase + fleet fights. Re-reading two September points
+  first gave the same numbers to the last digit, so the calculator had not changed.
+- 2 `survivors.cases` from the harvest (`block 4-sb-plus-fleet`): a starbase defending
+  beside destroyers and beside cruisers. The calculator shows the starbase row as an effective
+  level; those entries convert it to the CV fraction the model computes.
+
+Against the model before that date, 7 of the new win fixtures and both survivor fixtures fail
+(worst 2.29pp and 13.7 ships).
+
 Current state of the harness:
 
-- 13 win-% fixtures, worst error **0.75 pp** (a lone starbase — the win% side of the model's
-  known mixed/starbase gap), gate at 1.5 pp
+- 23 win-% fixtures, worst error **0.52 pp** (`composition-1000d-vs-125c`), gate at 1.5 pp
 - 10 starbase CV levels, exact match required
-- 8 survivor fixtures, worst error **0.005 units**, gate at 0.5 units
+- 10 survivor fixtures, worst error **0.005 units**, gate at 0.5 units
 
 Adding these fixtures caught two real bugs before they shipped: a lone starbase (no
 defending fleet) was taking zero losses regardless of attacker size (the fleet-only
@@ -232,6 +257,7 @@ the constants in `battle-model.js`, do not raise the gate.
 | `db73cd5` (2026-06-26) | last version of the bot's inline copy (the one that went stale) |
 | `fb2013f`–`2cc1467` (2026-06-27/28) | the original logistic-regression calibration: 24 in-game samples, survivors to `ΣenemyCV / Σ(att+2·def)`, power-law force/attack terms, mean error 0.97%, max 4.0% — see git history on this file for the individual commits, no longer reproduced here since none of those constants ship anymore |
 | 2026-09-06 | **replaced entirely.** Reverse-engineered from ~4200 live-calculator POSTs across four rounds (`scripts/battle-harvest/`) instead of fit as a regression. Corrected: race defense 12% (not the pre-patch 11%), math bracket ±25% (not ±12.5% — the old regression had halved it), the starbase-alongside-fleet and asymmetric-mathematics cases (both now modelled exactly, see below), and two bugs the new fixtures caught immediately (lone-starbase toughness, the exact-lossFrac=1.0 floor boundary) |
+| 2026-10-04 | Starbase fights: destroyers vs a lone starbase get blend weight `0.7745` (was the mixed `0.813`, 1.4-2.3pp low on the attacker), and a defending starbase's toughness always counts in the defender's loss fraction (was left out beside a fleet). Confirmed on 17 hand-read calculator results; 10 win and 2 survivor fixtures added. `battle-race-inference.js` now also skips a defender whose starbase level is unknown, since its fleet losses depend on it |
 
 ## Known-approximate areas
 
@@ -241,9 +267,16 @@ the constants in `battle-model.js`, do not raise the gate.
   fleet at once.
 - The 0.813 mixed-fleet blend weight is the least-attested constant in the model (not a
   clean fraction, unlike everything else).
+- **Win % with a starbase beside a fleet** still uses `0.813`. Near-even fights read on
+  2026-10-04 are within 0.1pp, but 100 destroyers vs 50 destroyers + level 9 is 1.17pp off
+  (attacker rated low) and no single weight fits the recorded points. Not fixed.
+- A lone starbase that ends a non-certain fight at a loss fraction of 1 showed level 1 (2 CV)
+  in one calculator reading (50 destroyers vs level 8, physics 8 vs 14), where the model wipes
+  it; ten recorded fights of that kind show 0.00, so the model is unchanged.
 
 **No longer approximate, contra the old version of this section**: a starbase defending
-alongside a fleet (mean ~0.06pp error across the harvested data) and a large mathematics
+alongside a fleet (win% mean ~0.06pp across the harvested single-type data; survivors
+corrected 2026-10-04, see above) and a large mathematics
 gap (mean ~0.00pp — the "iterative resolution" suspected here turned out to be the
 absolute-level/gap mislabeling described above, not anything iterative). Both are now
 modelled exactly rather than skipped past.
