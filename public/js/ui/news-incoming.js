@@ -160,9 +160,13 @@ function renderDefenderData(box, d, target) {
     // against what the starbase left of it; the owner's chance standing with his starbase.
     const winTag = (a) => {
         if (a.win == null || !a.winBand) return '';
-        const verb = a.mode === 'reinforce' ? 'holds' : 'wins';
-        const keep = a.keepCv != null && a.win > 0 ? ` · keeps ${Math.round(a.keepCv).toLocaleString()} CV` : '';
-        return ` · ${verb} ${esc(a.winBand)}${keep}${a.winUnknown ? ' (attacker race unscouted)' : ''}`;
+        const kept = (w, cv) => (cv != null && w > 0 ? `, keeps ${Math.round(cv).toLocaleString()} CV` : '');
+        const scout = a.winUnknown ? ' (attacker race unscouted)' : '';
+        if (a.mode === 'reinforce') return ` · holds ${esc(a.winBand)}${kept(a.win, a.keepCv)}${scout}`;
+        const after = `after: retakes ${esc(a.winBand)}${kept(a.win, a.keepCv)}`;
+        const before = !a.before ? '' : a.before.win < 0.005 ? 'before: fails · '
+            : `before: holds ${esc(a.before.winBand)}${kept(a.before.win, a.before.keepCv)} · `;
+        return ` · ${before}${after}${scout}`;
     };
     const row = (a, extra) =>
         `<div>${SRC[a.source] || ''} <b>${esc(a.name)}</b> [${a.cv.toLocaleString()} CV] ➔ ${fmtTime(a.eta)}${winTag(a)}${extra}${launchLink(a, target)}</div>`;
@@ -188,7 +192,7 @@ function renderDefenderData(box, d, target) {
         html += d.onTime.length ? d.onTime.map(a => row(a, a.note ? ` (${esc(a.note)})` : '')).join('') : '<div>❌ none found</div>';
     } else {
         html += p
-            ? '<div style="font-weight:bold;color:#4ade80">⚔️ Land right AFTER them, same cycle (never before — you\'d fight the starbase):</div>'
+            ? '<div style="font-weight:bold;color:#4ade80">⚔️ Defenders — before: land first, kill the SB, hold the planet · after: land right after them, same cycle, retake it</div>'
             : '<div style="font-weight:bold;color:#4ade80">🛡️ Can defend in time:</div>';
         html += d.onTime.length
             ? d.onTime.map(a => row(a, ` (spare ${fmtTime(a.delta)}${a.note ? ', ' + esc(a.note) : ''})`)).join('')

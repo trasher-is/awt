@@ -56,12 +56,31 @@ const worst = { ra: 4, rd: 4, phys: 15, math: 15, lvl: 5 };   // an unscouted at
     ok('nothing left to fight: a certain win that costs nothing', nothingLeft.win === 1 && nothingLeft.keepCv === model.cvOf(allyFleet));
 }
 
+// --- An ally lands BEFORE: kills the starbase, then holds the planet --------------------
+{
+    const enemyFleet = [100, 5, 0];
+    const allyFleet = [200, 0, 0];
+    const noSb = B.landBefore({ allyFleet, ally: plain, owner: plain, sbLevel: 0, enemyFleet, enemy: worst });
+    const direct = model.simulate({ defFleet: allyFleet, atkFleet: enemyFleet, sbLevel: 0, def: plain, atk: worst });
+    ok('no starbase: he simply defends the planet with his whole fleet', noSb.win === direct.winD && noSb.sbCostCv === 0, noSb);
+    const withSb = B.landBefore({ allyFleet, ally: plain, owner: plain, sbLevel: 9, enemyFleet, enemy: worst });
+    const kill = model.simulate({ defFleet: [0, 0, 0], atkFleet: allyFleet, sbLevel: 9, def: plain, atk: plain });
+    const hold = model.simulate({ defFleet: kill.survAtk, atkFleet: enemyFleet, sbLevel: 0, def: plain, atk: worst });
+    ok('with a starbase he fights it first (he attacks, the owner\'s stats defend) and pays in ships',
+        withSb.sbCostCv === model.cvOf(allyFleet) - kill.cvAtkRemain && withSb.sbCostCv > 0, withSb);
+    ok('then holds with what is left: P(kill) x P(hold)', Math.abs(withSb.win - kill.winA * hold.winD) < 1e-12, { withSb, k: kill.winA, h: hold.winD });
+    ok('so killing the starbase first is never better than finding no starbase', withSb.win <= noSb.win);
+    const tooWeak = B.landBefore({ allyFleet: [3, 0, 0], ally: plain, owner: plain, sbLevel: 12, enemyFleet, enemy: worst });
+    ok('a fleet that cannot beat the starbase holds nothing', tooWeak.win === 0 && tooWeak.keepCv === 0, tooWeak);
+}
+
 // --- The owner lands BEFORE: his fleet joins his starbase ---------------------------------
 {
     const ctx = { enemyFleet: [120, 5, 0], enemy: worst, sbLevel: 9, garrison: [10, 0, 0], owner: plain };
     const r = B.ownerReinforce({ ...ctx, allyFleet: [40, 0, 0] });
     const same = B.planetFight({ ...ctx, garrison: [50, 0, 0] });
-    ok('the owner reinforcing is the planet fight with a bigger garrison', r.win === same.holds && r.keepCv === same.defenceLeftCv, { r, same });
+    ok('the owner reinforcing is the planet fight with a bigger garrison', r.win === same.holds && r.keepCv === same.garrisonLeftCv, { r, same });
+    ok('what he keeps is ships, never more than he brought (the starbase is not counted)', r.keepCv <= model.cvOf([50, 0, 0]), r);
 }
 
 // --- What the planet's own PP buys before the attack lands --------------------------------

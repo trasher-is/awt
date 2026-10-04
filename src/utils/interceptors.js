@@ -143,13 +143,20 @@ function computeInterceptors(attack, nowUnix) {
             const onTarget = bp.system_id === attack.systemId && bp.planet_index === attack.planetIndex;
             const travel = onTarget ? 0 : calcTravelSeconds(bp.sx, bp.sy, bp.planet_index, target.x, target.y, attack.planetIndex, bp.energy, bp.race_speed, true);
             const hours = timeUntilImpact != null ? (timeUntilImpact - travel) / 3600 : 0;
-            let pp = bp.is_home
-                ? planets.reduce((sum, pl) => sum + ppAt(pl, hours), 0) + (ppPrice > 0 ? cleanInt(bp.astro_dollars) / ppPrice : 0)
-                : ppAt(bp, hours);
-            const fleet = buildableFleet(pp, bp.economy);
+            const budget = h => (bp.is_home
+                ? planets.reduce((sum, pl) => sum + ppAt(pl, h), 0) + (ppPrice > 0 ? cleanInt(bp.astro_dollars) / ppPrice : 0)
+                : ppAt(bp, h));
+            const fleet = buildableFleet(budget(hours), bp.economy);
             if (!fleet) continue;
             const where = onTarget ? 'the planet itself' : bp.is_home ? 'home' : `[${bp.system_id}] #${bp.planet_index}`;
-            consider(owner, cvOf(fleet.ships), travel, 'build', `build ${fleet.label} at ${where}`, { ships: fleet.ships });
+            // The fleet counts PP saved up to the last moment it can still launch. Say so,
+            // and say what is there right now, so nobody reads it as a fleet that exists.
+            let note = `build ${fleet.label} at ${where}`;
+            if (hours > 0.1) {
+                const now = buildableFleet(budget(0), bp.economy);
+                note += ` if PP saved till launch (now: ${now ? now.label : 'nothing'})`;
+            }
+            consider(owner, cvOf(fleet.ships), travel, 'build', note, { ships: fleet.ships });
         }
     }
     // Members without My Savings: the old estimate, home planet and the sheet's totals.
