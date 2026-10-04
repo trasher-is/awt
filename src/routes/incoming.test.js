@@ -280,6 +280,30 @@ function reset() {
         const missing = await get(server, 'defence/attack?key=nope');
         ok('an unknown attack is a 404', missing.status === 404);
 
+        // Landing planner (2026-10-04): chains of landings, and the sacrifice search.
+        {
+            const own = await post(server, '/defence/plan', { key: richKey, landings: [{ name: 'SyntheticDefender', ships: [40, 0, 0], when: 'before' }] });
+            ok('the planet owner landing first never fights his own planet',
+                own.status === 200 && own.body.chain.likely[0].fight === false && own.body.chain.held > 0.99, own.body.chain);
+            const two = await post(server, '/defence/plan', { key: richKey, landings: [
+                { name: 'SyntheticAllyA', ships: [30, 0, 0], when: 'before' },
+                { name: 'SyntheticAllyB', ships: [30, 0, 0], when: 'before' }] });
+            ok('a second ally landing first fights the first one', two.body.chain.likely[1].fight && two.body.chain.likely[1].against === 'SyntheticAllyA', two.body.chain.likely);
+            ok('the outcomes add up to 1', Math.abs(two.body.chain.held + two.body.chain.retaken + two.body.chain.lost - 1) < 1e-9, two.body.chain);
+            const sac = await post(server, '/defence/plan', { key: richKey, landings: [],
+                sacrifice: { decoy: { name: 'SyntheticAllyA', ships: [20, 0, 0] }, closer: { name: 'SyntheticAllyB', ships: [8, 0, 0] } } });
+            ok('the sacrifice search answers best, cheapest, the closer alone, and a table',
+                sac.status === 200 && sac.body.sacrifice.best && sac.body.sacrifice.cheapest && sac.body.sacrifice.baseline
+                && sac.body.sacrifice.table.length > 0 && sac.body.sacrifice.cheapest.cv <= sac.body.sacrifice.best.cv, sac.body.sacrifice);
+            const badSac = await post(server, '/defence/plan', { key: richKey, sacrifice: { decoy: { name: 'X' } } });
+            ok('a sacrifice question without both fleets is refused', badSac.status === 400);
+            const capped = await post(server, '/defence/plan', { key: richKey,
+                landings: Array.from({ length: 30 }, (_, k) => ({ name: `A${k}`, ships: [1, 0, 0], when: 'after' })) });
+            ok('at most 12 landings are simulated', capped.status === 200 && capped.body.chain.likely.length <= 13, capped.body.chain.likely.length);
+            const nope = await post(server, '/defence/plan', { key: 'nope', landings: [] });
+            ok('planning an unknown attack is a 404', nope.status === 404);
+        }
+
         // Live panel (2026-10-04): who is looking, and choices pushed to everyone at once.
         {
             const openStream = (name) => new Promise((resolve, reject) => {

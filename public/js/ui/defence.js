@@ -29,6 +29,8 @@ let stream = null, streamKey = null;
 let liveViewers = null;      // from the stream; null until the first event
 let livePlan = null;         // { choices, covering } from the stream
 let lastDetail = null;       // the last full analysis, re-painted when the plan changes
+// Landing planner state, per attack, kept across re-paints (a plan event re-draws the panel).
+let planner = { key: null, rows: [], result: null, decoy: '', closer: '', sac: null, busy: false };
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const nowSec = () => Math.floor(Date.now() / 1000) + serverOffset;
@@ -252,6 +254,7 @@ function paint() {
     box.querySelectorAll('.defence-choose').forEach(b => b.addEventListener('click', () => choose(b.dataset.role, Number(b.dataset.idx))));
     box.querySelector('#defence-withdraw-btn')?.addEventListener('click', () => choose('none'));
     box.querySelector('#defence-cover-btn')?.addEventListener('click', () => cover(lastDetail));
+    wirePlanner(box);
     paintLive();
 }
 
@@ -419,6 +422,7 @@ function renderDetail(d) {
 
     html += section(`🛡️ Keep it — land before ${clock(d.arrivalUnix)}`, rankedRows(d.keep, 'keep'));
     html += section(`⚔️ Retake it — land ${w ? `${clock(w.arrival)}–${clock(w.cycleEnd)}` : 'right after them'}, same cycle`, rankedRows(d.retake, 'retake'));
+    html += section('🧭 Landing planner', plannerBlock(d));
 
     // A member's best chances among options that make it in time, for the collapsed row —
     // with 15-20 members nobody should have to open every row to find the useful ones.
@@ -486,4 +490,182 @@ async function cover(d) {
     } catch (e) {
         alert('Cover failed: ' + e.message);
     }
+}
+
+// ─── Landing planner (POST /hub-api/defence/plan, src/utils/landing-planner.js) ──────
+// Build an order of landings — "before" ones in order, then the attacker, then "after"
+// ones in order — and see how often the planet is held, retaken or lost, and the most
+// likely way it goes. The sacrifice finder sizes a decoy that lands ahead of a closer.
+
+// Every option of every member, as "<member name>:<option index>". By name, not by row:
+// the panel re-sorts members by their chances on every refresh, while a member's own
+// options stay in ETA order.
+function optionList(d) {
+    const out = [];
+    d.members.forEach(m => m.options.forEach((o, oi) => out.push({ ref: `${encodeURIComponent(m.name)}:${oi}`, m, o })));
+    return out;
+}
+const optionByRef = (d, ref) => {
+    const i = String(ref).lastIndexOf(':');
+    if (i < 0) return null;
+    const name = decodeURIComponent(String(ref).slice(0, i)), oi = Number(String(ref).slice(i + 1));
+    const m = d.members.find(x => x.name === name);
+    return m && m.options[oi] ? { m, o: m.options[oi] } : null;
+};
+const optionLabel = ({ m, o }) => `${m.name} · ${SRC[o.source] || ''} ${num(o.cv)} CV${fleetArr(o.ships) ? ` (${fleetArr(o.ships)})` : ''} · ETA ${hms(o.eta)}`;
+
+function resetPlannerFor(d) {
+    if (planner.key === d.key) return;
+    planner = { key: d.key, rows: [], result: null, decoy: '', closer: '', sac: null, busy: false };
+    // Start from what people already said they will do: befores first, in the order said.
+    const plan = currentPlan();
+    const list = optionList(d);
+    for (const role of ['before', 'after']) {
+        for (const c of plan.choices.filter(x => x.role === role)) {
+            const hit = list.find(x => x.m.name.toLowerCase() === c.name.toLowerCase() && sameOption(c, x.o));
+            if (hit) planner.rows.push({ ref: hit.ref, when: role });
+        }
+    }
+}
+
+function timingNote(d, o, when) {
+    const T = d.arrivalUnix ? d.arrivalUnix - d.nowUnix : null;
+    if (when === 'before' && T != null && o.eta >= T) return 'cannot land before them';
+    if (when !== 'before' && d.window && o.eta > d.window.cycleEnd - d.nowUnix) return 'cannot land inside their cycle';
+    return '';
+}
+
+function plannerBlock(d) {
+    resetPlannerFor(d);
+    const list = optionList(d);
+    const opts = (sel) => `<option value="">— pick a fleet —</option>` + list.map(x =>
+        `<option value="${x.ref}" ${x.ref === sel ? 'selected' : ''}>${esc(optionLabel(x))}</option>`).join('');
+    const ctl = 'h-8 px-2 rounded-md bg-zinc-900 border border-border text-xs max-w-full';
+    const rows = planner.rows.map((r, i) => {
+        const hit = optionByRef(d, r.ref);
+        const warn = hit ? timingNote(d, hit.o, r.when) : '';
+        return `<div class="flex flex-wrap items-center gap-1.5 rounded-md bg-zinc-900/60 border border-border px-2 py-1.5">
+            <span class="text-muted-foreground text-xs w-4">${i + 1}.</span>
+            <select class="planner-ref ${ctl} flex-1 min-w-[12rem]" data-i="${i}">${opts(r.ref)}</select>
+            <select class="planner-when ${ctl}" data-i="${i}">
+                <option value="before" ${r.when === 'before' ? 'selected' : ''}>before them</option>
+                <option value="after" ${r.when !== 'before' ? 'selected' : ''}>after them</option>
+            </select>
+            <button class="planner-up ${ctl}" data-i="${i}" title="Earlier">↑</button>
+            <button class="planner-down ${ctl}" data-i="${i}" title="Later">↓</button>
+            <button class="planner-del ${ctl}" data-i="${i}" title="Remove">✕</button>
+            ${warn ? `<span class="text-xs text-orange-400 w-full">⚠️ ${warn}</span>` : ''}
+        </div>`;
+    }).join('');
+    const sacSel = (cls, sel, label) => `<label class="flex flex-col gap-1 text-xs text-muted-foreground flex-1 min-w-[12rem]">${label}
+        <select class="${cls} ${ctl}">${opts(sel)}</select></label>`;
+    return `
+        <div class="text-xs text-muted-foreground mb-2">Fleets land one at a time and fight whoever holds the planet — allies too.
+            Order: the <b>before</b> landings top to bottom, then the attacker, then the <b>after</b> landings.</div>
+        <div class="flex flex-col gap-1.5">${rows || '<div class="text-muted-foreground text-xs">No landings yet — add one, or pick before/after on your options below.</div>'}</div>
+        <div class="mt-2 flex flex-wrap gap-2">
+            <button id="planner-add" class="h-8 px-3 rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80 text-sm">+ Add landing</button>
+            <button id="planner-run" class="h-8 px-3 rounded-md bg-sky-700 text-white hover:bg-sky-600 text-sm" ${planner.busy ? 'disabled' : ''}>Simulate</button>
+        </div>
+        <div id="planner-result" class="mt-3">${planner.result ? chainHtml(planner.result) : ''}</div>
+        <div class="mt-5 rounded-md border border-border px-3 py-3">
+            <div class="font-semibold mb-1">🎯 Sacrifice finder</div>
+            <div class="text-xs text-muted-foreground mb-2">How much of one fleet to throw in first so the closer, landing after the attacker, has the best chance — the attacker loses ships to it, but gains its CV in XP.</div>
+            <div class="flex flex-wrap gap-2">
+                ${sacSel('planner-decoy', planner.decoy, 'Sacrifice (part of this fleet)')}
+                ${sacSel('planner-closer', planner.closer, 'Closer (lands after them)')}
+            </div>
+            <button id="planner-sac" class="mt-2 h-8 px-3 rounded-md bg-sky-700 text-white hover:bg-sky-600 text-sm" ${planner.busy ? 'disabled' : ''}>Find the sacrifice</button>
+            <div id="planner-sac-result" class="mt-3">${planner.sac ? sacHtml(planner.sac) : ''}</div>
+        </div>`;
+}
+
+// A probability as text, one decimal, never rounding "almost" up to 100% or down to 0%.
+function pctText(v) {
+    const x = Math.max(0, Math.min(100, v * 100));
+    if (x > 99.9 && x < 100) return '99.9%';
+    if (x > 0 && x < 0.1) return '0.1%';
+    return `${x.toFixed(1)}%`;
+}
+
+function outcomeBar(r) {
+    const bar = v => `${Math.max(0, Math.min(100, v * 100)).toFixed(2)}%`;
+    return `<div class="flex h-3 rounded overflow-hidden bg-zinc-800">
+            <div class="bg-green-600" style="width:${bar(r.held)}"></div>
+            <div class="bg-yellow-500" style="width:${bar(r.retaken)}"></div>
+            <div class="bg-red-700" style="width:${bar(r.lost)}"></div></div>
+        <div class="mt-1 text-sm"><span class="text-green-400">held ${pctText(r.held)}</span> · <span class="text-yellow-300">retaken ${pctText(r.retaken)}</span> · <span class="text-red-400">lost ${pctText(r.lost)}</span></div>`;
+}
+
+function stepsHtml(steps) {
+    return `<ol class="mt-2 flex flex-col gap-0.5 text-xs">${steps.map((st, i) => {
+        if (!st.fight) return `<li>${i + 1}. <b>${esc(st.name)}</b> ${st.joined ? 'joins the starbase' : 'lands on an empty planet'}</li>`;
+        const vs = `${esc(st.against)}${st.sb ? ` + SB ${st.sb}` : ''}`;
+        const res = st.won ? `wins (${esc(st.pText)}), keeps ${num(st.keptCv)} CV` : `loses (${esc(st.pText)}), ${esc(st.against)} keeps ${num(st.keptCv)} CV`;
+        return `<li class="${st.side === 'enemy' ? 'text-red-300' : ''}">${i + 1}. <b>${esc(st.name)}</b> lands → fights ${vs}: ${res}</li>`;
+    }).join('')}</ol>`;
+}
+
+function chainHtml(r) {
+    if (r.error) return `<div class="text-red-400 text-sm">${esc(r.error)}</div>`;
+    const kept = Object.entries(r.kept || {}).map(([n, cv]) => `${esc(n)} ${num(cv)} CV`).join(' · ');
+    return `${outcomeBar(r)}
+        <div class="text-xs text-muted-foreground mt-1">Attacker ends at PL ${r.enemyEndLevel} in the most likely run${kept ? ` · ships kept on average: ${kept}` : ''}</div>
+        <div class="text-xs text-muted-foreground mt-2">Most likely run (${esc(r.likelyText || '')}):</div>${stepsHtml(r.likely || [])}`;
+}
+
+function sacHtml(s) {
+    if (s.error) return `<div class="text-red-400 text-sm">${esc(s.error)}</div>`;
+    const line = (label, p) => p ? `<div><b>${label}:</b> send <b>${p.share}%</b> — ${esc(fleetArr(p.fleet))} (${num(p.cv)} CV) landing <b>${p.when}</b> them
+        → planet not lost <b class="text-green-400">${esc(p.notLostText)}</b> <span class="text-muted-foreground">· attacker ends PL ${p.enemyEndLevel}</span></div>` : '';
+    const table = (s.table || []).map(t => `<tr><td class="pr-3">${t.when}</td><td class="pr-3">${t.share}%</td><td class="pr-3">${num(t.cv)} CV</td><td class="pr-3">${esc(t.notLostText)}</td><td>PL ${t.enemyEndLevel}</td></tr>`).join('');
+    return `<div class="flex flex-col gap-1 text-sm">
+            <div>Closer alone: planet not lost <b>${esc(s.baseline.notLostText)}</b> <span class="text-muted-foreground">· attacker starts PL ${s.enemyStartLevel}, ends PL ${s.baseline.enemyEndLevel}</span></div>
+            ${line('Cheapest that works', s.cheapest)}
+            ${s.best && s.cheapest && s.best.share === s.cheapest.share && s.best.when === s.cheapest.when ? '' : line('Best chance', s.best)}
+        </div>
+        <details class="mt-2 text-xs"><summary class="cursor-pointer text-muted-foreground">Every 10%</summary>
+            <table class="mt-1"><thead class="text-muted-foreground"><tr><th class="text-left pr-3">lands</th><th class="text-left pr-3">share</th><th class="text-left pr-3">sacrifice</th><th class="text-left pr-3">not lost</th><th class="text-left">attacker</th></tr></thead><tbody>${table}</tbody></table>
+        </details>`;
+}
+
+function wirePlanner(box) {
+    const d = lastDetail;
+    if (!d || !box.querySelector('#planner-run')) return;
+    const repaint = () => paint();
+    box.querySelectorAll('.planner-ref').forEach(el => el.addEventListener('change', () => { planner.rows[+el.dataset.i].ref = el.value; planner.result = null; repaint(); }));
+    box.querySelectorAll('.planner-when').forEach(el => el.addEventListener('change', () => { planner.rows[+el.dataset.i].when = el.value; planner.result = null; repaint(); }));
+    const move = (i, by) => { const j = i + by; if (j < 0 || j >= planner.rows.length) return; [planner.rows[i], planner.rows[j]] = [planner.rows[j], planner.rows[i]]; planner.result = null; repaint(); };
+    box.querySelectorAll('.planner-up').forEach(el => el.addEventListener('click', () => move(+el.dataset.i, -1)));
+    box.querySelectorAll('.planner-down').forEach(el => el.addEventListener('click', () => move(+el.dataset.i, 1)));
+    box.querySelectorAll('.planner-del').forEach(el => el.addEventListener('click', () => { planner.rows.splice(+el.dataset.i, 1); planner.result = null; repaint(); }));
+    box.querySelector('#planner-add')?.addEventListener('click', () => { planner.rows.push({ ref: '', when: 'after' }); repaint(); });
+    box.querySelector('.planner-decoy')?.addEventListener('change', (e) => { planner.decoy = e.target.value; planner.sac = null; });
+    box.querySelector('.planner-closer')?.addEventListener('change', (e) => { planner.closer = e.target.value; planner.sac = null; });
+
+    const send = async (body) => {
+        const res = await fetch('/hub-api/defence/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: d.key, ...body }) });
+        const r = await res.json();
+        if (!r.success) throw new Error(r.error || 'failed');
+        return r;
+    };
+    const party = (ref) => { const hit = optionByRef(d, ref); return hit ? { name: hit.m.name, ships: hit.o.ships } : null; };
+
+    box.querySelector('#planner-run')?.addEventListener('click', async () => {
+        const landings = planner.rows.map(r => ({ ...party(r.ref), when: r.when })).filter(l => l.name);
+        planner.busy = true; repaint();
+        try {
+            const r = await send({ landings });
+            planner.result = { ...r.chain, likelyText: r.chain.likelyP != null ? `${pctText(r.chain.likelyP)} of runs` : '' };
+        } catch (e) { planner.result = { error: 'Could not simulate: ' + e.message }; }
+        planner.busy = false; repaint();
+    });
+    box.querySelector('#planner-sac')?.addEventListener('click', async () => {
+        const decoy = party(planner.decoy), closer = party(planner.closer);
+        if (!decoy || !closer) { planner.sac = { error: 'Pick both fleets first.' }; repaint(); return; }
+        planner.busy = true; repaint();
+        try { planner.sac = (await send({ landings: [], sacrifice: { decoy, closer } })).sacrifice; }
+        catch (e) { planner.sac = { error: 'Could not search: ' + e.message }; }
+        planner.busy = false; repaint();
+    });
 }
