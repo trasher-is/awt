@@ -2083,12 +2083,11 @@ async function handleMessage(message) {
         }
         const { survDef, survAtk, survSB, initCVD, initCVA, winD, winA } = sim;
 
-        // Format helpers. The win chance is printed as a RANGE: the model is a regression
-        // fit whose worst recorded error is ±4 points, so a figure like "47.3%" claims a
-        // precision it does not have. Same helper as the web calculator, so the two
-        // surfaces cannot describe their confidence differently either.
-        const bandDef = battleModel.winBand(winD, { sbLevel, defFleet, def: sim.defStats, atk: sim.atkStats });
-        const bandAtk = battleModel.winBand(winA, { sbLevel, defFleet, def: sim.defStats, atk: sim.atkStats });
+        // Format helpers. The win chance is printed as winBand()'s range (±BASE_ERROR_PP, the
+        // model's measured error against the in-game calculator). Same helper as the web
+        // calculator, so the two surfaces cannot describe their confidence differently.
+        const bandDef = battleModel.winBand(winD, { sbLevel, defFleet, atkFleet, def: sim.defStats, atk: sim.atkStats });
+        const bandAtk = battleModel.winBand(winA, { sbLevel, defFleet, atkFleet, def: sim.defStats, atk: sim.atkStats });
         const pct = n => (n * 100).toFixed(1) + '%';
         const fmt = n => n % 1 === 0 ? n.toString() : n.toFixed(2).replace(/\.?0+$/, '');
         const shipLine = (fleet, surv, label) => {
@@ -2144,7 +2143,7 @@ async function handleMessage(message) {
                     inline: false,
                 }
             )
-            .setFooter({ text: `Ranges, not readings: the model's worst recorded error is ±${battleModel.uncertainty.BASE_ERROR_PP} points. Survivor counts come from a separate formula with no test coverage. Same model as the Hub calculator.` });
+            .setFooter({ text: `Matches the game's battle calculator to within ±${battleModel.uncertainty.BASE_ERROR_PP} points; survivors follow the same rules. Only as good as the stats you give it. Same model as the Hub calculator.` });
 
         return message.reply({ embeds: [embed] });
     }

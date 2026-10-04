@@ -73,13 +73,12 @@ function render() {
     </div>` : '';
 
     const winColor = r.winD > 0.65 ? '#22c55e' : r.winA > 0.65 ? '#ef4444' : '#f59e0b';
-    // Bar width still uses the point estimate — it is a picture, not a claim. The NUMBER
-    // is a range, because the model is a regression fit and "47.3%" implies a precision
-    // it does not have.
+    // Bar width uses the point estimate. The NUMBER is the band winBand() gives: the
+    // model matches the in-game calculator to ±BASE_ERROR_PP, so the range is narrow.
     const winBarD  = (r.winD * 100).toFixed(1);
     const winBarA  = (r.winA * 100).toFixed(1);
-    const bandD = M.winBand(r.winD, { sbLevel: r.sbLvl, defFleet: r.defFleet, def: lastInputs.def, atk: lastInputs.atk });
-    const bandA = M.winBand(r.winA, { sbLevel: r.sbLvl, defFleet: r.defFleet, def: lastInputs.def, atk: lastInputs.atk });
+    const bandD = M.winBand(r.winD, { sbLevel: r.sbLvl, defFleet: r.defFleet, atkFleet: r.atkFleet, def: lastInputs.def, atk: lastInputs.atk });
+    const bandA = M.winBand(r.winA, { sbLevel: r.sbLvl, defFleet: r.defFleet, atkFleet: r.atkFleet, def: lastInputs.def, atk: lastInputs.atk });
     const caveatText = bandD.caveats.length
         ? ` This estimate is wider than usual because ${bandD.caveats.join(', and ')}.`
         : '';
@@ -117,9 +116,9 @@ function render() {
             </div>
             <div class="flex justify-between text-xs text-muted-foreground"><span>Defender</span><span>Attacker</span></div>
             <div class="text-xs text-zinc-600 mt-1">
-                A range, not a reading. The model is fitted to in-game samples and its worst
-                recorded error is ±${M.uncertainty.BASE_ERROR_PP} points, so that is the width shown.${caveatText}
-                Survivor counts above come from a separate formula that currently has no test coverage at all.
+                The same result as the game's own battle calculator, to within ±${M.uncertainty.BASE_ERROR_PP} points
+                (win chance) across every recorded calculator result; survivors follow the same rules.${caveatText}
+                It is only as good as the inputs: an enemy's sciences, race or level that are out of date move the real chance far more.
             </div>
         </div>
     `;

@@ -214,6 +214,7 @@ Current state of the harness:
 
 - 39 win-% fixtures, worst error **0.07 pp** (`phys-diff-6-threshold`, a June sample), gate at
   1.5 pp; every fixture must also sit inside the band `winBand()` shows for that fight
+  (±0.1pp, printed to one decimal, since 2026-10-04)
 - 10 starbase CV levels, exact match required
 - 16 survivor fixtures, worst error **0.024 units**, gate at 0.5 units
 
@@ -283,6 +284,7 @@ the constants in `battle-model.js`, do not raise the gate.
 | `db73cd5` (2026-06-26) | last version of the bot's inline copy (the one that went stale) |
 | `fb2013f`–`2cc1467` (2026-06-27/28) | the original logistic-regression calibration: 24 in-game samples, survivors to `ΣenemyCV / Σ(att+2·def)`, power-law force/attack terms, mean error 0.97%, max 4.0% — see git history on this file for the individual commits, no longer reproduced here since none of those constants ship anymore |
 | 2026-09-06 | **replaced entirely.** Reverse-engineered from ~4200 live-calculator POSTs across four rounds (`scripts/battle-harvest/`) instead of fit as a regression. Corrected: race defense 12% (not the pre-patch 11%), math bracket ±25% (not ±12.5% — the old regression had halved it), the starbase-alongside-fleet and asymmetric-mathematics cases (both now modelled exactly, see below), and two bugs the new fixtures caught immediately (lone-starbase toughness, the exact-lossFrac=1.0 floor boundary) |
+| 2026-10-04 (band) | Win-chance band narrowed ±1 → ±0.1pp and printed to one decimal; the hub calculator and `!battle` now pass the attacker's fleet to `winBand()`; their "survivors have no test coverage" notes replaced |
 | 2026-10-04 (round 2) | Force term replaced by strength `Σ ships·(3·attack + 2·defence)` plus the starbase's own `3·att + 2·def` (odd CV: defence gets the extra point); every blend weight removed. Constants made clean: physics 1.5%/level, level 1%/level; curve exponent refitted to 1.79375. All 2,956 non-certain readings within 0.01pp. Mixed-fleet band +1pp → 0. 6 win fixtures added |
 | 2026-10-04 (sweep) | Fitted to a 641-case calculator sweep: level term only for the side ahead with all three types; physics/maths bracket and level advantage add in one factor; survivor loss capped after the multiplier; one-survivor floor (5+ ships, largest-defence type; lone starbase keeps level 1); lone-starbase weights for cruisers and battleships; destroyers vs destroyers + starbase weight slides with fleet share. Mixed-fleet band ±6 → ±2pp. 10 win and 6 survivor fixtures added |
 | 2026-10-04 | Starbase fights: destroyers vs a lone starbase get blend weight `0.7745` (was the mixed `0.813`, 1.4-2.3pp low on the attacker), and a defending starbase's toughness always counts in the defender's loss fraction (was left out beside a fleet). Confirmed on 17 hand-read calculator results; 10 win and 2 survivor fixtures added. `battle-race-inference.js` now also skips a defender whose starbase level is unknown, since its fleet losses depend on it |

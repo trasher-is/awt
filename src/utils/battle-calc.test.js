@@ -79,6 +79,23 @@ if (!outside.length) {
     failed = true;
 }
 
+// Every caller that tells winBand() the defender's fleet must tell it the attacker's too:
+// the hub calculator and !battle used to pass only defFleet, so a mixed attacking fleet
+// never got its caveat. Scans source with comments stripped (see AGENTS.md).
+{
+    const stripComments = src => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const callers = ['public/js/ui/battle-calc.js', 'src/discord_bot.js'];
+    const missing = [];
+    for (const rel of callers) {
+        const src = stripComments(fs.readFileSync(path.join(__dirname, '..', '..', rel), 'utf8'));
+        for (const m of src.matchAll(/winBand\(([^)]*)\)/g)) {
+            if (/defFleet/.test(m[1]) && !/atkFleet/.test(m[1])) missing.push(`${rel}: winBand(${m[1].trim()})`);
+        }
+    }
+    if (missing.length) { console.log(`❌ winBand() called with the defender's fleet but not the attacker's: ${missing.join(' | ')}`); failed = true; }
+    else console.log('✅ every winBand() caller that passes defFleet also passes atkFleet');
+}
+
 // ─── 1b. SURVIVORS vs the game ────────────────────────────────────────────────
 // Was an empty array with zero coverage until 2026-09-06 (see survivors._note). Checks
 // every ship type on both sides plus the defending starbase's surviving CV fraction.
