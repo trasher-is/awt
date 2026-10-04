@@ -291,7 +291,8 @@ async function coverThis(info, arrivalUnix, coverEl, btn) {
         const resp = await fetch('/hub-api/incoming/cover', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ attacker: info.attacker, target: info.target, arrivalUnix: arrivalUnix || 0 })
+            // ships: two fleets from one attacker can land in the same cycle; the counts say which.
+            body: JSON.stringify({ attacker: info.attacker, target: info.target, ships: info.ships, arrivalUnix: arrivalUnix || 0 })
         });
         const data = await resp.json();
         if (data.success) {
@@ -327,7 +328,7 @@ async function announce(info, arrivalUnix, btn) {
             })
         });
         const data = await resp.json();
-        if (data.success) toast(data.edited ? 'Discord alert updated' : 'Discord alert sent');
+        if (data.success) toast(data.existed ? 'Already on Discord' : 'Discord alert sent');
         else toast('Discord: ' + (data.error || 'failed'));
     } catch (err) {
         console.error('[News] announce failed:', err);

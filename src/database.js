@@ -756,6 +756,10 @@ function initDatabase() {
     // to the base identity; the resolver treats those as unknown-arrival rows.
     addColumn('incoming_msgs', 'base_key', 'TEXT');
     addColumn('incoming_msgs', 'arrival_unix', 'INTEGER');
+    // Two fleets from one attacker landing on one planet in the same cycle share base key
+    // AND arrival, and used to merge into one alert. The ship counts ("D-C-B") tell them
+    // apart; see fleetSigOf() in src/utils/incoming-identity.js. NULL on older rows.
+    addColumn('incoming_msgs', 'fleet_sig', 'TEXT');
 
     // Shared, login-gated planning notes for the redzone (rz.*) proxy — one note per
     // planet, visible to everyone who entered the shared password. Keyed by the game's
