@@ -35,56 +35,55 @@
 //     lneff = w·ln(CVatk/CVdef) + (1−w)·ln(ATKatk/ATKdef)          [force/attack blend]
 //           + ln(1+0.08·RAatk) − ln(1+0.08·RAdef)                   [race attack]
 //           + ln(1+0.01491·PHatk) − ln(1+0.01491·PHdef)             [physics, below bracket]
-//           ± ln(1.25)                    if |PHatk−PHdef| >= 6     [physics bracket]
-//           ± ln(1+0.00995·|PLatk−PLdef|)                           [player level, RAW DIFF —
-//                                                                     see the PLEVEL_WIN_K note]
+//           + ln(EDGEatk) − ln(EDGEdef)                             [bracket + player level]
+//     EDGEside = 1 + 0.25 (if this side is 6+ physics ahead)
+//                  + 0.00995·(own PL − enemy PL)  (if ahead AND this side fields all 3 types)
+//     — the physics bracket and the level advantage ADD inside one factor per side.
 //     capped at |lneff| <= ln(1.5) (a certain win/loss beyond that), then run through
 //     a saturating curve: winFrac = 1 − 0.5·(1−x)^1.805, x = 2·(R−1), R = e^|lneff|.
 //     The blend weight w is 0.813 for any 2-3-type mix, but for a PURE single-type
 //     duel it's pair-specific (0.807 destroyer/cruiser, 0.760 battleship/destroyer,
-//     0.816 battleship/cruiser) — see PAIR_CV_WEIGHT below.
+//     0.816 battleship/cruiser) — see PAIR_CV_WEIGHT below — and a single ship type
+//     against a starbase has its own (LONE_SB_CV_WEIGHT, SB_FLEET_SHARE_SLOPE).
 //
-//   SURVIVORS — Mathematics, Race Defense and Player Level, all multiplicative on
-//   your OWN toughness (1/lossFraction), independent of each other and of win%:
-//     lossFrac_own = min(1, enemyCV / ownToughness) / toughnessMultiplier
+//   SURVIVORS — Mathematics, Race Defense and Player Level on your OWN toughness
+//   (1/lossFraction), independent of win%:
+//     lossFrac_own = min(1, (enemyCV / ownToughness) / toughnessMultiplier)
+//                    [capped AFTER dividing: a big multiplier cannot rescue a side
+//                     whose enemy CV is far above its toughness]
 //     toughnessMultiplier = (1 + 0.0015·ownMath)                    [OWN ABSOLUTE level,
 //                                                                     not the gap — see note]
-//                          × (1.25 or 0.75 if |ownMath−enemyMath| >= 6, else ×1)
+//                          × (1 ± 0.25 [|ownMath−enemyMath| >= 6]
+//                               + 0.01·max(0, ownPL−enemyPL))      [bracket and level ADD;
+//                                                                     level only with all 3 types]
 //                          × (1 + 0.12·ownRD)
-//                          × (1 + 0.01·max(0, ownPL−enemyPL))       [only if this side
-//                                                                     fields all 3 ship types]
+//     ownToughness includes a defending starbase's att + 2·def.
 //     Physics, Race Attack never touch survivors. Player level never touches
 //     anything unless the side has destroyers AND cruisers AND battleships.
 //
 //   ANNIHILATION: the LOSER of a fight that hit the |lneff|>=ln(1.5) certainty cap
 //   is wiped to 0 survivors, full stop — overriding whatever the CV-ratio formula
 //   alone would say. The winner is unaffected. Separately, a side whose own
-//   lossFrac (after the toughness multipliers) is pushed past 1 — which can only
-//   happen from a race-defense malus dividing an already-large loss further up —
-//   floors at exactly 1 survivor, never 0, unless that side is ALSO the certain
-//   loser above (which takes priority and zeroes it).
+//   lossFrac reaches 1 keeps exactly ONE ship — of its type with the most CV, the
+//   other types 0 — unless that side is ALSO the certain loser above (which takes
+//   priority and zeroes it).
 //
 // TWO THINGS THAT LOOK SIMILAR BUT AREN'T (both cost real accuracy the first way):
-//   • PLEVEL_WIN_K is applied to the RAW DIFFERENCE (PLatk−PLdef) as ONE number,
-//     not as ln(1+k·PLatk) − ln(1+k·PLdef) computed separately per side. Those
-//     look like the same formula and agree when the difference is small, but
-//     diverge by up to 2.7pp once both sides carry a large, comparable player
-//     level. A 121-point two-sided grid showed the true term depends on the raw
-//     difference ALONE — every (PLatk,PLdef) pair sharing a difference lands
-//     within 0.001 of the same log-odds value regardless of the absolute levels.
+//   • PLEVEL_WIN_K is applied to the level DIFFERENCE, not to each side's absolute
+//     level: a 121-point two-sided grid showed the term depends on the difference
+//     alone. It counts only for the side that is AHEAD and only if that side fields
+//     all three ship types (a 641-case calculator sweep, 2026-10-04: applying the
+//     whole gap whenever one side had all three was up to 68pp wrong).
 //   • MATH_SLOPE (0.0015) is your OWN absolute math level, not a gap to the
 //     enemy. Every earlier test that found "0.0015/level of advantage" held the
 //     enemy's math at exactly 0, so "gap" and "own level" were the same number
 //     and looked identical. The ±6 BRACKET, unlike the slope, genuinely is
 //     gap-based (confirmed at 6 different absolute bases from 15 to 40).
 //
-// KNOWN GAP: fleets mixing 2-3 ship types on either side fit noticeably worse
-// than pure single-type duels or single-type-vs-single-type cross matchups —
-// mean error ~0.3pp, worst case ~5.8pp in a 1673-case realistic-scale dataset,
-// vs <0.1pp almost everywhere else. A CV-share-weighted average of the pairwise
-// weights was tried as the natural fix and made every mixed-fleet case WORSE,
-// so the flat 0.813 fallback stays as the best known approximation. See
-// docs/battle-model.md for what's been ruled out.
+// KNOWN GAP: fleets mixing 2-3 ship types on either side fit a little worse than
+// pure single-type fights (mean ~0.5pp, worst ~2pp across 420 mixed calculator
+// readings with sciences 10-40) — the flat 0.813 blend weight is the remaining
+// approximation. See docs/battle-model.md for what's been ruled out.
 (function (root, factory) {
     const api = factory();
     // Node (CommonJS)
@@ -117,18 +116,21 @@
     // constant showed a systematic residual specific to that pairing that
     // neither reweighting it nor adding a defense-ratio third term could close.
     const PAIR_CV_WEIGHT = { 'de,cr': 0.807, 'bs,de': 0.760, 'bs,cr': 0.816 };
-    // Destroyers against a LONE starbase have their own weight too. With the mixed
-    // fallback above, every recorded single-type starbase fight rated the attacker low
-    // (14 of 14, up to 1.9 pp); 0.7745 fits the six recorded lone-starbase points to
-    // 0.08 pp and seven new calculator readings (2026-10-04, levels 4-13, 5-242
-    // destroyers, one with sciences set) to 0.3 pp. Other ships vs a starbase are unfitted.
-    const DE_VS_LONE_SB_CV_WEIGHT = 0.7745;
+    // A single ship type against a LONE starbase has its own weight per type (with the
+    // mixed fallback every such fight rated the attacker ~1-2pp low). Destroyers fit 13
+    // calculator points to 0.08pp, cruisers 7 to 0.13pp, battleships 5 to 0.08pp.
+    const LONE_SB_CV_WEIGHT = { [0]: 0.7745, [1]: 0.830, [2]: 0.7845 };
+    // Destroyers against destroyers + a starbase: the destroyer-vs-starbase weight
+    // slides down with the fleet's share of the defender's CV (24 calculator points,
+    // levels 3-12, shares 0.2-0.9: mean 0.01pp). Other starbase + fleet mixes: 0.813.
+    const SB_FLEET_SHARE_SLOPE = 0.026;
     const N_EXP = 1.805;             // saturation curve exponent
     const RACE_ATK_PCT = 0.08;       // confirmed exact, 6.0.0-beta (was 0.07)
     const RACE_DEF_PCT = 0.12;       // confirmed exact, 6.0.0-beta (was 0.11)
     const PHYS_SLOPE = 0.01491;      // per physics level, below the bracket
     const PHYS_BRACKET = Math.log(1.25); // fitted 0.2235 ≈ ln(1.25); triggers at |diff| >= 6
-    const PLEVEL_WIN_K = 0.00995;    // applied to the RAW difference — see file header
+    const PHYS_BRACKET_PCT = 0.25;   // the same +25%, as it adds to the level bonus in one factor
+    const PLEVEL_WIN_K = 0.00995;    // per level of ADVANTAGE, for the side ahead — see header
     const PLEVEL_SURV_SLOPE = 0.01;  // toughness ×= 1 + this·max(0, ownPL−enemyPL)
     const MATH_SLOPE = 0.0015;       // toughness ×= 1 + this·OWN absolute math level
     const MATH_BRACKET = 0.25;       // ±25% toughness at a 6+ math GAP (was wrongly 0.125)
@@ -148,13 +150,18 @@
     const singleType = f => { const nz = [DE, CR, BS].filter(i => f[i] > 0); return nz.length === 1 ? nz[0] : -1; };
     const SHIP_LETTER = { [DE]: 'de', [CR]: 'cr', [BS]: 'bs' };
 
-    // The CV-vs-attack-value blend weight for this matchup: pair-specific for a
-    // pure single-type duel with no starbase, or destroyers against a lone starbase;
-    // the global fallback otherwise (including a starbase with a fleet beside it).
-    function cvWeight(atkFleet, defFleet, hasStarbase) {
-        if (hasStarbase) {
-            const loneStarbase = !defFleet.some(n => n > 0);
-            return loneStarbase && singleType(atkFleet) === DE ? DE_VS_LONE_SB_CV_WEIGHT : P_CV_WEIGHT;
+    // The CV-vs-attack-value blend weight for this matchup: pair-specific for a pure
+    // single-type duel with no starbase, per ship type against a lone starbase, sliding
+    // for destroyers against destroyers + a starbase; the global fallback otherwise.
+    function cvWeight(atkFleet, defFleet, sbLevel) {
+        if (sbLevel > 0) {
+            const a = singleType(atkFleet);
+            if (!defFleet.some(n => n > 0)) return a >= 0 ? LONE_SB_CV_WEIGHT[a] : P_CV_WEIGHT;
+            if (a === DE && singleType(defFleet) === DE) {
+                const fleetShare = cvOf(defFleet) / (cvOf(defFleet) + sbCV(sbLevel));
+                return LONE_SB_CV_WEIGHT[DE] - SB_FLEET_SHARE_SLOPE * fleetShare;
+            }
+            return P_CV_WEIGHT;
         }
         const a = singleType(atkFleet), d = singleType(defFleet);
         if (a < 0 || d < 0) return P_CV_WEIGHT;
@@ -239,23 +246,21 @@
         const sbAtkVal = sbLevel > 0 ? sbCV(sbLevel) / 2 : 0;
         const aAtk = attOf(atkFleet), dAtk = attOf(defFleet) + sbAtkVal;
 
-        const w = cvWeight(atkFleet, defFleet, sbLevel > 0);
+        const w = cvWeight(atkFleet, defFleet, sbLevel);
         let lneff = w * Math.log(aCV / dCV) + (1 - w) * Math.log(Math.max(aAtk, 1e-9) / Math.max(dAtk, 1e-9));
 
         lneff += Math.log(1 + RACE_ATK_PCT * atk.ra) - Math.log(1 + RACE_ATK_PCT * def.ra);
 
         const physDiff = atk.phys - def.phys;
         lneff += Math.log(1 + PHYS_SLOPE * atk.phys) - Math.log(1 + PHYS_SLOPE * def.phys);
-        if (physDiff >= 6) lneff += PHYS_BRACKET;
-        else if (physDiff <= -6) lneff -= PHYS_BRACKET;
-
-        // Player level: gated per side on fielding all three ship types, and applied to
-        // the RAW DIFFERENCE as one number — see the file header note on why this isn't
-        // two separate per-side ln(1+k·PL) terms.
-        const aLvl = hasAllThree(atkFleet) ? atk.lvl : 0;
-        const dLvl = hasAllThree(defFleet) ? def.lvl : 0;
-        const plDiff = aLvl - dLvl;
-        if (plDiff !== 0) lneff += sgn(plDiff) * Math.log(1 + PLEVEL_WIN_K * Math.abs(plDiff));
+        // The physics bracket and the player-level advantage are percentages that ADD in one
+        // factor per side (with a separate ln term each, a side 6+ physics and 30+ levels
+        // ahead came out up to 10pp too strong). Level counts only for the side ahead, and
+        // only if that side fields all three ship types.
+        const edge = (ownFleet, own, enemy, bracketAhead) => 1
+            + (bracketAhead ? PHYS_BRACKET_PCT : 0)
+            + (hasAllThree(ownFleet) && own.lvl > enemy.lvl ? PLEVEL_WIN_K * (own.lvl - enemy.lvl) : 0);
+        lneff += Math.log(edge(atkFleet, atk, def, physDiff >= 6)) - Math.log(edge(defFleet, def, atk, physDiff <= -6));
 
         return satFrac(lneff);
     }
@@ -275,17 +280,14 @@
         const winA = calcAttackerWin(atk, def, atkFleet, defFleet, sbLvl);
         const winD = 1 - winA;
 
-        // Own-side toughness: mathematics (absolute level + gap bracket), race defense,
-        // and player level (gated on all-3-types, own-vs-enemy DIFFERENCE, multiplicative)
-        // — independent factors, order doesn't matter for a pure product.
+        // Own-side toughness: mathematics (absolute level), then the maths bracket and the
+        // player-level advantage ADDED in one factor (as on the win side), then race defense.
+        // Multiplying the bracket and the level bonus made stacked sides too tough.
         function toughnessMult(ownMath, enemyMath, ownRD, ownFleet, ownLvl, enemyLvl) {
-            let t = 1 + MATH_SLOPE * ownMath;
             const gap = ownMath - enemyMath;
-            if (gap >= 6) t *= (1 + MATH_BRACKET);
-            else if (gap <= -6) t *= (1 - MATH_BRACKET);
-            t *= (1 + RACE_DEF_PCT * ownRD);
-            if (hasAllThree(ownFleet)) t *= (1 + PLEVEL_SURV_SLOPE * Math.max(0, ownLvl - enemyLvl));
-            return t;
+            const bracket = gap >= 6 ? MATH_BRACKET : gap <= -6 ? -MATH_BRACKET : 0;
+            const level = hasAllThree(ownFleet) ? PLEVEL_SURV_SLOPE * Math.max(0, ownLvl - enemyLvl) : 0;
+            return (1 + MATH_SLOPE * ownMath) * (1 + bracket + level) * (1 + RACE_DEF_PCT * ownRD);
         }
 
         const enemyCVtoDef = cvOf(atkFleet);
@@ -303,26 +305,35 @@
         const defMult = toughnessMult(def.math, atk.math, def.rd, defFleet, def.lvl, atk.lvl);
         const atkMult = toughnessMult(atk.math, def.math, atk.rd, atkFleet, atk.lvl, def.lvl);
 
-        const fracDefKilled = defTough > 0 ? Math.min(1, enemyCVtoDef / defTough) / defMult : 0;
-        const fracAtkKilled = atkTough > 0 ? Math.min(1, enemyCVtoAtk / atkTough) / atkMult : 0;
+        // The cap comes AFTER the multiplier: enemy CV far above a side's toughness wipes
+        // it even with a large bonus. Capping first (min(1, ratio) / mult) let a side with
+        // a ×2 multiplier keep half its fleet against any odds — up to 54% of its CV wrong
+        // in the 2026-10-04 sweep.
+        const fracDefKilled = defTough > 0 ? Math.min(1, (enemyCVtoDef / defTough) / defMult) : 0;
+        const fracAtkKilled = atkTough > 0 ? Math.min(1, (enemyCVtoAtk / atkTough) / atkMult) : 0;
 
-        // A race-defense or mathematics malus can push an already-large (post-min(1,·))
-        // loss fraction up to or past 1 — landing at EXACTLY 1 counts as an overshoot
-        // here too, not just past it: five otherwise-identical mathematics-bracket
-        // observations (a diff-6-vs-0 malus exactly cancelling the 0.75 base ratio for a
-        // mirror fleet) all showed 1 survivor, never 0, even though the raw formula lands
-        // on exactly 0. A loss fraction that lands STRICTLY UNDER 1 naturally is left
-        // alone and CAN legitimately reach exactly 0 — confirmed by scanning every
-        // single-type, non-deterministic fixture harvested (0 counterexamples).
-        const applyLoss = (fleet, frac) => fleet.map(n => {
-            if (n <= 0) return 0;
-            const raw = n * (1 - frac);
-            return raw <= 0 ? 1 : raw;
-        });
+        // The one-survivor floor. A side of 5+ ships always keeps at least ONE ship of its
+        // type with the most total defence (destroyer 1, cruiser 16, battleship 24 each):
+        // that type is lifted to 1 when it would keep less, the others keep their own
+        // fractions (140 destroyers + 9 cruisers wiped keep 1 cruiser: defence 144 vs 140).
+        // A side of 4 ships or fewer gets no floor and can lose everything — 24 of 24 and
+        // 49 of 49 calculator cases. A starbase defending ALONE keeps level 1 when wiped
+        // (16 of 16 readings); beside 5+ ships the floor goes to a ship and the starbase can
+        // reach 0 (50 destroyers + level 9, wiped: 1 destroyer, starbase 0).
+        const floorOne = (fleet, frac, sbCvHere) => {
+            const ships = fleet.map(n => (n > 0 ? Math.max(0, n * (1 - frac)) : 0));
+            let sbFrac = sbCvHere > 0 ? Math.max(0, 1 - frac) : 0;
+            const top = [DE, CR, BS].reduce((b, x) => (fleet[x] * SHIPS[x].def > fleet[b] * SHIPS[b].def ? x : b), DE);
+            const shipCount = fleet.reduce((a, b) => a + b, 0);
+            if (shipCount >= 5 && ships[top] < 1) ships[top] = 1;
+            else if (shipCount === 0 && sbCvHere > 0 && frac >= 1) sbFrac = sbCV(1) / sbCvHere;
+            return { ships, sbFrac };
+        };
 
-        let survDef = applyLoss(defFleet, fracDefKilled);
-        let survAtk = applyLoss(atkFleet, fracAtkKilled);
-        let survSB = sbLvl > 0 ? Math.max(0, 1 - fracDefKilled) : 0;
+        const defLeft = floorOne(defFleet, fracDefKilled, sbCv);
+        let survDef = defLeft.ships;
+        let survAtk = floorOne(atkFleet, fracAtkKilled, 0).ships;
+        let survSB = defLeft.sbFrac;
 
         // The LOSER of a fight that hit the certainty cap (win% exactly 0 or 100) is
         // wiped to 0, overriding the CV-ratio formula above — confirmed by a race-attack
@@ -359,22 +370,23 @@
     //   * BASE_ERROR_PP covers single-type and single-type-vs-single-type fights: 97.7%
     //     of ~3200 realistic-scale observations (player level 1-30) land within 1pp, mean
     //     error 0.09pp. 1pp is therefore an honest band for the common case.
-    //   * MIXED_FLEET_EXTRA_PP covers the one identified remaining gap: a side fielding
-    //     2-3 ship types fits noticeably worse than a pure duel (mean ~0.3pp, worst
-    //     observed 5.8pp in a 1673-case realistic dataset) because the CV/attack blend
-    //     weight is pair-specific for pure duels but falls back to one flat constant for
-    //     a real mix — see the file header. Widen the band rather than claim precision
-    //     the data doesn't support.
+    //   * MIXED_FLEET_EXTRA_PP covers the one remaining gap: a side fielding 2-3 ship
+    //     types uses one flat blend weight. After the 2026-10-04 fixes (level advantage,
+    //     bracket + level adding in one factor) 420 mixed calculator readings with
+    //     sciences 10-40 and level gaps to 40 fit with mean 0.53pp, worst 1.9pp (the
+    //     September harvest's mixed rows: worst 1.6pp), so the mixed band is ±2pp.
+    //   * Not covered: a side of 2-3 ships, where one ship more or less moves the odds a
+    //     lot (2 destroyers vs a level-2 starbase: 4.4pp off).
     //
     // The OLD caveats here (starbase alongside a fleet, a 6+ mathematics gap) are GONE:
     // both are now modelled exactly (mean ~0.06pp and ~0.00pp respectively across the
     // harvested data) rather than approximated, so they no longer need extra margin.
     //
-    // src/utils/battle-calc.test.js asserts BASE_ERROR_PP is not smaller than the worst
-    // error the fixtures actually show, so the stated confidence can never drift below
+    // src/utils/battle-calc.test.js asserts that every win fixture's error is inside the
+    // band winBand() shows for that fight, so the stated confidence can never drift below
     // the measured one.
     const BASE_ERROR_PP = 1.0;
-    const MIXED_FLEET_EXTRA_PP = 5.0;
+    const MIXED_FLEET_EXTRA_PP = 1.0;
 
     /**
      * Turn a raw probability into an honest range.
@@ -417,7 +429,8 @@
         constants: {
             P_CV_WEIGHT, PAIR_CV_WEIGHT, N_EXP,
             RACE_ATK_PCT, RACE_DEF_PCT,
-            PHYS_SLOPE, PHYS_BRACKET,
+            LONE_SB_CV_WEIGHT, SB_FLEET_SHARE_SLOPE,
+            PHYS_SLOPE, PHYS_BRACKET, PHYS_BRACKET_PCT,
             PLEVEL_WIN_K, PLEVEL_SURV_SLOPE,
             MATH_SLOPE, MATH_BRACKET, LN_CAP
         }
