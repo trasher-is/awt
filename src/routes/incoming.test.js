@@ -212,6 +212,31 @@ function reset() {
         ok('a cover click with ship counts claims the right fleet', coverB.status === 200 && getCovering(keyB).includes('SyntheticCoverOne') && getCovering(key1).length === 0, coverB);
         ok('and is posted as a reply under that fleet\'s alert', coverUpdates.at(-1) === keyB, coverUpdates);
 
+        // 2026-10-04: the attacker fights the planet's starbase first. A starbase that holds
+        // on its own says so and pings nobody; one that does not shows what its own saved PP
+        // can still buy before the attack lands.
+        reset();
+        db.prepare('UPDATE planets SET starbase = 12 WHERE system_id = 4321 AND planet_index = 7').run();
+        await post(server, 'announce', {
+            attacker: { name: 'SyntheticRaider' }, target: { systemId: 4321, planetIndex: 7, planetName: 'SyntheticTargetSystem #7' },
+            arrivalUnix: T1, cv: 27, ships: { destroyers: 9 }
+        });
+        const strongMsg = messages.get(`4321:7:syntheticraider:${T1}`) || '';
+        ok('a starbase that beats the attack alone says so', /Holds on its own\*\* — SB 12/.test(strongMsg), strongMsg);
+        ok('and lists no defenders to fly in', !/Land right AFTER|Can defend in time/.test(strongMsg), strongMsg);
+
+        reset();
+        db.prepare('UPDATE planets SET starbase = 0 WHERE system_id = 4321 AND planet_index = 7').run();
+        db.prepare(`INSERT INTO planet_banking (game_planet_id, player_id, system_id, name, production_pp, production_rate)
+                    VALUES (990001, 9001, 4321, 'SyntheticTargetSystem #7', 300, 0)`).run();
+        await post(server, 'announce', {
+            attacker: { name: 'SyntheticRaider' }, target: { systemId: 4321, planetIndex: 7, planetName: 'SyntheticTargetSystem #7' },
+            arrivalUnix: T1, cv: 27, ships: { destroyers: 9 }
+        });
+        const weakMsg = messages.get(`4321:7:syntheticraider:${T1}`) || '';
+        ok('a planet without a starbase shows what is left of the attacker on it', /Planet alone\*\* — no starbase: 27 CV of theirs stays on it/.test(weakMsg), weakMsg);
+        ok('and the starbase its own saved PP buys before arrival', /SyntheticDefender\*\*: the PP saved there reaches \*\*SB \d+\*\*/.test(weakMsg), weakMsg);
+
         reset();
         const unowned = await post(server, 'announce', report(T1));
         ok('a target whose owner we have never scanned still gets its alert, without a target line',

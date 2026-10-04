@@ -7,8 +7,9 @@ const { requireAuth } = require('./_middleware');
 const { postIncomingOnce, replyToIncoming, replyIncomingCover } = require('../discord_bot');
 const { formatTime } = require('../utils/travel-calc');
 const { ONTIME_LIMIT, LATE_LIMIT, SOURCE_TAG, computeInterceptors } = require('../utils/interceptors');
-const { winChance, resolveStats } = require('../utils/battle');
-const battleModel = require('../../public/js/utils/battle-model.js');
+const { resolveStats } = require('../utils/battle');
+const incomingDefenceRepo = require('../repositories/incomingDefence');
+const { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, counterFight, ownerReinforce, pct } = require('../utils/incoming-battle');
 const { toggleCovering, getCovering, renderCoverLine } = require('../utils/covering');
 const { baseKeyFor, arrivalOf, fleetSigOf, pickAlertKey } = require('../utils/incoming-identity');
 const router = express.Router();
@@ -117,29 +118,42 @@ function computeDefenders(data, owner) {
     // Defender = the targeted planet's current owner (an alliance member), so the
     // interceptor search is scoped to our alliance.
     const defenderName = (owner === undefined ? resolveTargetOwner(data.target) : owner)?.name || null;
+    const planet = incomingDefenceRepo.getPlanetDefence(data.target.systemId, data.target.planetIndex) || null;
 
     const arr = parseInt(data.arrivalUnix, 10);
+    const arrivalUnix = Number.isInteger(arr) && arr > 0 ? arr : 0;
+    const nowUnix = Math.floor(Date.now() / 1000);
     const result = computeInterceptors({
         systemId: data.target.systemId,
         planetIndex: data.target.planetIndex,
         defenderName,
-        arrivalUnix: Number.isInteger(arr) && arr > 0 ? arr : 0
-    }, Math.floor(Date.now() / 1000));
+        arrivalUnix,
+        ownerId: planet && planet.owner_id ? planet.owner_id : null
+    }, nowUnix);
 
     if (result) {
-        attachWinChances(result, data);
-        // Only surface defenders with a real shot (≥25%) — anything less is a gamble.
-        // Keep entries whose win couldn't be computed (null) so they aren't silently lost.
-        const worthIt = d => d.win == null || d.win >= 0.25;
-        result.onTime = result.onTime.filter(worthIt);
-        if (result.late) result.late = result.late.filter(worthIt);
+        attachBattle(result, data, planet, arrivalUnix, nowUnix);
+        if (result.planet && result.planet.holds >= HOLDS) {
+            // The starbase holds on its own: nobody needs to fly, so nobody is listed or
+            // pinged. The alert says so instead.
+            result.onTime = [];
+            result.late = [];
+        } else {
+            // Only surface defenders with a real shot (≥25%) — anything less is a gamble.
+            // Keep entries whose win couldn't be computed (null) so they aren't silently lost.
+            const worthIt = d => d.win == null || d.win >= 0.25;
+            result.onTime = result.onTime.filter(worthIt);
+            if (result.late) result.late = result.late.filter(worthIt);
+        }
     }
     return result;
 }
 
-// Attach each defender's chance to beat the incoming fleet (defender fleet vs attacker
-// fleet). Attacker race/sciences fall back to assumptions when unknown/stale.
-function attachWinChances(result, data) {
+// The battle lines (src/utils/incoming-battle.js): the attacker against the planet first,
+// then each defender. An ally lands right AFTER the attacker and fights what the starbase
+// left of it; the planet's owner lands BEFORE it and stands with his own starbase.
+// Attacker race/sciences fall back to worst-case assumptions when unknown/stale.
+function attachBattle(result, data, planet, arrivalUnix, nowUnix) {
     try {
         const s = data.ships || {};
         const enemyFleet = [s.destroyers || 0, s.cruisers || 0, s.battleships || 0];
@@ -150,21 +164,61 @@ function attachWinChances(result, data) {
         if (!enemyRow && data.attacker && data.attacker.name) {
             enemyRow = playersRepo.getPlayerCombatStatsByName(data.attacker.name.toLowerCase());
         }
-        const enemyStats = resolveStats(enemyRow);
+        const enemy = resolveStats(enemyRow);
+
+        const ownerLower = planet && planet.owner_name ? planet.owner_name.toLowerCase() : null;
+        const owner = ownerLower ? allySide(incomingDefenceRepo.getAllyCombatRow(ownerLower)) : null;
+        let fight = null;
+        if (planet && owner) {
+            const beforeIso = arrivalUnix ? new Date(arrivalUnix * 1000).toISOString() : '9999';
+            const garrison = incomingDefenceRepo.getGarrison(planet.owner_id, data.target.systemId, data.target.planetIndex, beforeIso);
+            const ctx = { enemyFleet, enemy, sbLevel: planet.starbase || 0, garrison, owner };
+            fight = planetFight(ctx);
+            if (fight) {
+                result.planet = { ...fight, ownerName: planet.owner_name, seenAt: planet.updated_at };
+                if (fight.holds < HOLDS) {
+                    // What the owner can put into the starbase by arrival: the planet's own
+                    // saved PP, or every planet's PP if it is his home.
+                    const hours = arrivalUnix ? (arrivalUnix - nowUnix) / 3600 : 0;
+                    const mine = incomingDefenceRepo.getOwnerPlanets(planet.owner_id);
+                    const here = mine.find(m => m.system_id === data.target.systemId && m.planet_index === data.target.planetIndex);
+                    const budgetPp = planet.is_home
+                        ? mine.reduce((sum, m) => sum + ppAfter(m, hours), 0)
+                        : (here ? ppAfter(here, hours) : 0);
+                    const up = budgetPp > 0 ? sbUpgrade({ ...ctx, budgetPp }) : null;
+                    // Worth saying even when it still falls: it leaves less for the counter.
+                    if (up && (up.holds > fight.holds || up.enemyLeftCv < fight.enemyLeftCv)) {
+                        result.sbUpgrade = { ...up, budgetPp, fromHome: !!planet.is_home };
+                    }
+                }
+                ctx.garrisonFleet = garrison;
+            }
+            result.ctx = ctx;
+        }
 
         const all = [...result.onTime, ...(result.late || [])];
         for (const d of all) {
             const allyFleet = d.ships || [Math.floor(d.cv / 3), 0, 0];
-            const allyRow = playersRepo.getPlayerCombatStatsByName(d.name.toLowerCase());
-            d.win = winChance(allyFleet, resolveStats(allyRow), enemyFleet, enemyStats);
-            d.winUnknown = enemyStats.unknown; // attacker race not scouted
-            // The band is computed here, not in each renderer, so the Discord alert and
-            // the News panel can never quote different confidence for the same fight.
-            // Interceptions are fleet-only, so no starbase term applies.
-            d.winBand = battleModel.winBand(d.win).text;
+            const ally = allySide(incomingDefenceRepo.getAllyCombatRow(d.name.toLowerCase()));
+            let r;
+            if (fight && d.name.toLowerCase() === ownerLower) {
+                d.mode = 'reinforce';
+                r = ownerReinforce({ ...result.ctx, allyFleet });
+            } else {
+                d.mode = 'counter';
+                // Unscanned planet: no starbase fight to weaken them, so the whole fleet.
+                r = counterFight({ allyFleet, ally, enemyLeft: fight ? fight.enemyLeft : enemyFleet, enemy });
+            }
+            d.win = r ? r.win : null;
+            d.keepCv = r ? r.keepCv : null;
+            d.winUnknown = enemy.unknown; // attacker race not scouted
+            // Computed here, not in each renderer, so the Discord alert and the News panel
+            // can never quote different numbers for the same fight.
+            d.winBand = d.win == null ? null : pct(d.win);
         }
+        delete result.ctx;
     } catch (e) {
-        console.error('[Incoming] win-chance calc failed:', e.message);
+        console.error('[Incoming] battle calc failed:', e.message);
     }
 }
 
@@ -175,12 +229,15 @@ function launchUrl(a, target) {
     return `https://${process.env.PROXY_DOMAIN}/Game/Fleets/Launch/${a.fleetId}?systemId=${target.systemId}&planetIndex=${target.planetIndex}`;
 }
 
-// A range, not a reading: the win figure comes from a regression fit and is used to
-// decide whether to commit a real fleet.
+// "wins 99% · keeps 210 CV" for an ally landing after the attacker, "holds 99% · keeps …"
+// for the owner standing with his starbase. The model is exact to ±0.1pp; the uncertainty
+// that matters is the inputs (an unscouted race), which is flagged.
 function winTag(a) {
     if (a.win == null) return '';
-    const band = a.winBand || battleModel.winBand(a.win).text;
-    return ` · 🎲 ${band}${a.winUnknown ? ' (race unscouted)' : ''}`;
+    const verb = a.mode === 'reinforce' ? 'holds' : 'wins';
+    const keep = a.keepCv != null && a.win > 0 ? ` · keeps ${Math.round(a.keepCv).toLocaleString()} CV` : '';
+    // An unscouted race is already on the attacker's 🧬 line; once is enough.
+    return ` · ${verb} ${a.winBand || pct(a.win)}${keep}`;
 }
 
 function defenderLine(a, extra, target) {
@@ -192,12 +249,48 @@ function defenderLine(a, extra, target) {
     return s;
 }
 
+// How long ago a planet was last seen, when that is old enough to doubt its starbase.
+function seenAgo(sqliteTs) {
+    const ms = sqliteTs ? Date.parse(String(sqliteTs).replace(' ', 'T') + 'Z') : NaN;
+    if (!Number.isFinite(ms)) return ' *(starbase level unconfirmed)*';
+    const h = (Date.now() - ms) / 3600000;
+    if (h < 24) return '';
+    return ` *(seen ${Math.floor(h / 24)}d ago)*`;
+}
+
+// The planet's own fight: starbase + the owner's ships on it, against the attacker.
+function appendPlanet(L, result) {
+    const p = result && result.planet;
+    if (!p) {
+        if (result) L.push('\n🏰 *Planet not scanned — its starbase is unknown; defenders below fight the full fleet.*');
+        return;
+    }
+    const sb = p.sbLevel > 0 ? `SB ${p.sbLevel}` : 'no starbase';
+    const garrison = p.garrisonCv > 0 ? ` + ${p.garrisonCv.toLocaleString()} CV fleet` : '';
+    if (p.holds >= HOLDS) {
+        L.push(`\n🏰 **Holds on its own** — ${sb}${garrison}: ${pct(p.holds)}${seenAgo(p.seenAt)}. No help needed.`);
+        return;
+    }
+    const falls = p.holds > 0 ? `holds ${pct(p.holds)} · if it falls, ` : '';
+    L.push(`\n🏰 **Planet alone** — ${sb}${garrison}: ${falls}${Math.round(p.enemyLeftCv).toLocaleString()} CV of theirs stays on it${seenAgo(p.seenAt)}`);
+    const up = result.sbUpgrade;
+    if (up) {
+        const from = up.fromHome ? 'all his planets\' PP (home)' : 'the PP saved there';
+        const effect = up.holds >= HOLDS || up.holds > 0.5
+            ? `holds ${pct(up.holds)}`
+            : `still falls${up.holds > 0 ? ` (holds ${pct(up.holds)})` : ''}, but leaves them ${Math.round(up.enemyLeftCv).toLocaleString()} CV instead of ${Math.round(p.enemyLeftCv).toLocaleString()}`;
+        L.push(`🏗️ **${p.ownerName}**: ${from} reaches **SB ${up.level}** by then (${up.cost.toLocaleString()} PP) → ${effect}`);
+    }
+}
+
 // Append the "who can defend in time" section to the main alert.
 function appendDefenders(L, result, target) {
     if (!result) {
         L.push('\n⚠️ *Target system not mapped — cannot compute defenders.*');
         return;
     }
+    appendPlanet(L, result);
+    if (result.planet && result.planet.holds >= HOLDS) return;
 
     if (result.unknownTiming) {
         L.push('\n🛡️ **Closest defenders** *(arrival time unknown):*');
@@ -206,12 +299,18 @@ function appendDefenders(L, result, target) {
         return;
     }
 
-    L.push('\n🛡️ **Can defend in time:**');
+    // Allies land right after the attacker; landing first means fighting the ally's own
+    // starbase. The owner is the exception: his fleet joins it.
+    L.push(result.planet
+        ? '\n⚔️ **Land right AFTER them, same cycle** — never before, you\'d fight the starbase:'
+        : '\n🛡️ **Can defend in time:**');
     if (!result.onTime.length) {
-        L.push('❌ No allied defender can intercept in time.');
+        L.push('❌ No allied defender can make it in time.');
     } else {
-        result.onTime.slice(0, ONTIME_LIMIT).forEach(a =>
-            L.push('🟢 ' + defenderLine(a, ` *(spare ${formatTime(a.delta)}${a.note ? `, ${a.note}` : ''})*`, target)));
+        result.onTime.slice(0, ONTIME_LIMIT).forEach(a => {
+            const when = a.mode !== 'reinforce' ? '' : a.eta === 0 ? 'joins your SB, ' : 'land BEFORE them, joins your SB, ';
+            L.push('🟢 ' + defenderLine(a, ` *(${when}spare ${formatTime(a.delta)}${a.note ? `, ${a.note}` : ''})*`, target));
+        });
         if (result.onTime.length > ONTIME_LIMIT) L.push(`*...and ${result.onTime.length - ONTIME_LIMIT} more in time.*`);
     }
 
@@ -354,13 +453,20 @@ router.post('/incoming/defenders', requireAuth, (req, res) => {
         const slim = (a) => ({
             name: a.name, cv: a.cv, eta: a.eta, delta: a.delta, source: a.source, note: a.note,
             ownerId: a.ownerId, originSys: a.originSys, originIdx: a.originIdx, fleetId: a.fleetId,
-            win: a.win, winBand: a.winBand, winUnknown: a.winUnknown
+            win: a.win, winBand: a.winBand, winUnknown: a.winUnknown, keepCv: a.keepCv, mode: a.mode
         });
         const alertKey = resolveAlertKey(data, { persist: false });
+        const pl = result.planet;
         res.json({
             success: true,
             mapped: true,
             unknownTiming: !!result.unknownTiming,
+            // The planet's own fight (starbase + garrison), so the panel reads like the alert.
+            planet: pl ? { holds: pl.holds, holdsText: pct(pl.holds), sbLevel: pl.sbLevel, garrisonCv: pl.garrisonCv,
+                enemyLeftCv: Math.round(pl.enemyLeftCv), ownerName: pl.ownerName, holdsAlone: pl.holds >= HOLDS } : null,
+            sbUpgrade: result.sbUpgrade ? { level: result.sbUpgrade.level, cost: result.sbUpgrade.cost,
+                holds: result.sbUpgrade.holds, holdsText: pct(result.sbUpgrade.holds),
+                enemyLeftCv: Math.round(result.sbUpgrade.enemyLeftCv), fromHome: result.sbUpgrade.fromHome } : null,
             onTime: result.onTime.map(slim),
             late: (result.late || []).map(slim),
             covering: alertKey === null ? [] : getCovering(alertKey)
@@ -401,3 +507,6 @@ router.post('/incoming/cover', requireAuth, async (req, res) => {
 
 module.exports = router;
 module.exports.announceIncoming = announceIncoming;
+// For tests and the replay script: the analysis and the text, without Discord.
+module.exports.computeDefenders = computeDefenders;
+module.exports.buildAnnounce = buildAnnounce;

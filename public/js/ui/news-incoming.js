@@ -155,23 +155,41 @@ function launchLink(a, target) {
 
 function renderDefenderData(box, d, target) {
     if (!d.success || !d.mapped) { box.innerHTML = '<span style="opacity:.6">⚠️ Target system not mapped.</span>'; return; }
-    // A range, not a reading. These numbers decide whether someone commits a real fleet,
-    // and a single percentage from a regression fit overstates what is known. The band is
-    // computed server-side (see src/routes/incoming.js) so this panel and the Discord
-    // alert cannot quote different confidence for the same fight.
+    // Same numbers as the Discord alert, computed server-side (src/routes/incoming.js and
+    // src/utils/incoming-battle.js): an ally's chance landing right after the attacker,
+    // against what the starbase left of it; the owner's chance standing with his starbase.
     const winTag = (a) => {
         if (a.win == null || !a.winBand) return '';
-        return ` · 🎲 ${esc(a.winBand)}${a.winUnknown ? ' (attacker race unscouted)' : ''}`;
+        const verb = a.mode === 'reinforce' ? 'holds' : 'wins';
+        const keep = a.keepCv != null && a.win > 0 ? ` · keeps ${Math.round(a.keepCv).toLocaleString()} CV` : '';
+        return ` · ${verb} ${esc(a.winBand)}${keep}${a.winUnknown ? ' (attacker race unscouted)' : ''}`;
     };
     const row = (a, extra) =>
         `<div>${SRC[a.source] || ''} <b>${esc(a.name)}</b> [${a.cv.toLocaleString()} CV] ➔ ${fmtTime(a.eta)}${winTag(a)}${extra}${launchLink(a, target)}</div>`;
 
     let html = '';
+    const p = d.planet;
+    if (p) {
+        const sb = p.sbLevel > 0 ? `SB ${p.sbLevel}` : 'no starbase';
+        const garrison = p.garrisonCv > 0 ? ` + ${p.garrisonCv.toLocaleString()} CV fleet` : '';
+        html += p.holdsAlone
+            ? `<div style="font-weight:bold;color:#4ade80">🏰 Holds on its own — ${sb}${garrison}: ${esc(p.holdsText)}. No help needed.</div>`
+            : `<div>🏰 <b>Planet alone</b> — ${sb}${garrison}: holds ${esc(p.holdsText)} · if it falls, ${p.enemyLeftCv.toLocaleString()} CV of theirs stays on it</div>`;
+        if (d.sbUpgrade) {
+            const u = d.sbUpgrade;
+            const effect = u.holds > 0.5 ? `holds ${esc(u.holdsText)}`
+                : `still falls, but leaves them ${u.enemyLeftCv.toLocaleString()} CV instead of ${p.enemyLeftCv.toLocaleString()}`;
+            html += `<div>🏗️ <b>${esc(p.ownerName)}</b>: ${u.fromHome ? "all planets' PP (home)" : 'PP saved there'} reaches <b>SB ${u.level}</b> by then (${u.cost.toLocaleString()} PP) → ${effect}</div>`;
+        }
+        if (p.holdsAlone) { box.innerHTML = html; return; }
+    }
     if (d.unknownTiming) {
         html += '<div style="font-weight:bold">🛡️ Closest defenders (timing unknown):</div>';
         html += d.onTime.length ? d.onTime.map(a => row(a, a.note ? ` (${esc(a.note)})` : '')).join('') : '<div>❌ none found</div>';
     } else {
-        html += '<div style="font-weight:bold;color:#4ade80">🛡️ Can defend in time:</div>';
+        html += p
+            ? '<div style="font-weight:bold;color:#4ade80">⚔️ Land right AFTER them, same cycle (never before — you\'d fight the starbase):</div>'
+            : '<div style="font-weight:bold;color:#4ade80">🛡️ Can defend in time:</div>';
         html += d.onTime.length
             ? d.onTime.map(a => row(a, ` (spare ${fmtTime(a.delta)}${a.note ? ', ' + esc(a.note) : ''})`)).join('')
             : '<div>❌ none in time</div>';
