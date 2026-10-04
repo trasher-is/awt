@@ -10,7 +10,7 @@ const express = require('express');
 const db = require('../database');
 const incomingRepo = require('../repositories/incoming');
 const { getCovering, toggleCovering } = require('../utils/covering');
-const calls = [], messages = new Map(), coverUpdates = [];
+const calls = [], messages = new Map(), coverUpdates = [], replies = [];
 const discordPath = require.resolve('../discord_bot');
 require.cache[discordPath] = {
     id: discordPath, filename: discordPath, loaded: true,
@@ -26,7 +26,7 @@ require.cache[discordPath] = {
             messages.set(key, content);
             return { ok: true, existed, messageId, channelId: 'synthetic-channel' };
         },
-        async replyToIncoming() { throw new Error('No synthetic defenders should be pinged'); },
+        async replyToIncoming(channelId, messageId, text) { replies.push({ messageId, text }); return true; },
         async replyIncomingCover(key, name, added) { coverUpdates.push(key); return true; }
     }
 };
@@ -40,7 +40,8 @@ function ok(name, condition, detail) {
 const app = express();
 app.use(express.json());
 app.use((req, res, next) => {
-    req.session = { userId: 1, gameName: 'SyntheticCoverOne' };
+    // x-test-name lets the live-panel tests open streams as different members.
+    req.session = { userId: 1, gameName: req.get('x-test-name') || 'SyntheticCoverOne' };
     next();
 });
 app.use('/hub-api', incomingRouter);
@@ -61,7 +62,7 @@ function post(server, endpoint, body) {
         const data = JSON.stringify(body);
         const request = http.request({
             hostname: '127.0.0.1', port: server.address().port,
-            path: `/hub-api/incoming/${endpoint}`, method: 'POST',
+            path: endpoint.startsWith('/') ? `/hub-api${endpoint}` : `/hub-api/incoming/${endpoint}`, method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }
         }, response => {
             let raw = '';
@@ -278,6 +279,78 @@ function reset() {
         ok('the cycle window is part of it', d.window && d.window.cycleEnd === T1 + 119, d.window);
         const missing = await get(server, 'defence/attack?key=nope');
         ok('an unknown attack is a 404', missing.status === 404);
+
+        // Live panel (2026-10-04): who is looking, and choices pushed to everyone at once.
+        {
+            const openStream = (name) => new Promise((resolve, reject) => {
+                const events = [];
+                const req = http.get({ hostname: '127.0.0.1', port: server.address().port,
+                    path: `/hub-api/defence/stream?key=${encodeURIComponent(richKey)}`, headers: { 'x-test-name': name } }, res => {
+                    let buf = '';
+                    res.on('data', chunk => {
+                        buf += chunk;
+                        let i;
+                        while ((i = buf.indexOf('\n\n')) >= 0) {
+                            const block = buf.slice(0, i); buf = buf.slice(i + 2);
+                            const ev = /^event: (.+)$/m.exec(block), data = /^data: (.+)$/m.exec(block);
+                            if (ev && data) events.push({ event: ev[1], data: JSON.parse(data[1]) });
+                        }
+                    });
+                    resolve({ req, res, events, headers: res.headers });
+                }).on('error', reject);
+            });
+            const settle = () => new Promise(r => setTimeout(r, 80));
+            const lastOf = (s, event) => [...s.events].reverse().find(e => e.event === event);
+
+            const a = await openStream('SyntheticCoverOne');
+            await settle();
+            ok('a stream is an unbuffered event stream (nginx passes it through)',
+                a.headers['content-type'] === 'text/event-stream' && a.headers['x-accel-buffering'] === 'no', a.headers);
+            ok('a new panel gets the current plan straight away', !!lastOf(a, 'plan'), a.events);
+            const b = await openStream('SyntheticViewerTwo');
+            await settle();
+            ok('everyone watching sees who else is looking',
+                JSON.stringify(lastOf(a, 'viewers').data.viewers) === '["SyntheticCoverOne","SyntheticViewerTwo"]', lastOf(a, 'viewers'));
+
+            replies.length = 0;
+            const chose = await post(server, '/defence/choose', { key: richKey, role: 'before',
+                option: { source: 'build', cv: 318, eta: 0, note: 'build 78D 1C 1B at the planet itself', winText: '100%' } });
+            await settle();
+            const planB = lastOf(b, 'plan');
+            ok('a choice reaches the other viewer without a refresh',
+                chose.status === 200 && planB && planB.data.choices.some(c => c.name === 'SyntheticCoverOne' && c.role === 'before' && c.option.cv === 318), planB);
+            ok('a choice is a cover claim too', planB.data.covering.includes('SyntheticCoverOne'), planB.data);
+            ok('and is said under the Discord alert', replies.some(r => /🛡️ \*\*SyntheticCoverOne\*\* will land \*\*before\*\* them with 318 CV/.test(r.text)), replies);
+
+            await post(server, '/defence/choose', { key: richKey, role: 'after', option: { source: 'orbit', cv: 50 } });
+            await settle();
+            ok('changing your mind replaces the choice, it does not add one',
+                lastOf(b, 'plan').data.choices.filter(c => c.name === 'SyntheticCoverOne').length === 1
+                && lastOf(b, 'plan').data.choices[0].role === 'after', lastOf(b, 'plan').data);
+
+            const bad = await post(server, '/defence/choose', { key: richKey, role: 'sideways' });
+            ok('only before / after / none are accepted', bad.status === 400);
+
+            await post(server, '/defence/choose', { key: richKey, role: 'none' });
+            await settle();
+            ok('withdrawing clears the choice and the cover claim',
+                lastOf(b, 'plan').data.choices.length === 0 && !lastOf(b, 'plan').data.covering.includes('SyntheticCoverOne'), lastOf(b, 'plan').data);
+
+            await post(server, '/defence/choose', { key: richKey, role: 'before', option: { cv: 10 } });
+            await post(server, 'cover', { attacker: { name: 'SyntheticRaider' }, target: { systemId: 4321, planetIndex: 7 },
+                arrivalUnix: T1, ships: { destroyers: 9 } });
+            await settle();
+            ok('withdrawing cover from the News page withdraws the choice too, live',
+                lastOf(b, 'plan').data.choices.length === 0 && !lastOf(b, 'plan').data.covering.includes('SyntheticCoverOne'), lastOf(b, 'plan').data);
+
+            a.req.destroy();
+            await settle();
+            ok('closing a panel tells the others', JSON.stringify(lastOf(b, 'viewers').data.viewers) === '["SyntheticViewerTwo"]', lastOf(b, 'viewers'));
+            b.req.destroy();
+            await settle();
+            const unknownStream = await get(server, 'defence/stream?key=nope');
+            ok('no stream for an unknown attack', unknownStream.status === 404);
+        }
         ok('and says it counts PP saved until launch, with what is there now', /at the planet itself if PP saved till launch \(now: \d+D/.test(richMsg), richMsg);
 
         reset();

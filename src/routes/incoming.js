@@ -10,6 +10,9 @@ const { resolveStats } = require('../utils/battle');
 const incomingDefenceRepo = require('../repositories/incomingDefence');
 const { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, sbLevels, counterFight, landBefore, ownerReinforce, pct, fleetText } = require('../utils/incoming-battle');
 const { toggleCovering, getCovering, renderCoverLine } = require('../utils/covering');
+const defenceChoicesRepo = require('../repositories/defenceChoices');
+const defenceLive = require('../utils/defence-live');
+const { planState, planChanged, afterCoverToggle } = require('../utils/defence-plan');
 const { baseKeyFor, arrivalOf, fleetSigOf, pickAlertKey } = require('../utils/incoming-identity');
 const router = express.Router();
 
@@ -641,7 +644,7 @@ router.get('/defence/attack', requireAuth, (req, res) => {
         const pl = result && result.planet;
         res.json({
             success: true,
-            key: row.alert_key, nowUnix: Math.floor(Date.now() / 1000),
+            key: row.alert_key, nowUnix: Math.floor(Date.now() / 1000), viewer: req.session.gameName || null,
             attacker: { name: data.attacker.name, tag: data.attacker.tag, statLine: stats ? stats.statLine : null,
                 scanned: !!stats, raceKnown: !!(stats && stats.has_intel) },
             target: data.target, ownerName: owner ? owner.name : null,
@@ -662,10 +665,79 @@ router.get('/defence/attack', requireAuth, (req, res) => {
             retake: ((result && result.retakeAll) || []).map(panelRanked),
             members,
             covering: getCovering(row.alert_key),
+            choices: defenceChoicesRepo.listChoices(row.alert_key),
+            viewers: defenceLive.viewers(row.alert_key),
         });
     } catch (err) {
         console.error('[Defence] attack analysis failed:', err.message);
         res.status(500).json({ success: false, error: 'Analysis failed' });
+    }
+});
+
+// --- DEFENCE PANEL, LIVE (src/utils/defence-live.js) ---
+// One open panel = one stream on the attack it shows. Events: "viewers" (who has it open)
+// and "plan" (choices + covering), sent whenever either changes.
+// GET /hub-api/defence/stream?key=<alert key>
+router.get('/defence/stream', requireAuth, (req, res) => {
+    const key = String(req.query.key || '');
+    if (!incomingRepo.getIncoming(key)) return res.status(404).json({ success: false, error: 'No such incoming' });
+    defenceLive.attach(req, res, key, req.session.gameName || null, [['plan', planState(key)]]);
+});
+
+const CHOICE_ROLES = new Set(['before', 'after', 'none']);
+const SOURCES = new Set(['orbit', 'flight', 'build']);
+// What a member says he will send: only the fields the panel shows, bounded.
+function cleanOption(o) {
+    if (!o || typeof o !== 'object') return null;
+    const n = v => (Number.isFinite(Number(v)) ? Math.round(Number(v)) : null);
+    return {
+        source: SOURCES.has(o.source) ? o.source : null,
+        cv: n(o.cv),
+        eta: n(o.eta),
+        note: typeof o.note === 'string' ? o.note.slice(0, 160) : '',
+        winText: typeof o.winText === 'string' ? o.winText.slice(0, 8) : null,
+    };
+}
+// Names go into a Discord reply; strip what could become markup or a mention.
+const plainName = n => String(n || '').replace(/[@<>*_`~|]/g, '');
+
+// "I'll land before / after with this option", or "none" to withdraw. Keeps the covering
+// roster in step (a choice is a cover claim), tells Discord, and updates open panels.
+// POST /hub-api/defence/choose  Body: { key, role: 'before'|'after'|'none', option }
+router.post('/defence/choose', requireAuth, async (req, res) => {
+    try {
+        const { key, role } = req.body || {};
+        const name = req.session.gameName;
+        if (!name) return res.status(401).json({ success: false, error: 'No session name' });
+        if (!CHOICE_ROLES.has(role)) return res.status(400).json({ success: false, error: 'role must be before, after or none' });
+        const row = incomingRepo.getIncoming(String(key || ''));
+        if (!row) return res.status(404).json({ success: false, error: 'No such incoming' });
+
+        const covering = getCovering(row.alert_key);
+        const isCovering = covering.some(n => n.toLowerCase() === name.toLowerCase());
+        let text;
+        if (role === 'none') {
+            defenceChoicesRepo.removeChoice(row.alert_key, name);
+            if (isCovering) toggleCovering(row.alert_key, name);
+            text = `↩️ **${plainName(name)}** withdrew`;
+        } else {
+            const option = cleanOption(req.body.option);
+            defenceChoicesRepo.setChoice(row.alert_key, name, role, option);
+            if (!isCovering) toggleCovering(row.alert_key, name);
+            const what = option && option.cv != null
+                ? ` with ${option.cv.toLocaleString()} CV${option.note ? ` *(${plainName(option.note)})*` : ''}${option.winText ? ` · ${role === 'before' ? 'holds' : 'retakes'} ${option.winText}` : ''}`
+                : '';
+            text = `${role === 'before' ? '🛡️' : '⚔️'} **${plainName(name)}** will land **${role}** them${what}`;
+        }
+        planChanged(row.alert_key);
+        const ref = incomingRepo.getMessageRef(row.alert_key);
+        if (ref && ref.message_id && ref.channel_id) {
+            try { await replyToIncoming(ref.channel_id, ref.message_id, text); } catch (e) { /* best effort */ }
+        }
+        res.json({ success: true, ...planState(row.alert_key) });
+    } catch (err) {
+        console.error('[Defence] choose failed:', err.message);
+        res.status(500).json({ success: false, error: 'Choose failed' });
     }
 });
 
@@ -688,6 +760,7 @@ router.post('/incoming/cover', requireAuth, async (req, res) => {
             return res.status(410).json({ success: false, error: 'No recorded incoming for this expired arrival' });
         }
         const { covering, added } = toggleCovering(alertKey, name);
+        afterCoverToggle(alertKey, name, added);   // open Defence panels update at once
         // Best-effort: say so under the Discord alert (if one exists).
         await replyIncomingCover(alertKey, name, added);
         res.json({ success: true, covering, added });

@@ -31,6 +31,7 @@ const battleModel = require('../public/js/utils/battle-model.js');
 const visionModel = require('../public/js/utils/vision-model.js');
 const { buildCommands, suggestPlayers, suggestSystems, isEphemeral } = require('./discord-commands');
 const { buildHelp } = require('./discord-help');
+const { afterCoverToggle } = require('./utils/defence-plan');
 const { shouldRestartProcess, OFFLINE_CHECKS_BEFORE_RESTART } = require('./utils/discord-connection');
 
 const client = new Client({
@@ -105,6 +106,7 @@ client.on('interactionCreate', async (interaction) => {
         } catch (e) { /* fall back to Discord username */ }
 
         const { covering, added } = toggleCovering(alertKey, name);
+        afterCoverToggle(alertKey, name, added);   // open Defence panels update at once
         // A reply, not an edit: the alert itself is never rewritten (see postIncomingOnce),
         // so a claim shows up as its own line under it, in order, for everyone.
         await interaction.reply({ content: coverReplyText(name, added, covering), allowedMentions: { parse: [] } });
