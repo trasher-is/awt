@@ -44,6 +44,7 @@ list, with how sure we are of each value, is in
 - [Buying production points](#buying-production-points)
 - [Colonizing and conquering](#colonizing-and-conquering)
 - [Fleet and combat notes](#fleet-and-combat-notes)
+- [Battle formula](#battle-formula)
 - [Score](#score)
 - [Late-joiner catch-up](#late-joiner-catch-up)
 - [Win conditions](#win-conditions)
@@ -121,6 +122,9 @@ Worked example: +4 Science race pick (`4 × 8% = 32%`), plus a Memory Jar 3 arti
     total bonus = (1 + 0.32) × (1 + 0.30) × (1 + 0.85) − 1 = +217%
 
 not `32 + 30 + 85 = 147%`.
+
+Combat mostly follows the same rule, with one exception: the six-level science bracket and the
+player-level advantage **add** inside one factor. See [Battle formula](#battle-formula).
 
 ## Population growth
 
@@ -667,16 +671,19 @@ Each of the six science fields does something different besides its raw growth r
   choose any energy level from 1 up to your max at launch, instead of always launching at
   max energy. **Level 15** is required to build Cruisers.
   The [official Mathematics glossary](https://portal.astrowars.mudflatgames.com/glossary/mathematics/)
-  describes a **25%** defence bonus/malus at a six-level gap. The current
-  [battle model](battle-model.md) agrees: `MATH_BRACKET = 0.25` gives toughness factors
-  `1.25` / `0.75`, multiplied by `1 + 0.0015 × ownMath`. The old `0.125` regression
-  coefficient was replaced on 2026-09-06; it must not be used for race inference.
-  This modifies toughness, not the number of survivors by a flat 25%.
+  describes a **25%** defence bonus/malus at a six-level gap. The game's calculator agrees:
+  toughness gets `+25%` / `−25%` at a six-level gap, **added** to the player-level advantage
+  bonus in one factor, then multiplied by `1 + 0.0015 × own Mathematics` and by race defence.
+  The old `0.125` regression coefficient was replaced on 2026-09-06; it must not be used for
+  race inference. This modifies toughness, not the number of survivors by a flat 25%. Full
+  formula: [Battle formula](#battle-formula).
 - **Physics** — increases win chance. **Level 15** is required to build Battleships.
   The [official Physics glossary](https://portal.astrowars.mudflatgames.com/glossary/physics/)
-  gives a **25% attack modifier** at a six-level advantage. The current battle model
-  combines the absolute factors `1 + 0.01491 × Physics` with a relative `1.25` bracket
-  in log-power space. It is not a flat 25-percentage-point addition to win probability.
+  gives a **25% attack modifier** at a six-level advantage. The game's calculator applies
+  **1.5% per level** to each side's own Physics (`1 + 0.015 × Physics`), plus **+25%** for the
+  side that is at least 6 levels ahead, **added** to its player-level advantage in one factor.
+  It is not a flat 25-percentage-point addition to win probability. Full formula:
+  [Battle formula](#battle-formula).
   See [battle report tools](battle-report-tools.md#why-science-and-player-level-do-not-become-a-false-race-bonus)
   for how unknown historical science and player-level bonuses limit race inference.
 - **Social** — raises the population cap per planet (see the table below). If a Hydroponic
@@ -1037,11 +1044,12 @@ and caps on its buildings — though the exact numbers aren't published.
   in which case you always see everything regardless of biology.
 - **Colony ships and transports never take damage when their side wins a battle.**
 - **Maximum of 5 fleets in transit at any given time.**
-- **Fleets with fewer than 4 ships can lose every ship even in a battle they win** — the
-  "safe if you're the bigger fleet" assumption doesn't hold at very small fleet sizes.
-- Rough win-chance calibration from the official patch notes: **~80% win chance needs about
-  1.2× the enemy's power; a guaranteed win needs about 1.5×.** Worth cross-checking against
-  `public/js/utils/battle-model.js`'s `WIN_RA`/`WIN_RA_BASE6`/`WIN_RA_SLOPE` fit at some point.
+- **A fleet of 4 ships or fewer can lose every ship, even in a battle it wins.** A fleet of
+  **5 or more** always keeps at least one ship when the fight is not certain (see
+  [Battle formula](#battle-formula)).
+- Win-chance calibration from the official patch notes: **~80% win chance needs about 1.2×
+  the enemy's power; a guaranteed win needs about 1.5×.** Confirmed exactly: with the
+  formula below, a 1.2× power ratio gives **80.00%** and 1.5× gives 100%.
 - **Travel time has a fixed floor and a reducible part — both config pairs are real, not
   redundant.** `FixedTravelTimeInterPlanets`/`FixedTravelTimeInterSystems` (**20 min / 45
   min**) are hard minimums — energy and speed can never bring a flight below them, except the
@@ -1057,6 +1065,84 @@ and caps on its buildings — though the exact numbers aren't published.
 - **RZ: the player-level combat bonus is capped at 15%** on RedZone (changelog 5.2–5.3,
   round 7) — the battle model in this repo was harvested from the standard calculator and
   has no such cap. Not yet re-verified in game.
+
+## Battle formula
+
+What the game's own battle calculator computes. Reverse-engineered on 2026-10-04 from 2,956
+calculator results (the September harvest, two sweeps through the hub, hand readings); the
+hub's model reproduces every one of them within **0.01 percentage points**, the calculator's
+own rounding. Details and history: [battle model](battle-model.md); the code is
+`public/js/utils/battle-model.js`.
+
+### Win chance
+
+Each side has a **strength**:
+
+    strength = Σ ships × (3 × attack + 2 × defence)
+             + a defending starbase's 3 × attack + 2 × defence
+
+| | Attack | Defence | Strength each |
+|---|---|---|---|
+| Destroyer | 2 | 1 | 8 |
+| Cruiser | 8 | 16 | 56 |
+| Battleship | 36 | 24 | 156 |
+| Starbase (CV = round(4 × 1.5^level) − 4) | floor(CV / 2) | CV − attack | 3 × attack + 2 × defence |
+
+An odd starbase CV gives defence the extra point (level 8, CV 99: attack 49, defence 50).
+
+The bonuses enter as factors on each side; their logarithms add up to one score:
+
+    score = ln(strength_att / strength_def)
+          + ln(1 + 0.08 × race attack_att)  − ln(1 + 0.08 × race attack_def)
+          + ln(1 + 0.015 × physics_att)     − ln(1 + 0.015 × physics_def)
+          + ln(edge_att) − ln(edge_def)
+
+    edge = 1 + 0.25                           if this side is 6+ Physics levels ahead
+             + 0.01 × (own PL − enemy PL)     if this side is ahead in player level
+                                              AND fields destroyers, cruisers and battleships
+
+The bracket and the level advantage **add** inside the edge; a side that is behind gets
+nothing from either. Mathematics and race defence never affect the win chance.
+
+Then:
+
+    if |score| ≥ ln(1.5)  → a certain win or loss (1.5× the enemy's power)
+    R = e^|score|,  x = 2 × (R − 1)
+    win chance of the favoured side = 1 − 0.5 × (1 − x)^1.79375
+
+The exponent 1.79375 is the only fitted constant; every other number above is exact.
+
+### Survivors
+
+    toughness   = Σ ships × (attack + 2 × defence)          destroyer 4, cruiser 40, battleship 108
+                + a defending starbase's 3 × floor(CV / 2)
+
+    multiplier  = (1 + 0.0015 × own Mathematics)
+                × (1 ± 0.25 [Mathematics 6+ ahead / behind]
+                     + 0.01 × (own PL − enemy PL) [if ahead AND fielding all three types])
+                × (1 + 0.12 × own race defence)
+
+    loss        = min(1, (enemy CV / own toughness) / multiplier)    enemy CV includes its starbase
+    survivors   = ships × (1 − loss)            for each type; a starbase loses the same fraction
+
+For toughness the starbase uses floor(CV / 2) for both attack and defence, unlike the
+strength split above; that is what the calculator's survivors match. The cap is applied
+**after** the multiplier: a side facing far more enemy CV than its
+toughness is wiped even with a large bonus.
+
+**Who is left at the end:**
+
+- The **loser of a certain fight** (score at the cap) is wiped to zero.
+- Otherwise, a side of **5 or more ships** always keeps at least **one ship of its type with
+  the most total defence** (destroyer 1, cruiser 16, battleship 24 per ship): that type is
+  raised to 1 if it would keep less. 140 destroyers and 9 cruisers that are wiped keep 1
+  cruiser.
+- A side of **4 ships or fewer** gets no such floor.
+- A **starbase defending alone** keeps level 1 when its loss reaches 100%. Next to 5+ ships,
+  the floor goes to a ship instead.
+
+Survivor counts are fractions; the fractional part is a survival chance (see
+[Fleet and combat notes](#fleet-and-combat-notes)).
 
 ## Score
 

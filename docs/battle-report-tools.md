@@ -67,10 +67,10 @@ second formula. The model includes these effects:
 | Modifier | Existing standard-server model |
 | --- | --- |
 | Race Attack / Defence | `1 + 0.08 × ATK`; `1 + 0.12 × DEF` |
-| Physics | Absolute-level factors `1 + 0.01491 × Physics`, plus a relative `1.25` advantage at a gap of at least 6 levels |
-| Mathematics | Own absolute factor `1 + 0.0015 × Math`; toughness bracket `1.25` for a lead of at least 6, `0.75` for a deficit of at least 6, otherwise `1` |
-| Player level, win probability | Approximately 1% per difference level (`0.00995` model coefficient), gated per side on fielding all three fighting ship types |
-| Player level, survival | `1 + 0.01 × max(0, ownPL − enemyPL)`, only when the own fleet fields all three fighting ship types |
+| Physics | `1 + 0.015 × Physics` per side, plus **+25%** for the side at least 6 levels ahead, added to that side's level advantage in one factor |
+| Mathematics | Own absolute factor `1 + 0.0015 × Math`; toughness bracket `+25%` for a lead of at least 6, `−25%` for a deficit of at least 6, added to the level survival bonus in one factor |
+| Player level, win probability | `+1%` per level of advantage, only for the side that is ahead and only if it fields all three fighting ship types; adds to the physics bracket |
+| Player level, survival | `+1%` per level of advantage (`max(0, ownPL − enemyPL)`), only when the own fleet fields all three fighting ship types; adds to the maths bracket |
 
 These modify combat factors; they are not flat percentage points added to the displayed
 win chance. The specific science/PL formulas are documented calculator observations in
@@ -80,7 +80,8 @@ The official [Player Level](https://portal.astrowars.mudflatgames.com/glossary/p
 [Physics](https://portal.astrowars.mudflatgames.com/glossary/physics/) glossary entries
 corroborate the mixed-fleet 1% PL rule and six-level 25% science brackets. Those entries
 predate v5's switch to multiplicative bonuses; the calibrated model supplies the detailed
-formula. The live [GameOptions](https://astrowars.games/About/GameOptions), checked on
+formula (most factors multiply, the science brackets and the level advantage add; full formula in
+[game rules](game-rules.md#battle-formula)). The live [GameOptions](https://astrowars.games/About/GameOptions), checked on
 2026-09-12, has no standard-server PL cap (`MaxPlayerLevelBonus=null`) and disables combat
 artefacts (`CombatArtefacts=False`).
 
