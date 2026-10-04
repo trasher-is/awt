@@ -764,6 +764,19 @@ function initDatabase() {
     // panel can recompute it live: the Discord alert is a snapshot and is never edited.
     addColumn('incoming_msgs', 'payload', 'TEXT');
 
+    // Defence panel choices (2026-10-04): who said they will land BEFORE or AFTER an
+    // attacker, and with which of their options. One row per member per attack.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS defence_choices (
+            alert_key TEXT NOT NULL,
+            game_name TEXT NOT NULL,
+            role TEXT NOT NULL,
+            option_json TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (alert_key, game_name)
+        )
+    `);
+
     // Shared, login-gated planning notes for the redzone (rz.*) proxy — one note per
     // planet, visible to everyone who entered the shared password. Keyed by the game's
     // own global planet id (data-planet-id). Not per-user: it's a communal scratchpad, so

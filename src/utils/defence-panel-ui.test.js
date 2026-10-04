@@ -30,6 +30,13 @@ ok('the other is the ?defence= link the member followed', /get\('defence'\)[\s\S
 ok('the poll never opens anything', !/openDefencePanel/.test(src.slice(src.indexOf('async function poll'), src.indexOf('export function initDefenceWatch'))));
 ok('the sidebar button opens it on click', /getElementById\('open-defence-btn'\)\?\.addEventListener\('click', \(\) => openDefencePanel\(\)\)/.test(read('public/js/ui/dashboard.js')));
 ok('every localStorage access is guarded', (src.match(/localStorage\./g) || []).length === (src.match(/try \{[^\n]*localStorage\./g) || []).length);
+// Blinking is for attacks the member has not seen yet; the count pill stays while any is live.
+ok('blinking follows UNSEEN attacks only', /const blink = unseen\.length > 0;/.test(src) && /toggle\('awt-defence-alarm', blink\)/.test(src));
+ok('opening the panel marks every live attack seen', /markSeen\(liveAttacks\.map\(a => a\.key\)\)/.test(src.slice(src.indexOf('export async function openDefencePanel'))));
+ok('closing the banner marks that attack seen', /if \(key\) markSeen\(\[key\]\)/.test(src));
+ok('the pill shows every live attack, seen or not', /el\.textContent = live\.length \? String\(live\.length\) : ''/.test(src));
+ok('the banner only names unseen attacks', /const next = unseen\[0\]/.test(src));
+ok('the live stream is closed with the panel', /function closePanel\(\) \{[\s\S]{0,200}closeStream\(\)/.test(src));
 const wrapper = read('public/Wrapper.html');
 ok('Wrapper has one Defence button and one banner', (wrapper.match(/id="open-defence-btn"/g) || []).length === 1 && (wrapper.match(/id="defence-banner"/g) || []).length === 1);
 ok('the banner can be dismissed', /id="defence-banner-close"/.test(wrapper));

@@ -14,6 +14,7 @@ const newsEventsRepo = require('../repositories/newsEvents');
 const usersRepo = require('../repositories/users');
 const settingsRepo = require('../repositories/settings');
 const incomingRepo = require('../repositories/incoming');
+const defenceChoicesRepo = require('../repositories/defenceChoices');
 const tradeRepo = require('../repositories/trade');
 const routingRepo = require('../repositories/routing');
 const { archiveRound, listRounds, roundDetail } = require('../utils/round-archive');
@@ -361,6 +362,7 @@ router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
             // mean anything within the round that's being wiped.
             incomingRepo.deleteAllIncomingMsgs();
             incomingRepo.deleteAllIncomingAlerts();
+            defenceChoicesRepo.deleteAllChoices();
             tradeRepo.deleteAllTradeAgreements();
             systemsRepo.deleteAllSystems();
         });
