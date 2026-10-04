@@ -4,13 +4,13 @@ const playersRepo = require('../repositories/players');
 const incomingRepo = require('../repositories/incoming');
 const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
-const { sendOrEditIncoming, replyToIncoming, updateIncomingCover } = require('../discord_bot');
+const { postIncomingOnce, replyToIncoming, replyIncomingCover } = require('../discord_bot');
 const { formatTime } = require('../utils/travel-calc');
 const { ONTIME_LIMIT, LATE_LIMIT, SOURCE_TAG, computeInterceptors } = require('../utils/interceptors');
 const { winChance, resolveStats } = require('../utils/battle');
 const battleModel = require('../../public/js/utils/battle-model.js');
 const { toggleCovering, getCovering, renderCoverLine } = require('../utils/covering');
-const { baseKeyFor, arrivalOf, pickAlertKey } = require('../utils/incoming-identity');
+const { baseKeyFor, arrivalOf, fleetSigOf, pickAlertKey } = require('../utils/incoming-identity');
 const router = express.Router();
 
 // Build the compact attacker stat line shown both inline on the News page and in the
@@ -102,11 +102,10 @@ function buildAnnounce(data, stats, result, alertKey, owner) {
     appendDefenders(L, result, data.target);
 
     // "Covering:" roster — who has clicked "I cover this" (News panel or Discord button).
+    // Only non-empty when a News-panel claim landed before the alert was first posted;
+    // later claims are replies under the alert.
     const coverLine = renderCoverLine(alertKey != null ? getCovering(alertKey) : []);
     if (coverLine) L.push('\n' + coverLine);
-
-    const now = Math.floor(Date.now() / 1000);
-    L.push(`_updated <t:${now}:R>_`);
     return L.join('\n');
 }
 
@@ -255,18 +254,22 @@ function buildReply(result, planetLabel, target) {
 function resolveAlertKey(data, { persist } = { persist: true }) {
     const base = baseKeyFor(data);
     const arrival = arrivalOf(data);
-    const picked = pickAlertKey(base, arrival, incomingRepo.findIncomingByBaseKey(base));
-    if (persist && picked.alertKey !== null && (picked.isNew || picked.stampArrival)) {
-        incomingRepo.ensureIncomingIdentity(picked.alertKey, base, arrival);
+    const fleetSig = fleetSigOf(data);
+    const picked = pickAlertKey(base, arrival, incomingRepo.findIncomingByBaseKey(base), { fleetSig });
+    if (persist && picked.alertKey !== null && (picked.isNew || picked.stampArrival || fleetSig)) {
+        // Arrival is only written when it is new information; the signature only fills a
+        // row that has none (the repository keeps the first one it saw).
+        incomingRepo.ensureIncomingIdentity(picked.alertKey, base, (picked.isNew || picked.stampArrival) ? arrival : 0, fleetSig);
     }
     return picked.alertKey;
 }
 
-// --- ANNOUNCE / UPDATE AN INCOMING ON DISCORD ---
+// --- ANNOUNCE AN INCOMING ON DISCORD ---
 // Body: { attacker:{id,name,tag}, target:{systemId,planetIndex,planetName}, cv, ships:{...}, arrivalUnix }
-// Core announce/update logic, shared by the webhook auto-post, the News "announce" button,
-// and the dev test harness. Edits (or sends) the main alert keyed by the attack identity,
-// then posts a pinging reply when the on-time roster gains someone. Returns { ok, edited, replied }.
+// Core announce logic, shared by the webhook auto-post, the News "announce" button, and the
+// dev test harness. Posts the alert once per attack identity (never edits it), and on a
+// later report posts a pinging reply when the on-time roster gains someone.
+// Returns { ok, existed, replied }.
 async function announceIncoming(data) {
     if (!data.attacker || !data.attacker.name || !data.target ||
         data.target.systemId == null || data.target.planetIndex == null) {
@@ -274,7 +277,7 @@ async function announceIncoming(data) {
     }
     // News buttons and delayed webhooks can outlive an incoming. Reject before resolving
     // or sending: even a known old key could create a fresh alert if its Discord message
-    // was deleted or the configured channel changed (sendOrEditIncoming's fallback).
+    // is missing from the configured channel (postIncomingOnce posts it fresh).
     const arrival = arrivalOf(data);
     if (arrival > 0 && arrival <= Math.floor(Date.now() / 1000)) {
         return { ok: false, status: 410, error: 'Incoming has already arrived' };
@@ -299,12 +302,12 @@ async function announceIncoming(data) {
     if (arrival > 0 && arrival <= Math.floor(Date.now() / 1000)) {
         return { ok: false, status: 410, error: 'Incoming has already arrived' };
     }
-    const sent = await sendOrEditIncoming(alertKey, message);
+    const sent = await postIncomingOnce(alertKey, message);
     if (!sent.ok) return { ok: false, error: sent.error };
 
-    // Editing the main alert never pings anyone, so when the on-time roster GAINS someone
+    // The alert is posted once and never edited, so when the on-time roster GAINS someone
     // (fleet built / TT recalc) we post a reply that mentions the full current list. On a
-    // brand-new alert (not an edit) the main message already pinged, so just record state.
+    // brand-new alert the main message already pinged, so just record state.
     let replied = false;
     const current = onTimeNames(defenders);
     try {
@@ -313,7 +316,7 @@ async function announceIncoming(data) {
         const prevSet = new Set(prev);
         const newcomers = current.filter(n => !prevSet.has(n));
 
-        if (sent.edited && newcomers.length > 0) {
+        if (sent.existed && newcomers.length > 0) {
             const planetLabel = `${data.target.planetName || 'Planet'} [${data.target.systemId}] #${data.target.planetIndex}${owner ? ` (${owner.name})` : ''}`;
             const reply = buildReply(defenders, planetLabel, data.target);
             if (reply) replied = await replyToIncoming(sent.channelId, sent.messageId, reply);
@@ -323,7 +326,7 @@ async function announceIncoming(data) {
         console.error('[Incoming] reply bookkeeping failed:', e.message);
     }
 
-    return { ok: true, edited: !!sent.edited, replied };
+    return { ok: true, existed: !!sent.existed, replied };
 }
 
 // --- ANNOUNCE / UPDATE AN INCOMING ON DISCORD ---
@@ -333,7 +336,7 @@ router.post('/incoming/announce', requireAuth, async (req, res) => {
     try {
         const r = await announceIncoming(req.body || {});
         if (!r.ok) return res.status(r.status || (r.error && r.error.startsWith('Missing') ? 400 : 502)).json({ success: false, error: r.error });
-        res.json({ success: true, edited: r.edited, replied: r.replied });
+        res.json({ success: true, existed: r.existed, replied: r.replied });
     } catch (err) {
         console.error('[Incoming] announce failed:', err.message);
         res.status(500).json({ success: false, error: 'Announce failed' });
@@ -370,8 +373,8 @@ router.post('/incoming/defenders', requireAuth, (req, res) => {
 
 // --- "I COVER THIS" — claim/retract defence of an incoming ---
 // POST /hub-api/incoming/cover  Body: { attacker:{name}, target:{systemId,planetIndex}, arrivalUnix }
-// Toggles the logged-in user into the covering roster and re-renders the Discord alert's
-// "Covering:" line. Returns the updated roster so the News panel can reflect it.
+// Toggles the logged-in user into the covering roster and posts it as a reply under the
+// Discord alert. Returns the updated roster so the News panel can reflect it.
 router.post('/incoming/cover', requireAuth, async (req, res) => {
     try {
         const data = req.body || {};
@@ -387,8 +390,8 @@ router.post('/incoming/cover', requireAuth, async (req, res) => {
             return res.status(410).json({ success: false, error: 'No recorded incoming for this expired arrival' });
         }
         const { covering, added } = toggleCovering(alertKey, name);
-        // Best-effort: push the new roster onto the existing Discord alert (if one exists).
-        await updateIncomingCover(alertKey);
+        // Best-effort: say so under the Discord alert (if one exists).
+        await replyIncomingCover(alertKey, name, added);
         res.json({ success: true, covering, added });
     } catch (err) {
         console.error('[Incoming] cover toggle failed:', err.message);

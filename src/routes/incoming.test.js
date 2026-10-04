@@ -15,17 +15,19 @@ const discordPath = require.resolve('../discord_bot');
 require.cache[discordPath] = {
     id: discordPath, filename: discordPath, loaded: true,
     exports: {
-        async sendOrEditIncoming(key, content) {
+        // Mirrors the real postIncomingOnce: a known message is left alone, never edited.
+        async postIncomingOnce(key, content) {
             const old = incomingRepo.getMessageRef(key);
-            const edited = !!(old && old.message_id);
-            const messageId = edited ? old.message_id : `synthetic-${calls.length}`;
+            const existed = !!(old && old.message_id);
+            calls.push({ key, existed });
+            if (existed) return { ok: true, existed, messageId: old.message_id, channelId: 'synthetic-channel' };
+            const messageId = `synthetic-${calls.length}`;
             incomingRepo.upsertMessageRef(key, 'synthetic-channel', messageId);
             messages.set(key, content);
-            calls.push({ key, edited });
-            return { ok: true, edited, messageId, channelId: 'synthetic-channel' };
+            return { ok: true, existed, messageId, channelId: 'synthetic-channel' };
         },
         async replyToIncoming() { throw new Error('No synthetic defenders should be pinged'); },
-        async updateIncomingCover(key) { coverUpdates.push(key); return true; }
+        async replyIncomingCover(key, name, added) { coverUpdates.push(key); return true; }
     }
 };
 const incomingRouter = require('./incoming');
@@ -83,7 +85,7 @@ function reset() {
     try {
         console.log('incoming.test.js');
         const first = await post(server, 'announce', report(T1));
-        ok('a live incoming opens its own alert', first.status === 200 && first.body.edited === false && calls[0].key === key1, first);
+        ok('a live incoming opens its own alert', first.status === 200 && first.body.existed === false && calls[0].key === key1, first);
         const cover = await post(server, 'cover', report(T1));
         ok('a live cover claim is attached to its wave', cover.status === 200 && getCovering(key1).includes('SyntheticCoverOne'), cover);
         now = T1 + 1;
@@ -166,9 +168,9 @@ function reset() {
         db.prepare('UPDATE incoming_msgs SET updated_at = ? WHERE alert_key = ?')
             .run(new Date(now * 1000).toISOString().slice(0, 19).replace('T', ' '), base);
         const live = await post(server, 'announce', report(T1));
-        ok('a timed announcement still adopts the legacy untimed alert', untimed.status === 200 && live.body.edited === true && calls[0].key === base && calls[1].key === base, live);
+        ok('a timed announcement still adopts the legacy untimed alert', untimed.status === 200 && live.body.existed === true && calls[0].key === base && calls[1].key === base, live);
         const untimedAgain = await post(server, 'announce', report(0));
-        ok('a genuinely untimed report still edits the known live wave', untimedAgain.status === 200 && untimedAgain.body.edited === true && calls.at(-1).key === base, untimedAgain);
+        ok('a genuinely untimed report still lands on the known live wave', untimedAgain.status === 200 && untimedAgain.body.existed === true && calls.at(-1).key === base, untimedAgain);
 
         // 2026-09-15: the alert named the attacker and the planet but never the player
         // being attacked, so readers could not tell whose planet was in danger.
@@ -188,6 +190,27 @@ function reset() {
         ok('and their alliance tag', /\[SYN\]/.test(ownedMsg || ''), ownedMsg);
         ok('and pings them — a defenceless owner never appears in the roster below',
             /<@424242>/.test(ownedMsg || ''), ownedMsg);
+
+        // 2026-10-04: two fleets from one attacker landing in the same cycle shared one
+        // alert, and the second report rewrote the first fleet's message.
+        reset();
+        const fleetA = { ...report(T1, 153), ships: { destroyers: 51, transports: 5 } };
+        const fleetB = { ...report(T1 + 20, 27), ships: { destroyers: 9 } };
+        await post(server, 'announce', fleetA);
+        const firstText = messages.get(key1);
+        const b = await post(server, 'announce', fleetB);
+        const keyB = calls.at(-1).key;
+        ok('a second fleet in the same cycle gets its own alert', b.body.existed === false && keyB !== key1 && messages.has(keyB), calls);
+        const fleetC = { ...report(T1, 60), ships: { destroyers: 20 } };
+        await post(server, 'announce', fleetC);
+        ok('a third fleet on the exact same second gets a ship-tagged key', calls.at(-1).key === `${key1}:20-0-0` && !calls.at(-1).existed, calls.at(-1));
+        ok('and the first fleet\'s alert is untouched', messages.get(key1) === firstText && /51 DS/.test(firstText), firstText);
+        const again = await post(server, 'announce', { ...fleetA, arrivalUnix: T1 + 30 });
+        ok('re-reporting the first fleet finds its alert and does not post or edit', again.body.existed === true && calls.at(-1).key === key1 && messages.get(key1) === firstText, calls.at(-1));
+        ok('the alert carries no "updated" footer any more (it is never edited)', !/_updated/.test(firstText), firstText);
+        const coverB = await post(server, 'cover', { ...fleetB });
+        ok('a cover click with ship counts claims the right fleet', coverB.status === 200 && getCovering(keyB).includes('SyntheticCoverOne') && getCovering(key1).length === 0, coverB);
+        ok('and is posted as a reply under that fleet\'s alert', coverUpdates.at(-1) === keyB, coverUpdates);
 
         reset();
         const unowned = await post(server, 'announce', report(T1));

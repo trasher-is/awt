@@ -30,6 +30,15 @@
 // Discord message carries no <t:unix> token; the News page parses "hh:mm:ss". Two minutes
 // covers that gap while still splitting waves launched further apart than that.
 //
+// Same attacker, same planet, same cycle, different fleets: since 2026-10-04 the ship
+// counts are part of the identity too. Two waves landing within the tolerance used to merge
+// into one alert (the second edited the first). A report's fleet signature is "D-C-B"
+// (destroyers-cruisers-battleships, see fleetSigOf). Rows match only when the signatures
+// agree; a side without one (an older row, a cover click from an old page) matches anything.
+// Transports and colony ships are left out on purpose: the game notification reads them
+// from a different spot than the News page does, and a parse gap there must not split one
+// attack into two messages.
+//
 // Pure: no database access. Callers pass the rows sharing the base key (see
 // src/repositories/incoming.js's findIncomingByBaseKey) so this can be tested in isolation.
 
@@ -52,6 +61,17 @@ function arrivalOf(data) {
     return Number.isInteger(n) && n > 0 ? n : 0;
 }
 
+// "D-C-B" for a report's combat ships, or null when it carries none (no ships object, or
+// an all-zero one: a transport-only drop, or a reporter that dropped the counts).
+function fleetSigOf(data) {
+    const s = (data && data.ships) || {};
+    const n = v => { const x = parseInt(v, 10); return Number.isInteger(x) && x > 0 ? x : 0; };
+    const d = n(s.destroyers), c = n(s.cruisers), b = n(s.battleships);
+    return d + c + b > 0 ? `${d}-${c}-${b}` : null;
+}
+
+const sigCompatible = (row, sig) => !sig || !row.fleet_sig || row.fleet_sig === sig;
+
 function knownArrival(row) {
     const n = Number(row && row.arrival_unix);
     return Number.isFinite(n) && n > 0 ? n : 0;
@@ -66,7 +86,8 @@ function updatedAtSec(row) {
 
 /**
  * Pick the alert key for a report.
- *   rows: [{ alert_key, arrival_unix, updated_at }] — every stored incoming with this base key
+ *   rows: [{ alert_key, arrival_unix, fleet_sig, updated_at }] — every stored incoming with this base key
+ *   opts.fleetSig — the report's fleetSigOf(), or null
  * Returns { alertKey, isNew, stampArrival }:
  *   alertKey     — the stored/new key, or null for an unmatched expired report
  *   isNew        — no stored row carries this key yet
@@ -77,7 +98,10 @@ function pickAlertKey(baseKey, arrivalUnix, rows, opts = {}) {
     const tolerance = opts.toleranceSec != null ? opts.toleranceSec : ARRIVAL_TOLERANCE_SEC;
     const maxUnknownAge = opts.unknownMaxAgeSec != null ? opts.unknownMaxAgeSec : UNKNOWN_ARRIVAL_MAX_AGE_SEC;
     const nowSec = opts.nowSec != null ? opts.nowSec : Math.floor(Date.now() / 1000);
-    const list = Array.isArray(rows) ? rows.filter(r => r && r.alert_key) : [];
+    const sig = opts.fleetSig || null;
+    const all = Array.isArray(rows) ? rows.filter(r => r && r.alert_key) : [];
+    // Another fleet's row is not a candidate at all, but its key is still taken.
+    const list = all.filter(r => sigCompatible(r, sig));
 
     // Passing the arrival time does not erase a known wave's identity: historical Cover
     // and defender lookups must still select that wave, never the next live incoming.
@@ -95,7 +119,8 @@ function pickAlertKey(baseKey, arrivalUnix, rows, opts = {}) {
         }
         const live = list.filter(r => knownArrival(r) > nowSec).sort((a, b) => knownArrival(a) - knownArrival(b));
         if (live.length) return { alertKey: live[0].alert_key, isNew: false, stampArrival: false };
-        return { alertKey: baseKey, isNew: !list.some(r => r.alert_key === baseKey), stampArrival: false };
+        if (!all.some(r => r.alert_key === baseKey)) return { alertKey: baseKey, isNew: true, stampArrival: false };
+        return { alertKey: `${baseKey}:${sig || 'x'}`, isNew: !all.some(r => r.alert_key === `${baseKey}:${sig || 'x'}`), stampArrival: false };
     }
 
     // 1. Same fleet, already known by its arrival: the closest row inside the tolerance.
@@ -106,8 +131,9 @@ function pickAlertKey(baseKey, arrivalUnix, rows, opts = {}) {
         // A rounded expired report must not borrow a still-live wave's cover roster.
         // Across the arrival boundary, prefer an unknown identity to uncertain defence.
         if (arrival <= nowSec && a > nowSec) continue;
-        const diff = Math.abs(a - arrival);
-        if (diff <= tolerance && diff < bestDiff) { best = r; bestDiff = diff; }
+        // An exact signature match beats a signature-less row at the same distance.
+        const diff = Math.abs(a - arrival) + (sig && r.fleet_sig === sig ? 0 : 0.5);
+        if (Math.abs(a - arrival) <= tolerance && diff < bestDiff) { best = r; bestDiff = diff; }
     }
     if (best) return { alertKey: best.alert_key, isNew: false, stampArrival: false };
 
@@ -124,8 +150,11 @@ function pickAlertKey(baseKey, arrivalUnix, rows, opts = {}) {
         return { alertKey: legacy.alert_key, isNew: false, stampArrival: true };
     }
 
-    // 3. A new wave.
-    return { alertKey: `${baseKey}:${arrival}`, isNew: true, stampArrival: true };
+    // 3. A new wave. When another fleet already holds "<base>:<arrival>" (same cycle,
+    //    different ships), the signature goes on the end so the keys stay distinct.
+    const plain = `${baseKey}:${arrival}`;
+    const alertKey = all.some(r => r.alert_key === plain) ? `${plain}:${sig || 'x'}` : plain;
+    return { alertKey, isNew: true, stampArrival: true };
 }
 
-module.exports = { ARRIVAL_TOLERANCE_SEC, UNKNOWN_ARRIVAL_MAX_AGE_SEC, baseKeyFor, arrivalOf, pickAlertKey };
+module.exports = { ARRIVAL_TOLERANCE_SEC, UNKNOWN_ARRIVAL_MAX_AGE_SEC, baseKeyFor, arrivalOf, fleetSigOf, pickAlertKey };

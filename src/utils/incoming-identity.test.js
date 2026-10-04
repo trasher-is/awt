@@ -10,7 +10,7 @@
 // swallow this week's attack.
 
 const path = require('path');
-const { ARRIVAL_TOLERANCE_SEC, baseKeyFor, arrivalOf, pickAlertKey } =
+const { ARRIVAL_TOLERANCE_SEC, baseKeyFor, arrivalOf, fleetSigOf, pickAlertKey } =
     require(path.join(__dirname, 'incoming-identity.js'));
 
 let pass = 0, fail = 0;
@@ -118,9 +118,32 @@ const timelessOnly = pickAlertKey('1234:5:xerxes', T2, mixed, opts);
 ok('a new wave with a fresh time-less row around adopts that row rather than opening a third message',
     timelessOnly.alertKey === '1234:5:xerxes' && timelessOnly.stampArrival, timelessOnly);
 
+console.log('\n── Same cycle, different fleets (2026-10-04) ' + '─'.repeat(32));
+ok('the signature is D-C-B from the report\'s ships', fleetSigOf({ ships: { destroyers: 51, transports: 5 } }) === '51-0-0');
+ok('no combat ships, no signature', fleetSigOf({ ships: { transports: 5 } }) === null && fleetSigOf({}) === null);
+const sigOpts = sig => ({ ...opts, fleetSig: sig });
+const rowA = { alert_key: `1234:5:xerxes:${T1}`, arrival_unix: T1, fleet_sig: '51-0-0', updated_at: fresh };
+const sameShips = pickAlertKey('1234:5:xerxes', T1 + 30, [rowA], sigOpts('51-0-0'));
+ok('the same ships re-reported 30 s off are the same attack', sameShips.alertKey === rowA.alert_key && !sameShips.isNew, sameShips);
+const otherShips = pickAlertKey('1234:5:xerxes', T1, [rowA], sigOpts('9-0-0'));
+ok('a second fleet landing in the same cycle gets its OWN alert (the reported bug)',
+    otherShips.isNew && otherShips.alertKey === `1234:5:xerxes:${T1}:9-0-0`, otherShips);
+const rowB = { alert_key: `1234:5:xerxes:${T1}:9-0-0`, arrival_unix: T1, fleet_sig: '9-0-0', updated_at: fresh };
+const backToB = pickAlertKey('1234:5:xerxes', T1 + 40, [rowA, rowB], sigOpts('9-0-0'));
+ok('and that second fleet re-reported finds its own alert, not the first one', backToB.alertKey === rowB.alert_key, backToB);
+const noSigReport = pickAlertKey('1234:5:xerxes', T1, [rowA], sigOpts(null));
+ok('a report with no ship counts (an old page\'s cover click) still finds the attack', noSigReport.alertKey === rowA.alert_key, noSigReport);
+const oldRow = { alert_key: `1234:5:xerxes:${T1}`, arrival_unix: T1, updated_at: fresh };
+const onOldRow = pickAlertKey('1234:5:xerxes', T1, [oldRow], sigOpts('51-0-0'));
+ok('a row from before signatures matches any fleet, so a deploy cannot double-post a live attack', onOldRow.alertKey === oldRow.alert_key && !onOldRow.isNew, onOldRow);
+const prefer = pickAlertKey('1234:5:xerxes', T1, [oldRow, { ...rowB, arrival_unix: T1 }], sigOpts('9-0-0'));
+ok('an exact signature match beats a signature-less row at the same arrival', prefer.alertKey === rowB.alert_key, prefer);
+const untimedOther = pickAlertKey('1234:5:xerxes', 0, [{ alert_key: '1234:5:xerxes', arrival_unix: null, fleet_sig: '51-0-0', updated_at: fresh }], sigOpts('9-0-0'));
+ok('an untimed report of a different fleet does not take the untimed row', untimedOther.alertKey === '1234:5:xerxes:9-0-0' && untimedOther.isNew, untimedOther);
+
 console.log('\n── Discord customId budget ' + '─'.repeat(50));
-const longest = `cover:${99999}:${99}:${'x'.repeat(40)}:${T2}`;
-ok('"cover:<base>:<arrival>" for a 40-char attacker name stays under Discord\'s 100-char customId cap', longest.length < 100, longest.length);
+const longest = `cover:${99999}:${99}:${'x'.repeat(40)}:${T2}:${'99999-9999-9999'}`;
+ok('"cover:<base>:<arrival>:<ships>" for a 40-char attacker name stays under Discord\'s 100-char customId cap', longest.length < 100, longest.length);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

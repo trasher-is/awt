@@ -24,7 +24,7 @@ const { calcTravelSeconds, formatTime } = require('./utils/travel-calc');
 // A player name is chosen by another player, so it reaches Discord through the same
 // mention defuser every other posted name does.
 const { defuseMentions } = require('./utils/discord-post');
-const { toggleCovering, getCovering, renderCoverLine, applyCoverLine } = require('./utils/covering');
+const { toggleCovering, getCovering, renderCoverLine } = require('./utils/covering');
 // The battle model — the same physical file the dashboard calculator imports, so
 // !battle and the web calculator cannot drift apart again. See docs/battle-model.md.
 const battleModel = require('../public/js/utils/battle-model.js');
@@ -91,8 +91,8 @@ function coverButtonRow(alertKey) {
 }
 
 // Handle "I cover this" button clicks: toggle the clicker into/out of the covering roster
-// and edit the alert in place so everyone sees who has defence on the way. Uses the
-// clicker's linked Hub name when available, else their Discord username.
+// and answer with a reply under the alert ("covers this" / "withdrew", plus the roster).
+// Uses the clicker's linked Hub name when available, else their Discord username.
 client.on('interactionCreate', async (interaction) => {
     try {
         if (!interaction.isButton() || !interaction.customId.startsWith('cover:')) return;
@@ -104,11 +104,10 @@ client.on('interactionCreate', async (interaction) => {
             if (row && row.game_name) name = row.game_name;
         } catch (e) { /* fall back to Discord username */ }
 
-        toggleCovering(alertKey, name);
-        const content = applyCoverLine(interaction.message.content, renderCoverLine(getCovering(alertKey)));
-        // interaction.update edits the message the button lives on AND acknowledges the
-        // click, so the whole channel sees the updated roster with no extra ping.
-        await interaction.update({ content, components: [coverButtonRow(alertKey)] });
+        const { covering, added } = toggleCovering(alertKey, name);
+        // A reply, not an edit: the alert itself is never rewritten (see postIncomingOnce),
+        // so a claim shows up as its own line under it, in order, for everyone.
+        await interaction.reply({ content: coverReplyText(name, added, covering), allowedMentions: { parse: [] } });
     } catch (e) {
         console.error('[Discord] cover button failed:', e.message);
         try { await interaction.reply({ content: '⚠️ Could not register your cover — try again.', flags: MessageFlags.Ephemeral }); } catch (_) {}
@@ -2473,18 +2472,27 @@ async function sendIncomingAlert(content) {
 }
 
 /**
- * Send OR edit the incoming-attack alert for a given attack identity (alertKey =
- * "system:planet:attacker[:arrival]", resolved by the route via
- * src/utils/incoming-identity.js so a second wave gets its own key — issue #143). The
- * first call posts a new message and records its id; later calls — whether from the
- * webhook auto-post or the News "announce" button — edit that SAME message. Falls back
- * to a fresh message if the original was deleted or the channel changed.
- * Returns { ok, edited, messageId, channelId }.
+ * Post the incoming-attack alert for an attack identity (alertKey =
+ * "system:planet:attacker[:arrival[:ships]]", resolved by src/utils/incoming-identity.js),
+ * ONCE. A later report of the same attack — the webhook and the News page both report it,
+ * often more than once — does not touch the message: editing it is how a second fleet
+ * used to overwrite the first fleet's alert, and an edit pings nobody anyway. Changes go
+ * out as replies (new defenders: replyToIncoming; cover claims: replyIncomingCover).
+ * A stored message in another channel (the channel setting changed) gets a fresh post.
+ * Returns { ok, existed, messageId, channelId }.
  */
-async function sendOrEditIncoming(alertKey, content) {
+async function postIncomingOnce(alertKey, content) {
     if (!client.isReady()) return { ok: false, error: 'Discord bot not ready' };
     const channelId = getSettingValue('discord_incoming_channel');
     if (!channelId) return { ok: false, error: 'No incoming channel configured' };
+
+    let existing = null;
+    try {
+        existing = alertKey != null ? incomingRepo.getMessageRef(alertKey) : null;
+    } catch (err) { existing = null; }
+    if (existing && existing.message_id && existing.channel_id === channelId) {
+        return { ok: true, existed: true, messageId: existing.message_id, channelId };
+    }
 
     let channel;
     try {
@@ -2499,66 +2507,35 @@ async function sendOrEditIncoming(alertKey, content) {
 
     // Discord hard-caps message content at 2000 chars.
     const text = content.length > 1990 ? content.slice(0, 1987) + '...' : content;
-
-    const record = (msgId) => incomingRepo.upsertMessageRef(alertKey, channelId, msgId);
-
-    // Try to edit the existing alert first (same attack, same channel).
-    let existing = null;
-    try {
-        existing = alertKey != null ? incomingRepo.getMessageRef(alertKey) : null;
-    } catch (err) { existing = null; }
-
     const components = alertKey != null ? [coverButtonRow(alertKey)] : [];
-
-    if (existing && existing.message_id && existing.channel_id === channelId) {
-        try {
-            const msg = await channel.messages.fetch(existing.message_id);
-            await msg.edit({ content: text, components });
-            return { ok: true, edited: true, messageId: existing.message_id, channelId };
-        } catch (err) {
-            // Original gone (deleted/purged) — fall through and post a new one.
-            console.warn('[Discord] Could not edit incoming alert, sending new:', err.message);
-        }
-    }
-
     try {
         const sent = await channel.send({ content: text, components });
-        if (alertKey != null) record(sent.id);
-        return { ok: true, edited: false, messageId: sent.id, channelId };
+        if (alertKey != null) incomingRepo.upsertMessageRef(alertKey, channelId, sent.id);
+        return { ok: true, existed: false, messageId: sent.id, channelId };
     } catch (err) {
         console.error('[Discord] Failed to send incoming alert:', err.message);
         return { ok: false, error: 'Failed to send message' };
     }
 }
 
+// "🛡️ caveman covers this" / "↩️ caveman withdrew", then who is covering now. Shared by
+// the Discord button and the News panel's cover button so both read the same.
+function coverReplyText(name, added, covering) {
+    const head = added ? `🛡️ **${defuseMentions(name)}** covers this` : `↩️ **${defuseMentions(name)}** withdrew`;
+    const roster = renderCoverLine((covering || []).map(n => defuseMentions(n)));
+    return roster ? `${head}\n${roster}` : `${head}\n🛡️ Nobody is covering this now.`;
+}
+
 /**
- * Re-render just the "Covering:" line on an existing incoming alert (used when a defender
- * claims/retracts from the News panel — the Discord button path edits itself). Reads the
- * current roster from the DB. Best-effort, safe no-op if the message is gone.
+ * A cover claim/retraction made on the News panel, posted as a reply under the alert (the
+ * Discord button replies by itself). Best-effort, safe no-op if there is no alert.
  */
-async function updateIncomingCover(alertKey) {
-    if (!client.isReady() || alertKey == null) return false;
+async function replyIncomingCover(alertKey, name, added) {
+    if (alertKey == null) return false;
     let row;
-    try {
-        row = incomingRepo.getMessageRef(alertKey);
-    } catch (e) { return false; }
+    try { row = incomingRepo.getMessageRef(alertKey); } catch (e) { return false; }
     if (!row || !row.message_id || !row.channel_id) return false;
-
-    let channel;
-    try {
-        channel = await client.channels.fetch(row.channel_id);
-    } catch (err) { return false; }
-    if (!channel || typeof channel.messages?.fetch !== 'function') return false;
-
-    try {
-        const msg = await channel.messages.fetch(row.message_id);
-        const content = applyCoverLine(msg.content, renderCoverLine(getCovering(alertKey)));
-        await msg.edit({ content, components: [coverButtonRow(alertKey)] });
-        return true;
-    } catch (err) {
-        console.warn('[Discord] Could not update cover line:', err.message);
-        return false;
-    }
+    return replyToIncoming(row.channel_id, row.message_id, coverReplyText(name, added, getCovering(alertKey)));
 }
 
 /**
@@ -2575,7 +2552,8 @@ async function replyToIncoming(channelId, messageId, content) {
 
     const text = content.length > 1990 ? content.slice(0, 1987) + '...' : content;
     try {
-        await channel.send({ content: text, reply: { messageReference: messageId, failIfNotExists: false } });
+        // Only real <@id> mentions ping (the new-defender reply); a name can never ping.
+        await channel.send({ content: text, reply: { messageReference: messageId, failIfNotExists: false }, allowedMentions: { parse: ['users'] } });
         return true;
     } catch (err) {
         console.error('[Discord] Failed to reply to incoming alert:', err.message);
@@ -2584,8 +2562,8 @@ async function replyToIncoming(channelId, messageId, content) {
 }
 
 module.exports = {
-    initDiscordBot, announceSystemChanges, announceSystemMilestones, sendVariousChangeEmbed, sendIncomingAlert, sendOrEditIncoming,
-    replyToIncoming, updateIncomingCover,
+    initDiscordBot, announceSystemChanges, announceSystemMilestones, sendVariousChangeEmbed, sendIncomingAlert, postIncomingOnce,
+    replyToIncoming, replyIncomingCover, coverReplyText,
     // Exported for the tests: these are the pieces with real logic in them, and they run
     // without a Discord connection.
     handleTimer, checkDueTimers, handleLink, parseTimerInput, slashToPrefix, registerSlashCommands, handleMessage, interactionAsMessage,

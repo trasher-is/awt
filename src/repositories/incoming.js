@@ -44,7 +44,7 @@ function updateLastOntime(alertKey, lastOntime) {
 // report is the same fleet (edit) or a new wave (new key). Legacy rows written before
 // base_key existed are matched by alert_key = base instead. Issue #143.
 const findIncomingByBaseKeyStmt = db.prepare(`
-    SELECT alert_key, arrival_unix, updated_at
+    SELECT alert_key, arrival_unix, fleet_sig, updated_at
     FROM incoming_msgs
     WHERE base_key = ? OR alert_key = ?
 `);
@@ -56,13 +56,14 @@ function findIncomingByBaseKey(baseKey) {
 // is the first thing that touches a brand-new incoming (a "cover" click can land before the
 // alert is ever sent), and never downgrades a known arrival back to unknown (0/null).
 const ensureIncomingIdentityStmt = db.prepare(`
-    INSERT INTO incoming_msgs (alert_key, base_key, arrival_unix) VALUES (?, ?, ?)
+    INSERT INTO incoming_msgs (alert_key, base_key, arrival_unix, fleet_sig) VALUES (?, ?, ?, ?)
     ON CONFLICT(alert_key) DO UPDATE SET
         base_key = COALESCE(excluded.base_key, base_key),
-        arrival_unix = CASE WHEN excluded.arrival_unix > 0 THEN excluded.arrival_unix ELSE arrival_unix END
+        arrival_unix = CASE WHEN excluded.arrival_unix > 0 THEN excluded.arrival_unix ELSE arrival_unix END,
+        fleet_sig = COALESCE(fleet_sig, excluded.fleet_sig)
 `);
-function ensureIncomingIdentity(alertKey, baseKey, arrivalUnix) {
-    ensureIncomingIdentityStmt.run(alertKey, baseKey, arrivalUnix > 0 ? arrivalUnix : null);
+function ensureIncomingIdentity(alertKey, baseKey, arrivalUnix, fleetSig) {
+    ensureIncomingIdentityStmt.run(alertKey, baseKey, arrivalUnix > 0 ? arrivalUnix : null, fleetSig || null);
 }
 
 // alert_key is system:planet:attacker (plus ":arrival" for every wave after the first, see
