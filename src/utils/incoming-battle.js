@@ -161,6 +161,21 @@ function sbUpgrade({ enemyFleet, enemy, sbLevel, garrison, owner, budgetPp }) {
     return best;
 }
 
+// Every starbase level the budget reaches, cheapest first, with what each does — the
+// Defence panel lists them all (the alert shows the one sbUpgrade picks).
+function sbLevels({ enemyFleet, enemy, sbLevel, garrison, owner, budgetPp }) {
+    const from = Math.max(0, sbLevel || 0);
+    const top = Math.min(AWTables.maxLevel(AWTables.BUILDING), battleModel.clampStarbase(99));
+    const out = [];
+    for (let lvl = from + 1; lvl <= top; lvl++) {
+        const cost = AWTables.aggregate(AWTables.BUILDING, from, lvl);
+        if (cost > budgetPp) break;
+        const f = planetFight({ enemyFleet, enemy, sbLevel: lvl, garrison, owner });
+        out.push({ level: lvl, cost, holds: f ? f.holds : 0, enemyLeft: f ? f.enemyLeft : [0, 0, 0], enemyLeftCv: f ? f.enemyLeftCv : 0 });
+    }
+    return out;
+}
+
 // An ally landing right after the attacker, against what the planet fight left of it.
 // The ally is the ATTACKER here: the enemy now sits on the planet, its starbase gone.
 function counterFight({ allyFleet, ally, enemyLeft, enemy }) {
@@ -214,5 +229,5 @@ function pct(p) {
     return `${Math.round(v)}%`;
 }
 
-module.exports = { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, counterFight, landBefore, ownerReinforce, pct,
+module.exports = { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, sbLevels, counterFight, landBefore, ownerReinforce, pct,
     levelForXp, xpGained, levelAfter, fleetText, ceilFleet, floorFleet };

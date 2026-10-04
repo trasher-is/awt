@@ -181,28 +181,38 @@ function computeInterceptors(attack, nowUnix) {
     };
     const chosen = new Map([...byPlayer].map(([k, options]) => [k, pick(options)]));
 
+    // Every option of every member, for the Defence panel (the alert shows a few). The
+    // chosen ones above are the same objects, so whatever is attached to an option later
+    // (battle numbers) shows up in both.
+    const options = [...byPlayer.values()].flat();
+
     // Attach a real Discord mention where we know the player's numeric id (matched
     // game_name -> app_users.discord_id). Renders as their Discord name AND pings them.
-    for (const a of chosen.values()) {
-        try {
-            const row = usersRepo.getUserMentionByGameName(a.name.toLowerCase());
-            a.mention = row && row.discord_id ? `<@${row.discord_id}>` : null;
-        } catch (e) { a.mention = null; }
+    const mentions = new Map();
+    for (const a of options) {
+        const key = a.name.toLowerCase();
+        if (!mentions.has(key)) {
+            try {
+                const row = usersRepo.getUserMentionByGameName(key);
+                mentions.set(key, row && row.discord_id ? `<@${row.discord_id}>` : null);
+            } catch (e) { mentions.set(key, null); }
+        }
+        a.mention = mentions.get(key);
     }
 
     const all = Array.from(chosen.values());
     if (timeUntilImpact == null) {
         all.sort((a, b) => a.eta - b.eta);
-        return { unknownTiming: true, onTime: all.slice(0, ONTIME_LIMIT), late: [] };
+        return { unknownTiming: true, onTime: all.slice(0, ONTIME_LIMIT), late: [], options };
     }
 
-    all.forEach(a => { a.delta = timeUntilImpact - a.eta; });
+    options.forEach(a => { a.delta = timeUntilImpact - a.eta; });
     const onTime = all.filter(a => a.delta >= 0).sort((a, b) => a.eta - b.eta);
     // Only surface "late" defenders who are *barely* missing it (< 15 min) — anyone
     // further out is noise.
     const late = all.filter(a => a.delta < 0 && a.delta > -LATE_WINDOW).sort((a, b) => b.delta - a.delta);
 
-    return { unknownTiming: false, timeUntilImpact, onTime, late };
+    return { unknownTiming: false, timeUntilImpact, onTime, late, options };
 }
 
 const SOURCE_TAG = { orbit: '🛰️', flight: '✈️', build: '🏗️' };

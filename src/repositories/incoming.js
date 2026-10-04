@@ -66,6 +66,38 @@ function ensureIncomingIdentity(alertKey, baseKey, arrivalUnix, fleetSig) {
     ensureIncomingIdentityStmt.run(alertKey, baseKey, arrivalUnix > 0 ? arrivalUnix : null, fleetSig || null);
 }
 
+// --- The stored report, for the Defence panel ---
+// Written on every announce (webhook or News page); the latest report of an attack wins.
+const savePayloadStmt = db.prepare(`
+    INSERT INTO incoming_msgs (alert_key, payload) VALUES (?, ?)
+    ON CONFLICT(alert_key) DO UPDATE SET payload = excluded.payload
+`);
+function savePayload(alertKey, payload) {
+    savePayloadStmt.run(alertKey, JSON.stringify(payload));
+}
+
+const parsePayload = row => {
+    if (!row || !row.payload) return null;
+    try { return { ...row, payload: JSON.parse(row.payload) }; } catch (e) { return null; }
+};
+
+// Attacks still worth defending: not landed yet, or landed within the last cycle (a
+// counter-attack can still land until the cycle ends).
+const getLiveIncomingsStmt = db.prepare(`
+    SELECT alert_key, arrival_unix, payload, covering, message_id
+    FROM incoming_msgs
+    WHERE payload IS NOT NULL AND arrival_unix IS NOT NULL AND arrival_unix > ?
+    ORDER BY arrival_unix
+`);
+function getLiveIncomings(nowSec) {
+    return getLiveIncomingsStmt.all(nowSec - 240).map(parsePayload).filter(Boolean);
+}
+
+const getIncomingStmt = db.prepare(`SELECT alert_key, arrival_unix, payload, covering, message_id FROM incoming_msgs WHERE alert_key = ?`);
+function getIncoming(alertKey) {
+    return parsePayload(getIncomingStmt.get(alertKey));
+}
+
 // alert_key is system:planet:attacker (plus ":arrival" for every wave after the first, see
 // above) — an identity that only means anything against the current round's map, so a round
 // reset must clear it or the next round's first genuinely new incoming at the same
@@ -86,6 +118,7 @@ function deleteAllIncomingAlerts() {
 
 module.exports = {
     getCoveringRow, upsertCovering, upsertMessageRef, getMessageRef,
+    savePayload, getLiveIncomings, getIncoming,
     getLastOntimeRow, updateLastOntime,
     findIncomingByBaseKey, ensureIncomingIdentity,
     deleteAllIncomingMsgs, deleteAllIncomingAlerts,

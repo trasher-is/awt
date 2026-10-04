@@ -760,6 +760,9 @@ function initDatabase() {
     // AND arrival, and used to merge into one alert. The ship counts ("D-C-B") tell them
     // apart; see fleetSigOf() in src/utils/incoming-identity.js. NULL on older rows.
     addColumn('incoming_msgs', 'fleet_sig', 'TEXT');
+    // The attack as reported (attacker, target, ships, CV, arrival) as JSON, so the Defence
+    // panel can recompute it live: the Discord alert is a snapshot and is never edited.
+    addColumn('incoming_msgs', 'payload', 'TEXT');
 
     // Shared, login-gated planning notes for the redzone (rz.*) proxy — one note per
     // planet, visible to everyone who entered the shared password. Keyed by the game's

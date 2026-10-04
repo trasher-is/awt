@@ -1049,6 +1049,15 @@ and caps on its buildings — though the exact numbers aren't published.
   has just fought the starbase, has lost ships to it, and cannot leave before the
   counter-attack lands. (Stated by the alliance's lead player, 2026-10-04; the incoming alerts
   are built on it — `src/utils/incoming-battle.js`.)
+- **One planet, one fight at a time, in landing order.** Fleets landing on the same planet fight
+  one after another, allies included: two allies landing before an attacker fight each other,
+  and the winner meets the attacker. Fleets landing on the **same second land in launch
+  order**, and the attacker, who launched first, lands first.
+- **The counter-attack window is the rest of the attacker's fleet cycle.** Cycles are 2 minutes
+  (`00:02:00`–`00:03:59`); an attacker landing at `00:02:30` can leave from `00:04:00`, so a
+  counter must land between his arrival and the cycle's last second. Attackers who suspect a
+  counter usually leave at once. (Both stated by the alliance's lead player, 2026-10-04; the
+  Defence panel and incoming alerts are built on them.)
 - **Colony ships and transports never take damage when their side wins a battle.**
 - **Maximum of 5 fleets in transit at any given time.**
 - **A fleet of 4 ships or fewer can lose every ship, even in a battle it wins.** A fleet of

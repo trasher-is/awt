@@ -109,6 +109,10 @@
 
             <div class="flex flex-col py-2 border-b border-border">
                 <div class="px-4 py-2 text-s text-muted-foreground font-semibold uppercase tracking-wider hide-collapsed">Tools</div>
+                <button id="open-defence-btn" class="h-8 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
+                    <i class="fa-solid fa-shield-halved w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-sm">Defence</span>
+                    <span id="defence-count" class="hidden ml-auto sidebar-text text-xs font-bold text-red-400"></span>
+                </button>
                 <button id="open-galaxy-dashboard-btn" class="h-8 w-full flex items-center justify-start px-4 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
                     <i class="fa-solid fa-gauge-high w-6 text-center text-sm"></i><span class="ml-4 sidebar-text text-sm">Galaxy Dashboard</span>
                 </button>
@@ -210,6 +214,15 @@
             </button>
         </div>
     </nav>
+
+    <!-- Live-incoming warning (public/js/ui/defence.js). Slim and dismissible: it never opens
+         the Defence panel by itself — tapping it does. -->
+    <div id="defence-banner" class="hidden fixed top-0 left-0 right-0 md:left-14 z-30 bg-red-950/95 border-b border-red-700 text-red-100 text-sm px-3 py-1.5 flex items-center gap-2 shadow-lg">
+        <button id="defence-banner-open" class="flex-1 min-w-0 text-left truncate"></button>
+        <button id="defence-banner-close" class="shrink-0 w-7 h-7 rounded hover:bg-red-900 flex items-center justify-center" title="Dismiss">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    </div>
 
     <div id="dynamic-panels-container"></div>
 

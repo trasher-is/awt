@@ -5,11 +5,10 @@ const incomingRepo = require('../repositories/incoming');
 const usersRepo = require('../repositories/users');
 const { requireAuth } = require('./_middleware');
 const { postIncomingOnce, replyToIncoming, replyIncomingCover } = require('../discord_bot');
-const { formatTime } = require('../utils/travel-calc');
-const { ONTIME_LIMIT, LATE_LIMIT, SOURCE_TAG, computeInterceptors } = require('../utils/interceptors');
+const { SOURCE_TAG, computeInterceptors } = require('../utils/interceptors');
 const { resolveStats } = require('../utils/battle');
 const incomingDefenceRepo = require('../repositories/incomingDefence');
-const { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, counterFight, landBefore, ownerReinforce, pct, fleetText } = require('../utils/incoming-battle');
+const { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, sbLevels, counterFight, landBefore, ownerReinforce, pct, fleetText } = require('../utils/incoming-battle');
 const { toggleCovering, getCovering, renderCoverLine } = require('../utils/covering');
 const { baseKeyFor, arrivalOf, fleetSigOf, pickAlertKey } = require('../utils/incoming-identity');
 const router = express.Router();
@@ -85,8 +84,11 @@ function buildAnnounce(data, stats, result, alertKey, owner) {
     if (data.attacker.tag) atk += ` [${data.attacker.tag}]`;
     L.push(atk);
 
+    // The battle lines assume the worst about what we do not know; say so where it applies.
     const sline = statLine(stats);
-    if (sline) L.push(`🧬 \`${sline}\``);
+    if (!stats) L.push('🧬 `never scanned` — worst case assumed (+4 attack, +4 defence)');
+    else if (!stats.has_intel) L.push(`🧬 \`${sline}\` — race unknown, worst case assumed (+4/+4)`);
+    else if (sline) L.push(`🧬 \`${sline}\``);
 
     const ships = [];
     const s = data.ships || {};
@@ -100,7 +102,7 @@ function buildAnnounce(data, stats, result, alertKey, owner) {
     const arr = parseInt(data.arrivalUnix, 10);
     if (Number.isInteger(arr) && arr > 0) L.push(`🕐 ~ <t:${arr}:f>`);
 
-    appendDefenders(L, result, data.target);
+    appendDefenders(L, result, data.target, alertKey);
 
     // "Covering:" roster — who has clicked "I cover this" (News panel or Discord button).
     // Only non-empty when a News-panel claim landed before the alert was first posted;
@@ -133,6 +135,8 @@ function computeDefenders(data, owner) {
 
     if (result) {
         attachBattle(result, data, planet, arrivalUnix, nowUnix);
+        result.window = cycleWindow(arrivalUnix);
+        rankOptions(result, arrivalUnix);
         if (result.planet && result.planet.holds >= HOLDS) {
             // The starbase holds on its own: nobody needs to fly, so nobody is listed or
             // pinged. The alert says so instead.
@@ -149,6 +153,59 @@ function computeDefenders(data, owner) {
         }
     }
     return result;
+}
+
+// The 2-minute fleet cycle the attack lands in (docs/game-rules.md): an attacker landing at
+// 00:02:30 sits in 00:02:00-00:03:59 and can leave from 00:04:00, so a counter-attack has
+// to land between his arrival and the cycle's last second. Cycles are aligned to the even
+// minute.
+const CYCLE_SEC = 120;
+function cycleWindow(arrivalUnix) {
+    if (!arrivalUnix) return null;
+    const start = Math.floor(arrivalUnix / CYCLE_SEC) * CYCLE_SEC;
+    return { arrival: arrivalUnix, cycleStart: start, cycleEnd: start + CYCLE_SEC - 1 };
+}
+
+const KEEP_RETAKE_LIMIT = 3;
+const REAL_CHANCE = 0.25;
+
+// The two lists the alert shows (top 3 each, one line per member) and the panel heads with.
+//   keep   — land BEFORE the attacker and hold the planet: the owner's fleet joining his
+//            starbase, or an ally killing the starbase first. Must land strictly before
+//            him (same second: he launched first, so he lands first).
+//   retake — land AFTER him, inside his cycle, against what the starbase left.
+// Ranked by chance, then by ships kept. Each option gets launchFrom/launchBy for its role.
+function rankOptions(result, arrivalUnix) {
+    const w = cycleWindow(arrivalUnix);
+    const opts = result.options || [];
+    const timed = w != null;
+    const keepVal = o => (o.mode === 'reinforce'
+        ? { win: o.win, keepCv: o.keepCv }
+        : o.before ? { win: o.before.win, keepCv: o.before.keepCv } : null);
+    const keep = [], retake = [];
+    for (const o of opts) {
+        const k = keepVal(o);
+        if (k && k.win != null && k.win >= REAL_CHANCE && (!timed || o.eta < w.arrival - result.nowUnix)) {
+            keep.push({ opt: o, win: k.win, keepCv: k.keepCv, launchBy: timed ? w.arrival - 1 - o.eta : null });
+        }
+        if (o.mode === 'counter' && o.win != null && o.win >= REAL_CHANCE && (!timed || o.eta <= w.cycleEnd - result.nowUnix)) {
+            retake.push({ opt: o, win: o.win, keepCv: o.keepCv,
+                launchFrom: timed ? Math.max(result.nowUnix, w.arrival - o.eta) : null,
+                launchBy: timed ? w.cycleEnd - o.eta : null });
+        }
+    }
+    const best = list => {
+        const byName = new Map();
+        for (const e of list.sort((a, b) => b.win - a.win || (b.keepCv || 0) - (a.keepCv || 0))) {
+            const k = e.opt.name.toLowerCase();
+            if (!byName.has(k)) byName.set(k, e);
+        }
+        return [...byName.values()];
+    };
+    result.keepAll = best(keep);
+    result.retakeAll = best(retake);
+    result.keep = result.keepAll.slice(0, KEEP_RETAKE_LIMIT);
+    result.retake = result.retakeAll.slice(0, KEEP_RETAKE_LIMIT);
 }
 
 // The battle lines (src/utils/incoming-battle.js): the attacker against the planet first,
@@ -194,6 +251,9 @@ function attachBattle(result, data, planet, arrivalUnix, nowUnix) {
                         ? mine.reduce((sum, m) => sum + ppAfter(m, hours), 0)
                         : (here ? ppAfter(here, hours) : 0);
                     const up = budgetPp > 0 ? sbUpgrade({ ...ctx, budgetPp }) : null;
+                    // Every affordable level, for the Defence panel.
+                    result.sbBudget = { budgetPp, fromHome: !!planet.is_home };
+                    result.sbOptions = budgetPp > 0 ? sbLevels({ ...ctx, budgetPp }) : [];
                     // Worth saying even when it still falls: it leaves less for the counter.
                     if (up && (up.holds > fight.holds || up.enemyLeftCv < fight.enemyLeftCv)) {
                         result.sbUpgrade = { ...up, budgetPp, fromHome: !!planet.is_home };
@@ -204,7 +264,8 @@ function attachBattle(result, data, planet, arrivalUnix, nowUnix) {
             result.ctx = ctx;
         }
 
-        const all = [...result.onTime, ...(result.late || [])];
+        result.nowUnix = nowUnix;
+        const all = result.options || [...result.onTime, ...(result.late || [])];
         for (const d of all) {
             const allyFleet = d.ships || [Math.floor(d.cv / 3), 0, 0];
             const ally = allySide(incomingDefenceRepo.getAllyCombatRow(d.name.toLowerCase()));
@@ -243,30 +304,6 @@ function attachBattle(result, data, planet, arrivalUnix, nowUnix) {
 function launchUrl(a, target) {
     if (!a.fleetId || !process.env.PROXY_DOMAIN || !target || target.systemId == null || target.planetIndex == null) return null;
     return `https://${process.env.PROXY_DOMAIN}/Game/Fleets/Launch/${a.fleetId}?systemId=${target.systemId}&planetIndex=${target.planetIndex}`;
-}
-
-// "wins 99% · keeps 210 CV" for an ally landing after the attacker, "holds 99% · keeps …"
-// for the owner standing with his starbase. The model is exact to ±0.1pp; the uncertainty
-// that matters is the inputs (an unscouted race), which is flagged.
-function winTag(a) {
-    if (a.win == null) return '';
-    const kept = (w, cv) => (cv != null && w > 0 ? `, keeps ${Math.round(cv).toLocaleString()} CV` : '');
-    // An unscouted race is already on the attacker's 🧬 line; once is enough.
-    if (a.mode === 'reinforce') return ` · holds ${a.winBand || pct(a.win)}${kept(a.win, a.keepCv)}`;
-    const after = `after: retakes ${a.winBand || pct(a.win)}${kept(a.win, a.keepCv)}`;
-    if (!a.before) return ` · ${after}`;
-    const b = a.before;
-    const before = b.win < 0.005 ? 'before: fails' : `before: holds ${b.winBand}${kept(b.win, b.keepCv)}`;
-    return ` · ${before} · ${after}`;
-}
-
-function defenderLine(a, extra, target) {
-    let s = `${SOURCE_TAG[a.source] || ''} **${a.name}**${a.mention ? ' ' + a.mention : ''} \`[${a.cv.toLocaleString()} CV]\` ➔ ETA ${formatTime(a.eta)}${winTag(a)}${extra || ''}`;
-    const url = launchUrl(a, target);
-    // Masked links ([text](url)) only render in embeds; this is a plain message (needed
-    // so @mentions ping), so use a bare <url> — clickable, with the preview suppressed.
-    if (url) s += ` · 🚀 <${url}>`;
-    return s;
 }
 
 // How long ago a planet was last seen, when that is old enough to doubt its starbase.
@@ -316,66 +353,73 @@ function appendPlanet(L, result) {
     }
 }
 
-// Append the "who can defend in time" section to the main alert.
-function appendDefenders(L, result, target) {
+// The Defence panel for this attack, on the hub (login-gated). null without PROXY_DOMAIN.
+function panelUrl(alertKey) {
+    if (!process.env.PROXY_DOMAIN || alertKey == null) return null;
+    return `https://${process.env.PROXY_DOMAIN}/dashboard?defence=${encodeURIComponent(alertKey)}`;
+}
+
+// One ranked line: "1. 🏗️ Moardin25 @ [1,230 CV] · holds 47%, keeps 453 CV · launch by 14:02:10 (build …)"
+function rankedLine(i, e, role, target) {
+    const a = e.opt;
+    const kept = e.keepCv != null && e.win > 0 ? `, keeps ${Math.round(e.keepCv).toLocaleString()} CV` : '';
+    const verb = role === 'keep' ? 'holds' : 'retakes';
+    let when = '';
+    if (role === 'keep' && e.launchBy != null) when = ` · ${a.eta === 0 ? 'build' : 'launch'} by <t:${e.launchBy}:T>`;
+    if (role === 'retake' && e.launchBy != null) when = ` · launch <t:${e.launchFrom}:T>–<t:${e.launchBy}:T>`;
+    const how = role === 'keep'
+        ? (a.mode === 'reinforce' ? 'own fleet + SB' : 'kills the SB first')
+        : '';
+    const notes = [how, a.note].filter(Boolean).join(', ');
+    let s = `${i + 1}. ${SOURCE_TAG[a.source] || ''} **${a.name}**${a.mention ? ' ' + a.mention : ''} \`[${a.cv.toLocaleString()} CV]\` · ${verb} ${pct(e.win)}${kept}${when}${notes ? ` *(${notes})*` : ''}`;
+    const url = launchUrl(a, target);
+    if (url) s += ` · 🚀 <${url}>`;
+    return s;
+}
+
+// The defence section: the planet's own fight, then the top 3 ways to KEEP it and the top
+// 3 ways to RETAKE it, and a link to the Defence panel with every option, live. The
+// alert is a snapshot (never edited); the panel is not.
+function appendDefenders(L, result, target, alertKey) {
     if (!result) {
         L.push('\n⚠️ *Target system not mapped — cannot compute defenders.*');
         return;
     }
     appendPlanet(L, result);
-    if (result.planet && result.planet.holds >= HOLDS) return;
+    const url = panelUrl(alertKey);
+    const link = () => { if (url) L.push(`\n📋 **All options, live:** <${url}>`); };
+    if (result.planet && result.planet.holds >= HOLDS) { link(); return; }
 
-    if (result.unknownTiming) {
-        L.push('\n🛡️ **Closest defenders** *(arrival time unknown):*');
-        if (!result.onTime.length) { L.push('❌ No allied defenders found.'); return; }
-        result.onTime.forEach(a => L.push('• ' + defenderLine(a, a.note ? ` *(${a.note})*` : '', target)));
-        return;
-    }
+    const w = result.window;
+    L.push(w ? `\n🛡️ **Keep it** — land before <t:${w.arrival}:T>:` : '\n🛡️ **Keep it** — land before them *(arrival time unknown)*:');
+    if (result.keep && result.keep.length) result.keep.forEach((e, i) => L.push(rankedLine(i, e, 'keep', target)));
+    else L.push('❌ Nobody can keep it with a real chance (25%+).');
 
-    // Two ways for an ally: BEFORE the attacker (kill the starbase, then hold the planet —
-    // keeps population and buildings) or right AFTER it in the same cycle (retake it from
-    // what the starbase left). The owner's own fleet simply joins his starbase.
-    if (result.planet) {
-        L.push('\n⚔️ **Defenders** — *before*: land first, kill the SB, hold the planet · *after*: land right after them, same cycle, retake it');
-    } else {
-        L.push('\n🛡️ **Can defend in time:**');
-    }
-    if (!result.onTime.length) {
-        L.push(result.planet
-            ? '❌ Nobody who can make it in time has a real chance (25%+).'
-            : '❌ No allied defender can make it in time.');
-    } else {
-        result.onTime.slice(0, ONTIME_LIMIT).forEach(a => {
-            const when = a.mode !== 'reinforce' ? '' : a.eta === 0 ? 'owner, joins the SB, ' : 'owner: land before them, joins the SB, ';
-            L.push('🟢 ' + defenderLine(a, ` *(${when}spare ${formatTime(a.delta)}${a.note ? `, ${a.note}` : ''})*`, target));
-        });
-        if (result.onTime.length > ONTIME_LIMIT) L.push(`*...and ${result.onTime.length - ONTIME_LIMIT} more in time.*`);
-    }
+    L.push(w ? `\n⚔️ **Retake it** — land <t:${w.arrival}:T>–<t:${w.cycleEnd}:T>, same cycle, before they can leave:`
+        : '\n⚔️ **Retake it** — land right after them, same cycle:');
+    if (result.retake && result.retake.length) result.retake.forEach((e, i) => L.push(rankedLine(i, e, 'retake', target)));
+    else L.push('❌ Nobody can retake it in time with a real chance (25%+).');
 
-    if (result.late.length) {
-        L.push('\n🟡 **Just missing it:**');
-        result.late.slice(0, LATE_LIMIT).forEach(a =>
-            L.push('🟡 ' + defenderLine(a, ` *(late by ${formatTime(Math.abs(a.delta))}${a.note ? `, ${a.note}` : ''})*`, target)));
-    }
-
-    L.push('\n_🛰️ orbit · ✈️ in flight · 🏗️ build & launch_');
+    const more = (result.keepAll || []).length + (result.retakeAll || []).length - (result.keep || []).length - (result.retake || []).length;
+    L.push(`\n_🛰️ orbit · ✈️ in flight · 🏗️ build${more > 0 ? ` · ${more} more option${more === 1 ? '' : 's'} in the panel` : ''}_`);
+    link();
 }
 
-// The names that count as "able to arrive in time" right now (for change detection).
+// The names on the alert's two lists right now (for change detection: a reply pings
+// whoever newly makes a list).
 function onTimeNames(result) {
     if (!result) return [];
-    return result.onTime.map(a => a.name.toLowerCase()).sort();
+    const names = [...(result.keep || []), ...(result.retake || [])].map(e => e.opt.name.toLowerCase());
+    return [...new Set(names)].sort();
 }
 
-// Reply body: only the defenders who can make it, with @mentions so they get pinged.
-// Returns null if there's no one to notify.
+// Reply body when someone newly makes one of the lists: the two lists again, with
+// @mentions so they get pinged. null if both are empty.
 function buildReply(result, planetLabel, target) {
-    if (!result || !result.onTime.length) return null;
-    const L = [`🟢 **Reinforcements available** for ${planetLabel} — can arrive in time:`];
-    result.onTime.slice(0, ONTIME_LIMIT).forEach(a => {
-        const spare = (!result.unknownTiming && a.delta != null) ? ` *(spare ${formatTime(a.delta)})*` : '';
-        L.push(defenderLine(a, spare, target));
-    });
+    if (!result || (!(result.keep || []).length && !(result.retake || []).length)) return null;
+    const L = [`🟢 **New defence options** for ${planetLabel}:`];
+    if ((result.keep || []).length) { L.push('🛡️ Keep it:'); result.keep.forEach((e, i) => L.push(rankedLine(i, e, 'keep', target))); }
+    if ((result.retake || []).length) { L.push('⚔️ Retake it:'); result.retake.forEach((e, i) => L.push(rankedLine(i, e, 'retake', target))); }
     return L.join('\n');
 }
 
@@ -422,6 +466,16 @@ async function announceIncoming(data) {
     const alertKey = resolveAlertKey(data);
     // The clock can cross arrival between the guard above and identity resolution.
     if (alertKey === null) return { ok: false, status: 410, error: 'Incoming has already arrived' };
+    // The report itself, for the Defence panel to recompute live (the alert never changes).
+    try {
+        incomingRepo.savePayload(alertKey, {
+            attacker: { id: data.attacker.id || null, name: data.attacker.name, tag: data.attacker.tag || null },
+            target: data.target, cv: data.cv || 0, ships: data.ships || {}, arrivalUnix: arrival || 0,
+            fleetId: data.fleetId || null,
+        });
+    } catch (e) {
+        console.error('[Incoming] could not store the report:', e.message);
+    }
 
     let stats = data.attacker.id ? getStatsByIds([data.attacker.id])[data.attacker.id] : null;
     if (!stats) {
@@ -515,6 +569,103 @@ router.post('/incoming/defenders', requireAuth, (req, res) => {
     } catch (err) {
         console.error('[Incoming] defenders lookup failed:', err.message);
         res.status(500).json({ success: false, error: 'Defender lookup failed' });
+    }
+});
+
+// --- DEFENCE PANEL ---
+// Every live attack, light: for the sidebar warning and the panel's list. No battle maths,
+// so the whole alliance can poll it every minute.
+// GET /hub-api/defence/live
+router.get('/defence/live', requireAuth, (req, res) => {
+    try {
+        const nowSec = Math.floor(Date.now() / 1000);
+        const attacks = incomingRepo.getLiveIncomings(nowSec).map(r => {
+            const p = r.payload;
+            const owner = resolveTargetOwner(p.target);
+            return {
+                key: r.alert_key, arrivalUnix: r.arrival_unix,
+                attacker: { name: p.attacker.name, tag: p.attacker.tag },
+                target: p.target, cv: p.cv, ships: p.ships,
+                ownerName: owner ? owner.name : null,
+                covering: r.covering ? r.covering.split('\n').filter(Boolean) : [],
+            };
+        });
+        res.json({ success: true, nowUnix: nowSec, attacks });
+    } catch (err) {
+        console.error('[Defence] live list failed:', err.message);
+        res.status(500).json({ success: false, error: 'Live list failed' });
+    }
+});
+
+// One option as the panel needs it (no Discord mention markup).
+function panelOption(o) {
+    return {
+        name: o.name, source: o.source, cv: o.cv, ships: o.ships, eta: o.eta, delta: o.delta ?? null,
+        note: o.note || '', mode: o.mode || null, fleetId: o.fleetId || null,
+        originSys: o.originSys ?? null, originIdx: o.originIdx ?? null,
+        after: o.mode === 'counter' && o.win != null ? { win: o.win, winText: pct(o.win), keepCv: o.keepCv } : null,
+        before: o.mode === 'reinforce'
+            ? (o.win != null ? { win: o.win, winText: pct(o.win), keepCv: o.keepCv, own: true } : null)
+            : (o.before ? { win: o.before.win, winText: pct(o.before.win), keepCv: o.before.keepCv, sbCostCv: o.before.sbCostCv } : null),
+    };
+}
+const panelRanked = e => ({ name: e.opt.name, source: e.opt.source, cv: e.opt.cv, note: e.opt.note || '', mode: e.opt.mode,
+    win: e.win, winText: pct(e.win), keepCv: e.keepCv, launchFrom: e.launchFrom ?? null, launchBy: e.launchBy ?? null, eta: e.opt.eta });
+
+// The full, live analysis of one attack: everything the alert shows and every option of
+// every member, the viewer's own first.
+// GET /hub-api/defence/attack?key=<alert key>
+router.get('/defence/attack', requireAuth, (req, res) => {
+    try {
+        const row = incomingRepo.getIncoming(String(req.query.key || ''));
+        if (!row) return res.status(404).json({ success: false, error: 'No such incoming' });
+        const data = row.payload;
+        const owner = resolveTargetOwner(data.target);
+        const result = computeDefenders(data, owner);
+        let stats = data.attacker.id ? getStatsByIds([data.attacker.id])[data.attacker.id] : null;
+        if (!stats) {
+            const r = playersRepo.getPlayerWithAllianceByNameLower(String(data.attacker.name).toLowerCase());
+            if (r) stats = { ...r, statLine: statLine(r) };
+        }
+        const me = String(req.session.gameName || '').toLowerCase();
+        const byMember = new Map();
+        for (const o of (result && result.options) || []) {
+            if (!byMember.has(o.name)) byMember.set(o.name, []);
+            byMember.get(o.name).push(panelOption(o));
+        }
+        const bestOf = list => Math.max(0, ...list.map(o => Math.max(o.before ? o.before.win : 0, o.after ? o.after.win : 0)));
+        const members = [...byMember].map(([name, options]) => ({
+            name, me: name.toLowerCase() === me,
+            options: options.sort((a, b) => a.eta - b.eta),
+        })).sort((a, b) => (b.me - a.me) || (bestOf(b.options) - bestOf(a.options)));
+        const pl = result && result.planet;
+        res.json({
+            success: true,
+            key: row.alert_key, nowUnix: Math.floor(Date.now() / 1000),
+            attacker: { name: data.attacker.name, tag: data.attacker.tag, statLine: stats ? stats.statLine : null,
+                scanned: !!stats, raceKnown: !!(stats && stats.has_intel) },
+            target: data.target, ownerName: owner ? owner.name : null,
+            cv: data.cv, ships: data.ships, arrivalUnix: data.arrivalUnix || row.arrival_unix || null,
+            window: result ? result.window : null,
+            mapped: !!result,
+            planet: pl ? {
+                holds: pl.holds, holdsText: pct(pl.holds), holdsAlone: pl.holds >= HOLDS,
+                sbLevel: pl.sbLevel, garrisonCv: pl.garrisonCv, seenAt: pl.seenAt,
+                enemyLeft: pl.enemyLeft, enemyLeftText: enemyLeftText(pl.enemyLeft, pl.enemyLeftCv),
+                enemyXp: pl.enemyXp, enemyLvlBefore: pl.enemyLvlBefore, enemyLvlAfter: pl.enemyLvlAfter,
+                outcomeText: planetOutcome(pl),
+            } : null,
+            sbBudget: result && result.sbBudget ? result.sbBudget : null,
+            sbOptions: ((result && result.sbOptions) || []).map(o => ({ level: o.level, cost: o.cost, holds: o.holds,
+                holdsText: pct(o.holds), enemyLeftText: enemyLeftText(o.enemyLeft, o.enemyLeftCv) })),
+            keep: ((result && result.keepAll) || []).map(panelRanked),
+            retake: ((result && result.retakeAll) || []).map(panelRanked),
+            members,
+            covering: getCovering(row.alert_key),
+        });
+    } catch (err) {
+        console.error('[Defence] attack analysis failed:', err.message);
+        res.status(500).json({ success: false, error: 'Analysis failed' });
     }
 });
 

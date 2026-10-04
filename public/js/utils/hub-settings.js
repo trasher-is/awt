@@ -33,6 +33,7 @@
     const OFF = { defaultOn: false };
 
     const TOOLS = [
+        tool('defence', 'Defence', 'fa-shield-halved', 'open-defence-btn'),
         tool('galaxyDashboard', 'Galaxy Dashboard', 'fa-gauge-high', 'open-galaxy-dashboard-btn'),
         tool('warRoom', 'War Room', 'fa-bomb', 'open-war-room-btn'),
         tool('allianceStats', 'Alliance Stats', 'fa-chess', 'open-alliance-stats-btn'),
