@@ -1215,8 +1215,8 @@ Experience needed per player level; **aggregated** is the running total.
 
 ### Full XP from combat
 
-Winning a battle only pays out full XP if you had **at least 1 starbase and at least 1
-surviving ship** in the fight — otherwise XP is reduced to **25%**.
+Winning a battle only pays out full XP if you had **at least 1 starbase and at least 2
+surviving ships** in the fight — otherwise XP is reduced to **25%**.
 
 ### Autogrowth (unverified — needs a thorough check)
 
