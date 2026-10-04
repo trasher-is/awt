@@ -334,21 +334,18 @@
     }
 
     // ─── HOW SURE ARE WE? ─────────────────────────────────────────────────────
-    // The win percentage is reverse-engineered from ~4200 live calculator observations
-    // across four harvest rounds (see scripts/battle-harvest/ and the file header), not a
-    // regression fit — but it is still an approximation with a measured, non-zero error,
-    // and printing it as "47.3%" would claim more precision than that.
-    //
-    //   * BASE_ERROR_PP covers single-type and single-type-vs-single-type fights: 97.7%
-    //     of ~3200 realistic-scale observations (player level 1-30) land within 1pp, mean
-    //     error 0.09pp. 1pp is therefore an honest band for the common case.
-    //   * MIXED_FLEET_EXTRA_PP is 0 since the strength rule (2026-10-04): 176 bonus-free and
-    //     401 bonus-carrying mixed readings fit to 0.12pp and 0.13pp at worst.
+    // Since 2026-10-04 the model reproduces the in-game calculator: all 2,956 non-certain
+    // readings on record (the September harvest, two sweeps, hand readings) match within
+    // 0.01pp, and the worst fixture is 0.07pp. BASE_ERROR_PP is set just above that, and
+    // the band is printed to one decimal so it does not hide that precision.
+    //   * MIXED_FLEET_EXTRA_PP is 0: mixed fleets fit as well as pure ones.
+    //   * The band covers the MODEL only. Stale or guessed inputs (an enemy's sciences,
+    //     race or level) can move the real chance far more than this.
     //
     // src/utils/battle-calc.test.js asserts that every win fixture's error is inside the
     // band winBand() shows for that fight, so the stated confidence can never drift below
     // the measured one.
-    const BASE_ERROR_PP = 1.0;
+    const BASE_ERROR_PP = 0.1;
     const MIXED_FLEET_EXTRA_PP = 0;
 
     /**
@@ -371,8 +368,10 @@
             caveats.push('a side fielding 2-3 ship types is less precisely modelled than a pure single-type fleet');
         }
 
-        const low = Math.max(0, Math.round(pct - margin));
-        const high = Math.min(100, Math.round(pct + margin));
+        // One decimal, so a ±0.1pp band is not rounded away into a whole-number range.
+        const r1 = x => Math.round(x * 10) / 10;
+        const low = Math.max(0, r1(pct - margin));
+        const high = Math.min(100, r1(pct + margin));
 
         // A band that has hit a wall should not read as certainty. "0-4%" is honest;
         // "0%" would not be.
