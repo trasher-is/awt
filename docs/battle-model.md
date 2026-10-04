@@ -75,15 +75,20 @@ unchanged and confirmed exact for all 20 levels.
 
 Four mechanics, two outcomes, **no cross-interaction between them**:
 
-**Win %** — Race Attack and Physics, both additive log-odds terms:
+**Win %** — force, race attack, physics and player level as log-odds terms:
 
 ```
 lneff =  w·ln(CVatk/CVdef) + (1−w)·ln(ATKatk/ATKdef)         force/attack blend
        + ln(1+0.08·RAatk) − ln(1+0.08·RAdef)                  race attack
-       + ln(1+0.01491·PHatk) − ln(1+0.01491·PHdef)            physics, below its bracket
-       ± ln(1.25)                   if |PHatk−PHdef| >= 6     physics bracket
-       ± ln(1+0.00995·|PLatk−PLdef|)                          player level, RAW DIFFERENCE
+       + ln(1+0.01491·PHatk) − ln(1+0.01491·PHdef)            physics slope
+       + ln(EDGEatk) − ln(EDGEdef)                            physics bracket + player level
+
+EDGEside = 1 + 0.25                       if this side is 6+ physics ahead
+             + 0.00995·(ownPL − enemyPL)  if this side is ahead in level AND fields all 3 types
 ```
+
+The physics bracket and the level advantage are percentages that **add** inside one factor
+per side. A side that is behind gets nothing from either; the enemy's factor carries the gap.
 
 capped at `|lneff| <= ln(1.5)` (a certain win/loss beyond that — the old "1.5× shortcut",
 now derived rather than hand-tuned), then run through a saturating curve:
@@ -96,24 +101,35 @@ constant. Reweighting the global constant or adding a defense-ratio third term b
 to close that residual; a dense 90-point destroyer-vs-battleship sweep is what surfaced the
 per-pair weights instead.
 
-Destroyers against a **lone starbase** have their own weight too, `0.7745` (2026-10-04).
-Until then any fight with a starbase used the mixed `0.813`, and every recorded single-type
-starbase fight rated the attacker low (14 of 14, up to 1.9pp). `0.7745` fits the six recorded
-lone-starbase points to 0.08pp and seven new calculator readings (levels 4-13, 5-242
-destroyers, one with sciences and race set) to 0.3pp. A starbase with a fleet beside it, and
-cruisers or battleships against a starbase, still use `0.813`.
+A single ship type against a **starbase** has its own weight as well:
 
-**Survivors** — Mathematics, Race Defense and Player Level, all multiplicative on your own
-toughness (`1/lossFraction`), independent of each other and of win%:
+| Attacker | Defender | `w` |
+|---|---|---|
+| destroyers | lone starbase | `0.7745` |
+| cruisers | lone starbase | `0.830` |
+| battleships | lone starbase | `0.7845` |
+| destroyers | destroyers + starbase | `0.7745 − 0.026 × (fleet CV / (fleet CV + starbase CV))` |
+| anything else with a starbase | | `0.813` |
+
+With the mixed `0.813` every such fight rated the attacker 1-2pp low. The fitted weights match
+13, 7, 5 and 24 calculator readings to 0.08, 0.13, 0.08 and 0.01pp.
+
+**Survivors** — Mathematics, Race Defense and Player Level on your own toughness
+(`1/lossFraction`), independent of win %:
 
 ```
-lossFrac_own = min(1, enemyCV / ownToughness) / toughnessMultiplier
+lossFrac_own = min(1, (enemyCV / ownToughness) / toughnessMultiplier)
 
 toughnessMultiplier = (1 + 0.0015·ownMath)                    OWN ABSOLUTE level, not the gap
-                     × (1.25 or 0.75 if |ownMath−enemyMath| >= 6, else ×1)
+                     × (1 ± 0.25 [if |ownMath−enemyMath| >= 6]
+                          + 0.01·max(0, ownPL−enemyPL))        level only if this side has all 3 types
                      × (1 + 0.12·ownRD)
-                     × (1 + 0.01·max(0, ownPL−enemyPL))        only if this side has all 3 types
 ```
+
+The cap comes **after** the multiplier: a side facing far more enemy CV than its toughness is
+wiped even with a large bonus. (Capping first, `min(1, ratio) / multiplier`, let a side with a
+×2 multiplier keep half its fleet against any odds.) The maths bracket and the level advantage
+add in one factor, as on the win side.
 
 `ownToughness = Σ(att + 2·def)` over the fleet, **plus** the defending starbase's own
 `att + 2·def` (`att = def = floor(cv/2)`) whenever there is one, with or without a fleet
@@ -128,30 +144,34 @@ cruisers **and** battleships.
 
 **Annihilation**: the loser of a fight that hit the certainty cap is wiped to 0 survivors —
 overriding whatever the CV-ratio formula alone would say. The winner is unaffected.
-Separately, a side whose own `lossFrac` (after the toughness multipliers) reaches **or
-exceeds** 1 — which needs a race-defense or mathematics malus, since the base ratio alone
-is capped at 1 before the multiplier is applied — floors at exactly 1 survivor, never 0,
-unless that side is also the certain loser above (which takes priority and zeroes it).
-Landing on *exactly* 1.0, not just past it, still floors: five otherwise-identical
-mathematics-bracket samples all showed 1 survivor at a malus that exactly cancelled the
-base ratio, not 0.
+
+**The one-survivor floor** (when the fight is not certain):
+
+- A side of **5 or more ships** always keeps at least one ship of its type with the most total
+  **defence** (destroyer 1, cruiser 16, battleship 24 per ship). That type is lifted to 1 when it
+  would keep less; the other types keep their own fractions. 140 destroyers + 9 cruisers that are
+  wiped keep 1 cruiser (defence 144 vs 140).
+- A side of **4 ships or fewer** gets no floor and can lose everything.
+- A **starbase defending alone** keeps level 1 when its loss reaches 100%. Beside 5+ ships the
+  floor goes to a ship and the starbase can reach 0.
+
+24 of 24 calculator cases with 5+ ships were lifted, 49 of 49 with 4 or fewer were not, and 16
+of 16 lone starbases kept level 1.
 
 **Two things that look similar but aren't** (both cost real accuracy the first way):
 
-- The player-level win% term is applied to the **raw difference** `(PLatk − PLdef)` as one
-  number, not as `ln(1+k·PLatk) − ln(1+k·PLdef)` computed per side. A 121-point two-sided
-  grid showed the true term depends on the difference alone — same log-odds value for every
-  pair sharing a difference, regardless of the absolute levels — and the two forms diverge
-  by up to 2.7pp once both sides carry a large, comparable player level.
+- The player-level term depends on the **difference** in level, not on each side's absolute
+  level (a 121-point two-sided grid). It counts **only for the side that is ahead**, and only
+  if that side fields all three ship types. Charging the whole gap whenever one side had all
+  three types was up to 68pp wrong.
 - `0.0015`/level is your **own absolute** math level, not a gap to the enemy. Every earlier
   test that found "0.0015/level of advantage" held the enemy's math at 0, so "gap" and "own
   level" were the same number. The `±6` bracket, unlike the slope, genuinely is gap-based.
 
-**Known remaining gap**: fleets mixing 2-3 ship types on either side fit noticeably worse
-than a pure single-type duel — mean error ~0.3pp, worst observed 5.8pp in a 1673-case
-realistic-scale dataset, vs <0.1pp almost everywhere else. A CV-share-weighted average of
-the pairwise weights was the natural next fix and made every mixed-fleet case **worse**, so
-the flat 0.813 fallback stands as the best known approximation.
+**Known remaining gap**: fleets mixing 2-3 ship types use one flat blend weight, `0.813`.
+Across 420 mixed calculator readings (sciences 10-40, level gaps to 40) the win % is off by
+0.53pp on average and 1.9pp at worst, so the UI shows mixed fleets ±2pp. A CV-share-weighted
+average of the pairwise weights made every mixed-fleet case **worse**.
 
 ## Ground truth
 
@@ -188,11 +208,23 @@ destroyers against a starbase, alone or with a destroyer fleet):
 Against the model before that date, 7 of the new win fixtures and both survivor fixtures fail
 (worst 2.29pp and 13.7 ships).
 
+Later the same day a **641-case sweep** of the calculator, run from a member's logged-in hub tab
+through the proxy and its 5/s gate (75% mixed fleets, sciences 10-40, level gaps to 40, every
+race pick, plus the starbase shapes real battles use), surfaced the level, additive-bonus,
+cap-after and floor rules above. It added 10 `winChance` and 6 `survivors.cases` fixtures, each
+the case the previous model got most wrong for its rule (up to 68pp and 496 ships off).
+
 Current state of the harness:
 
-- 23 win-% fixtures, worst error **0.52 pp** (`composition-1000d-vs-125c`), gate at 1.5 pp
+- 33 win-% fixtures, worst error **1.47 pp** (`sweep-bracket-plus-level-add`, a mixed fleet),
+  gate at 1.5 pp; every fixture must also sit inside the band `winBand()` shows for that fight
+  (±1pp, ±2pp with a mixed fleet)
 - 10 starbase CV levels, exact match required
-- 10 survivor fixtures, worst error **0.005 units**, gate at 0.5 units
+- 16 survivor fixtures, worst error **0.024 units**, gate at 0.5 units
+
+Against all recorded calculator data (2,750 non-certain readings from the harvest and the
+641-case sweep), the win % is off by 0.16pp on average; worst 1.9pp for a mixed fleet and 4.35pp
+for a 2-ship side. The surviving CV is within 0.5% of the calculator.
 
 Adding these fixtures caught two real bugs before they shipped: a lone starbase (no
 defending fleet) was taking zero losses regardless of attacker size (the fleet-only
@@ -257,22 +289,17 @@ the constants in `battle-model.js`, do not raise the gate.
 | `db73cd5` (2026-06-26) | last version of the bot's inline copy (the one that went stale) |
 | `fb2013f`–`2cc1467` (2026-06-27/28) | the original logistic-regression calibration: 24 in-game samples, survivors to `ΣenemyCV / Σ(att+2·def)`, power-law force/attack terms, mean error 0.97%, max 4.0% — see git history on this file for the individual commits, no longer reproduced here since none of those constants ship anymore |
 | 2026-09-06 | **replaced entirely.** Reverse-engineered from ~4200 live-calculator POSTs across four rounds (`scripts/battle-harvest/`) instead of fit as a regression. Corrected: race defense 12% (not the pre-patch 11%), math bracket ±25% (not ±12.5% — the old regression had halved it), the starbase-alongside-fleet and asymmetric-mathematics cases (both now modelled exactly, see below), and two bugs the new fixtures caught immediately (lone-starbase toughness, the exact-lossFrac=1.0 floor boundary) |
+| 2026-10-04 (sweep) | Fitted to a 641-case calculator sweep: level term only for the side ahead with all three types; physics/maths bracket and level advantage add in one factor; survivor loss capped after the multiplier; one-survivor floor (5+ ships, largest-defence type; lone starbase keeps level 1); lone-starbase weights for cruisers and battleships; destroyers vs destroyers + starbase weight slides with fleet share. Mixed-fleet band ±6 → ±2pp. 10 win and 6 survivor fixtures added |
 | 2026-10-04 | Starbase fights: destroyers vs a lone starbase get blend weight `0.7745` (was the mixed `0.813`, 1.4-2.3pp low on the attacker), and a defending starbase's toughness always counts in the defender's loss fraction (was left out beside a fleet). Confirmed on 17 hand-read calculator results; 10 win and 2 survivor fixtures added. `battle-race-inference.js` now also skips a defender whose starbase level is unknown, since its fleet losses depend on it |
 
 ## Known-approximate areas
 
-- **Mixed 2-3-ship-type fleets** — the one substantial remaining gap, see "The model" above.
-  Not present in single-type-vs-single-type fights or in any single-modifier test; only
-  shows up when several ship types and several modifiers are all active on a realistic-scale
-  fleet at once.
-- The 0.813 mixed-fleet blend weight is the least-attested constant in the model (not a
-  clean fraction, unlike everything else).
-- **Win % with a starbase beside a fleet** still uses `0.813`. Near-even fights read on
-  2026-10-04 are within 0.1pp, but 100 destroyers vs 50 destroyers + level 9 is 1.17pp off
-  (attacker rated low) and no single weight fits the recorded points. Not fixed.
-- A lone starbase that ends a non-certain fight at a loss fraction of 1 showed level 1 (2 CV)
-  in one calculator reading (50 destroyers vs level 8, physics 8 vs 14), where the model wipes
-  it; ten recorded fights of that kind show 0.00, so the model is unchanged.
+- **Mixed 2-3-ship-type fleets** — the flat `0.813` blend weight, mean 0.53pp and worst 1.9pp
+  across 420 mixed readings. It is the least-attested constant in the model.
+- **Sides of 2-3 ships**, where one ship more or less moves the odds a lot: 2 destroyers vs a
+  level-2 starbase is 4.4pp off.
+- The displayed starbase level differs from the model by about 0.06 in some starbase + fleet
+  fights with sciences set.
 
 **No longer approximate, contra the old version of this section**: a starbase defending
 alongside a fleet (win% mean ~0.06pp across the harvested single-type data; survivors
