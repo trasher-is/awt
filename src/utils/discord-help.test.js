@@ -60,6 +60,7 @@ const allNames = helpEntries(margins).flatMap(g => g.items).flatMap(e => e.names
         const missing = [...handled].filter(c => c !== 'help' && !EGGS.has(c) && !allNames.includes(c));
         ok('every handled command is reachable through !help', missing.length === 0, missing);
         ok('the source scan found the commands it should', handled.has('battle') && handled.has('cvkillsweek'), [...handled]);
+        ok('!price is no longer a command', !handled.has('price'));
         ok('no egg is in the help data', !allNames.some(n => EGGS.has(n)));
         ok('no name is claimed by two entries', new Set(allNames).size === allNames.length);
     }
@@ -74,8 +75,22 @@ const allNames = helpEntries(margins).flatMap(g => g.items).flatMap(e => e.names
         ok('the index is under 1,600 characters (the old one was ~5,000)', embedChars(embed) < 1600, embedChars(embed));
         const long = lines.filter(l => l.length > 55);
         ok('every index line fits a phone-width embed', long.length === 0, long);
-        ok('the index says how to get the details', /!help <command>/.test(embed.description), embed.description);
+        ok('the index says !help <command> gives deeper help', /!help <command>` shows deeper help/.test(embed.description), embed.description);
         ok('the egg hint footer survives', /not everything/.test(embed.footer.text));
+        const index = embed.fields.map(f => f.value).join(' ');
+        ok('!glory (RAID-only) and !bio (partial) are not in the index', !/`!glory`|`!bio`/.test(index), index);
+        ok('!price is gone', !/!price/.test(index));
+        ok('the index still has the commands around them', /`!battle`/.test(index) && /`!mortal`/.test(index) && /`!research`/.test(index));
+    }
+    {
+        const c = capture('!help glory');
+        await bot.handleMessage(c.message);
+        ok('a hidden command still has its !help page', /!glory/.test(lastEmbed(c.replies).title));
+    }
+    {
+        const c = capture('!price 4200 1800');
+        await bot.handleMessage(c.message);
+        ok('!price no longer answers', c.replies.length === 0, c.replies);
     }
 
     // --- !help <command> ------------------------------------------------------

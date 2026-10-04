@@ -308,8 +308,8 @@ modelled exactly rather than skipped past.
 The model answers "who wins". The hub's own battle archive says that question is, for most
 real attacks, already decided before anyone presses launch. Taking every recorded report
 that carries both fleets' combat values and sorting by the attacker's CV over the
-defender's (968 battles as of 2026-09-22, produced by `!price` — see
-`src/utils/battle-ledger.js`):
+defender's (968 battles as of 2026-09-22, produced by
+`src/utils/battle-ledger.js`, formerly shown by the retired `!price` command):
 
 | attacker CV / defender CV | battles | attacker won | attacker's fleet lost |
 |---|---:|---:|---:|
@@ -345,8 +345,10 @@ this table is the check.
   **42%** of rows match it exactly
 
 Nothing renders the column today, so nothing is currently lying to anyone. It must not be
-wired to a "win chance" label later. `!price check` re-runs all three checks against live
-rows, so this section can be verified rather than believed.
+wired to a "win chance" label later. `storedWinChanceCheck()` in
+`src/utils/battle-ledger.js` re-runs all three checks against live rows (it was the
+Discord `!price check` until that command was retired), so this section can be verified
+rather than believed.
 
 ### Per-battle stats snapshot
 

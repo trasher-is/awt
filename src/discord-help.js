@@ -4,6 +4,8 @@
 //
 // Each entry: `names` are every word that should find it via `!help <word>` (the first is
 // the one shown), `usage` is the syntax line, `short` the index blurb, `detail` the full text.
+// `hidden` keeps an entry out of the index but still answers `!help <name>`: !glory is
+// RAID's own scoring, and !bio is a partial view next to the Hub's /game/sciences page.
 
 function helpEntries({ bioConfirmed, bioSuspected }) {
     return [
@@ -49,7 +51,7 @@ function helpEntries({ bioConfirmed, bioSuspected }) {
                     example: '!research Harpyie',
                 },
                 {
-                    names: ['bio'], usage: '!bio', short: 'who can see your origin',
+                    names: ['bio'], hidden: true, usage: '!bio', short: 'who can see your origin',
                     detail: `Players who can SEE your origin and hold a +${bioConfirmed} confirmed biology, or a +${bioSuspected} science advantage if never scanned.`,
                 },
                 {
@@ -103,11 +105,6 @@ function helpEntries({ bioConfirmed, bioSuspected }) {
                     example: '!battle 50 10 0 vs 40 8 2 --dp 5 --ap 3 --dl 12 --al 8',
                 },
                 {
-                    names: ['price'], usage: '!price [yourCV theirCV]', short: 'what an attack really costs',
-                    detail: 'What an attack at that strength ratio has actually cost, from the hub\'s own recorded battles — win rate AND how much of the attacking fleet came home. No arguments: the whole table. `!price check` re-proves on live rows that the stored win_chance column is a dice roll, not a probability.',
-                    example: '!price 4200 1800',
-                },
-                {
                     names: ['tt'], usage: '!tt <sysA> <plA> <sysB> <plB> <speed> <nrg>', short: 'fleet travel time',
                     detail: 'Calculates fleet travel time between two coordinates. You can also swap speed/energy for a player name: `!tt 100 1 200 4 PlayerOne`.',
                     example: '!tt 100 1 200 4 10 5',
@@ -134,7 +131,7 @@ function helpEntries({ bioConfirmed, bioSuspected }) {
                     example: '!popkillsweek nsa',
                 },
                 {
-                    names: ['glory', 'gloryday', 'gloryweek'], usage: '!glory', short: 'combined points (alliance only)',
+                    names: ['glory', 'gloryday', 'gloryweek'], hidden: true, usage: '!glory', short: 'combined points (alliance only)',
                     detail: 'Combined CV + population points leaderboard (plus any bonus-goal points), weighted so a bigger single kill is worth disproportionately more per unit. Alliance-only — no `[all|<alliance_tag>]` option, unlike `!mortal`. `!gloryday` / `!gloryweek` for the last 24 hours / 7 days.',
                 },
             ],
@@ -187,12 +184,12 @@ function buildHelp(topic, margins) {
 
     return {
         title: '🛠️ Command Center Help',
-        description: 'Type `!help <command>` for details and an example — e.g. `!help battle`.',
+        description: '💡 **`!help <command>` shows deeper help** — full options and an example, e.g. `!help battle`.',
         color: COLOR,
         fields: groups.map(g => ({
             name: g.group,
             value: [
-                ...g.items.map(e => `\`!${e.names[0]}\` — ${e.short}`),
+                ...g.items.filter(e => !e.hidden).map(e => `\`!${e.names[0]}\` — ${e.short}`),
                 ...(g.note ? [`*${g.note}*`] : []),
             ].join('\n'),
         })),
