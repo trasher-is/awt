@@ -1311,6 +1311,12 @@ Experience needed per player level; **aggregated** is the running total.
 Winning a battle only pays out full XP if you had **at least 1 starbase and at least 2
 surviving ships** in the fight — otherwise XP is reduced to **25%**.
 
+**How much:** the winner gains XP equal to the **combat value the loser lost** — measured on
+the hub's battle reports (2026-10-04): 1,481 of 1,534 match exactly, and most of the rest are
+the reduced 25% payout, seen when the winner kept fewer than 2 ships. The loser gains nothing.
+Beating a starbase therefore pays its whole CV (SB 12 = 515 XP), which can lift a low-level
+attacker a level or two before a counter-attack lands; the incoming alerts count that.
+
 ### Autogrowth (unverified — needs a thorough check)
 
 Speed/attack/defence race picks are believed to also add a small daily player-level XP

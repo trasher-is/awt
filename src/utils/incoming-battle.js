@@ -47,15 +47,54 @@ function allySide(row) {
     // for an ENEMY, the most flattering one for us. Neutral 0/0 instead.
     if (!row || !row.has_intel) {
         const seen = row ? observedCombatSciences(row) : { physics: null, mathematics: null };
-        return { ra: 0, rd: 0, phys: seen.physics || 0, math: seen.mathematics || 0, lvl: (row && row.level) || 0, unknown: true };
+        return { ra: 0, rd: 0, phys: seen.physics || 0, math: seen.mathematics || 0, lvl: (row && row.level) || 0,
+            totalXp: row && Number.isFinite(row.total_xp) ? row.total_xp : null, unknown: true };
     }
     const base = resolveStats(row);
     const seen = observedCombatSciences(row);
     return {
         ...base,
+        totalXp: Number.isFinite(row.total_xp) ? row.total_xp : null,
         phys: seen.physics != null ? seen.physics : base.phys,
         math: seen.mathematics != null ? seen.mathematics : base.math,
     };
+}
+
+// ─── Experience between fights (2026-10-04) ──────────────────────────────────────────
+// The winner of a battle gains XP equal to the CV the loser lost — 1,481 of 1,534 recorded
+// battle reports match that exactly; most of the rest are the reduced payout, 25% when the
+// winner keeps fewer than 2 ships (docs/game-rules.md, "Full XP from combat"). Beating a
+// starbase can therefore lift the attacker a player level or two before the counter-attack
+// lands in the same cycle, and the level bonus (1% per level ahead, only with all three
+// ship types) counts in that next fight. The same works for an ally who kills the
+// starbase first. NOT verified: that the new level already applies to a second battle in
+// the same 2-minute cycle; the alerts assume it does.
+const levelXp = level => AWTables.aggregate(AWTables.PLAYER_LEVEL, 0, level);
+function levelForXp(totalXp) {
+    let lvl = 0;
+    while (lvl + 1 < AWTables.PLAYER_LEVEL.length && levelXp(lvl + 1) <= totalXp) lvl++;
+    return lvl;
+}
+const shipCount = f => toFleet(f).reduce((a, b) => a + b, 0);
+function xpGained(loserLostCv, winnerLeft) {
+    const full = Math.round(Math.max(0, loserLostCv));
+    return shipCount(winnerLeft) >= 2 ? full : Math.floor(full * 0.25);
+}
+// side: { lvl, totalXp } — totalXp from the players table when known; otherwise the side
+// is taken to stand at the very start of its level (the fewest levels it could gain).
+function levelAfter(side, gained) {
+    const lvl = (side && side.lvl) || 0;
+    const base = side && Number.isFinite(side.totalXp) ? side.totalXp : levelXp(lvl);
+    return Math.max(lvl, levelForXp(base + gained));
+}
+
+// "1 DS, 0.4 CR, 13.7 BS" — survivors are fractional in the game too: the fraction is the
+// chance one more ship survived.
+function fleetText(f) {
+    const names = ['DS', 'CR', 'BS'];
+    const one = n => (Math.round(n * 10) / 10).toString();
+    const parts = toFleet(f).map((n, i) => (n >= 0.05 ? `${one(n)} ${names[i]}` : null)).filter(Boolean);
+    return parts.length ? parts.join(', ') : 'nothing';
 }
 
 // Attacker vs the planet: starbase + garrison as one side.
@@ -66,6 +105,9 @@ function planetFight({ enemyFleet, enemy, sbLevel, garrison, owner }) {
     });
     if (!r) return null;
     const enemyLeft = r.winA > 0 ? r.survAtk : [0, 0, 0];
+    // Taking the planet pays the attacker the whole defence in XP.
+    const enemyXp = r.winA > 0 ? xpGained(r.initCVD, enemyLeft) : 0;
+    const enemyLvlAfter = levelAfter(enemy, enemyXp);
     return {
         holds: r.winD,
         sbLevel: r.sbLvl,
@@ -73,6 +115,11 @@ function planetFight({ enemyFleet, enemy, sbLevel, garrison, owner }) {
         // If the planet falls: what of the attacker is still sitting on it.
         enemyLeft,
         enemyLeftCv: cvOf(enemyLeft),
+        enemyXp,
+        enemyLvlBefore: (enemy && enemy.lvl) || 0,
+        enemyLvlAfter,
+        // The attacker as he stands for the counter-attack: same stats, new level.
+        enemyAfter: { ...enemy, lvl: enemyLvlAfter },
         // If it holds: what the defence keeps (fleet + starbase CV), and the fleet alone.
         defenceLeftCv: r.cvDefRemain,
         garrisonLeftCv: cvOf(r.survDef),
@@ -100,7 +147,8 @@ function sbUpgrade({ enemyFleet, enemy, sbLevel, garrison, owner, budgetPp }) {
         const cost = AWTables.aggregate(AWTables.BUILDING, from, lvl);
         if (cost > budgetPp) break;
         const fight = planetFight({ enemyFleet, enemy, sbLevel: lvl, garrison, owner });
-        best = { level: lvl, cost, holds: fight ? fight.holds : 0, enemyLeftCv: fight ? fight.enemyLeftCv : 0 };
+        best = { level: lvl, cost, holds: fight ? fight.holds : 0,
+            enemyLeft: fight ? fight.enemyLeft : [0, 0, 0], enemyLeftCv: fight ? fight.enemyLeftCv : 0 };
         if (best.holds >= HOLDS) break;
     }
     return best;
@@ -126,15 +174,17 @@ function counterFight({ allyFleet, ally, enemyLeft, enemy }) {
 // The owner's own ships on the planet are left out of both steps: whether an ally landing
 // on them fights them too is not confirmed.
 function landBefore({ allyFleet, ally, owner, sbLevel, enemyFleet, enemy }) {
-    let left = toFleet(allyFleet), pKill = 1, sbCostCv = 0;
+    let left = toFleet(allyFleet), pKill = 1, sbCostCv = 0, holder = ally;
     if (sbLevel > 0) {
         const r1 = simulate({ defFleet: [0, 0, 0], atkFleet: left, sbLevel, def: owner, atk: ally });
         if (!r1 || r1.winA <= 0) return { win: 0, keepCv: 0, sbCostCv: cvOf(left) };
         pKill = r1.winA;
         sbCostCv = cvOf(left) - r1.cvAtkRemain;
         left = r1.survAtk;
+        // Killing the starbase pays him its CV in XP before the attacker arrives.
+        holder = { ...ally, lvl: levelAfter(ally, xpGained(r1.initCVD, left)) };
     }
-    const r2 = simulate({ defFleet: left, atkFleet: toFleet(enemyFleet), sbLevel: 0, def: ally, atk: enemy });
+    const r2 = simulate({ defFleet: left, atkFleet: toFleet(enemyFleet), sbLevel: 0, def: holder, atk: enemy });
     if (!r2) return null;
     return { win: pKill * r2.winD, keepCv: r2.winD > 0 ? r2.cvDefRemain : 0, sbCostCv };
 }
@@ -156,4 +206,5 @@ function pct(p) {
     return `${Math.round(v)}%`;
 }
 
-module.exports = { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, counterFight, landBefore, ownerReinforce, pct };
+module.exports = { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, counterFight, landBefore, ownerReinforce, pct,
+    levelForXp, xpGained, levelAfter, fleetText };

@@ -120,6 +120,35 @@ const worst = { ra: 4, rd: 4, phys: 15, math: 15, lvl: 5 };   // an unscouted at
     ok('nothing known at all -> neutral and flagged', B.allySide(null).ra === 0 && B.allySide(null).unknown === true);
 }
 
+// --- Experience: the winner gains the loser's lost CV ---------------------------------------
+{
+    ok('levels come from the published table (211 XP = level 4, 210 = level 3)', B.levelForXp(211) === 4 && B.levelForXp(210) === 3 && B.levelForXp(300) === 4);
+    ok('a winner keeping 2+ ships gets the loser\'s lost CV in full', B.xpGained(515, [0, 0, 3]) === 515);
+    ok('fewer than 2 ships left: a quarter', B.xpGained(515, [0, 0, 1.5]) === 128);
+    ok('known total XP decides the new level', B.levelAfter({ lvl: 4, totalXp: 300 }, 515) === 6);
+    ok('unknown total XP: counted from the start of his level (the fewest levels gained)', B.levelAfter({ lvl: 4 }, 175) === 5 && B.levelAfter({ lvl: 4 }, 174) === 4);
+
+    const attacker = { ...worst, lvl: 4, totalXp: 300 };
+    const f = B.planetFight({ enemyFleet: [1, 1, 20], enemy: attacker, sbLevel: 12, garrison: [0, 0, 0], owner: plain });
+    ok('taking the planet pays the attacker the whole defence in XP', f.enemyXp === model.sbCV(12) && f.enemyLvlAfter === 6, f);
+    ok('and he meets the counter-attack at his new level', f.enemyAfter.lvl === 6 && f.enemyAfter.ra === attacker.ra);
+    const ally = { ...plain, lvl: 5 };
+    const vsNew = B.counterFight({ allyFleet: [300, 1, 1], ally, enemyLeft: f.enemyLeft, enemy: f.enemyAfter });
+    const vsOld = B.counterFight({ allyFleet: [300, 1, 1], ally, enemyLeft: f.enemyLeft, enemy: attacker });
+    ok('his level-up makes the counter-attack harder when he fields all three types', vsNew.win < vsOld.win, { vsNew, vsOld });
+    const held = B.planetFight({ enemyFleet: [9, 0, 0], enemy: attacker, sbLevel: 12, garrison: [0, 0, 0], owner: plain });
+    ok('a lost attack pays the attacker nothing', held.enemyXp === 0 && held.enemyLvlAfter === 4, held);
+
+    const lowAlly = { ...plain, lvl: 1, totalXp: 5 };
+    const before = B.landBefore({ allyFleet: [200, 1, 1], ally: lowAlly, owner: plain, sbLevel: 9, enemyFleet: [100, 5, 2], enemy: { ...worst, lvl: 6 } });
+    const kill = model.simulate({ defFleet: [0, 0, 0], atkFleet: [200, 1, 1], sbLevel: 9, def: plain, atk: lowAlly });
+    const lvl = B.levelAfter(lowAlly, B.xpGained(kill.initCVD, kill.survAtk));
+    const hold = model.simulate({ defFleet: kill.survAtk, atkFleet: [100, 5, 2], sbLevel: 0, def: { ...lowAlly, lvl }, atk: { ...worst, lvl: 6 } });
+    ok('an ally killing the starbase first holds at the level that kill gave him', lvl > 1 && Math.abs(before.win - kill.winA * hold.winD) < 1e-12, { lvl, before });
+}
+
+ok('fleets read like the game: one decimal, empty types left out', B.fleetText([1, 0.43, 13.71]) === '1 DS, 0.4 CR, 13.7 BS' && B.fleetText([0, 0, 0]) === 'nothing');
+
 // --- Percentages --------------------------------------------------------------------------
 ok('whole numbers in the middle', B.pct(0.873) === '87%');
 ok('"almost certain" keeps a decimal so it never reads as 100%', B.pct(0.9987) === '99.8%');
