@@ -234,7 +234,7 @@ function reset() {
             arrivalUnix: T1, cv: 27, ships: { destroyers: 9 }
         });
         const weakMsg = messages.get(`4321:7:syntheticraider:${T1}`) || '';
-        ok('a planet without a starbase shows what is left of the attacker on it', /Planet alone\*\* — no starbase: 27 CV of theirs stays on it/.test(weakMsg), weakMsg);
+        ok('a planet without a starbase shows what is left of the attacker on it', /Planet alone\*\* — no starbase: falls · the enemy keeps 9 DS \(27 CV\)/.test(weakMsg), weakMsg);
         ok('and the starbase its own saved PP buys before arrival', /SyntheticDefender\*\*: the PP saved there reaches \*\*SB \d+\*\*/.test(weakMsg), weakMsg);
         ok('nobody with a real chance says so, instead of "nobody in time"', /Nobody who can make it in time has a real chance/.test(weakMsg), weakMsg);
 

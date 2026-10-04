@@ -33,7 +33,7 @@ function getGarrison(ownerId, systemId, planetIndex, beforeIso) {
 // see allySide() in src/utils/incoming-battle.js for why both.
 const getAllyCombatRowStmt = db.prepare(`
     SELECT p.race_attack, p.race_defense, p.physics, p.mathematics, p.science_level, p.level,
-           p.has_intel, p.intel_updated_at,
+           p.has_intel, p.intel_updated_at, p.total_xp,
            s.physics AS sheet_physics, s.mathematics AS sheet_mathematics,
            s.sciences_updated_at AS sheet_sciences_updated_at
     FROM players p
@@ -76,4 +76,13 @@ function getOwnerPlanets(ownerId) {
     return getOwnerPlanetsStmt.all(ownerId);
 }
 
-module.exports = { getPlanetDefence, getGarrison, getAllyCombatRow, getBuildPlanets, getOwnerPlanets };
+// A player's total experience, for the level he reaches by winning a fight (see
+// levelAfter in src/utils/incoming-battle.js). By id when the report has it, else by name.
+const getTotalXpByIdStmt = db.prepare(`SELECT total_xp FROM players WHERE id = ?`);
+const getTotalXpByNameStmt = db.prepare(`SELECT total_xp FROM players WHERE LOWER(name) = ?`);
+function getTotalXp({ id, nameLower }) {
+    const row = (id && getTotalXpByIdStmt.get(id)) || (nameLower && getTotalXpByNameStmt.get(nameLower));
+    return row && Number.isFinite(row.total_xp) ? row.total_xp : null;
+}
+
+module.exports = { getPlanetDefence, getGarrison, getAllyCombatRow, getBuildPlanets, getOwnerPlanets, getTotalXp };

@@ -9,7 +9,7 @@ const { formatTime } = require('../utils/travel-calc');
 const { ONTIME_LIMIT, LATE_LIMIT, SOURCE_TAG, computeInterceptors } = require('../utils/interceptors');
 const { resolveStats } = require('../utils/battle');
 const incomingDefenceRepo = require('../repositories/incomingDefence');
-const { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, counterFight, landBefore, ownerReinforce, pct } = require('../utils/incoming-battle');
+const { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, counterFight, landBefore, ownerReinforce, pct, fleetText } = require('../utils/incoming-battle');
 const { toggleCovering, getCovering, renderCoverLine } = require('../utils/covering');
 const { baseKeyFor, arrivalOf, fleetSigOf, pickAlertKey } = require('../utils/incoming-identity');
 const router = express.Router();
@@ -166,7 +166,13 @@ function attachBattle(result, data, planet, arrivalUnix, nowUnix) {
         if (!enemyRow && data.attacker && data.attacker.name) {
             enemyRow = playersRepo.getPlayerCombatStatsByName(data.attacker.name.toLowerCase());
         }
-        const enemy = resolveStats(enemyRow);
+        const enemy = {
+            ...resolveStats(enemyRow),
+            totalXp: incomingDefenceRepo.getTotalXp({
+                id: data.attacker && data.attacker.id,
+                nameLower: data.attacker && data.attacker.name ? data.attacker.name.toLowerCase() : null,
+            }),
+        };
 
         const ownerLower = planet && planet.owner_name ? planet.owner_name.toLowerCase() : null;
         const owner = ownerLower ? allySide(incomingDefenceRepo.getAllyCombatRow(ownerLower)) : null;
@@ -209,7 +215,8 @@ function attachBattle(result, data, planet, arrivalUnix, nowUnix) {
             } else {
                 d.mode = 'counter';
                 // Unscanned planet: no starbase fight to weaken them, so the whole fleet.
-                r = counterFight({ allyFleet, ally, enemyLeft: fight ? fight.enemyLeft : enemyFleet, enemy });
+                // After the starbase fight the attacker may have levelled up (enemyAfter).
+                r = counterFight({ allyFleet, ally, enemyLeft: fight ? fight.enemyLeft : enemyFleet, enemy: fight ? fight.enemyAfter : enemy });
                 // Or land BEFORE them: kill the starbase, keep the planet (2026-10-04).
                 if (fight) {
                     const b = landBefore({ allyFleet, ally, owner: result.ctx.owner, sbLevel: result.ctx.sbLevel, enemyFleet, enemy });
@@ -271,6 +278,20 @@ function seenAgo(sqliteTs) {
     return ` *(seen ${Math.floor(h / 24)}d ago)*`;
 }
 
+// "13.7 BS, 1 CR (820 CV)"
+function enemyLeftText(fleet, cv) {
+    return `${fleetText(fleet)} (${Math.round(cv).toLocaleString()} CV)`;
+}
+
+// "holds 3% · if it falls, the enemy keeps 13.7 BS (820 CV) and reaches PL 6 (+515 XP)"
+function planetOutcome(p) {
+    const head = p.holds > 0 ? `holds ${pct(p.holds)} · if it falls, the enemy keeps ` : 'falls · the enemy keeps ';
+    const lvl = p.enemyLvlAfter > p.enemyLvlBefore
+        ? ` and reaches PL ${p.enemyLvlAfter} (+${p.enemyXp.toLocaleString()} XP)`
+        : '';
+    return `${head}${enemyLeftText(p.enemyLeft, p.enemyLeftCv)}${lvl}`;
+}
+
 // The planet's own fight: starbase + the owner's ships on it, against the attacker.
 function appendPlanet(L, result) {
     const p = result && result.planet;
@@ -284,14 +305,13 @@ function appendPlanet(L, result) {
         L.push(`\n🏰 **Holds on its own** — ${sb}${garrison}: ${pct(p.holds)}${seenAgo(p.seenAt)}. No help needed.`);
         return;
     }
-    const falls = p.holds > 0 ? `holds ${pct(p.holds)} · if it falls, ` : '';
-    L.push(`\n🏰 **Planet alone** — ${sb}${garrison}: ${falls}${Math.round(p.enemyLeftCv).toLocaleString()} CV of theirs stays on it${seenAgo(p.seenAt)}`);
+    L.push(`\n🏰 **Planet alone** — ${sb}${garrison}: ${planetOutcome(p)}${seenAgo(p.seenAt)}`);
     const up = result.sbUpgrade;
     if (up) {
         const from = up.fromHome ? 'all his planets\' PP (home)' : 'the PP saved there';
         const effect = up.holds >= HOLDS || up.holds > 0.5
             ? `holds ${pct(up.holds)}`
-            : `still falls${up.holds > 0 ? ` (holds ${pct(up.holds)})` : ''}, but leaves them ${Math.round(up.enemyLeftCv).toLocaleString()} CV instead of ${Math.round(p.enemyLeftCv).toLocaleString()}`;
+            : `still falls${up.holds > 0 ? ` (holds ${pct(up.holds)})` : ''}, but the enemy keeps only ${enemyLeftText(up.enemyLeft, up.enemyLeftCv)}`;
         L.push(`🏗️ **${p.ownerName}**: ${from} reaches **SB ${up.level}** by then (${up.cost.toLocaleString()} PP) → ${effect}`);
     }
 }
@@ -481,10 +501,13 @@ router.post('/incoming/defenders', requireAuth, (req, res) => {
             unknownTiming: !!result.unknownTiming,
             // The planet's own fight (starbase + garrison), so the panel reads like the alert.
             planet: pl ? { holds: pl.holds, holdsText: pct(pl.holds), sbLevel: pl.sbLevel, garrisonCv: pl.garrisonCv,
-                enemyLeftCv: Math.round(pl.enemyLeftCv), ownerName: pl.ownerName, holdsAlone: pl.holds >= HOLDS } : null,
+                enemyLeftCv: Math.round(pl.enemyLeftCv), outcomeText: planetOutcome(pl),
+                ownerName: pl.ownerName, holdsAlone: pl.holds >= HOLDS } : null,
             sbUpgrade: result.sbUpgrade ? { level: result.sbUpgrade.level, cost: result.sbUpgrade.cost,
                 holds: result.sbUpgrade.holds, holdsText: pct(result.sbUpgrade.holds),
-                enemyLeftCv: Math.round(result.sbUpgrade.enemyLeftCv), fromHome: result.sbUpgrade.fromHome } : null,
+                enemyLeftCv: Math.round(result.sbUpgrade.enemyLeftCv),
+                enemyLeftText: enemyLeftText(result.sbUpgrade.enemyLeft, result.sbUpgrade.enemyLeftCv),
+                fromHome: result.sbUpgrade.fromHome } : null,
             onTime: result.onTime.map(slim),
             late: (result.late || []).map(slim),
             covering: alertKey === null ? [] : getCovering(alertKey)

@@ -178,11 +178,11 @@ function renderDefenderData(box, d, target) {
         const garrison = p.garrisonCv > 0 ? ` + ${p.garrisonCv.toLocaleString()} CV fleet` : '';
         html += p.holdsAlone
             ? `<div style="font-weight:bold;color:#4ade80">🏰 Holds on its own — ${sb}${garrison}: ${esc(p.holdsText)}. No help needed.</div>`
-            : `<div>🏰 <b>Planet alone</b> — ${sb}${garrison}: holds ${esc(p.holdsText)} · if it falls, ${p.enemyLeftCv.toLocaleString()} CV of theirs stays on it</div>`;
+            : `<div>🏰 <b>Planet alone</b> — ${sb}${garrison}: ${esc(p.outcomeText)}</div>`;
         if (d.sbUpgrade) {
             const u = d.sbUpgrade;
             const effect = u.holds > 0.5 ? `holds ${esc(u.holdsText)}`
-                : `still falls, but leaves them ${u.enemyLeftCv.toLocaleString()} CV instead of ${p.enemyLeftCv.toLocaleString()}`;
+                : `still falls, but the enemy keeps only ${esc(u.enemyLeftText)}`;
             html += `<div>🏗️ <b>${esc(p.ownerName)}</b>: ${u.fromHome ? "all planets' PP (home)" : 'PP saved there'} reaches <b>SB ${u.level}</b> by then (${u.cost.toLocaleString()} PP) → ${effect}</div>`;
         }
         if (p.holdsAlone) { box.innerHTML = html; return; }
