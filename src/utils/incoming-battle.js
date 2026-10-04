@@ -88,8 +88,15 @@ function levelAfter(side, gained) {
     return Math.max(lvl, levelForXp(base + gained));
 }
 
-// "1 DS, 0.4 CR, 13.7 BS" — survivors are fractional in the game too: the fraction is the
-// chance one more ship survived.
+// Survivors come out fractional (the game shows them the same way: 13.7 BS = 13 sure, a
+// 14th with 70% chance). A ship either survives or not, so the alerts round to whole
+// ships, against us: the ENEMY rounds up, OUR side rounds down. 84.4 DS, 5.6 CR, 2.1 BS
+// is 85 DS, 6 CR, 3 BS (579 CV) — and that is the fleet a counter-attack must beat.
+// The epsilon keeps a float like 13.0000000001 from becoming 14.
+const ceilFleet = f => toFleet(f).map(n => Math.max(0, Math.ceil(n - 1e-9)));
+const floorFleet = f => toFleet(f).map(n => Math.max(0, Math.floor(n + 1e-9)));
+
+// "1 DS, 6 CR, 14 BS" (one decimal if a caller passes fractions).
 function fleetText(f) {
     const names = ['DS', 'CR', 'BS'];
     const one = n => (Math.round(n * 10) / 10).toString();
@@ -104,7 +111,7 @@ function planetFight({ enemyFleet, enemy, sbLevel, garrison, owner }) {
         sbLevel: Math.max(0, sbLevel || 0), def: owner, atk: enemy,
     });
     if (!r) return null;
-    const enemyLeft = r.winA > 0 ? r.survAtk : [0, 0, 0];
+    const enemyLeft = r.winA > 0 ? ceilFleet(r.survAtk) : [0, 0, 0];
     // Taking the planet pays the attacker the whole defence in XP.
     const enemyXp = r.winA > 0 ? xpGained(r.initCVD, enemyLeft) : 0;
     const enemyLvlAfter = levelAfter(enemy, enemyXp);
@@ -122,7 +129,7 @@ function planetFight({ enemyFleet, enemy, sbLevel, garrison, owner }) {
         enemyAfter: { ...enemy, lvl: enemyLvlAfter },
         // If it holds: what the defence keeps (fleet + starbase CV), and the fleet alone.
         defenceLeftCv: r.cvDefRemain,
-        garrisonLeftCv: cvOf(r.survDef),
+        garrisonLeftCv: cvOf(floorFleet(r.survDef)),
     };
 }
 
@@ -160,7 +167,7 @@ function counterFight({ allyFleet, ally, enemyLeft, enemy }) {
     if (cvOf(enemyLeft) <= 0) return { win: 1, keepCv: cvOf(allyFleet) };
     const r = simulate({ defFleet: toFleet(enemyLeft), atkFleet: toFleet(allyFleet), sbLevel: 0, def: enemy, atk: ally });
     if (!r) return null;
-    return { win: r.winA, keepCv: r.winA > 0 ? r.cvAtkRemain : 0 };
+    return { win: r.winA, keepCv: r.winA > 0 ? cvOf(floorFleet(r.survAtk)) : 0 };
 }
 
 // An ally landing BEFORE the attacker (2026-10-04). He fights his ally's starbase first and
@@ -179,14 +186,15 @@ function landBefore({ allyFleet, ally, owner, sbLevel, enemyFleet, enemy }) {
         const r1 = simulate({ defFleet: [0, 0, 0], atkFleet: left, sbLevel, def: owner, atk: ally });
         if (!r1 || r1.winA <= 0) return { win: 0, keepCv: 0, sbCostCv: cvOf(left) };
         pKill = r1.winA;
-        sbCostCv = cvOf(left) - r1.cvAtkRemain;
-        left = r1.survAtk;
+        const kept = floorFleet(r1.survAtk);
+        sbCostCv = cvOf(left) - cvOf(kept);
+        left = kept;
         // Killing the starbase pays him its CV in XP before the attacker arrives.
         holder = { ...ally, lvl: levelAfter(ally, xpGained(r1.initCVD, left)) };
     }
     const r2 = simulate({ defFleet: left, atkFleet: toFleet(enemyFleet), sbLevel: 0, def: holder, atk: enemy });
     if (!r2) return null;
-    return { win: pKill * r2.winD, keepCv: r2.winD > 0 ? r2.cvDefRemain : 0, sbCostCv };
+    return { win: pKill * r2.winD, keepCv: r2.winD > 0 ? cvOf(floorFleet(r2.survDef)) : 0, sbCostCv };
 }
 
 // The owner landing before the attacker: his fleet stands with his starbase.
@@ -207,4 +215,4 @@ function pct(p) {
 }
 
 module.exports = { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, counterFight, landBefore, ownerReinforce, pct,
-    levelForXp, xpGained, levelAfter, fleetText };
+    levelForXp, xpGained, levelAfter, fleetText, ceilFleet, floorFleet };

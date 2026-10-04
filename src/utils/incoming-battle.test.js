@@ -31,7 +31,8 @@ const worst = { ra: 4, rd: 4, phys: 15, math: 15, lvl: 5 };   // an unscouted at
     const f = B.planetFight({ enemyFleet, enemy: worst, sbLevel: 9, garrison: [0, 0, 0], owner: plain });
     const direct = model.simulate({ defFleet: [0, 0, 0], atkFleet: enemyFleet, sbLevel: 9, def: plain, atk: worst });
     ok('planetFight is simulate() with the starbase and garrison defending', f.holds === direct.winD && f.sbLevel === 9, { f, direct });
-    ok('what is left of the attacker is the model\'s attacker survivors', f.enemyLeftCv === model.cvOf(direct.survAtk));
+    ok('what is left of the attacker is the model\'s survivors, rounded UP to whole ships',
+        f.enemyLeftCv === model.cvOf(direct.survAtk.map(n => Math.ceil(n - 1e-9))) && f.enemyLeft.every(Number.isInteger), f.enemyLeft);
     ok('the starbase costs the attacker ships: it keeps less than it brought', f.enemyLeftCv < model.cvOf(enemyFleet), f.enemyLeftCv);
 
     const big = B.planetFight({ enemyFleet: [9, 0, 0], enemy: worst, sbLevel: 12, garrison: [0, 0, 0], owner: plain });
@@ -51,7 +52,8 @@ const worst = { ra: 4, rd: 4, phys: 15, math: 15, lvl: 5 };   // an unscouted at
     const alone = B.counterFight({ allyFleet, ally: plain, enemyLeft: enemyFleet, enemy: worst });
     ok('landing after the starbase fight beats meeting the whole fleet', after.win > alone.win, { after, alone });
     const direct = model.simulate({ defFleet: fight.enemyLeft, atkFleet: allyFleet, sbLevel: 0, def: worst, atk: plain });
-    ok('the ally is the attacker and the enemy now defends the planet, with no starbase', after.win === direct.winA && after.keepCv === direct.cvAtkRemain);
+    ok('the ally is the attacker and the enemy now defends the planet, with no starbase', after.win === direct.winA);
+    ok('what the ally keeps is rounded DOWN to whole ships', after.keepCv === model.cvOf(direct.survAtk.map(n => Math.floor(n + 1e-9))), after);
     const nothingLeft = B.counterFight({ allyFleet, ally: plain, enemyLeft: [0, 0, 0], enemy: worst });
     ok('nothing left to fight: a certain win that costs nothing', nothingLeft.win === 1 && nothingLeft.keepCv === model.cvOf(allyFleet));
 }
@@ -65,9 +67,10 @@ const worst = { ra: 4, rd: 4, phys: 15, math: 15, lvl: 5 };   // an unscouted at
     ok('no starbase: he simply defends the planet with his whole fleet', noSb.win === direct.winD && noSb.sbCostCv === 0, noSb);
     const withSb = B.landBefore({ allyFleet, ally: plain, owner: plain, sbLevel: 9, enemyFleet, enemy: worst });
     const kill = model.simulate({ defFleet: [0, 0, 0], atkFleet: allyFleet, sbLevel: 9, def: plain, atk: plain });
-    const hold = model.simulate({ defFleet: kill.survAtk, atkFleet: enemyFleet, sbLevel: 0, def: plain, atk: worst });
-    ok('with a starbase he fights it first (he attacks, the owner\'s stats defend) and pays in ships',
-        withSb.sbCostCv === model.cvOf(allyFleet) - kill.cvAtkRemain && withSb.sbCostCv > 0, withSb);
+    const keptAfterKill = B.floorFleet(kill.survAtk);
+    const hold = model.simulate({ defFleet: keptAfterKill, atkFleet: enemyFleet, sbLevel: 0, def: plain, atk: worst });
+    ok('with a starbase he fights it first (he attacks, the owner\'s stats defend) and pays in whole ships',
+        withSb.sbCostCv === model.cvOf(allyFleet) - model.cvOf(keptAfterKill) && withSb.sbCostCv > 0, withSb);
     ok('then holds with what is left: P(kill) x P(hold)', Math.abs(withSb.win - kill.winA * hold.winD) < 1e-12, { withSb, k: kill.winA, h: hold.winD });
     ok('so killing the starbase first is never better than finding no starbase', withSb.win <= noSb.win);
     const tooWeak = B.landBefore({ allyFleet: [3, 0, 0], ally: plain, owner: plain, sbLevel: 12, enemyFleet, enemy: worst });
@@ -142,11 +145,14 @@ const worst = { ra: 4, rd: 4, phys: 15, math: 15, lvl: 5 };   // an unscouted at
     const lowAlly = { ...plain, lvl: 1, totalXp: 5 };
     const before = B.landBefore({ allyFleet: [200, 1, 1], ally: lowAlly, owner: plain, sbLevel: 9, enemyFleet: [100, 5, 2], enemy: { ...worst, lvl: 6 } });
     const kill = model.simulate({ defFleet: [0, 0, 0], atkFleet: [200, 1, 1], sbLevel: 9, def: plain, atk: lowAlly });
-    const lvl = B.levelAfter(lowAlly, B.xpGained(kill.initCVD, kill.survAtk));
-    const hold = model.simulate({ defFleet: kill.survAtk, atkFleet: [100, 5, 2], sbLevel: 0, def: { ...lowAlly, lvl }, atk: { ...worst, lvl: 6 } });
+    const lvl = B.levelAfter(lowAlly, B.xpGained(kill.initCVD, B.floorFleet(kill.survAtk)));
+    const hold = model.simulate({ defFleet: B.floorFleet(kill.survAtk), atkFleet: [100, 5, 2], sbLevel: 0, def: { ...lowAlly, lvl }, atk: { ...worst, lvl: 6 } });
     ok('an ally killing the starbase first holds at the level that kill gave him', lvl > 1 && Math.abs(before.win - kill.winA * hold.winD) < 1e-12, { lvl, before });
 }
 
+ok('rounding: the enemy up, us down, whole ships, no float creep',
+    JSON.stringify(B.ceilFleet([84.4, 5.6, 2.1])) === '[85,6,3]' && model.cvOf(B.ceilFleet([84.4, 5.6, 2.1])) === 579
+    && JSON.stringify(B.floorFleet([84.4, 5.6, 2.1])) === '[84,5,2]' && JSON.stringify(B.ceilFleet([13.0000000001, 0, 0])) === '[13,0,0]');
 ok('fleets read like the game: one decimal, empty types left out', B.fleetText([1, 0.43, 13.71]) === '1 DS, 0.4 CR, 13.7 BS' && B.fleetText([0, 0, 0]) === 'nothing');
 
 // --- Percentages --------------------------------------------------------------------------
