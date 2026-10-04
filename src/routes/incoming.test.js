@@ -236,6 +236,19 @@ function reset() {
         const weakMsg = messages.get(`4321:7:syntheticraider:${T1}`) || '';
         ok('a planet without a starbase shows what is left of the attacker on it', /Planet alone\*\* — no starbase: 27 CV of theirs stays on it/.test(weakMsg), weakMsg);
         ok('and the starbase its own saved PP buys before arrival', /SyntheticDefender\*\*: the PP saved there reaches \*\*SB \d+\*\*/.test(weakMsg), weakMsg);
+        ok('nobody with a real chance says so, instead of "nobody in time"', /Nobody who can make it in time has a real chance/.test(weakMsg), weakMsg);
+
+        // The owner with enough PP builds on the attacked planet itself: no flight, and he
+        // stands with his starbase; the line says the fleet assumes PP saved until launch.
+        reset();
+        db.prepare('UPDATE planet_banking SET production_pp = 3000, production_rate = 100 WHERE game_planet_id = 990001').run();
+        await post(server, 'announce', {
+            attacker: { name: 'SyntheticRaider' }, target: { systemId: 4321, planetIndex: 7, planetName: 'SyntheticTargetSystem #7' },
+            arrivalUnix: T1, cv: 27, ships: { destroyers: 9 }
+        });
+        const richMsg = messages.get(`4321:7:syntheticraider:${T1}`) || '';
+        ok('the owner\'s own build is listed first, joining his starbase', /🟢 🏗️ \*\*SyntheticDefender\*\*[^\n]*➔ ETA 00:00:00 · holds 100%[^\n]*owner, joins the SB/.test(richMsg), richMsg);
+        ok('and says it counts PP saved until launch, with what is there now', /at the planet itself if PP saved till launch \(now: \d+D/.test(richMsg), richMsg);
 
         reset();
         const unowned = await post(server, 'announce', report(T1));

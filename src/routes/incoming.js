@@ -9,7 +9,7 @@ const { formatTime } = require('../utils/travel-calc');
 const { ONTIME_LIMIT, LATE_LIMIT, SOURCE_TAG, computeInterceptors } = require('../utils/interceptors');
 const { resolveStats } = require('../utils/battle');
 const incomingDefenceRepo = require('../repositories/incomingDefence');
-const { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, counterFight, ownerReinforce, pct } = require('../utils/incoming-battle');
+const { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, counterFight, landBefore, ownerReinforce, pct } = require('../utils/incoming-battle');
 const { toggleCovering, getCovering, renderCoverLine } = require('../utils/covering');
 const { baseKeyFor, arrivalOf, fleetSigOf, pickAlertKey } = require('../utils/incoming-identity');
 const router = express.Router();
@@ -141,8 +141,10 @@ function computeDefenders(data, owner) {
         } else {
             // Only surface defenders with a real shot (≥25%) — anything less is a gamble.
             // Keep entries whose win couldn't be computed (null) so they aren't silently lost.
-            const worthIt = d => d.win == null || d.win >= 0.25;
-            result.onTime = result.onTime.filter(worthIt);
+            const worthIt = d => d.win == null || d.bestWin >= 0.25;
+            // The owner first: his own fleet joining his starbase is the plain answer.
+            result.onTime = result.onTime.filter(worthIt)
+                .sort((a, b) => (b.mode === 'reinforce') - (a.mode === 'reinforce'));
             if (result.late) result.late = result.late.filter(worthIt);
         }
     }
@@ -208,9 +210,16 @@ function attachBattle(result, data, planet, arrivalUnix, nowUnix) {
                 d.mode = 'counter';
                 // Unscanned planet: no starbase fight to weaken them, so the whole fleet.
                 r = counterFight({ allyFleet, ally, enemyLeft: fight ? fight.enemyLeft : enemyFleet, enemy });
+                // Or land BEFORE them: kill the starbase, keep the planet (2026-10-04).
+                if (fight) {
+                    const b = landBefore({ allyFleet, ally, owner: result.ctx.owner, sbLevel: result.ctx.sbLevel, enemyFleet, enemy });
+                    if (b) d.before = { win: b.win, winBand: pct(b.win), keepCv: b.keepCv, sbCostCv: b.sbCostCv };
+                }
             }
             d.win = r ? r.win : null;
             d.keepCv = r ? r.keepCv : null;
+            // Listed when either way gives a real chance; filtered on this.
+            d.bestWin = Math.max(d.win == null ? 0 : d.win, d.before ? d.before.win : 0);
             d.winUnknown = enemy.unknown; // attacker race not scouted
             // Computed here, not in each renderer, so the Discord alert and the News panel
             // can never quote different numbers for the same fight.
@@ -234,10 +243,14 @@ function launchUrl(a, target) {
 // that matters is the inputs (an unscouted race), which is flagged.
 function winTag(a) {
     if (a.win == null) return '';
-    const verb = a.mode === 'reinforce' ? 'holds' : 'wins';
-    const keep = a.keepCv != null && a.win > 0 ? ` · keeps ${Math.round(a.keepCv).toLocaleString()} CV` : '';
+    const kept = (w, cv) => (cv != null && w > 0 ? `, keeps ${Math.round(cv).toLocaleString()} CV` : '');
     // An unscouted race is already on the attacker's 🧬 line; once is enough.
-    return ` · ${verb} ${a.winBand || pct(a.win)}${keep}`;
+    if (a.mode === 'reinforce') return ` · holds ${a.winBand || pct(a.win)}${kept(a.win, a.keepCv)}`;
+    const after = `after: retakes ${a.winBand || pct(a.win)}${kept(a.win, a.keepCv)}`;
+    if (!a.before) return ` · ${after}`;
+    const b = a.before;
+    const before = b.win < 0.005 ? 'before: fails' : `before: holds ${b.winBand}${kept(b.win, b.keepCv)}`;
+    return ` · ${before} · ${after}`;
 }
 
 function defenderLine(a, extra, target) {
@@ -299,16 +312,21 @@ function appendDefenders(L, result, target) {
         return;
     }
 
-    // Allies land right after the attacker; landing first means fighting the ally's own
-    // starbase. The owner is the exception: his fleet joins it.
-    L.push(result.planet
-        ? '\n⚔️ **Land right AFTER them, same cycle** — never before, you\'d fight the starbase:'
-        : '\n🛡️ **Can defend in time:**');
+    // Two ways for an ally: BEFORE the attacker (kill the starbase, then hold the planet —
+    // keeps population and buildings) or right AFTER it in the same cycle (retake it from
+    // what the starbase left). The owner's own fleet simply joins his starbase.
+    if (result.planet) {
+        L.push('\n⚔️ **Defenders** — *before*: land first, kill the SB, hold the planet · *after*: land right after them, same cycle, retake it');
+    } else {
+        L.push('\n🛡️ **Can defend in time:**');
+    }
     if (!result.onTime.length) {
-        L.push('❌ No allied defender can make it in time.');
+        L.push(result.planet
+            ? '❌ Nobody who can make it in time has a real chance (25%+).'
+            : '❌ No allied defender can make it in time.');
     } else {
         result.onTime.slice(0, ONTIME_LIMIT).forEach(a => {
-            const when = a.mode !== 'reinforce' ? '' : a.eta === 0 ? 'joins your SB, ' : 'land BEFORE them, joins your SB, ';
+            const when = a.mode !== 'reinforce' ? '' : a.eta === 0 ? 'owner, joins the SB, ' : 'owner: land before them, joins the SB, ';
             L.push('🟢 ' + defenderLine(a, ` *(${when}spare ${formatTime(a.delta)}${a.note ? `, ${a.note}` : ''})*`, target));
         });
         if (result.onTime.length > ONTIME_LIMIT) L.push(`*...and ${result.onTime.length - ONTIME_LIMIT} more in time.*`);
@@ -453,7 +471,7 @@ router.post('/incoming/defenders', requireAuth, (req, res) => {
         const slim = (a) => ({
             name: a.name, cv: a.cv, eta: a.eta, delta: a.delta, source: a.source, note: a.note,
             ownerId: a.ownerId, originSys: a.originSys, originIdx: a.originIdx, fleetId: a.fleetId,
-            win: a.win, winBand: a.winBand, winUnknown: a.winUnknown, keepCv: a.keepCv, mode: a.mode
+            win: a.win, winBand: a.winBand, winUnknown: a.winUnknown, keepCv: a.keepCv, mode: a.mode, before: a.before || null
         });
         const alertKey = resolveAlertKey(data, { persist: false });
         const pl = result.planet;

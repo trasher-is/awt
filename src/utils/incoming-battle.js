@@ -14,6 +14,8 @@
 //   2. sbUpgrade     — the cheapest starbase level the planet's own saved PP reaches by
 //                      arrival that makes it hold; otherwise the best it can reach.
 //   3. counterFight  — an ally landing after it, against what is left of the attacker.
+//      landBefore    — or an ally landing BEFORE it: kill the starbase, then hold the
+//                      planet (keeps population and buildings; costs the starbase).
 //   4. ownerReinforce — the OWNER landing his own fleet before the attacker: it joins the
 //                      starbase, so it is the planet fight with a bigger garrison.
 //
@@ -71,8 +73,9 @@ function planetFight({ enemyFleet, enemy, sbLevel, garrison, owner }) {
         // If the planet falls: what of the attacker is still sitting on it.
         enemyLeft,
         enemyLeftCv: cvOf(enemyLeft),
-        // If it holds: what the defence keeps (fleet + starbase CV).
+        // If it holds: what the defence keeps (fleet + starbase CV), and the fleet alone.
         defenceLeftCv: r.cvDefRemain,
+        garrisonLeftCv: cvOf(r.survDef),
     };
 }
 
@@ -112,11 +115,36 @@ function counterFight({ allyFleet, ally, enemyLeft, enemy }) {
     return { win: r.winA, keepCv: r.winA > 0 ? r.cvAtkRemain : 0 };
 }
 
+// An ally landing BEFORE the attacker (2026-10-04). He fights his ally's starbase first and
+// loses ships to it, then holds the planet with what is left. Worth it when losing the
+// planet is the bigger loss: a conquered and retaken planet loses population and
+// buildings, a destroyed starbase costs only PP.
+//   step 1: ally (attacking) vs the starbase (owner's stats). No starbase -> no fight.
+//   step 2: the attacker vs the ally's survivors sitting on the planet, no starbase.
+// holds = P(ally kills the starbase) x P(he then beats the attacker). If he fails step 1
+// he is the loser and wiped, and the starbase meets the attacker damaged — counted as lost.
+// The owner's own ships on the planet are left out of both steps: whether an ally landing
+// on them fights them too is not confirmed.
+function landBefore({ allyFleet, ally, owner, sbLevel, enemyFleet, enemy }) {
+    let left = toFleet(allyFleet), pKill = 1, sbCostCv = 0;
+    if (sbLevel > 0) {
+        const r1 = simulate({ defFleet: [0, 0, 0], atkFleet: left, sbLevel, def: owner, atk: ally });
+        if (!r1 || r1.winA <= 0) return { win: 0, keepCv: 0, sbCostCv: cvOf(left) };
+        pKill = r1.winA;
+        sbCostCv = cvOf(left) - r1.cvAtkRemain;
+        left = r1.survAtk;
+    }
+    const r2 = simulate({ defFleet: left, atkFleet: toFleet(enemyFleet), sbLevel: 0, def: ally, atk: enemy });
+    if (!r2) return null;
+    return { win: pKill * r2.winD, keepCv: r2.winD > 0 ? r2.cvDefRemain : 0, sbCostCv };
+}
+
 // The owner landing before the attacker: his fleet stands with his starbase.
 function ownerReinforce({ allyFleet, enemyFleet, enemy, sbLevel, garrison, owner }) {
     const g = toFleet(garrison), a = toFleet(allyFleet);
     const fight = planetFight({ enemyFleet, enemy, sbLevel, garrison: [g[0] + a[0], g[1] + a[1], g[2] + a[2]], owner });
-    return fight ? { win: fight.holds, keepCv: fight.holds > 0 ? fight.defenceLeftCv : 0 } : null;
+    // keepCv is ships only (his garrison and the new fleet); the starbase is not "kept CV".
+    return fight ? { win: fight.holds, keepCv: fight.holds > 0 ? fight.garrisonLeftCv : 0 } : null;
 }
 
 // "87%" — the model is exact to ±0.1pp; a ping does not need the decimal unless it is
@@ -128,4 +156,4 @@ function pct(p) {
     return `${Math.round(v)}%`;
 }
 
-module.exports = { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, counterFight, ownerReinforce, pct };
+module.exports = { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, counterFight, landBefore, ownerReinforce, pct };
