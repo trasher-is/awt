@@ -1,0 +1,27 @@
+<div id="defence-panel" class="fixed top-0 right-0 h-full w-full md:w-[calc(100%-3.5rem)] bg-black border-l border-border transform translate-x-full transition-transform duration-300 z-40 flex flex-col shadow-2xl">
+
+    <div class="h-14 border-b border-border flex items-center justify-between px-4 md:px-6 bg-zinc-900 shrink-0 gap-2">
+        <div class="flex items-center gap-3 min-w-0">
+            <div class="w-8 h-8 rounded-md bg-white/5 flex items-center justify-center text-red-400 shrink-0">
+                <i class="fa-solid fa-shield-halved text-base"></i>
+            </div>
+            <div class="min-w-0">
+                <h2 class="font-bold text-foreground tracking-wide">Defence</h2>
+                <p class="text-sm text-muted-foreground truncate">Every way to keep or retake a planet — recomputed live</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-1 shrink-0">
+            <span id="defence-updated" class="hidden sm:inline text-xs text-muted-foreground mr-2"></span>
+            <button id="defence-refresh-btn" class="w-8 h-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors" title="Recompute now">
+                <i class="fa-solid fa-rotate text-base"></i>
+            </button>
+            <button id="defence-close-btn" class="w-8 h-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
+                <i class="fa-solid fa-xmark text-base"></i>
+            </button>
+        </div>
+    </div>
+
+    <div id="defence-list" class="px-3 md:px-6 py-3 border-b border-border bg-zinc-950 flex gap-2 overflow-x-auto shrink-0"></div>
+
+    <div id="defence-detail" class="flex-1 overflow-y-auto px-3 md:px-6 py-4 text-sm"></div>
+</div>

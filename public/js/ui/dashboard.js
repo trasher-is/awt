@@ -23,6 +23,7 @@ import '../utils/vision-model.js';   // side-effect import: the !vision rule, de
 import { initVersionWatch } from './version-watch.js';
 import { initAwtPresence } from './awt-presence.js';
 import { openSleepMapPanel } from './sleep-map.js';
+import { openDefencePanel, initDefenceWatch } from './defence.js';
 import { openGalaxyDashboardPanel } from './galaxy-dashboard.js';
 import { openSettingsPanel, initSidebarTools } from './settings-panel.js';
 import { whenReady as whenSettingsReady, clearCache as clearSettingsCache } from './hub-settings-store.js';
@@ -58,6 +59,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('open-alliance-stats-btn')?.addEventListener('click', openAllianceStatsPanel);
     document.getElementById('open-trade-agreements-btn')?.addEventListener('click', openTradeAgreementsPanel);
     document.getElementById('open-road-to-ta-btn')?.addEventListener('click', openRoadToTaPanel);
+    document.getElementById('open-defence-btn')?.addEventListener('click', () => openDefencePanel());
     document.getElementById('open-sleep-map-btn')?.addEventListener('click', openSleepMapPanel);
     document.getElementById('open-players-db-btn')?.addEventListener('click', openDatabasePanel);
     document.getElementById('open-systems-db-btn')?.addEventListener('click', openSystemDatabasePanel);
@@ -235,6 +237,9 @@ async function initWrapper() {
     initVersionWatch(() => showToast('Hub updated — refreshing when you are idle'));
 
     initAwtPresence();
+
+    // Live incomings: blinking Defence button + slim banner, and ?defence=<key> links.
+    initDefenceWatch();
 }
 
 // The Hub half of the Discord link challenge. You are already logged in here, which is

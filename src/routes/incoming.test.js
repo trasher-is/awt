@@ -72,6 +72,15 @@ function post(server, endpoint, body) {
         request.end(data);
     });
 }
+function get(server, pathAndQuery) {
+    return new Promise((resolve, reject) => {
+        http.get({ hostname: '127.0.0.1', port: server.address().port, path: `/hub-api/${pathAndQuery}` }, response => {
+            let raw = '';
+            response.on('data', chunk => { raw += chunk; });
+            response.on('end', () => resolve({ status: response.statusCode, body: JSON.parse(raw) }));
+        }).on('error', reject);
+    });
+}
 const snapshot = () => JSON.stringify(db.prepare('SELECT * FROM incoming_msgs ORDER BY alert_key').all());
 function reset() {
     incomingRepo.deleteAllIncomingMsgs();
@@ -236,7 +245,10 @@ function reset() {
         const weakMsg = messages.get(`4321:7:syntheticraider:${T1}`) || '';
         ok('a planet without a starbase shows what is left of the attacker on it', /Planet alone\*\* — no starbase: falls · the enemy keeps 9 DS \(27 CV\)/.test(weakMsg), weakMsg);
         ok('and the starbase its own saved PP buys before arrival', /SyntheticDefender\*\*: the PP saved there reaches \*\*SB \d+\*\*/.test(weakMsg), weakMsg);
-        ok('nobody with a real chance says so, instead of "nobody in time"', /Nobody who can make it in time has a real chance/.test(weakMsg), weakMsg);
+        ok('nobody with a real chance says so, for keeping and for retaking',
+            /Nobody can keep it with a real chance \(25%\+\)/.test(weakMsg) && /Nobody can retake it in time with a real chance/.test(weakMsg), weakMsg);
+        ok('an attacker the hub never scanned is flagged as a worst-case guess', /never scanned` — worst case assumed/.test(weakMsg), weakMsg);
+        ok('the retake window is the attacker\'s 2-minute cycle', /land <t:1800000000:T>–<t:1800000119:T>, same cycle/.test(weakMsg), weakMsg);
 
         // The owner with enough PP builds on the attacked planet itself: no flight, and he
         // stands with his starbase; the line says the fleet assumes PP saved until launch.
@@ -247,7 +259,25 @@ function reset() {
             arrivalUnix: T1, cv: 27, ships: { destroyers: 9 }
         });
         const richMsg = messages.get(`4321:7:syntheticraider:${T1}`) || '';
-        ok('the owner\'s own build is listed first, joining his starbase', /🟢 🏗️ \*\*SyntheticDefender\*\*[^\n]*➔ ETA 00:00:00 · holds 100%[^\n]*owner, joins the SB/.test(richMsg), richMsg);
+        ok('the owner\'s own build is the first way to keep it, with his starbase',
+            /Keep it\*\* — land before[^\n]*\n1\. 🏗️ \*\*SyntheticDefender\*\*[^\n]*· holds 100%[^\n]*build by <t:1799999999:T> \*\(own fleet \+ SB/.test(richMsg), richMsg);
+        ok('the report is stored for the Defence panel', (() => { const r = incomingRepo.getIncoming(`4321:7:syntheticraider:${T1}`); return r && r.payload.ships.destroyers === 9 && r.payload.arrivalUnix === T1; })());
+
+        // The Defence panel: the live list, and the full analysis of one attack.
+        const liveList = await get(server, 'defence/live');
+        const richKey = `4321:7:syntheticraider:${T1}`;
+        ok('the live list carries the stored attack, with its owner', liveList.status === 200
+            && liveList.body.attacks.some(a => a.key === richKey && a.ownerName === 'SyntheticDefender' && a.ships.destroyers === 9), liveList.body);
+        const detail = await get(server, `defence/attack?key=${encodeURIComponent(richKey)}`);
+        const d = detail.body;
+        ok('the panel analysis recomputes the planet fight', detail.status === 200 && d.planet && d.planet.sbLevel === 0 && /the enemy keeps 9 DS/.test(d.planet.outcomeText), d.planet);
+        ok('and lists every starbase level the saved PP reaches, cheapest first',
+            d.sbOptions.length >= 7 && d.sbOptions[0].level === 1 && d.sbOptions.every((o, k) => k === 0 || o.cost > d.sbOptions[k - 1].cost), d.sbOptions);
+        ok('every member option is there, grouped by member', d.members.some(m => m.name === 'SyntheticDefender' && m.options.length >= 1), d.members);
+        ok('the keep list matches the alert\'s', d.keep[0] && d.keep[0].name === 'SyntheticDefender' && d.keep[0].winText === '100%', d.keep);
+        ok('the cycle window is part of it', d.window && d.window.cycleEnd === T1 + 119, d.window);
+        const missing = await get(server, 'defence/attack?key=nope');
+        ok('an unknown attack is a 404', missing.status === 404);
         ok('and says it counts PP saved until launch, with what is there now', /at the planet itself if PP saved till launch \(now: \d+D/.test(richMsg), richMsg);
 
         reset();
