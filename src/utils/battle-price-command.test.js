@@ -139,7 +139,7 @@ const insert = db.prepare(`
         const c = capture('!help');
         await bot.handleMessage(c.message);
         const embed = lastEmbed(c.replies);
-        ok('!price is listed in !help', embed && embed.fields.some(f => f.name.includes('!price')), embed && embed.fields.map(f => f.name));
+        ok('!price is listed in !help', embed && embed.fields.some(f => f.value.includes('`!price`')), embed && embed.fields.map(f => f.value));
     }
 
     console.log(failed === 0 ? '  PASS' : `  FAIL (${failed})`);

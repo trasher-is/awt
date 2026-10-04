@@ -155,7 +155,7 @@ db.prepare(`INSERT INTO players (id, name) VALUES (11, '@everyone')`).run();
         const help = capture('!help');
         await bot.handleMessage(help.message);
         const embed = lastEmbed(help.replies);
-        const names = embed.fields.map(f => f.name).join(' ');
+        const names = embed.fields.map(f => `${f.name} ${f.value}`).join(' ');
         ok('no egg is listed in !help — they are eggs', !/!42|!hail|!warp/.test(names), names);
         ok('but !help hints that they exist, so they are findable',
             /not everything/.test(embed.footer.text), embed.footer && embed.footer.text);

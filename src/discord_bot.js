@@ -31,6 +31,7 @@ const battleModel = require('../public/js/utils/battle-model.js');
 const battleLedger = require('./utils/battle-ledger');
 const visionModel = require('../public/js/utils/vision-model.js');
 const { buildCommands, suggestPlayers, suggestSystems, isEphemeral } = require('./discord-commands');
+const { buildHelp } = require('./discord-help');
 const { shouldRestartProcess, OFFLINE_CHECKS_BEFORE_RESTART } = require('./utils/discord-connection');
 
 const client = new Client({
@@ -540,42 +541,19 @@ async function handleMessage(message) {
     // Linking now happens only through a code minted in the Hub. See handleLink().
 
     // ----------------------------------------------------
-    // !help - DISPLAY ALL AVAILABLE COMMANDS
+    // !help [command] - SHORT INDEX, OR ONE COMMAND IN FULL (src/discord-help.js)
     // ----------------------------------------------------
     if (command === 'help') {
+        const help = buildHelp(args[0], {
+            bioConfirmed: playersRepo.BIO_THREAT_MARGIN_CONFIRMED,
+            bioSuspected: playersRepo.BIO_THREAT_MARGIN_SUSPECTED,
+        });
         const embed = new EmbedBuilder()
-            .setTitle('🛠️ Command Center Help')
-            .setDescription('Here is a list of all available commands and how to use them:')
-            .setColor('#10b981') // Green color
-            .addFields(
-                { name: '`!link <code>`', value: 'Links your Discord account to your Hub account so you get @pinged on incoming alerts you can defend. Get the one-time code from **Link Discord** in the Hub sidebar first (`!link` with no code explains how). Codes expire after 10 minutes.\n*Example: `!link A1B2C3`*' },
-                { name: '`!getid`', value: 'Shows the ID of the current channel — useful for config that asks for a channel ID.' },
-                { name: '`!timer <duration>`', value: 'Sets a personal reminder that pings you back here. Survives a bot restart; checked once a minute.\n*Example: `!timer 1 hour 8 mins`*' },
-                { name: '`!intels`', value: 'Opens an interactive text menu to browse tracked intelligence profiles.' },
-                { name: '`!sys <system_id>`', value: 'Displays intel for a specific solar system (Planets, Fleets, Plans).\n*Example: `!sys 123`*' },
-                { name: '`!intel <player_name>`', value: 'Displays detailed intelligence and stats for a specific player.\n*Example: `!intel PlayerOne`*' },
-                { name: '`!dist <sys1_id> <sys2_id>`', value: 'Calculates the distance and required biology level between two systems.\n*Example: `!dist 100 200`*' },
-                { name: '`!plan <sys_id> <planet_num> <instructions...>`', value: 'Adds a tactical plan/note to a specific planet. (Requires your Discord ID to be linked in the Hub).\n*Example: `!plan 123 4 Send colony ship`*' },
-                { name: '`!plan del <sys_id> <planet_num>`', value: 'Removes a plan. You can only remove your own — an admin account can remove anyone\'s.\n*Example: `!plan del 123 4`*' },
-                { name: '`!splan <sys_id> [text...]`', value: 'One standing note for a whole system — not per-planet. No text: reads it back. With text: writes/overwrites it (admins only). Admins also get ✏️ Edit / 🗑️ Delete buttons on the reply — Edit opens a pre-filled box so you never retype the whole thing.\n*Example: `!splan 123` or `!splan 123 Hold this system, colony ships incoming`*' },
-                { name: '`!splan del <sys_id>`', value: 'Removes a system plan (admins only).\n*Example: `!splan del 123`*' },
-                { name: '`!vision <system_id> [alliance_tag]`', value: 'Performs a radar scan to see which alliance members have vision over a target system.\n*Example: `!vision 123 RAID`*' },
-                { name: '`!holes [alliance_tag]`', value: 'Scans your alliance\'s territory for a per-system breakdown: your own holdings, free unplanned, 🟧 planned (!plan), 🟨 neutral, 🟩 ally, and 🟥 war-list presence, per the Alliance Relations tags set in Admin.\n*Example: `!holes RAID`*' },
-                { name: '`!tt <sysA> <plnA> <sysB> <plnB> <speed> <nrg>`', value: 'Calculates fleet travel time between two coordinates.\n*Example: `!tt 100 1 200 4 10 5`*\n*(You can also swap speed/energy for a player name: `!tt 100 1 200 4 PlayerOne`)*' },
-                { name: '`!ghosts <sys_id> <planet_num> <alliance_tag>`', value: 'Calculates the shortest/longest hidden fleet arrival window from hostile members with radar vision over a system.\n*Example: `!ghosts 1 10 AO`*' },
-                { name: '`!research [player]`', value: 'What each member is researching, how long until the level lands, and what is queued after it — read from their own Science page. With a name: that member\'s whole queue.\n*Example: `!research Harpyie`*' },
-                { name: '`!bio`', value: `Players who can SEE your origin and hold a +${playersRepo.BIO_THREAT_MARGIN_CONFIRMED} confirmed biology, or a +${playersRepo.BIO_THREAT_MARGIN_SUSPECTED} science advantage if never scanned.` },
-                { name: '`!battle <D> <C> <B> vs <D> <C> <B>`', value: 'Simulates a battle. Flags: `--sb N` starbase (0-50), `--dp/--ap N` physics, `--dm/--am N` math, `--dra/--ara N` race atk, `--drd/--ard N` race def, `--dl/--al N` player level. Or `--def Name --atk Name` to auto-fill all stats from DB.\n*Example: `!battle 50 10 0 vs 40 8 2 --dp 5 --ap 3 --dl 12 --al 8`*' },
-                { name: '`!mortal` / `!mortalday` / `!mortalweek` `[all|<alliance_tag>]`', value: 'Shows the CV/population-killed battle leaderboards, each with a simple points column. All-time, last 24 hours, or last 7 days. Defaults to Hub tool users only; `all` lifts that; any alliance tag filters to that alliance (any alliance, not just your own).\n*Example: `!mortalweek nsa`*' },
-                { name: '`!cvkills` / `!cvkillsday` / `!cvkillsweek` `[all|<alliance_tag>]`', value: 'Pure CV-killed ranking — the raw number only, no points. Same scope rules as `!mortal`.\n*Example: `!cvkillsweek nsa`*' },
-                { name: '`!popkills` / `!popkillsday` / `!popkillsweek` `[all|<alliance_tag>]`', value: 'Pure population-killed ranking — the raw number only, no points. Same scope rules as `!mortal`.\n*Example: `!popkillsweek nsa`*' },
-                { name: '`!glory` / `!gloryday` / `!gloryweek`', value: 'Combined CV + population points leaderboard (plus any bonus-goal points), weighted so a bigger single kill is worth disproportionately more per unit. Alliance-only — no `[all|<alliance_tag>]` option, unlike `!mortal`.' },
-                { name: '`!price [<your CV> <their CV>]`', value: 'What an attack at that strength ratio has actually cost, from the hub\'s own recorded battles — win rate AND how much of the attacking fleet came home. No arguments: the whole table. `!price check` re-proves on live rows that the stored win_chance column is a dice roll, not a probability.\n*Example: `!price 4200 1800`*' },
-                { name: '`!lastseen <player_name>`', value: 'Shows up to 5 recent system/planet locations a player was involved in a battle report or News-page bombardment at, on either side, newest first.\n*Example: `!lastseen Hkiller89`*' },
-                { name: '`!8ball <question>`', value: 'Ask the magic 8-ball a question.\n*Example: `!8ball will we win this round?`*' }
-            )
-            // The eggs (!42, !hail, !warp) are deliberately not listed. This is the hint.
-            .setFooter({ text: 'AWT Intelligence Hub · not everything it answers to is on this list' });
+            .setTitle(help.title)
+            .setDescription(help.description)
+            .setColor(help.color)
+            .setFooter(help.footer);
+        if (help.fields.length) embed.addFields(help.fields);
 
         return message.reply({ embeds: [embed] });
     }
@@ -2213,7 +2191,7 @@ function slashToPrefix(interaction) {
     const i = (key) => interaction.options.getInteger(key);
     const n = (key) => interaction.options.getNumber(key);
 
-    if (name === 'help') return '!help';
+    if (name === 'help') return s('command') ? `!help ${s('command')}` : '!help';
     if (name === 'intel') {
         if (sub === 'player') return `!intel ${s('player')}`;
         if (sub === 'system') return `!sys ${s('system')}`;

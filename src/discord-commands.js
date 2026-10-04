@@ -165,7 +165,8 @@ function buildCommands() {
 
         new SlashCommandBuilder()
             .setName('help')
-            .setDescription('What this bot can do'),
+            .setDescription('What this bot can do')
+            .addStringOption(o => o.setName('command').setDescription('One command in full, e.g. "battle"')),
     ];
 }
 
