@@ -757,6 +757,518 @@
         "level": 0
       },
       "observedDefenderWinPct": 15.51
+    },
+    {
+      "id": "sweep-level-gap-only-ahead-side-counts",
+      "desc": "attacker destroyers+cruisers vs defender with all three types, levels 57 vs 56: only the side AHEAD with all three types gets a level bonus (the old rule charged the defender its whole level, 68pp off)",
+      "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case X1-056)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          103,
+          8,
+          63
+        ],
+        "starbase": 0,
+        "physics": 15,
+        "mathematics": 40,
+        "raceAttack": -2,
+        "raceDefense": 4,
+        "level": 56
+      },
+      "atk": {
+        "fleet": [
+          733,
+          90,
+          0
+        ],
+        "physics": 14,
+        "mathematics": 27,
+        "raceAttack": 2,
+        "raceDefense": -1,
+        "level": 57
+      },
+      "observedDefenderWinPct": 6.48
+    },
+    {
+      "id": "sweep-level-behind-side-gets-nothing",
+      "desc": "attacker with all three types at level 49 vs a two-type defender at 66: the attacker is behind, so no level term at all (old rule: +49 levels for the attacker, 65pp off)",
+      "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case X1-261)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          62,
+          0,
+          12
+        ],
+        "starbase": 0,
+        "physics": 26,
+        "mathematics": 25,
+        "raceAttack": 1,
+        "raceDefense": 0,
+        "level": 66
+      },
+      "atk": {
+        "fleet": [
+          71,
+          20,
+          5
+        ],
+        "physics": 14,
+        "mathematics": 11,
+        "raceAttack": 2,
+        "raceDefense": -2,
+        "level": 49
+      },
+      "observedDefenderWinPct": 88.79
+    },
+    {
+      "id": "sweep-bracket-plus-level-add",
+      "desc": "defender 14 physics and 35 levels ahead with all three types: the +25% bracket and the level bonus add in one factor (multiplied they were 10pp off)",
+      "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case X1-139)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          69,
+          16,
+          6
+        ],
+        "starbase": 16,
+        "physics": 35,
+        "mathematics": 17,
+        "raceAttack": -2,
+        "raceDefense": 0,
+        "level": 62
+      },
+      "atk": {
+        "fleet": [
+          1698,
+          0,
+          11
+        ],
+        "physics": 21,
+        "mathematics": 26,
+        "raceAttack": -2,
+        "raceDefense": 1,
+        "level": 27
+      },
+      "observedDefenderWinPct": 64.1
+    },
+    {
+      "id": "sweep-bracket-plus-level-add-attacker",
+      "desc": "attacker 8 physics and 31 levels ahead with all three types: same additive bracket + level factor on the attacking side",
+      "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case X1-178)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          2376,
+          40,
+          0
+        ],
+        "starbase": 0,
+        "physics": 17,
+        "mathematics": 31,
+        "raceAttack": 2,
+        "raceDefense": -3,
+        "level": 1
+      },
+      "atk": {
+        "fleet": [
+          335,
+          50,
+          55
+        ],
+        "physics": 25,
+        "mathematics": 26,
+        "raceAttack": 0,
+        "raceDefense": 1,
+        "level": 32
+      },
+      "observedDefenderWinPct": 54.51
+    },
+    {
+      "id": "sweep-high-sciences-mixed",
+      "desc": "mixed fleets with both sides at sciences 30-40 and a level-15 starbase, levels 46 vs 76",
+      "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case X2-056)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          152,
+          0,
+          34
+        ],
+        "starbase": 15,
+        "physics": 30,
+        "mathematics": 32,
+        "raceAttack": 0,
+        "raceDefense": 2,
+        "level": 76
+      },
+      "atk": {
+        "fleet": [
+          36,
+          155,
+          6
+        ],
+        "physics": 30,
+        "mathematics": 31,
+        "raceAttack": -2,
+        "raceDefense": 2,
+        "level": 46
+      },
+      "observedDefenderWinPct": 91.1
+    },
+    {
+      "id": "sweep-cruisers-vs-lone-starbase",
+      "desc": "23 cruisers vs a lone level-12 starbase: cruisers have their own lone-starbase blend weight (0.830)",
+      "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case G2-004)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          0,
+          0,
+          0
+        ],
+        "starbase": 12,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          0,
+          23,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 49.86
+    },
+    {
+      "id": "sweep-battleships-vs-lone-starbase",
+      "desc": "battleships vs a lone starbase: their own lone-starbase blend weight (0.7845)",
+      "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case G2-011)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          0,
+          0,
+          0
+        ],
+        "starbase": 12,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          0,
+          0,
+          10
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 18.57
+    },
+    {
+      "id": "sweep-destroyers-vs-small-fleet-plus-starbase",
+      "desc": "4 destroyers vs 1 destroyer + level-3 starbase (fleet 23% of defender CV): the destroyer weight slides with the fleet share",
+      "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case G1-001)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          1,
+          0,
+          0
+        ],
+        "starbase": 3,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          4,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 55.47
+    },
+    {
+      "id": "sweep-destroyers-vs-big-fleet-plus-starbase",
+      "desc": "125 destroyers vs 112 destroyers + level-6 starbase (fleet 89% of defender CV)",
+      "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case G1-012)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          112,
+          0,
+          0
+        ],
+        "starbase": 6,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          125,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 50.18
+    },
+    {
+      "id": "sweep-level-ladder-gap-40",
+      "desc": "all three ship types on both sides, levels 5 vs 45: the level term alone at a 40-level gap",
+      "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case X3-017)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          600,
+          120,
+          50
+        ],
+        "starbase": 0,
+        "physics": 20,
+        "mathematics": 20,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 45
+      },
+      "atk": {
+        "fleet": [
+          600,
+          120,
+          50
+        ],
+        "physics": 20,
+        "mathematics": 20,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 5
+      },
+      "observedDefenderWinPct": 97.21
+    },
+    {
+      "id": "strength-two-type-attacker",
+      "desc": "attacker 50% cruisers + 50% battleships (by CV) vs pure destroyers, no bonuses: strength 3*attack + 2*defence summed over ships (the 0.813 blend was 2.0pp off)",
+      "source": "in-game battle calculator, 2026-10-04 round-2 mixed-fleet sweep through the hub (/root/calc-sweep case M1-033)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          4000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          0,
+          266,
+          107
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 52.32
+    },
+    {
+      "id": "strength-two-type-defender",
+      "desc": "pure destroyers vs defender 50% destroyers + 50% cruisers, no bonuses",
+      "source": "in-game battle calculator, 2026-10-04 round-2 mixed-fleet sweep through the hub (/root/calc-sweep case M2-003)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          2000,
+          250,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          3790,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 48.1
+    },
+    {
+      "id": "strength-three-types",
+      "desc": "attacker 20% D + 60% C + 20% B vs pure destroyers, no bonuses",
+      "source": "in-game battle calculator, 2026-10-04 round-2 mixed-fleet sweep through the hub (/root/calc-sweep case M4-007)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          4000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          860,
+          323,
+          43
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 51.82
+    },
+    {
+      "id": "strength-size-invariant",
+      "desc": "attacker 50% C + 50% B vs pure destroyers at 10x size: the rule does not depend on fleet size",
+      "source": "in-game battle calculator, 2026-10-04 round-2 mixed-fleet sweep through the hub (/root/calc-sweep case M5-006)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          40000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          0,
+          2673,
+          1069
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 51.99
+    },
+    {
+      "id": "strength-away-from-even",
+      "desc": "attacker 50% C + 50% B vs pure destroyers near 80%: the curve exponent 1.79375",
+      "source": "in-game battle calculator, 2026-10-04 round-2 mixed-fleet sweep through the hub (/root/calc-sweep case M6-006)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          4000,
+          0,
+          0
+        ],
+        "starbase": 0,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          0,
+          320,
+          128
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 21.95
+    },
+    {
+      "id": "starbase-odd-cv-level-2",
+      "desc": "2 destroyers vs a lone level-2 starbase (CV 5): attack 2, defence 3, strength 12 (CV/2 each gave 12.5 and was 4.5pp off)",
+      "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case G3-001)",
+      "confidence": "observed",
+      "def": {
+        "fleet": [
+          0,
+          0,
+          0
+        ],
+        "starbase": 2,
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "atk": {
+        "fleet": [
+          2,
+          0,
+          0
+        ],
+        "physics": 0,
+        "mathematics": 0,
+        "raceAttack": 0,
+        "raceDefense": 0,
+        "level": 0
+      },
+      "observedDefenderWinPct": 6.97
     }
   ],
   "starbaseCv": {
@@ -1206,6 +1718,258 @@
           0
         ],
         "observedDefStarbaseSurvivorFrac": 0.1237
+      },
+      {
+        "id": "sweep-loss-capped-after-multiplier",
+        "desc": "defender with a ~x2 toughness multiplier facing 2.66x its toughness in enemy CV: the cap comes after the multiplier, so it is wiped to 1 ship (the old cap-first rule kept 54% of it)",
+        "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case X1-197)",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            918,
+            11,
+            14
+          ],
+          "starbase": 0,
+          "physics": 40,
+          "mathematics": 22,
+          "raceAttack": 2,
+          "raceDefense": 4,
+          "level": 66
+        },
+        "atk": {
+          "fleet": [
+            731,
+            513,
+            8
+          ],
+          "physics": 10,
+          "mathematics": 11,
+          "raceAttack": -3,
+          "raceDefense": 1,
+          "level": 52
+        },
+        "observedDefSurvivors": [
+          1,
+          0,
+          0
+        ],
+        "observedAtkSurvivors": [
+          594.04,
+          416.89,
+          6.5
+        ],
+        "observedDefStarbaseSurvivorFrac": 0
+      },
+      {
+        "id": "sweep-floor-goes-to-largest-defence-type",
+        "desc": "140 destroyers + 9 cruisers wiped: the one survivor is a cruiser (defence 144 vs 140), not a destroyer",
+        "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case X1-190)",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            140,
+            9,
+            0
+          ],
+          "starbase": 0,
+          "physics": 36,
+          "mathematics": 10,
+          "raceAttack": -2,
+          "raceDefense": 2,
+          "level": 14
+        },
+        "atk": {
+          "fleet": [
+            227,
+            3,
+            3
+          ],
+          "physics": 16,
+          "mathematics": 34,
+          "raceAttack": -2,
+          "raceDefense": 1,
+          "level": 29
+        },
+        "observedDefSurvivors": [
+          0,
+          1,
+          0
+        ],
+        "observedAtkSurvivors": [
+          158.56,
+          2.1,
+          2.1
+        ],
+        "observedDefStarbaseSurvivorFrac": 0
+      },
+      {
+        "id": "sweep-floor-lifts-largest-defence-type",
+        "desc": "27 destroyers + 2 cruisers + 2 battleships: the battleships would keep 0.53 and are lifted to 1; the other types keep their fractions",
+        "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case X2-019)",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            33,
+            5,
+            0
+          ],
+          "starbase": 0,
+          "physics": 38,
+          "mathematics": 37,
+          "raceAttack": 3,
+          "raceDefense": -2,
+          "level": 42
+        },
+        "atk": {
+          "fleet": [
+            27,
+            2,
+            2
+          ],
+          "physics": 39,
+          "mathematics": 32,
+          "raceAttack": -2,
+          "raceDefense": -2,
+          "level": 47
+        },
+        "observedDefSurvivors": [
+          2.15,
+          1,
+          0
+        ],
+        "observedAtkSurvivors": [
+          7.14,
+          0.53,
+          1
+        ],
+        "observedDefStarbaseSurvivorFrac": 0
+      },
+      {
+        "id": "sweep-no-floor-under-five-ships",
+        "desc": "4 destroyers attacking: a side of 4 ships or fewer gets no one-ship floor (keeps 0.75)",
+        "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case G1-001)",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            1,
+            0,
+            0
+          ],
+          "starbase": 3,
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "atk": {
+          "fleet": [
+            4,
+            0,
+            0
+          ],
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "observedDefSurvivors": [
+          0.37,
+          0,
+          0
+        ],
+        "observedAtkSurvivors": [
+          0.75,
+          0,
+          0
+        ],
+        "observedDefStarbaseSurvivorFrac": 0.344
+      },
+      {
+        "id": "sweep-lone-starbase-keeps-level-1",
+        "desc": "a lone level-5 starbase whose loss reaches 100% in a non-certain fight keeps level 1",
+        "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case G4-001)",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            0,
+            0,
+            0
+          ],
+          "starbase": 5,
+          "physics": 14,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "atk": {
+          "fleet": [
+            13,
+            0,
+            0
+          ],
+          "physics": 8,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "observedDefSurvivors": [
+          0,
+          0,
+          0
+        ],
+        "observedAtkSurvivors": [
+          6.5,
+          0,
+          0
+        ],
+        "observedDefStarbaseSurvivorFrac": 0.0769
+      },
+      {
+        "id": "sweep-fleet-takes-floor-before-starbase",
+        "desc": "50 destroyers + level-9 starbase wiped: the floor goes to a destroyer and the starbase reaches 0",
+        "source": "in-game battle calculator, 2026-10-04 sweep through the hub (/root/calc-sweep case G5-016)",
+        "confidence": "observed",
+        "def": {
+          "fleet": [
+            50,
+            0,
+            0
+          ],
+          "starbase": 9,
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": -3,
+          "level": 0
+        },
+        "atk": {
+          "fleet": [
+            100,
+            0,
+            0
+          ],
+          "physics": 0,
+          "mathematics": 0,
+          "raceAttack": 0,
+          "raceDefense": 0,
+          "level": 0
+        },
+        "observedDefSurvivors": [
+          1,
+          0,
+          0
+        ],
+        "observedAtkSurvivors": [
+          25,
+          0,
+          0
+        ],
+        "observedDefStarbaseSurvivorFrac": 0
       }
     ],
     "gate": {

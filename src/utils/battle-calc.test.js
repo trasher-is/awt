@@ -61,12 +61,21 @@ for (const c of fixtures.winChance) {
 console.log(`\nWorst win-% error: ${worst.toFixed(2)} pp on "${worstId}"  (gate: ${GATE_PP} pp)`);
 
 // The stated confidence must never be narrower than the measured error, or the UI would
-// be claiming more precision than the fixtures support.
+// be claiming more precision than the fixtures support. Each fixture is held to the band
+// winBand() shows for THAT fight (wider for a side fielding 2-3 ship types).
 const stated = model.uncertainty.BASE_ERROR_PP;
-if (stated >= worst) {
-    console.log(`✅ the ±${stated} pp band the UI shows is no narrower than the measured error`);
+const outside = [];
+for (const c of fixtures.winChance) {
+    const r = model.simulate({ defFleet: c.def.fleet, atkFleet: c.atk.fleet, sbLevel: c.def.starbase || 0, def: toStats(c.def), atk: toStats(c.atk) });
+    if (!r) continue;
+    const band = model.winBand(r.winD, { defFleet: c.def.fleet, atkFleet: c.atk.fleet }).marginPp;
+    const err = Math.abs(r.winD * 100 - c.observedDefenderWinPct);
+    if (err > band) outside.push(`${c.id} (${err.toFixed(2)} pp > ±${band} pp)`);
+}
+if (!outside.length) {
+    console.log(`✅ every fixture is inside the band the UI shows for it (±${stated} pp, ±${stated + model.uncertainty.MIXED_FLEET_EXTRA_PP} pp with a mixed fleet)`);
 } else {
-    console.log(`❌ the UI states ±${stated} pp but the fixtures show ${worst.toFixed(2)} pp — widen BASE_ERROR_PP`);
+    console.log(`❌ fixtures outside the band the UI states: ${outside.join(', ')} — widen the band`);
     failed = true;
 }
 
