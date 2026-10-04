@@ -1042,6 +1042,13 @@ and caps on its buildings — though the exact numbers aren't published.
   another player's, you can see their full intel — race picks, sciences, trade rate %,
   artifacts. Below that gap you see nothing about them, **unless you're in the same alliance**,
   in which case you always see everything regardless of biology.
+- **An ally's fleet landing on your planet fights your starbase.** Allied fleets do not join a
+  planet's defence: landing on an ally's planet before an attack means destroying his
+  starbase and losing ships to it. Only the planet owner's own ships stand with his starbase.
+  The way to help is to land in the **same 2-minute fleet cycle right after the attacker**: it
+  has just fought the starbase, has lost ships to it, and cannot leave before the
+  counter-attack lands. (Stated by the alliance's lead player, 2026-10-04; the incoming alerts
+  are built on it — `src/utils/incoming-battle.js`.)
 - **Colony ships and transports never take damage when their side wins a battle.**
 - **Maximum of 5 fleets in transit at any given time.**
 - **A fleet of 4 ships or fewer can lose every ship, even in a battle it wins.** A fleet of

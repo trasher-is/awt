@@ -8,6 +8,7 @@ const fleetsRepo = require('../repositories/fleets');
 const playersRepo = require('../repositories/players');
 const usersRepo = require('../repositories/users');
 const settingsRepo = require('../repositories/settings');
+const incomingDefenceRepo = require('../repositories/incomingDefence');
 
 const ONTIME_LIMIT = 10;
 const LATE_LIMIT = 10;
@@ -47,7 +48,25 @@ function getPpPrice() {
     }
 }
 
-// attack: { systemId, planetIndex, defenderName, arrivalUnix }
+// The fleet a member could build from `pp` production points at this economy: 1 cruiser +
+// 1 battleship + as many destroyers as the rest buys (1C+1B is the least that makes it a
+// "full" fleet, so the player-level bonus counts), or all destroyers when the core is out
+// of reach. null when not one destroyer is affordable.
+function buildableFleet(pp, economy) {
+    const totalCv = Math.floor(pp / costPerCv(economy));
+    const D_CV = SHIPS[0].cv;
+    const CORE_CV = cvOf([0, 1, 1]);
+    if (totalCv >= CORE_CV) {
+        const nD = Math.floor((totalCv - CORE_CV) / D_CV);
+        return { ships: [nD, 1, 1], label: `${nD}D 1C 1B` };
+    }
+    const nD = Math.floor(totalCv / D_CV);
+    return nD > 0 ? { ships: [nD, 0, 0], label: `${nD}D` } : null;
+}
+
+// attack: { systemId, planetIndex, defenderName, arrivalUnix, ownerId }
+//   ownerId — the attacked planet's owner: his ships already on that planet are its
+//             garrison (src/utils/incoming-battle.js), not a fleet that still has to fly.
 function computeInterceptors(attack, nowUnix) {
     const target = systemsRepo.getSystemCoords(attack.systemId);
     if (!target || target.x == null || target.y == null) return null;
@@ -68,30 +87,34 @@ function computeInterceptors(attack, nowUnix) {
         : playersRepo.getInterceptHomesByActiveUsers();
 
     const timeUntilImpact = attack.arrivalUnix > 0 ? attack.arrivalUnix - nowUnix : null;
+    const arrivalIso = attack.arrivalUnix > 0 ? new Date(attack.arrivalUnix * 1000).toISOString() : null;
 
+    // Every way each member could get ships there; one is picked per member at the end.
     const byPlayer = new Map();
     const consider = (name, cv, eta, source, note, origin) => {
         if (cv <= 0 || eta == null || isNaN(eta)) return;
         const key = name.toLowerCase();
-        const existing = byPlayer.get(key);
-        if (!existing || eta < existing.eta) {
-            byPlayer.set(key, {
-                name, cv, eta, source, note: note || '',
-                // Origin of an existing fleet, for building Game/Fleets/Launch links.
-                ownerId: origin ? origin.ownerId : null,
-                originSys: origin ? origin.originSys : null,
-                originIdx: origin ? origin.originIdx : null,
-                fleetId: origin ? origin.fleetId : null,
-                // Ship composition [D, C, B], for win-chance estimates.
-                ships: origin ? origin.ships : [Math.floor(cv / 3), 0, 0]
-            });
-        }
+        if (!byPlayer.has(key)) byPlayer.set(key, []);
+        byPlayer.get(key).push({
+            name, cv, eta, source, note: note || '',
+            // Origin of an existing fleet, for building Game/Fleets/Launch links.
+            ownerId: origin ? origin.ownerId : null,
+            originSys: origin ? origin.originSys : null,
+            originIdx: origin ? origin.originIdx : null,
+            fleetId: origin ? origin.fleetId : null,
+            // Ship composition [D, C, B], for the battle lines.
+            ships: origin ? origin.ships : [Math.floor(cv / 3), 0, 0]
+        });
     };
 
     for (const f of fleets) {
+        const landUnix = f.arrival_at ? Math.floor(Date.parse(f.arrival_at) / 1000) : 0;
+        // The owner's ships on the attacked planet (sitting there, or landing before the
+        // attacker) are its garrison and already fight beside the starbase.
+        if (attack.ownerId && f.owner_id === attack.ownerId && f.origin_sys === attack.systemId
+            && f.planet_index === attack.planetIndex && (!arrivalIso || !f.arrival_at || f.arrival_at <= arrivalIso)) continue;
         const cv = cvOf(f);
         const travel = calcTravelSeconds(f.sx, f.sy, f.planet_index, target.x, target.y, attack.planetIndex, f.energy, f.race_speed, true);
-        const landUnix = f.arrival_at ? Math.floor(Date.parse(f.arrival_at) / 1000) : 0;
         const landDelay = (landUnix && landUnix > nowUnix) ? (landUnix - nowUnix) : 0;
         const origin = {
             ownerId: f.owner_id, originSys: f.origin_sys, originIdx: f.planet_index, fleetId: f.game_fleet_id || null,
@@ -104,45 +127,63 @@ function computeInterceptors(attack, nowUnix) {
         }
     }
 
+    // Build & launch. With My Savings synced, from ANY of the member's planets: a planet
+    // spends its own saved PP, the home planet can spend every planet's PP (plus A$). PP
+    // keeps accruing until launch, which is (arrival - flight time) at the latest.
+    const buildPlanets = incomingDefenceRepo.getBuildPlanets(allianceId);
+    const planetsByOwner = new Map();
+    for (const bp of buildPlanets) {
+        if (!planetsByOwner.has(bp.owner_name)) planetsByOwner.set(bp.owner_name, []);
+        planetsByOwner.get(bp.owner_name).push(bp);
+    }
+    const ppAt = (pl, hours) => Math.max(0, (pl.production_pp || 0) + (pl.production_rate || 0) * Math.max(0, hours));
+    for (const [owner, planets] of planetsByOwner) {
+        for (const bp of planets) {
+            // Built on the attacked planet itself: already there, no flight.
+            const onTarget = bp.system_id === attack.systemId && bp.planet_index === attack.planetIndex;
+            const travel = onTarget ? 0 : calcTravelSeconds(bp.sx, bp.sy, bp.planet_index, target.x, target.y, attack.planetIndex, bp.energy, bp.race_speed, true);
+            const hours = timeUntilImpact != null ? (timeUntilImpact - travel) / 3600 : 0;
+            let pp = bp.is_home
+                ? planets.reduce((sum, pl) => sum + ppAt(pl, hours), 0) + (ppPrice > 0 ? cleanInt(bp.astro_dollars) / ppPrice : 0)
+                : ppAt(bp, hours);
+            const fleet = buildableFleet(pp, bp.economy);
+            if (!fleet) continue;
+            const where = onTarget ? 'the planet itself' : bp.is_home ? 'home' : `[${bp.system_id}] #${bp.planet_index}`;
+            consider(owner, cvOf(fleet.ships), travel, 'build', `build ${fleet.label} at ${where}`, { ships: fleet.ships });
+        }
+    }
+    // Members without My Savings: the old estimate, home planet and the sheet's totals.
     for (const h of homes) {
+        if (planetsByOwner.has(h.owner_name)) continue;
         const pp = cleanInt(h.production_points);
         const ad = cleanInt(h.astro_dollars);
-        const totalPp = pp + (ppPrice > 0 ? ad / ppPrice : 0);
-        // Affordable CV from PP + A$ (A$ valued in PP), given ship costs at this Eco.
-        const totalCv = Math.floor(totalPp / costPerCv(h.economy));
-        if (totalCv <= 0) continue;
-        // Suggest a full D/C/B fleet: 1 Cruiser (24 CV) + 1 Battleship (60 CV) + the max
-        // Destroyers (3 CV each) affordable from what's left. 1C+1B is the minimum for a
-        // "full" fleet so the defender's player level counts in the win-chance formula.
-        // Can't afford the 1C+1B core? Fall back to all-destroyers.
-        let ships, cv, note;
-        const D_CV = SHIPS[0].cv;
-        const CORE_CV = cvOf([0, 1, 1]);
-        if (totalCv >= CORE_CV) {
-            const nD = Math.floor((totalCv - CORE_CV) / D_CV);
-            ships = [nD, 1, 1];
-            note = `build & launch: ${nD}D 1C 1B`;
-        } else {
-            const nD = Math.floor(totalCv / D_CV);
-            if (nD <= 0) continue;
-            ships = [nD, 0, 0];
-            note = `build & launch: ${nD}D`;
-        }
-        cv = cvOf(ships);
+        const fleet = buildableFleet(pp + (ppPrice > 0 ? ad / ppPrice : 0), h.economy);
+        if (!fleet) continue;
         const travel = calcTravelSeconds(h.sx, h.sy, h.launch_planet, target.x, target.y, attack.planetIndex, h.energy, h.race_speed, true);
-        consider(h.owner_name, cv, travel, 'build', note, { ships });
+        consider(h.owner_name, cvOf(fleet.ships), travel, 'build', `build & launch: ${fleet.label}`, { ships: fleet.ships });
     }
+
+    // One line per member: the strongest option that makes it in time; when none does,
+    // the one that comes closest (for the "just missing it" list).
+    const pick = (options) => {
+        if (timeUntilImpact != null) {
+            const inTime = options.filter(o => o.eta <= timeUntilImpact);
+            if (inTime.length) return inTime.reduce((a, b) => (b.cv > a.cv || (b.cv === a.cv && b.eta < a.eta) ? b : a));
+        }
+        return options.reduce((a, b) => (b.eta < a.eta ? b : a));
+    };
+    const chosen = new Map([...byPlayer].map(([k, options]) => [k, pick(options)]));
 
     // Attach a real Discord mention where we know the player's numeric id (matched
     // game_name -> app_users.discord_id). Renders as their Discord name AND pings them.
-    for (const a of byPlayer.values()) {
+    for (const a of chosen.values()) {
         try {
             const row = usersRepo.getUserMentionByGameName(a.name.toLowerCase());
             a.mention = row && row.discord_id ? `<@${row.discord_id}>` : null;
         } catch (e) { a.mention = null; }
     }
 
-    const all = Array.from(byPlayer.values());
+    const all = Array.from(chosen.values());
     if (timeUntilImpact == null) {
         all.sort((a, b) => a.eta - b.eta);
         return { unknownTiming: true, onTime: all.slice(0, ONTIME_LIMIT), late: [] };
@@ -161,5 +202,5 @@ const SOURCE_TAG = { orbit: '🛰️', flight: '✈️', build: '🏗️' };
 
 module.exports = {
     ONTIME_LIMIT, LATE_LIMIT, SOURCE_TAG,
-    cleanInt, cvOf, costPerCv, getPpPrice, computeInterceptors
+    cleanInt, cvOf, costPerCv, getPpPrice, buildableFleet, computeInterceptors
 };
