@@ -96,9 +96,10 @@ ok('getTradeAnalysisRows returns the stats-joined-to-player rows', tradeRows.len
 const archiveStats = alliances.getAllianceStatsForArchive();
 ok('getAllianceStatsForArchive returns full stats rows with player_name', archiveStats.find(s => s.player_id === 1).player_name === 'caveman');
 {
-    db.prepare(`INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id) VALUES (9101, '2026-10-04T10:00:00+02:00', 1, 50), (9102, '2026-10-04T11:00:00+02:00', 51, 1)`).run();
+    db.prepare(`INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, att_luckiness, def_luckiness) VALUES (9101, '2026-10-04T10:00:00+02:00', 1, 50, -0.25, 0.25), (9102, '2026-10-04T11:00:00+02:00', 51, 1, -0.04, 0.04)`).run();
     const row = alliances.getAllianceStatsForArchive().find(s => s.player_id === 1);
     ok('getAllianceStatsForArchive counts pl_battle_count from battle_reports', row.pl_battle_count === 2, row.pl_battle_count);
+    ok('getAllianceStatsForArchive totals pl_battle_luck from the member\'s side of each report', row.pl_battle_luck === -0.21, row.pl_battle_luck);
     db.prepare(`DELETE FROM battle_reports WHERE id IN (9101, 9102)`).run();
 }
 

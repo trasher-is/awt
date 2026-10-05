@@ -96,17 +96,24 @@ ok('getWarRoomPlayers includes last_activity_at',
 // Player 1 attacks twice, defends once, and fights itself once (counted once, not twice).
 {
     db.prepare(`UPDATE players SET number_of_battles = 0 WHERE id = 1`).run();
-    const report = db.prepare(`INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id) VALUES (?, '2026-10-04T10:00:00+02:00', ?, ?)`);
-    report.run(9001, 1, 77);
-    report.run(9002, 1, 78);
-    report.run(9003, 79, 1);
-    report.run(9004, 1, 1);
-    report.run(9005, 80, 81); // someone else's battle
+    // Luck mirrors across the two sides (+x winner, -x loser), as in every stored report.
+    const report = db.prepare(`INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id, att_luckiness, def_luckiness)
+        VALUES (?, '2026-10-04T10:00:00+02:00', ?, ?, ?, ?)`);
+    report.run(9001, 1, 77, 0.18, -0.18);
+    report.run(9002, 1, 78, 0, 0);
+    report.run(9003, 79, 1, 0.07, -0.07);
+    report.run(9004, 1, 1, 0.02, -0.02);   // a self-battle counts one side only
+    report.run(9005, 80, 81, 0.5, -0.5);   // someone else's battle
     const war = players.getWarRoomPlayers(2).find(p => p.id === 1);
     ok('getWarRoomPlayers counts battles from battle_reports, not number_of_battles', war.battle_count === 4, war.battle_count);
     const full = players.getFullPlayersDb().find(p => p.id === 1);
     ok('getFullPlayersDb carries the same battle_count', full.battle_count === 4, full.battle_count);
     ok('a player with no reports counts 0, not null', players.getFullPlayersDb().find(p => p.id === 2).battle_count === 0);
+    db.prepare(`UPDATE players SET battle_luckiness = 9.99 WHERE id = 1`).run();
+    ok('getWarRoomPlayers totals luck from the player\'s side of each report, not battle_luckiness',
+        players.getWarRoomPlayers(2).find(p => p.id === 1).battle_luck === 0.13, players.getWarRoomPlayers(2).find(p => p.id === 1).battle_luck);
+    ok('getFullPlayersDb carries the same battle_luck', players.getFullPlayersDb().find(p => p.id === 1).battle_luck === 0.13);
+    ok('a player with no reports has null luck (shown "-"), not 0', players.getFullPlayersDb().find(p => p.id === 2).battle_luck === null);
     db.prepare(`DELETE FROM battle_reports WHERE id BETWEEN 9001 AND 9005`).run();
 }
 
