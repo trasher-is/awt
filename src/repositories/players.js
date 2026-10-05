@@ -34,6 +34,14 @@ const getWarRoomPlayersStmt = db.prepare(`
            -- with 29 stored reports had 0). Two index-backed counts; a self-battle counts once.
            (SELECT COUNT(*) FROM battle_reports WHERE att_player_id = p.id)
              + (SELECT COUNT(*) FROM battle_reports WHERE def_player_id = p.id AND att_player_id IS NOT p.id) as battle_count,
+           -- Luck: the TOTAL of this player's side of each stored report's luckiness ("Combat
+           -- Variance", +(1-w)^2 for the winner, the same negative for the loser), not
+           -- p.battle_luckiness, which is the game's figure over its own 0-3 battle count. A
+           -- total, because only ~3% of battles carry any luck: an average over 30 battles
+           -- rounds to 0.00 for almost everyone. NULL (shown "-") when there are no reports.
+           (SELECT ROUND(SUM(l), 2) FROM (
+               SELECT att_luckiness AS l FROM battle_reports WHERE att_player_id = p.id
+               UNION ALL SELECT def_luckiness FROM battle_reports WHERE def_player_id = p.id AND att_player_id IS NOT p.id)) as battle_luck,
            -- Live population sum for the calculated Max CV (see max-combat-value.js). The
            -- War Room is scoped to an enemy alliance, which is the only place the figure is
            -- actually wanted: the game never prints an enemy's CV limit anywhere.
@@ -72,9 +80,12 @@ const getFullPlayersDbStmt = db.prepare(`
     SELECT p.*, a.tag as alliance_tag,
            (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as planet_count,
            (SELECT COALESCE(SUM(population), 0) FROM planets WHERE owner_id = p.id) as owned_population,
-           -- Same battle count as getWarRoomPlayers (not p.number_of_battles; see there).
+           -- Same battle count and luck as getWarRoomPlayers (not the game's fields; see there).
            (SELECT COUNT(*) FROM battle_reports WHERE att_player_id = p.id)
-             + (SELECT COUNT(*) FROM battle_reports WHERE def_player_id = p.id AND att_player_id IS NOT p.id) as battle_count
+             + (SELECT COUNT(*) FROM battle_reports WHERE def_player_id = p.id AND att_player_id IS NOT p.id) as battle_count,
+           (SELECT ROUND(SUM(l), 2) FROM (
+               SELECT att_luckiness AS l FROM battle_reports WHERE att_player_id = p.id
+               UNION ALL SELECT def_luckiness FROM battle_reports WHERE def_player_id = p.id AND att_player_id IS NOT p.id)) as battle_luck
     FROM players p
     LEFT JOIN alliances a ON p.alliance_id = a.id
 `);
