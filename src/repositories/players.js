@@ -29,6 +29,11 @@ const getWarRoomPlayersStmt = db.prepare(`
            p.eco_bonus, p.number_of_battles, p.battle_luckiness, p.country, p.joined, p.logins, p.last_login_at,
            a.tag as alliance_tag,
            (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as total_planets,
+           -- Battles counted from the reports the hub holds, NOT p.number_of_battles: that is
+           -- the game API's numberOfBattles, which reads 0-3 for everyone (2026-10-05: a player
+           -- with 29 stored reports had 0). Two index-backed counts; a self-battle counts once.
+           (SELECT COUNT(*) FROM battle_reports WHERE att_player_id = p.id)
+             + (SELECT COUNT(*) FROM battle_reports WHERE def_player_id = p.id AND att_player_id IS NOT p.id) as battle_count,
            -- Live population sum for the calculated Max CV (see max-combat-value.js). The
            -- War Room is scoped to an enemy alliance, which is the only place the figure is
            -- actually wanted: the game never prints an enemy's CV limit anywhere.
@@ -66,7 +71,10 @@ function listPlayerIds() {
 const getFullPlayersDbStmt = db.prepare(`
     SELECT p.*, a.tag as alliance_tag,
            (SELECT COUNT(*) FROM planets WHERE owner_id = p.id) as planet_count,
-           (SELECT COALESCE(SUM(population), 0) FROM planets WHERE owner_id = p.id) as owned_population
+           (SELECT COALESCE(SUM(population), 0) FROM planets WHERE owner_id = p.id) as owned_population,
+           -- Same battle count as getWarRoomPlayers (not p.number_of_battles; see there).
+           (SELECT COUNT(*) FROM battle_reports WHERE att_player_id = p.id)
+             + (SELECT COUNT(*) FROM battle_reports WHERE def_player_id = p.id AND att_player_id IS NOT p.id) as battle_count
     FROM players p
     LEFT JOIN alliances a ON p.alliance_id = a.id
 `);

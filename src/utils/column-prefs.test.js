@@ -169,7 +169,7 @@ async function loadEsm(rel, tmp) {
         race_growth: 2, race_science: -1, race_culture: 0, race_production: 4, race_speed: 1, race_attack: -2, race_defense: 3, race_trader: 1, race_sul: 0,
         trade_revenue: 50, science_rate: 100, culture_rate: 50, production_rate: 70, astro_dollars: 1000, production_points: 200, eco_bonus: 5,
         biology: 7, economy: 10, energy: 12, mathematics: 3, physics: 4, social: 6, artefact: 'CD 3', intel_updated_at: '2026-09-05 12:00:00',
-        number_of_battles: 9, battle_luckiness: 1.2345, country: 'PL', joined: '2026-08-01', logins: 40, last_activity_at: null, idle_time: '2h 5m',
+        number_of_battles: 9, battle_count: 9, pl_battle_count: 9, battle_luckiness: 1.2345, country: 'PL', joined: '2026-08-01', logins: 40, last_activity_at: null, idle_time: '2h 5m',
         player_name: 'Elfen<lied>', player_id: 5, planets_text: '6 (7)', next_culture_at: null, level_text: 'Lvl 12', cv_limit_text: '300', population: 40, hoarded_au: 5000, updated_at: '2026-09-05 12:00:00',
         pl_points: 12345, pl_race_speed: 1, pl_race_production: 4, pl_race_attack: -2, pl_trade_revenue: 50, pl_biology: 7, pl_total_farms: 30, pl_last_activity_at: null,
         pl_tp: 61.5, pl_tpx: 12.3 };
@@ -307,11 +307,16 @@ async function loadEsm(rel, tmp) {
     console.log('\n── Every database-backed column is really selected by its SQL ' + '─'.repeat(12));
     const playersSql = read('src/repositories/players.js');
     const warSql = playersSql.slice(playersSql.indexOf('const getWarRoomPlayersStmt'), playersSql.indexOf('function getWarRoomPlayers('));
-    const computedWar = new Set(['idle', 'calculated_prod', 'cv_day', 'max_cv', 'calculated_science', 'cv', 'total_planets']);
+    const computedWar = new Set(['idle', 'calculated_prod', 'cv_day', 'max_cv', 'calculated_science', 'cv', 'total_planets', 'battle_count']);
     const missingWar = tables.warRoom.columns.map(c => c.key).filter(k => !computedWar.has(k) && !new RegExp(`p\\.${k}\\b`).test(warSql));
     ok('war room: every column is a p.<column> in getWarRoomPlayers', missingWar.length === 0, missingWar);
     ok('war room: CV needs both halves', /p\.cv_used/.test(warSql) && /p\.cv_limit/.test(warSql));
     ok('war room: last_activity_at is still selected (players.test.js relies on it)', /p\.last_activity_at/.test(warSql));
+    ok('war room: Battles is counted from battle_reports, not the game API field',
+        /FROM battle_reports WHERE att_player_id = p\.id/.test(warSql) && /as battle_count\b/.test(warSql));
+    ok('players archive: Battles is counted from battle_reports too',
+        /FROM battle_reports WHERE att_player_id = p\.id/.test(playersSql.slice(playersSql.indexOf('const getFullPlayersDbStmt'), playersSql.indexOf('function getFullPlayersDb(')))
+        && tables.players.columns.some(c => c.key === 'battle_count') && !tables.players.columns.some(c => c.key === 'number_of_battles'));
 
     const alliancesSql = read('src/repositories/alliances.js');
     const allySql = alliancesSql.slice(alliancesSql.indexOf('const getAllianceStatsForArchiveStmt'), alliancesSql.indexOf('function getAllianceStatsForArchive('));

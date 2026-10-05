@@ -95,6 +95,12 @@ ok('getTradeAnalysisRows returns the stats-joined-to-player rows', tradeRows.len
 
 const archiveStats = alliances.getAllianceStatsForArchive();
 ok('getAllianceStatsForArchive returns full stats rows with player_name', archiveStats.find(s => s.player_id === 1).player_name === 'caveman');
+{
+    db.prepare(`INSERT INTO battle_reports (id, started_at, att_player_id, def_player_id) VALUES (9101, '2026-10-04T10:00:00+02:00', 1, 50), (9102, '2026-10-04T11:00:00+02:00', 51, 1)`).run();
+    const row = alliances.getAllianceStatsForArchive().find(s => s.player_id === 1);
+    ok('getAllianceStatsForArchive counts pl_battle_count from battle_reports', row.pl_battle_count === 2, row.pl_battle_count);
+    db.prepare(`DELETE FROM battle_reports WHERE id IN (9101, 9102)`).run();
+}
 
 // Research tracker (2026-09-28): the member's latest read of their own Science page rides
 // along on their stats row. A member who never reported has null research fields — the join
