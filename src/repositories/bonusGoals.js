@@ -9,7 +9,7 @@
 //                      schedule; first real hit on it (by anyone in scope) wins a flat
 //                      point award. No client scrape needed — the target comes from data
 //                      the hub already has, so scheduling and picking both run server-side.
-//   'stat_milestone' — first player anywhere to reach a configured science/economy stat
+//   'stat_milestone' — first hub member to reach a configured science/economy stat
 //                      threshold wins a flat point award for that specific milestone —
 //                      "first past the post" enforced the exact same way as
 //                      random_target's claim (an UNIQUE(goal_id, source_key) row), just
@@ -241,12 +241,15 @@ function evaluateBattleReportForGoals(reportId, now = new Date()) {
     return awarded;
 }
 
-// --- stat_milestone: first player anywhere to cross a configured threshold ---
+// --- stat_milestone: first hub member to cross a configured threshold ---
 
 const STAT_MILESTONE_FIELDS = new Set(['biology', 'economy', 'energy', 'mathematics', 'physics', 'social']);
 const playerStatsForMilestonesStmt = db.prepare(`
     SELECT id, name, biology, economy, energy, mathematics, physics, social FROM players WHERE id = ?
 `);
+// "Member" means what !glory's default scope means (see scopeClauseFor below): a player
+// linked to a hub account by game_name.
+const isHubMemberStmt = db.prepare(`SELECT 1 FROM app_users WHERE game_name = ? COLLATE NOCASE LIMIT 1`);
 
 // Called whenever a player-detail sync delivers validated intel for these fields (see
 // sync.js's /sync/player-detail — only when has_intel resolves to 1, since that's the only
@@ -255,9 +258,12 @@ const playerStatsForMilestonesStmt = db.prepare(`
 // (goal_id + stat + threshold, no player in it) is what makes a milestone one-time — once
 // insertAwardStmt's UNIQUE constraint has a row for it, every later check for that exact
 // milestone is simply ignored, first past the post, regardless of whose sync triggers it.
+// Members only (2026-10-06): any player with intel used to be able to claim one, so an
+// enemy crossing first used the milestone up with an award !glory never shows. A
+// non-member crossing now leaves the milestone open for the members.
 function evaluatePlayerStatsForGoals(playerId) {
     const player = playerStatsForMilestonesStmt.get(playerId);
-    if (!player) return [];
+    if (!player || !isHubMemberStmt.get(player.name)) return [];
 
     const awarded = [];
     for (const goal of listEnabledGoalsByType('stat_milestone')) {

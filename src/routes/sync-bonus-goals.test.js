@@ -167,6 +167,9 @@ function request(server, method, urlPath, body) {
         // would have worked. So the trigger moved to the profile scrape — the one route that
         // sees a real report — and the test moved with it, onto the payload a scrape actually
         // sends (player-parser.js's shape, has_intel set from the page's ir-summary block).
+        // Milestones are members-only, so both scraped players below are hub members — the
+        // no-intel check must fail on its has_intel gate, not on membership.
+        db.prepare(`INSERT INTO app_users (game_name, password_hash) VALUES ('Scientist850', 'x'), ('Unseen851', 'x')`).run();
         const scrapeRes = await request(server, 'POST', '/hub-api/sync/player', {
             id: 850, name: 'Scientist850', level: 5, points: 100, logins: 0,
             has_intel: 1,
