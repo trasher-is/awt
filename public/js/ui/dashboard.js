@@ -1,4 +1,5 @@
-import { handleSearchInput } from './search.js';
+import { handleSearchInput, navToIframe } from './search.js';
+import { installGameLinkHandler, loadLinkIndex } from '../utils/game-links.js';
 import { loadPlans, savePlan, deletePlan, setIntelSystemId } from './system-intel.js';
 import {
     openDatabasePanel,
@@ -93,6 +94,11 @@ window.addEventListener('DOMContentLoaded', () => {
     refreshDeepScanStatus();
 
     // --- EVENT DELEGATION FOR DYNAMIC ELEMENTS ---
+    // Every player/alliance/system/planet link any sidebar tool paints (game-links.js):
+    // one listener for the whole page, so a panel injected later is covered too.
+    installGameLinkHandler(document, navToIframe);
+    loadLinkIndex();
+
     // Player/system/alliance search results are NOT wired here — search.js binds a
     // listener directly to each result button as it renders them (executeSearch). A
     // leftover duplicate delegation used to live here too: every result click fired

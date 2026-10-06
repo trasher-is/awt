@@ -16,6 +16,8 @@
 // choices and the covering roster, pushed the moment anyone changes them — here, on the
 // Discord button or on the News page.
 
+import { playerLink, allianceLink, planetLink } from '../utils/game-links.js';
+
 const POLL_MS = 60 * 1000;
 const PANEL_REFRESH_MS = 60 * 1000;
 const SEEN_KEY = 'awt.defence.seen';
@@ -63,6 +65,12 @@ function shipsText(ships) {
 }
 const fleetArr = (f) => (Array.isArray(f) ? ['DS', 'CR', 'BS'].map((n, i) => (f[i] ? `${f[i]} ${n}` : null)).filter(Boolean).join(', ') : '');
 const planetLabel = (a) => `${esc(a.target.planetName || 'Planet')} <span class="text-muted-foreground">[${esc(a.target.systemId)}] #${esc(a.target.planetIndex)}</span>`;
+// The same label as a game link — not used inside the attack picker, which is a <button>
+// (a link inside a button is invalid HTML and the tap would go to both).
+const planetLinkLabel = (a) => planetLink({ planetId: a.target.planetId, systemId: a.target.systemId },
+    `${a.target.planetName || 'Planet'} [${a.target.systemId}] #${a.target.planetIndex}`);
+// Members and viewers are known by name only; the link index resolves them.
+const nameLink = (name) => playerLink(null, name);
 
 // ─── Seen attacks (per viewer) ───────────────────────────────────────────────
 // An attack is "seen" once the member opened the Defence panel while it was live (the
@@ -264,7 +272,7 @@ function paintLive() {
     const names = liveViewers || lastDetail.viewers || [];
     const others = names.filter(n => !isMe(n));
     el.innerHTML = others.length
-        ? `👀 Looking now: ${others.map(n => `<b>${esc(n)}</b>`).join(', ')}${names.some(isMe) ? ' and you' : ''}`
+        ? `👀 Looking now: ${others.map(n => `<b>${nameLink(n)}</b>`).join(', ')}${names.some(isMe) ? ' and you' : ''}`
         : '👀 Only you are looking at this right now.';
 }
 
@@ -344,7 +352,7 @@ function rankedRows(list, role) {
             : (e.launchBy ? `launch <b>${clock(e.launchFrom)}–${clock(e.launchBy)}</b>` : '');
         const how = role === 'keep' ? (e.mode === 'reinforce' ? 'own fleet + SB' : 'kills the SB first') : '';
         return `<li class="rounded-md bg-zinc-900 border border-border px-3 py-2">
-            <div><span class="text-muted-foreground">${i + 1}.</span> ${SRC[e.source] || ''} <b>${esc(e.name)}</b> <span class="text-muted-foreground">[${num(e.cv)} CV]</span>
+            <div><span class="text-muted-foreground">${i + 1}.</span> ${SRC[e.source] || ''} <b>${nameLink(e.name)}</b> <span class="text-muted-foreground">[${num(e.cv)} CV]</span>
             · ${role === 'keep' ? 'holds' : 'retakes'} <b class="${e.win >= 0.75 ? 'text-green-400' : e.win >= 0.5 ? 'text-yellow-300' : 'text-orange-400'}">${esc(e.winText)}</b>, keeps ${num(e.keepCv)} CV</div>
             <div class="text-xs text-muted-foreground mt-0.5">${[when, how, esc(e.note)].filter(Boolean).join(' · ')}</div>
         </li>`;
@@ -387,8 +395,8 @@ function renderDetail(d) {
     const w = d.window;
     const head = `
         <div class="rounded-lg border border-red-800 bg-red-950/30 px-4 py-3 mb-5">
-            <div class="text-base font-bold">🚨 ${esc(d.attacker.name)}${d.attacker.tag ? ` <span class="text-muted-foreground">[${esc(d.attacker.tag)}]</span>` : ''} → ${planetLabel(d)}</div>
-            ${d.ownerName ? `<div class="mt-0.5">🎯 ${esc(d.ownerName)}</div>` : ''}
+            <div class="text-base font-bold">🚨 ${playerLink(d.attacker.id, d.attacker.name)}${d.attacker.tag ? ` <span class="text-muted-foreground">${allianceLink(null, d.attacker.tag)}</span>` : ''} → ${planetLinkLabel(d)}</div>
+            ${d.ownerName ? `<div class="mt-0.5">🎯 ${nameLink(d.ownerName)}</div>` : ''}
             <div class="mt-0.5">🛰️ <b>${num(d.cv)} CV</b> — ${esc(shipsText(d.ships))}</div>
             <div class="mt-0.5 text-muted-foreground">🧬 ${d.attacker.scanned
                 ? `${esc(d.attacker.statLine || '')}${d.attacker.raceKnown ? '' : ' — race unknown, worst case assumed (+4/+4)'}`
@@ -440,7 +448,7 @@ function renderDetail(d) {
     };
     const members = d.members.map(m => `
         <details data-member="${esc(m.name)}" class="mb-2 rounded-md border ${m.me ? 'border-sky-700' : 'border-border'}" ${m.me ? 'open' : ''}>
-            <summary class="cursor-pointer px-3 py-2 ${m.me ? 'bg-sky-950/40' : 'bg-zinc-900'} rounded-md"><b>${esc(m.name)}</b>${m.me ? ' (you)' : ''}${bestLine(m)} <span class="text-muted-foreground">· ${m.options.length} option${m.options.length === 1 ? '' : 's'}</span></summary>
+            <summary class="cursor-pointer px-3 py-2 ${m.me ? 'bg-sky-950/40' : 'bg-zinc-900'} rounded-md"><b>${nameLink(m.name)}</b>${m.me ? ' (you)' : ''}${bestLine(m)} <span class="text-muted-foreground">· ${m.options.length} option${m.options.length === 1 ? '' : 's'}</span></summary>
             <div class="p-2 flex flex-col gap-1.5">${m.options.map((o, i) => optionRow(o, d, i, m.me)).join('')}</div>
         </details>`).join('');
     html += section('Every option, by member', members || '<div class="text-muted-foreground">No member fleets or saved PP found.</div>');
@@ -460,10 +468,10 @@ function planBlock(d) {
     const rows = plan.choices.map(c => {
         const o = c.option || {};
         const bits = [o.cv != null ? `${num(o.cv)} CV` : '', o.winText ? `${c.role === 'before' ? 'holds' : 'retakes'} ${esc(o.winText)}` : '', esc(o.note || ''), ago(c.updatedAt)].filter(Boolean);
-        return `<div class="${isMe(c.name) ? 'text-sky-300' : ''}">${c.role === 'before' ? '🛡️' : '⚔️'} <b>${esc(c.name)}</b> — lands <b>${esc(c.role)}</b> them${bits.length ? ` <span class="text-muted-foreground">· ${bits.join(' · ')}</span>` : ''}</div>`;
+        return `<div class="${isMe(c.name) ? 'text-sky-300' : ''}">${c.role === 'before' ? '🛡️' : '⚔️'} <b>${nameLink(c.name)}</b> — lands <b>${esc(c.role)}</b> them${bits.length ? ` <span class="text-muted-foreground">· ${bits.join(' · ')}</span>` : ''}</div>`;
     });
     const picked = new Set(plan.choices.map(c => c.name.toLowerCase()));
-    plan.covering.filter(n => !picked.has(n.toLowerCase())).forEach(n => rows.push(`<div>🛡️ <b>${esc(n)}</b> — covering <span class="text-muted-foreground">· no option picked</span></div>`));
+    plan.covering.filter(n => !picked.has(n.toLowerCase())).forEach(n => rows.push(`<div>🛡️ <b>${nameLink(n)}</b> — covering <span class="text-muted-foreground">· no option picked</span></div>`));
     const meIn = plan.choices.some(c => isMe(c.name)) || plan.covering.some(isMe);
     const action = meIn
         ? '<button id="defence-withdraw-btn" class="h-8 px-3 rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80 text-sm">Withdraw</button>'

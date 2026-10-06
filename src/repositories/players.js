@@ -68,6 +68,11 @@ function countPlayers() {
 }
 
 const listPlayerIdsStmt = db.prepare(`SELECT id FROM players ORDER BY id ASC`);
+// For the sidebar's game links (GET /intel/link-index): every current name and its id.
+const listPlayerNameIdsStmt = db.prepare(`SELECT id, name FROM players WHERE name IS NOT NULL AND name != ''`);
+function listPlayerNameIds() {
+    return listPlayerNameIdsStmt.all();
+}
 function listPlayerIds() {
     return listPlayerIdsStmt.all();
 }
@@ -1071,7 +1076,7 @@ function saveManualIntel(values) {
 
 module.exports = {
     saveManualIntel,
-    getWarRoomPlayers, getAllianceIntelPlayerIds, countPlayers, listPlayerIds, getFullPlayersDb, getJoinedDates,
+    getWarRoomPlayers, getAllianceIntelPlayerIds, countPlayers, listPlayerIds, listPlayerNameIds, getFullPlayersDb, getJoinedDates,
     getAllianceTagForMembers, getVisionObservers, getPlayerWithPlanetCount,
     getPlayerLoginHistory, getPlayerLoginHeatmap, recordLoginSample, getPlayerLoginSamples,
     upsertPlayerBasic, getPlayerNameWithTag, getPlayerJoinedWithTag, getPlayerRestartCheck, playerExistsById, resetPlayerOnRestart,

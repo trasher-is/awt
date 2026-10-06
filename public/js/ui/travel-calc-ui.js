@@ -6,6 +6,7 @@
 // runs that file and puts its API on globalThis.
 
 import { esc } from '../utils/escape.js';
+import { playerLink, allianceLink, systemLink, planetLink } from '../utils/game-links.js';
 import '../utils/travel-model.js';
 import '../utils/battle-model.js';   // side-effect import: cvOf for the system view
 import '../utils/game-rate-limit.js'; // side-effect import: the shared 5/s gate AWApi rides
@@ -214,10 +215,10 @@ async function renderSystemView(sysId) {
         if (!d.success) { box.innerHTML = `<div class="text-xs text-red-400">System #${sysId} not in database — scan it in-game.</div>`; return; }
 
         const planetRows = (d.planets || []).map(p => {
-            const owner = p.owner_name ? `${p.alliance_tag ? `[${esc(p.alliance_tag)}] ` : ''}${esc(p.owner_name)}` : '<span class="text-zinc-600">—</span>';
+            const owner = p.owner_name ? `${p.alliance_tag ? `${allianceLink(p.alliance_id, p.alliance_tag)} ` : ''}${playerLink(p.owner_id, p.owner_name)}` : '<span class="text-zinc-600">—</span>';
             const plan = (d.plans || []).find(pl => pl.planet_index === p.planet_index);
             return `<tr class="border-b border-zinc-800/50">
-                <td class="py-0.5 pr-2 text-zinc-400">#${p.planet_index}</td>
+                <td class="py-0.5 pr-2 text-zinc-400">${planetLink({ planetId: p.game_planet_id, systemId: sysId }, `#${p.planet_index}`)}</td>
                 <td class="py-0.5 pr-2 text-foreground">${owner}</td>
                 <td class="py-0.5 pr-2 text-right tabular-nums">${p.population || 0}</td>
                 <td class="py-0.5 pr-2 text-right tabular-nums">${p.starbase || 0}</td>
@@ -226,7 +227,7 @@ async function renderSystemView(sysId) {
         }).join('');
 
         const fleetRows = (d.fleets || []).sort((a, b) => a.planet_index - b.planet_index).map(f => {
-            const owner = f.owner_name ? `${f.alliance_tag ? `[${esc(f.alliance_tag)}] ` : ''}${esc(f.owner_name)}` : '?';
+            const owner = f.owner_name ? `${f.alliance_tag ? `${allianceLink(f.alliance_id, f.alliance_tag)} ` : ''}${playerLink(f.owner_id, f.owner_name)}` : '?';
             const ships = [
                 f.transports && `${f.transports}TR`, f.colony_ships && `${f.colony_ships}CS`,
                 f.destroyers && `${f.destroyers}DS`, f.cruisers && `${f.cruisers}CR`, f.battleships && `${f.battleships}BS`
@@ -244,7 +245,7 @@ async function renderSystemView(sysId) {
                 <div class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">🎯 Target System #${sysId}</div>
                 <div class="flex items-center gap-3">
                     <button id="tc-sys-update" class="text-xs text-emerald-400 hover:underline">Update</button>
-                    <a href="/Game/Map/SolarSystem/${sysId}" target="_blank" class="text-xs text-blue-400 hover:underline">Open live ↗</a>
+                    ${systemLink(sysId, 'Open live ↗', 'text-xs text-blue-400')}
                 </div>
             </div>
             <table class="w-full text-xs"><tbody>${planetRows || '<tr><td class="text-zinc-600 text-xs">No planets recorded.</td></tr>'}</tbody></table>

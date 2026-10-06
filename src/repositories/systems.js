@@ -323,9 +323,9 @@ function getHighestPopulationFriendlyCoverage(friendlyTagsUpper) {
 
 const getSystemPlanetsWithIntelStmt = db.prepare(`
     SELECT p.planet_index, p.population, p.starbase, p.has_fleet, p.is_sieged, p.siege_is_friendly,
-           p.game_planet_id,
+           p.game_planet_id, p.owner_id,
            u.name as owner_name, u.home_system_id, u.home_planet_index, u.possible_homes,
-           a.tag as alliance_tag,
+           a.id as alliance_id, a.tag as alliance_tag,
            bg.cv as guard_cv
     FROM planets p
     LEFT JOIN players u ON p.owner_id = u.id
@@ -413,9 +413,9 @@ function checkAndUpdateSystemSecured(sysId, friendlyTagsUpper, ownTagsUpper) {
 }
 
 const getPlanetsFullDbStmt = db.prepare(`
-    SELECT p.system_id, p.planet_index, p.population, p.starbase, p.is_sieged, p.updated_at,
+    SELECT p.system_id, p.planet_index, p.game_planet_id, p.owner_id, p.population, p.starbase, p.is_sieged, p.updated_at,
            s.name as system_name, s.x, s.y,
-           u.name as owner_name, a.tag as alliance_tag
+           u.name as owner_name, a.id as alliance_id, a.tag as alliance_tag
     FROM planets p
     LEFT JOIN systems s ON p.system_id = s.id
     LEFT JOIN players u ON p.owner_id = u.id

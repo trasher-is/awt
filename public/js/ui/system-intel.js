@@ -1,4 +1,5 @@
 import { esc } from '../utils/escape.js';
+import { playerLink, allianceLink } from '../utils/game-links.js';
 import { formatCultureCountdown } from './stat-columns.js';
 import '../utils/battle-model.js';   // side-effect import: puts the model on globalThis
 import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
@@ -69,14 +70,14 @@ export async function loadPlans(sysId) {
             return `
                 <div class="flex justify-between items-center py-0.5 text-s">
                     <span class="text-muted-foreground">At #${f.planet_index} ${statBadge}</span>
-                    <span class="text-red-400 font-medium">by [${esc(f.alliance_tag || '?')}] ${esc(f.owner_name || 'Unknown')} (CV: ${cv.toLocaleString()})</span>
+                    <span class="text-red-400 font-medium">by ${f.alliance_tag ? allianceLink(f.alliance_id, f.alliance_tag) : '[?]'} ${playerLink(f.owner_id, f.owner_name || 'Unknown')} (CV: ${cv.toLocaleString()})</span>
                 </div>`;
         }).join('') : '<span class="text-muted-foreground italic text-center py-2">No fleets detected.</span>';
 
         document.getElementById('intel-history-list').innerHTML = data.history.length ? data.history.map(h => {
             const when = formatEventTime(h.timestamp);
             const detail = h.event_type_id === 1
-                ? `<span class="text-foreground font-medium">${esc(h.old_owner || 'None')} &rarr; ${esc(h.new_owner || 'None')}</span>`
+                ? `<span class="text-foreground font-medium">${h.old_owner ? playerLink(null, h.old_owner) : 'None'} &rarr; ${h.new_owner ? playerLink(null, h.new_owner) : 'None'}</span>`
                 : `<span class="text-red-400 font-medium">Population drop${(h.old_value != null && h.new_value != null) ? ` (${h.old_value} &rarr; ${h.new_value})` : ''}</span>`;
             return `
             <div class="text-s leading-tight mb-2 border-l-2 border-border pl-2">

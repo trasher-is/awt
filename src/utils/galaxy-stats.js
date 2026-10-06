@@ -171,7 +171,7 @@ function computeGalaxyStats(db, { now = Date.now(), days = 14 } = {}) {
     const latestFleet = db.prepare(`SELECT MAX(updated_at) AS at FROM strongest_fleet`).get().at;
     const topFleet = latestFleet ? db.prepare(`
         SELECT sf.player_id AS id, sf.rank, sf.cv, sf.destroyers, sf.cruisers, sf.battleships,
-               p.name, a.tag
+               p.name, a.tag, a.id AS alliance_id
         FROM strongest_fleet sf
         LEFT JOIN players p ON p.id = sf.player_id
         LEFT JOIN alliances a ON a.id = p.alliance_id
@@ -180,14 +180,14 @@ function computeGalaxyStats(db, { now = Date.now(), days = 14 } = {}) {
     `).all(latestFleet) : [];
 
     const topLevel = db.prepare(`
-        SELECT p.id, p.name, a.tag, p.level, p.total_xp AS xp
+        SELECT p.id, p.name, a.tag, a.id AS alliance_id, p.level, p.total_xp AS xp
         FROM players p LEFT JOIN alliances a ON a.id = p.alliance_id
         WHERE p.resigned_at IS NULL AND p.level IS NOT NULL
         ORDER BY p.level DESC, COALESCE(p.total_xp, 0) DESC LIMIT 10
     `).all();
 
     const topPopulation = db.prepare(`
-        SELECT pl.owner_id AS id, p.name, a.tag, COUNT(*) AS planets, SUM(COALESCE(pl.population, 0)) AS population
+        SELECT pl.owner_id AS id, p.name, a.tag, a.id AS alliance_id, COUNT(*) AS planets, SUM(COALESCE(pl.population, 0)) AS population
         FROM planets pl
         LEFT JOIN players p ON p.id = pl.owner_id
         LEFT JOIN alliances a ON a.id = p.alliance_id

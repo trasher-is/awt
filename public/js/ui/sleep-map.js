@@ -11,6 +11,7 @@
 // number actually came from, so nobody plans a launch off a rounded label alone — the
 // launch times under "best launch" are exact instants, not hour labels.
 import { esc } from '../utils/escape.js';
+import { playerLink, allianceLink } from '../utils/game-links.js';
 
 let rows = [];
 let meta = { days: 14, travelHours: null, generatedAt: 0 };
@@ -112,8 +113,8 @@ function renderBody() {
         const nowClass = nowScore >= 0.8 ? 'text-green-400' : nowScore <= 0.2 ? 'text-red-400' : 'text-muted-foreground';
 
         return `<tr class="hover:bg-white/5">
-            <td class="px-3 py-1 whitespace-nowrap text-foreground">${esc(r.name)}${r.resigned ? ' <span class="text-muted-foreground/50">(resigned)</span>' : ''}</td>
-            <td class="px-2 py-1 text-muted-foreground">${esc(r.tag || '')}</td>
+            <td class="px-3 py-1 whitespace-nowrap text-foreground">${playerLink(r.id, r.name)}${r.resigned ? ' <span class="text-muted-foreground/50">(resigned)</span>' : ''}</td>
+            <td class="px-2 py-1 text-muted-foreground">${allianceLink(r.alliance_id, r.tag, '', { bare: true })}</td>
             <td class="px-2 py-1 text-right ${nowClass}">${Math.round(nowScore * 100)}%</td>
             <td class="px-2 py-1 text-muted-foreground">${quietFor}</td>
             ${cells}

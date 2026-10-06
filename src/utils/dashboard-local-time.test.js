@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { installGameLinks } = require('./game-links-sandbox');
 const { spawnSync } = require('child_process');
 
 const zones = { UTC: '17:50', 'Europe/Warsaw': '19:50', 'America/New_York': '13:50' };
@@ -52,6 +53,7 @@ function load(name, response = {}) {
     });
     const code = fs.readFileSync(path.join(__dirname, '../../public/js/ui', name), 'utf8')
         .replace(/^import\b[\s\S]*?;[^\n]*(?:\n|$)/gm, '').replace(/^export /gm, '');
+    installGameLinks(context);
     vm.runInContext(code, context, { filename: name });
     return { get, run: code => vm.runInContext(code, context), context };
 }

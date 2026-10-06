@@ -7,6 +7,9 @@
 // horizon. The gap between them is the uncertainty, and showing a single number would
 // present the hub's memory as the state of the galaxy.
 import { esc } from '../utils/escape.js';
+import { allianceLink, systemLink } from '../utils/game-links.js';
+// Tags here come from the owner-change log, without ids — the link index resolves them.
+const tagLink = (tag) => allianceLink(null, tag, '', { bare: true });
 
 let data = null;
 
@@ -75,14 +78,14 @@ function renderFrontier() {
     }
 
     body.innerHTML = rows.map(s => {
-        const named = s.claimingTags.map(t => `<span class="text-foreground">${esc(t.tag)}</span>&nbsp;${t.claims}`).join(' · ');
+        const named = s.claimingTags.map(t => `<span class="text-foreground">${tagLink(t.tag)}</span>&nbsp;${t.claims}`).join(' · ');
         const unallied = s.unalliedClaims ? `${named ? ' · ' : ''}<span class="text-muted-foreground">${s.unalliedClaims} unallied</span>` : '';
         const who = named || unallied ? '' : '<span class="text-muted-foreground/50">—</span>';
         // An old "last looked" is the whole point of the column: it says how much this row
         // is worth, and a system nobody has scanned in a week may already be full.
         const ageClass = s.oldestObservationHours > 72 ? 'text-aw-warning' : 'text-muted-foreground';
         return `<tr class="hover:bg-white/5">
-            <td class="p-2 text-foreground">[${s.system_id}] ${esc(s.name || '—')}</td>
+            <td class="p-2 text-foreground">${systemLink(s.system_id, `[${s.system_id}] ${s.name || '—'}`)}</td>
             <td class="p-2 text-right text-foreground">${s.freePlanets || ''}</td>
             <td class="p-2 text-right ${ageClass}">${esc(fmtAge(s.oldestObservationHours))}</td>
             <td class="p-2 text-right text-muted-foreground">${s.distance === null ? '—' : s.distance.toFixed(1)}</td>
@@ -110,8 +113,8 @@ function renderContested() {
     if (!host || !data) return;
     if (!data.contested.length) { host.innerHTML = '<span class="text-muted-foreground">Nobody is settling the same system as anyone else.</span>'; return; }
     host.innerHTML = data.contested.slice(0, 10).map(s => `
-        <div><span class="text-foreground">[${s.system_id}] ${esc(s.name || '—')}</span>
-        <span class="text-muted-foreground"> — ${s.claimingTags.map(t => `${esc(t.tag)} ${t.claims}`).join(' vs ')}</span></div>`).join('');
+        <div><span class="text-foreground">${systemLink(s.system_id, `[${s.system_id}] ${s.name || '—'}`)}</span>
+        <span class="text-muted-foreground"> — ${s.claimingTags.map(t => `${tagLink(t.tag)} ${t.claims}`).join(' vs ')}</span></div>`).join('');
 }
 
 function renderConquests() {
@@ -120,9 +123,9 @@ function renderConquests() {
     const rows = data.conquests.filter(c => c.planets > 0).slice(0, 10);
     if (!rows.length) { host.innerHTML = '<span class="text-muted-foreground">No planet changed hands in this window.</span>'; return; }
     host.innerHTML = rows.map(c => `
-        <div><span class="text-muted-foreground">${esc(c.from_tag || 'unallied')}</span>
+        <div><span class="text-muted-foreground">${c.from_tag ? tagLink(c.from_tag) : 'unallied'}</span>
         <span class="text-muted-foreground/60"> → </span>
-        <span class="text-foreground">${esc(c.to_tag || 'unallied')}</span>
+        <span class="text-foreground">${c.to_tag ? tagLink(c.to_tag) : 'unallied'}</span>
         <span class="text-muted-foreground"> ${c.planets}</span></div>`).join('');
 }
 
