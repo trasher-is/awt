@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { installGameLinks } = require('./game-links-sandbox');
 
 let pass = 0, fail = 0;
 function ok(name, condition, detail) {
@@ -55,6 +56,7 @@ function harness() {
     const code = fs.readFileSync(path.join(__dirname, '../../public/js/ui/route-planner.js'), 'utf8')
         .replace(/^import .*$/gm, '')
         .replace(/^export /gm, '');
+    installGameLinks(context);
     vm.runInContext(code, context);
     vm.runInContext('collectWaypoints = () => [{ systemId: 1, planetIndex: 1 }, { systemId: 2, planetIndex: 1 }];', context);
     return { get, requests, run: code => vm.runInContext(code, context), timers };

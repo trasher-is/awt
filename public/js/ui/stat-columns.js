@@ -20,6 +20,7 @@
 // the document work.
 
 import { esc } from '../utils/escape.js';
+import { playerLink, allianceLink } from '../utils/game-links.js';
 import '../utils/parse-number.js';   // side-effect import: AWNumber.compareNumeric, one locale parser
 import '../utils/idle-parse.js';     // side-effect import: AWIdleParse.parseIdleStringToSeconds
 import '../utils/sqlite-time.js';
@@ -331,8 +332,10 @@ function truePowerCell(v) {
     return v == null || Number.isNaN(Number(v)) ? Q : `${Math.round(Number(v))}%`;
 }
 
+// Opens the profile in the game frame (game-links.js), like every other sidebar link — it
+// used to open a new browser tab, which on a phone left the hub behind.
 function profileLink(row, hoverCls) {
-    return `<a href="/Game/Players/Profile/${num(row.id)}" target="_blank" class="hover:underline ${hoverCls}">${esc(row.name || 'Unknown')}</a>`;
+    return playerLink(row.id, row.name || 'Unknown', hoverCls);
 }
 
 /**
@@ -397,7 +400,7 @@ const P_STATS = hasStats('stats_scraped_at', 'has_intel');
 
 export const PLAYER_COLUMNS = [
     col('name', 'Name', { group: 'Player', locked: true, sort: 'string', head: 'sticky left-0 z-20 bg-secondary', cell: 'font-medium text-foreground sticky left-0 z-10 bg-card', render: r => profileLink(r, 'hover:text-primary') }),
-    col('alliance_tag', 'Ally', { group: 'Player', sort: 'string', cell: 'text-aw-warning', render: r => (r.alliance_tag ? `[${esc(r.alliance_tag)}]` : '-') }),
+    col('alliance_tag', 'Ally', { group: 'Player', sort: 'string', cell: 'text-aw-warning', render: r => allianceLink(r.alliance_id, r.alliance_tag) || '-' }),
     col('id', 'ID', { group: 'Player', default: false, cell: 'text-muted-foreground font-mono', render: r => num(r.id) }),
     col('country', 'Country', { group: 'Player', default: false, sort: 'string', render: r => text(r.country) }),
     col('joined', 'Joined', { group: 'Player', default: false, sort: 'string', cell: 'text-muted-foreground', render: r => text(r.joined), title: 'Join date as the game reports it' }),
@@ -546,7 +549,7 @@ const A_INTEL = hasIntel('pl_has_intel');
 const A_STATS = hasStats('pl_stats_scraped_at', 'pl_has_intel');
 
 export const ALLY_STATS_COLUMNS = [
-    col('player_name', 'Member', { group: 'Member', locked: true, sort: 'string', head: WAR_NAME_HEAD, cell: 'sticky left-0 z-10 bg-black font-medium text-foreground break-words leading-tight w-[110px] border-r border-zinc-800', render: r => esc(r.player_name || 'Unknown') }),
+    col('player_name', 'Member', { group: 'Member', locked: true, sort: 'string', head: WAR_NAME_HEAD, cell: 'sticky left-0 z-10 bg-black font-medium text-foreground break-words leading-tight w-[110px] border-r border-zinc-800', render: r => playerLink(r.player_id, r.player_name || 'Unknown', 'hover:text-primary') }),
     col('player_id', 'ID', { group: 'Member', cell: 'text-muted-foreground', render: r => num(r.player_id) }),
     col('planets_text', 'Planets', { group: 'Sheet', sort: 'string', cell: 'text-aw-ally font-semibold', render: r => text(r.planets_text) }),
     col('next_culture_at', 'Next Cult', { group: 'Sheet', sort: 'string', cell: 'font-semibold text-yellow-500 whitespace-nowrap', render: r => formatCultureCountdown(r.next_culture_at) }),

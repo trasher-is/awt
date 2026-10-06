@@ -78,13 +78,21 @@ try {
     ok('drop records identify the source and preserve observations without invented report fields',
         drop.id === null && drop.att_destroyers === null && drop.battle_report_id === null
         && drop.defender_name === 'Synthetic Owner' && Number(drop.old_population) === 80 && drop.killed_population === 7);
+    const panelRows = repo.searchBattleReportsFeed({ q: '', limit: 500 }).rows;
+    ok('the panel feed carries every link id', panelRows.length > 0 && panelRows.every(row => repo.FEED_LINK_KEYS.every(key => key in row)));
+    ok('a population drop links its owner as the defender',
+        panelRows.some(row => row.battle_report_id === null && row.defender_name === 'Synthetic Owner' && row.defender_id != null), panelRows.filter(r => r.battle_report_id === null));
+    ok('...and the export carries none of them',
+        repo.getBattleReportsExport({ scope: 'filtered', q: '' }).rows.every(row => repo.FEED_LINK_KEYS.every(key => !(key in row))));
     for (const q of ['', 'Synthetic Owner', 'SYN', 'Orbit', 'Beta', 'no match']) {
         for (const sort of ['occurred_at', 'cv', 'pop', 'att_cv', 'def_cv']) {
             for (const dir of ['asc', 'desc']) {
                 const result = repo.getBattleReportsExport({ scope: 'filtered', q, sort, dir }).rows;
                 const visible = repo.searchBattleReportsFeed({ q, sort, dir, limit: 500 }).rows;
                 ok(`filtered export matches search: ${q || '(empty)'}, ${sort}, ${dir}`,
-                    same(result.map(row => Object.fromEntries(Object.keys(visible[0] || {}).map(key => [key, row[key]]))), visible));
+                    // The panel's link ids (FEED_LINK_KEYS) are deliberately not exported.
+                    same(result.map(row => Object.fromEntries(Object.keys(visible[0] || {}).filter(key => !repo.FEED_LINK_KEYS.includes(key)).map(key => [key, row[key]]))),
+                        visible.map(row => Object.fromEntries(Object.entries(row).filter(([key]) => !repo.FEED_LINK_KEYS.includes(key))))));
             }
         }
     }

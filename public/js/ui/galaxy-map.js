@@ -22,6 +22,7 @@
 // hole in our intel into a claim about the galaxy, so unscanned systems are hollow rings
 // and scanned ones are filled.
 import { esc } from '../utils/escape.js';
+import { allianceLink, systemLink } from '../utils/game-links.js';
 import '../utils/fleet-traffic.js';   // side-effect import: the ship-position rule, defined once
 import '../utils/vision-model.js';   // side-effect import: the !vision rule, defined once
 import '../utils/travel-model.js';   // side-effect import: THE travel formula, defined once
@@ -840,7 +841,7 @@ function renderClaimsList() {
         const rows = shares.map(c => `
             <div class="flex items-start justify-between gap-1.5 pl-2">
                 <div class="min-w-0">
-                    <span class="text-foreground font-medium">${esc(c.alliance_tag)}</span>
+                    <span class="text-foreground font-medium">${allianceLink(null, c.alliance_tag, '', { bare: true })}</span>
                     ${c.planet_count != null ? `<span class="text-zinc-400"> ×${c.planet_count}</span>` : ''}
                     ${c.note ? `<div class="text-zinc-500 truncate">${esc(c.note)}</div>` : ''}
                 </div>
@@ -851,7 +852,7 @@ function renderClaimsList() {
                         class="gm-claim-del text-zinc-400 hover:text-red-400" title="Delete"><i class="fa-solid fa-trash"></i></button>
                 </div>
             </div>`).join('');
-        return `<div><div class="font-medium text-foreground">${esc(claimSystemLabel(systemId))}</div>${rows}</div>`;
+        return `<div><div class="font-medium text-foreground">${systemLink(systemId, claimSystemLabel(systemId))}</div>${rows}</div>`;
     }).join('');
 
     body.innerHTML = systemsHtml;

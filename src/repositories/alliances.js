@@ -20,6 +20,12 @@ function getAllianceIdByTag(tag) {
     return getAllianceIdByTagStmt.get(tag);
 }
 
+// For the sidebar's game links (GET /intel/link-index): every tag and its alliance id.
+const listAllianceTagIdsStmt = db.prepare(`SELECT id, tag FROM alliances WHERE tag IS NOT NULL AND tag != ''`);
+function listAllianceTagIds() {
+    return listAllianceTagIdsStmt.all();
+}
+
 const countAlliancesStmt = db.prepare(`SELECT COUNT(*) as count FROM alliances`);
 function countAlliances() {
     return countAlliancesStmt.get().count;
@@ -401,7 +407,7 @@ function deleteAllAllianceMemberStats() {
 }
 
 module.exports = {
-    getWarRoomAllianceIntelTags, getAllianceIdByTag, countAlliances, getWarRoomAlliances,
+    getWarRoomAllianceIntelTags, getAllianceIdByTag, listAllianceTagIds, countAlliances, getWarRoomAlliances,
     searchAlliancesByTagOrName, upsertAllianceFromApiSearch, upsertAllianceFromMapSector,
     upsertAllianceBasic, getAllianceTagById, upsertAllianceTagOnly, upsertAllianceFull, deleteAllAlliances,
     insertBroadcast, getBroadcasts, updateBroadcast, deleteBroadcast,

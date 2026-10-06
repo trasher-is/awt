@@ -10,7 +10,7 @@ function countFleets() {
 const getFleetsForSystemStmt = db.prepare(`
     SELECT f.planet_index, f.transports, f.colony_ships, f.destroyers, f.cruisers, f.battleships,
            f.arrival_at, f.arrival_time,
-           u.name as owner_name, a.tag as alliance_tag
+           f.owner_id, u.name as owner_name, a.id as alliance_id, a.tag as alliance_tag
     FROM fleets f
     LEFT JOIN players u ON f.owner_id = u.id
     LEFT JOIN alliances a ON u.alliance_id = a.id
@@ -34,11 +34,13 @@ function getFleetsForSystemFull(sysId) {
 const getFleetsFullDbStmt = db.prepare(`
     SELECT f.*,
            s.name as system_name, s.x, s.y,
-           u.name as owner_name, a.tag as alliance_tag
+           u.name as owner_name, a.id as alliance_id, a.tag as alliance_tag,
+           pl.game_planet_id
     FROM fleets f
     LEFT JOIN systems s ON f.system_id = s.id
     LEFT JOIN players u ON f.owner_id = u.id
     LEFT JOIN alliances a ON u.alliance_id = a.id
+    LEFT JOIN planets pl ON pl.system_id = f.system_id AND pl.planet_index = f.planet_index
 `);
 function getFleetsFullDb() {
     return getFleetsFullDbStmt.all();
@@ -200,7 +202,7 @@ function deleteAllStrongestFleet() {
 
 const getStrongestFleetFullStmt = db.prepare(`
     SELECT sf.rank, sf.player_id, sf.destroyers, sf.cruisers, sf.battleships, sf.cv, sf.updated_at,
-           p.name as owner_name, a.tag as alliance_tag
+           p.name as owner_name, a.id as alliance_id, a.tag as alliance_tag
     FROM strongest_fleet sf
     LEFT JOIN players p ON p.id = sf.player_id
     LEFT JOIN alliances a ON a.id = p.alliance_id
@@ -236,7 +238,7 @@ const getBestGuardedForMatchStmt = db.prepare(`
            CAST(REPLACE(REPLACE(bg.cv, ',', ''), ' ', '') AS INTEGER) AS cv,
            bg.updated_at,
            p.system_id, p.planet_index, p.owner_id,
-           s.name AS system_name, u.name AS owner_name, a.tag AS owner_tag
+           s.name AS system_name, u.name AS owner_name, a.id AS owner_alliance_id, a.tag AS owner_tag
     FROM best_guarded bg
     JOIN planets p ON p.game_planet_id = bg.game_planet_id
     LEFT JOIN systems s ON s.id = p.system_id
@@ -250,7 +252,7 @@ function getFleetLocationMatches() {
     const asCandidate = (g) => ({
         game_planet_id: g.game_planet_id, system_id: g.system_id, system_name: g.system_name,
         planet_index: g.planet_index, owner_id: g.owner_id, owner_name: g.owner_name,
-        owner_tag: g.owner_tag, guard_updated_at: g.updated_at,
+        owner_alliance_id: g.owner_alliance_id, owner_tag: g.owner_tag, guard_updated_at: g.updated_at,
     });
 
     const guardedByCv = new Map();

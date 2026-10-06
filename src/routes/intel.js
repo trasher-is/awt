@@ -103,6 +103,23 @@ router.get('/intel/summary', requireAuth, (req, res) => {
     }
 });
 
+// --- NAME/TAG -> ID, FOR THE SIDEBAR'S GAME LINKS ---
+// Several tools only know a player's name or an alliance's tag (Defence, Land Rush, the
+// Galaxy Archive), but the game's profile pages are addressed by id. The browser loads this
+// once (game-links.js) and links what it can resolve. Small: one row per player/alliance.
+router.get('/intel/link-index', requireAuth, (req, res) => {
+    try {
+        res.json({
+            success: true,
+            players: playersRepo.listPlayerNameIds().map(p => [p.id, p.name]),
+            alliances: alliancesRepo.listAllianceTagIds().map(a => [a.id, a.tag]),
+        });
+    } catch (err) {
+        console.error('[DB Error] Failed to build the link index:', err);
+        res.status(500).json({ error: 'Failed to build the link index' });
+    }
+});
+
 // --- GET ALL SYSTEMS FOR MASS SCAN ---
 router.get('/systems', requireAuth, (req, res) => {
     try {

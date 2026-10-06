@@ -30,6 +30,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 async function loadEsm(rel, tmp) {
     let src = read(rel);
     src = src.replace(/from '\.\.\/utils\/escape\.js'/g, `from '${pathToFileURL(path.join(tmp, 'escape.mjs')).href}'`);
+    src = src.replace(/from '\.\.\/utils\/game-links\.js'/g, `from '${pathToFileURL(path.join(tmp, 'game-links.mjs')).href}'`);
     src = src.replace(/import '\.\.\/utils\/([a-z-]+)\.js';/g, (m, name) => `import '${pathToFileURL(path.join(ROOT, 'public', 'js', 'utils', `${name}.js`)).href}';`);
     const target = path.join(tmp, path.basename(rel, '.js') + '.mjs');
     fs.writeFileSync(target, src);
@@ -39,6 +40,7 @@ async function loadEsm(rel, tmp) {
 (async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'awt-columns-'));
     fs.writeFileSync(path.join(tmp, 'escape.mjs'), read('public/js/utils/escape.js'));
+    fs.writeFileSync(path.join(tmp, 'game-links.mjs'), read('public/js/utils/game-links.js').replace("from './escape.js'", "from './escape.mjs'"));
 
     console.log('── Preferences: only the difference from the defaults is remembered ' + '─'.repeat(6));
     const cols = [

@@ -361,7 +361,7 @@ const battleReportsFeedStmt = db.prepare(`
 const unmatchedPopDropsStmt = db.prepare(`
     SELECT pe.timestamp AS occurred_at, pe.system_id, pe.planet_index, s.name AS system_name,
            pe.old_value AS old_population, pe.new_value AS new_population,
-           p.name AS owner_name
+           p.name AS owner_name, p.id AS owner_id, pl.game_planet_id
     FROM planet_events pe
     LEFT JOIN systems s ON s.id = pe.system_id
     LEFT JOIN planets pl ON pl.system_id = pe.system_id AND pl.planet_index = pe.planet_index
@@ -426,10 +426,11 @@ const battleReportColumns = db.prepare('PRAGMA table_info(battle_reports)').all(
 
 const battleReportsSearchSelect = `
     SELECT br.*, br.id AS battle_report_id, datetime(br.started_at) AS occurred_at,
-           s.name AS system_name,
+           s.name AS system_name, pl.game_planet_id,
            (COALESCE(br.att_lost_cv, 0) + COALESCE(br.def_lost_cv, 0)) AS total_cv_lost
     FROM battle_reports br
     LEFT JOIN systems s ON s.id = br.system_id
+    LEFT JOIN planets pl ON pl.system_id = br.system_id AND pl.planet_index = br.planet_index
 `;
 const battleReportsSearchStmt = db.prepare(`${battleReportsSearchSelect}
     WHERE br.system_id IS NOT NULL
@@ -447,7 +448,7 @@ const allBattleReportsExportStmt = db.prepare(`${battleReportsSearchSelect}
 const unmatchedPopDropsSearchStmt = db.prepare(`
     SELECT pe.timestamp AS occurred_at, pe.system_id, pe.planet_index, s.name AS system_name,
            pe.old_value AS old_population, pe.new_value AS new_population,
-           p.name AS owner_name
+           p.name AS owner_name, p.id AS owner_id, pl.game_planet_id
     FROM planet_events pe
     LEFT JOIN systems s ON s.id = pe.system_id
     LEFT JOIN planets pl ON pl.system_id = pe.system_id AND pl.planet_index = pe.planet_index
@@ -495,18 +496,33 @@ function battleReportFeedRow(row, includeDetails = false) {
     };
 }
 
+// What the Battle Reports panel's player/alliance/planet links point at. Kept out of
+// battleReportFeedRow so the CSV/JSON export's columns stay exactly what they were (it
+// already carries att_player_id etc. among the stored columns). A bare population-drop row
+// only knows the planet's current owner, so its "defender" is that owner.
+const FEED_LINK_KEYS = ['game_planet_id', 'attacker_id', 'attacker_alliance_id', 'defender_id', 'defender_alliance_id'];
+function linkIds(row) {
+    return {
+        game_planet_id: row.game_planet_id ?? null,
+        attacker_id: row.att_player_id ?? null, attacker_alliance_id: row.att_alliance_id ?? null,
+        defender_id: row.def_player_id ?? row.owner_id ?? null, defender_alliance_id: row.def_alliance_id ?? null,
+    };
+}
+
 function searchBattleReportsFeed({ q = '', sort = 'occurred_at', dir = 'desc', limit = 50, offset = 0, includeDetails = false } = {}) {
     const trimmed = (q || '').trim();
     const likeTerm = trimmed ? `%${trimmed}%` : '%';
 
-    const battles = battleReportsSearchStmt.all({ q: likeTerm }).map(row => battleReportFeedRow(row, includeDetails));
+    // The panel (not the export) also gets the ids its game links need — see linkIds.
+    const withLinks = (feedRow, row) => (includeDetails ? feedRow : { ...feedRow, ...linkIds(row) });
+    const battles = battleReportsSearchStmt.all({ q: likeTerm }).map(row => withLinks(battleReportFeedRow(row, includeDetails), row));
 
     // A bare population-drop row has no attacker/defender name of its own to match
     // against — skip the query entirely (same shape as the plain feed's unfiltered pull)
     // when there's nothing to search for, since @q would just be the neutral '%' anyway.
     const dropRows = (trimmed ? unmatchedPopDropsSearchStmt : unmatchedPopDropsStmt)
         .all({ q: likeTerm, window: POP_DROP_MATCH_WINDOW_MINUTES, limit: -1 })
-        .map(row => ({
+        .map(row => withLinks({
             ...(includeDetails ? {
                 record_type: 'population_drop',
                 ...Object.fromEntries(battleReportColumns.map(column => [column, null])),
@@ -524,7 +540,7 @@ function searchBattleReportsFeed({ q = '', sort = 'occurred_at', dir = 'desc', l
             winner: null,
             total_cv_lost: 0,
             old_population: row.old_population, new_population: row.new_population,
-        }));
+        }, row));
 
     const merged = sortBattleReportRows([...battles, ...dropRows], sort, dir);
     return { total: merged.length, rows: merged.slice(offset, offset + limit) };
@@ -632,6 +648,7 @@ function snapshotStatsForReports(ids) {
 }
 
 module.exports = {
+    FEED_LINK_KEYS,
     deleteAllBattleReports,
     snapshotStatsForReports,
     getPendingAnnouncements,

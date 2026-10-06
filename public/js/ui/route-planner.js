@@ -6,6 +6,9 @@
 // travel formula for free.
 
 import { esc } from '../utils/escape.js';
+import { playerLink, allianceLink, systemLink } from '../utils/game-links.js';
+// A stop on a route: its system's game page, labelled "Name #planet".
+const stopLink = (s) => systemLink(s.systemId, `${s.systemName || '?'} #${s.planetIndex}`);
 import '../utils/request-sequence.js'; // side-effect import: "only the latest request renders"
 import '../utils/fresh-cache.js';      // side-effect import: reference data with a lifetime
 import '../utils/route-schedule-input.js'; // preserves saved instants through local input
@@ -377,7 +380,7 @@ function durationDifference(seconds) {
 }
 
 function recordedIntel(meta) {
-    const owner = `${esc(meta.ownerName || 'Unknown owner')}${meta.allianceTag ? ` [${esc(meta.allianceTag)}]` : ''}`;
+    const owner = `${meta.ownerName ? playerLink(meta.ownerId, meta.ownerName) : 'Unknown owner'}${meta.allianceTag ? ` ${allianceLink(meta.allianceId, meta.allianceTag)}` : ''}`;
     const synced = meta.lastSeenAt
         ? `Last synced <span title="${esc(fmtUtc(meta.lastSeenAt))} UTC">${esc(fmtLocal(meta.lastSeenAt))}</span>`
         : 'Sync time unknown';
@@ -431,7 +434,7 @@ async function findAirports() {
                 : '';
             return `<div class="border border-border rounded bg-zinc-950 p-2 flex flex-col gap-1 text-xs">
                 <div class="flex items-start justify-between gap-2">
-                    <span class="text-foreground font-semibold">${esc(candidate.waypoint.systemName || 'Sys')} #${candidate.waypoint.systemId}, planet ${candidate.waypoint.planetIndex}</span>
+                    <span class="text-foreground font-semibold">${systemLink(candidate.waypoint.systemId, `${candidate.waypoint.systemName || 'Sys'} #${candidate.waypoint.systemId}`)}, planet ${candidate.waypoint.planetIndex}</span>
                     <button type="button" class="rp-use-airport shrink-0 text-emerald-400 hover:underline" data-airport-index="${index}">Use airport</button>
                 </div>
                 <div class="text-emerald-400">Friendly airport (SB ${candidate.starbase}) · Insert after ${candidate.insertAfterIndex === 0 ? 'Start' : `Jump ${candidate.insertAfterIndex}`}</div>
@@ -509,9 +512,9 @@ function renderLeg(l) {
       <div class="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
         <span class="font-mono text-foreground font-semibold w-20 shrink-0">${esc(l.travelTime)}</span>
         <span class="text-muted-foreground truncate flex-1 min-w-0">
-            ${esc(l.from.systemName || '?')} #${l.from.planetIndex}
+            ${stopLink(l.from)}
             <i class="fa-solid fa-arrow-right mx-1 text-zinc-600"></i>
-            ${esc(l.to.systemName || '?')} #${l.to.planetIndex}
+            ${stopLink(l.to)}
         </span>
         <span class="text-zinc-500 shrink-0">dist ${l.distance}</span>
         ${warn}
@@ -644,8 +647,8 @@ async function loadShared() {
         box.innerHTML = d.routes.map(r => {
             const mine = me.id != null && r.authorId === me.id;
             const canEdit = mine || me.role === 'admin' || r.authorId == null;
-            const hops = r.legs.map(l => `${esc(l.to.systemName || '?')} #${l.to.planetIndex}`).join(' → ');
-            const origin = r.legs.length ? `${esc(r.legs[0].from.systemName || '?')} #${r.legs[0].from.planetIndex}` : '?';
+            const hops = r.legs.map(l => stopLink(l.to)).join(' → ');
+            const origin = r.legs.length ? stopLink(r.legs[0].from) : '?';
             const start = r.departsAt
                 ? `starts <span title="${esc(fmtUtc(r.departsAt))} UTC">${esc(fmtLocal(r.departsAt))}</span>`
                 : 'no schedule';
@@ -657,7 +660,7 @@ async function loadShared() {
                 <div class="flex items-start justify-between gap-2">
                     <div class="min-w-0">
                         <div class="text-sm text-foreground font-medium truncate">${esc(r.title || 'Untitled route')}</div>
-                        <div class="text-xs text-muted-foreground truncate">by ${esc(r.author)}${r.visibility === 'private' ? ' · private' : ''}</div>
+                        <div class="text-xs text-muted-foreground truncate">by ${playerLink(null, r.author)}${r.visibility === 'private' ? ' · private' : ''}</div>
                     </div>
                     <div class="font-mono text-sm text-foreground shrink-0">${esc(r.totalTime)}</div>
                 </div>

@@ -5,6 +5,7 @@
 // request. The one thing done here is bucketing the battle chart into the viewer's own
 // days: the server answers in UTC hours because it cannot know where the member sits.
 import { esc, escAttr } from '../utils/escape.js';
+import { playerLink, allianceLink } from '../utils/game-links.js';
 
 const PANEL_ID = 'galaxy-dashboard-panel';
 const HOUR = 3600 * 1000;
@@ -22,12 +23,12 @@ function ago(ms) {
     return `${Math.round(h / 24)}d ago`;
 }
 
-function tagHtml(tag) {
+function tagHtml(tag, allianceId) {
     if (!tag) return '<span class="text-muted-foreground/50">—</span>';
     const upper = String(tag).toUpperCase();
     const cls = data.ownTags.includes(upper) ? 'text-primary font-semibold'
         : data.friendlyTags.includes(upper) ? 'text-green-400' : 'text-muted-foreground';
-    return `<span class="${cls}">[${esc(tag)}]</span>`;
+    return `<span class="${cls}">${allianceLink(allianceId, tag)}</span>`;
 }
 
 function tile(label, value, sub, warn) {
@@ -106,8 +107,8 @@ function board(listId, rows, valueOf) {
     if (!rows.length) { el.innerHTML = '<li class="text-muted-foreground">No data yet.</li>'; return; }
     el.innerHTML = rows.map((r, i) => `<li class="flex items-baseline gap-2 min-w-0">
         <span class="w-5 text-right text-muted-foreground/60 shrink-0">${i + 1}</span>
-        <span class="truncate text-foreground">${esc(r.name || `#${r.id}`)}</span>
-        <span class="shrink-0">${tagHtml(r.tag)}</span>
+        <span class="truncate text-foreground">${playerLink(r.id, r.name || `#${r.id}`)}</span>
+        <span class="shrink-0">${tagHtml(r.tag, r.alliance_id)}</span>
         <span class="ml-auto shrink-0 text-foreground">${valueOf(r)}</span>
     </li>`).join('');
 }
@@ -123,7 +124,7 @@ function renderBoards() {
 // key, label, value for sorting, cell html, default direction
 const COLUMNS = [
     ['ranking', '#', r => r.ranking ?? Infinity, r => r.ranking ?? '—', 'asc'],
-    ['tag', 'Alliance', r => (r.tag || '~').toLowerCase(), r => `${tagHtml(r.tag)} <span class="text-muted-foreground font-sans">${esc(r.name || '')}</span>`, 'asc'],
+    ['tag', 'Alliance', r => (r.tag || '~').toLowerCase(), r => `${tagHtml(r.tag, r.id)} <span class="text-muted-foreground font-sans">${allianceLink(r.id, r.name || '', '', { bare: true })}</span>`, 'asc'],
     ['points', 'Pts', r => r.points ?? -1, r => fmt(r.points), 'desc'],
     ['members', 'Members', r => r.members, r => `${r.members} <span class="text-muted-foreground" title="active in the last 24h">(${r.active24h})</span>`, 'desc'],
     ['avgLevel', 'Avg PL', r => r.avgLevel ?? -1, r => r.avgLevel ?? '—', 'desc'],

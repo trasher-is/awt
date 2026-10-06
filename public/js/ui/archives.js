@@ -1,6 +1,7 @@
 // public/js/ui/archives.js
 import { esc } from '../utils/escape.js';
 import { navToIframe } from './search.js';
+import { playerLink, allianceLink, systemLink, planetLink } from '../utils/game-links.js';
 // Reached from the Planets panel's toolbar: "how much free land is left, and for how long"
 // is a different question about the same rows, and it does not belong in this file's 1600
 // lines any more than the galaxy map does.
@@ -204,7 +205,7 @@ export async function openFleetDatabasePanel() {
     panel.classList.replace('translate-x-full', 'translate-x-0');
     if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
     
-    document.getElementById('flt-db-table-body').innerHTML = '<tr><td colspan="11" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Archive...</td></tr>';
+    document.getElementById('flt-db-table-body').innerHTML = '<tr><td colspan="12" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading Archive...</td></tr>';
     try {
         const res = await fetch('/hub-api/intel/fleets_db');
         const data = await res.json();
@@ -212,7 +213,7 @@ export async function openFleetDatabasePanel() {
             rawDbFleets = data.fleets.map(f => ({ ...f, cv: cvOf(f) }));
             renderFleetTable(); 
         }
-    } catch (err) { document.getElementById('flt-db-table-body').innerHTML = '<tr><td colspan="11" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
+    } catch (err) { document.getElementById('flt-db-table-body').innerHTML = '<tr><td colspan="12" class="text-center py-8 text-red-500">Failed to load data.</td></tr>'; }
 }
 
 // --- FLEET LOCATIONS (war-tool groundwork, 2026-09-20) ---
@@ -261,20 +262,21 @@ function renderFleetLocationsTable() {
     tbody.innerHTML = filtered.map(f => {
         const status = LOCATION_STATUS_STYLE[f.location_status] || { label: f.location_status || 'Unknown', cls: 'text-muted-foreground' };
         let locationText;
-        if (f.location_status === 'home') locationText = `${esc(f.location.system_name || 'Unknown')} #${f.location.planet_index}`;
-        else if (f.location_status === 'parked') locationText = `${esc(f.location.system_name || 'Unknown')} #${f.location.planet_index} (${esc(f.location.owner_name || 'Unowned')}${f.location.owner_tag ? ` [${esc(f.location.owner_tag)}]` : ''})`;
+        const at = (l) => planetLink({ planetId: l.game_planet_id, systemId: l.system_id }, `${l.system_name || 'Unknown'} #${l.planet_index}`);
+        if (f.location_status === 'home') locationText = at(f.location);
+        else if (f.location_status === 'parked') locationText = `${at(f.location)} (${f.location.owner_name ? playerLink(f.location.owner_id, f.location.owner_name) : 'Unowned'}${f.location.owner_tag ? ` ${allianceLink(f.location.owner_alliance_id, f.location.owner_tag)}` : ''})`;
         else if (f.location_status === 'ambiguous') locationText = `${f.candidates.length} candidate${f.candidates.length === 1 ? '' : 's'} at this CV`;
         else locationText = '—';
 
         const lastBattleText = f.last_battle_seen
-            ? `${esc(f.last_battle_seen.system_name || 'Unknown')} #${f.last_battle_seen.planet_index ?? '?'}`
+            ? systemLink(f.last_battle_seen.system_id, `${f.last_battle_seen.system_name || 'Unknown'} #${f.last_battle_seen.planet_index ?? '?'}`)
             : '—';
 
         return `
         <tr class="hover:bg-accent/50 transition-colors">
             <td class="p-3 text-muted-foreground">#${f.rank}</td>
-            <td class="p-3 border-l border-border font-medium text-foreground">${esc(f.owner_name || (f.player_id == null ? 'Unknown' : `#${f.player_id}`))}</td>
-            <td class="p-3 text-aw-warning">${f.alliance_tag ? `[${esc(f.alliance_tag)}]` : '-'}</td>
+            <td class="p-3 border-l border-border font-medium text-foreground">${playerLink(f.player_id, f.owner_name || (f.player_id == null ? 'Unknown' : `#${f.player_id}`))}</td>
+            <td class="p-3 text-aw-warning">${allianceLink(f.alliance_id, f.alliance_tag) || '-'}</td>
             <td class="p-3 border-l border-border text-aw-warning font-bold">${(f.cv || 0).toLocaleString()}</td>
             <td class="p-3 text-red-400">${f.destroyers || 0}</td>
             <td class="p-3 text-red-400">${f.cruisers || 0}</td>
@@ -668,9 +670,9 @@ function updateSortArrows() {
 // battleReports.js), so there's no reason to withhold it from the loser's cell too. A bare
 // population-drop row has no side data at all (combatValue is null), so the CV line is
 // omitted entirely rather than showing a misleading "— CV".
-function battleSideCell(name, tag, combatValue, survivedCv, isWinner) {
+function battleSideCell(name, tag, combatValue, survivedCv, isWinner, ids = {}) {
     if (!name) return '<span class="text-muted-foreground">—</span>';
-    const label = `${tag ? `[${esc(tag)}] ` : ''}${esc(name)}`;
+    const label = `${tag ? `${allianceLink(ids.allianceId, tag)} ` : ''}${playerLink(ids.playerId, name)}`;
     const nameHtml = isWinner ? `<strong class="text-emerald-400">${label}</strong>` : label;
     if (combatValue == null) return nameHtml;
     const cvLine = survivedCv != null
@@ -694,11 +696,14 @@ function renderBattleReportsTable(feed, total) {
 
     body.innerHTML = feed.map(row => {
         const when = formatSqliteUtc(row.occurred_at, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-        const systemLabel = row.system_name ? `${esc(row.system_name)} [${row.system_id}] #${row.planet_index}` : `#${row.system_id}/${row.planet_index}`;
+        const systemLabel = planetLink({ planetId: row.game_planet_id, systemId: row.system_id },
+            row.system_name ? `${row.system_name} [${row.system_id}] #${row.planet_index}` : `#${row.system_id}/${row.planet_index}`);
         const attacker = battleSideCell(row.attacker_name, row.attacker_alliance_tag,
-            row.attacker_combat_value, row.attacker_survived_cv, row.winner_side === 'att');
+            row.attacker_combat_value, row.attacker_survived_cv, row.winner_side === 'att',
+            { playerId: row.attacker_id, allianceId: row.attacker_alliance_id });
         const defender = battleSideCell(row.defender_name, row.defender_alliance_tag,
-            row.defender_combat_value, row.defender_survived_cv, row.winner_side === 'def');
+            row.defender_combat_value, row.defender_survived_cv, row.winner_side === 'def',
+            { playerId: row.defender_id, allianceId: row.defender_alliance_id });
         // 0 is a real value (a battle where nothing was actually lost, or a bare pop-drop
         // row with no CV at all) — shown as-is rather than masked as "no data".
         const cv = row.total_cv_lost != null ? row.total_cv_lost.toLocaleString() : '<span class="text-muted-foreground">—</span>';
@@ -869,7 +874,7 @@ function renderSystemTable() {
     const tbody = document.getElementById('sys-db-table-body'); if (!tbody) return;
     tbody.innerHTML = f.map(s => `
         <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3 font-mono">${s.id}</td><td class="p-3 font-medium text-foreground">${esc(s.name || 'Unknown')}</td><td>${s.x}</td><td>${s.y}</td><td class="p-3 border-l border-border text-aw-ally">${s.planet_count || 0}</td><td class="p-3 text-aw-enemy">${s.fleet_count || 0}</td><td class="p-3 border-l border-border text-muted-foreground">${esc(formatLocalDateTime(s.updated_at))}</td>
+            <td class="p-3 font-mono">${systemLink(s.id, s.id)}</td><td class="p-3 font-medium text-foreground">${systemLink(s.id, s.name || 'Unknown')}</td><td>${s.x}</td><td>${s.y}</td><td class="p-3 border-l border-border text-aw-ally">${s.planet_count || 0}</td><td class="p-3 text-aw-enemy">${s.fleet_count || 0}</td><td class="p-3 border-l border-border text-muted-foreground">${esc(formatLocalDateTime(s.updated_at))}</td>
         </tr>`).join('');
 }
 
@@ -882,14 +887,15 @@ function renderPlanetTable() {
     const tbody = document.getElementById('pln-db-table-body'); if (!tbody) return;
     tbody.innerHTML = f.map(p => `
         <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3 font-mono">${p.system_id}</td><td>${esc(p.system_name || 'Unknown')}</td><td class="p-3 font-medium text-foreground">#${p.planet_index}</td><td class="p-3 border-l border-border">${esc(p.owner_name || 'Empty')}</td><td class="p-3 text-aw-warning">${p.alliance_tag ? `[${esc(p.alliance_tag)}]` : '-'}</td><td class="p-3 border-l border-border text-primary">${(p.population || 0).toLocaleString()}</td><td class="p-3 text-aw-warning">${p.starbase || 0}</td><td class="p-3 border-l border-border text-muted-foreground">${esc(formatLocalDateTime(p.updated_at))}</td>
+            <td class="p-3 font-mono">${systemLink(p.system_id, p.system_id)}</td><td>${systemLink(p.system_id, p.system_name || 'Unknown')}</td><td class="p-3 font-medium text-foreground">${planetLink({ planetId: p.game_planet_id, systemId: p.system_id }, `#${p.planet_index}`)}</td><td class="p-3 border-l border-border">${p.owner_name ? playerLink(p.owner_id, p.owner_name) : 'Empty'}</td><td class="p-3 text-aw-warning">${allianceLink(p.alliance_id, p.alliance_tag) || '-'}</td><td class="p-3 border-l border-border text-primary">${(p.population || 0).toLocaleString()}</td><td class="p-3 text-aw-warning">${p.starbase || 0}</td><td class="p-3 border-l border-border text-muted-foreground">${esc(formatLocalDateTime(p.updated_at))}</td>
         </tr>`).join('');
 }
 
 function renderFleetTable() {
     const input = document.getElementById('flt-db-search-input');
     const q = (input ? input.value : '').toLowerCase();
-    let f = rawDbFleets.filter(f => (f.system_name && f.system_name.toLowerCase().includes(q)) || (f.owner_name && f.owner_name.toLowerCase().includes(q)));
+    let f = rawDbFleets.filter(f => (f.system_name && f.system_name.toLowerCase().includes(q)) || (f.owner_name && f.owner_name.toLowerCase().includes(q))
+        || (f.system_id != null && String(f.system_id) === q.trim()) || (f.alliance_tag && f.alliance_tag.toLowerCase().includes(q.replace(/[[\]]/g, ''))));
     f.sort((a, b) => { let v1 = a[fltDbSortCol]||0, v2 = b[fltDbSortCol]||0; if(typeof v1==='string')v1=v1.toLowerCase(); if(typeof v2==='string')v2=v2.toLowerCase(); return v1<v2 ? (fltDbSortAsc?-1:1) : (v1>v2 ? (fltDbSortAsc?1:-1) : 0); });
     const countEl = document.getElementById('flt-db-result-count'); if (countEl) countEl.innerText = f.length;
     const tbody = document.getElementById('flt-db-table-body'); if (!tbody) return;
@@ -902,7 +908,7 @@ function renderFleetTable() {
         const arrivalTitle = !canonicalArrival && sourceArrival ? `Recorded source time (timezone unknown): ${sourceArrival}` : '';
         return `
         <tr class="hover:bg-accent/50 transition-colors">
-            <td class="p-3">${esc(f.system_name || 'Unknown')}</td><td class="p-3 font-medium text-foreground">#${f.planet_index}</td><td class="p-3 border-l border-border">${esc(f.owner_name || 'Unknown')}</td><td class="p-3 text-aw-warning">${f.alliance_tag ? `[${esc(f.alliance_tag)}]` : '-'}</td><td class="p-3 border-l border-border text-gray-400">${f.transports || 0}</td><td class="p-3 text-gray-400">${f.colony_ships || 0}</td><td class="p-3 text-red-400 border-l border-border">${f.destroyers || 0}</td><td class="p-3 text-red-400">${f.cruisers || 0}</td><td class="p-3 text-red-400">${f.battleships || 0}</td><td class="p-3 text-aw-warning border-l border-border font-bold">${(f.cv || 0).toLocaleString()}</td><td title="${esc(arrivalTitle)}" class="p-3 border-l border-border ${arrival ? 'text-red-400 font-bold' : 'text-muted-foreground'}">${esc(arrival || 'Stationed')}</td>
+            <td class="p-3 font-mono">${systemLink(f.system_id, f.system_id ?? '?')}</td><td class="p-3">${systemLink(f.system_id, f.system_name || 'Unknown')}</td><td class="p-3 font-medium text-foreground">${planetLink({ planetId: f.game_planet_id, systemId: f.system_id }, `#${f.planet_index}`)}</td><td class="p-3 border-l border-border">${playerLink(f.owner_id, f.owner_name || 'Unknown')}</td><td class="p-3 text-aw-warning">${allianceLink(f.alliance_id, f.alliance_tag) || '-'}</td><td class="p-3 border-l border-border text-gray-400">${f.transports || 0}</td><td class="p-3 text-gray-400">${f.colony_ships || 0}</td><td class="p-3 text-red-400 border-l border-border">${f.destroyers || 0}</td><td class="p-3 text-red-400">${f.cruisers || 0}</td><td class="p-3 text-red-400">${f.battleships || 0}</td><td class="p-3 text-aw-warning border-l border-border font-bold">${(f.cv || 0).toLocaleString()}</td><td title="${esc(arrivalTitle)}" class="p-3 border-l border-border ${arrival ? 'text-red-400 font-bold' : 'text-muted-foreground'}">${esc(arrival || 'Stationed')}</td>
         </tr>`;
     }).join('');
 }
@@ -1109,7 +1115,7 @@ function renderTaBoard() {
         confirmList.innerHTML = pendingForMe.map(t => {
             const other = t.player_a.toLowerCase() === meLower ? t.player_b : t.player_a;
             return `<div class="flex items-center justify-between bg-zinc-950 border border-yellow-700/50 rounded-md px-3 py-2">
-                <span class="text-sm text-foreground"><b>${esc(other)}</b> proposed a trade agreement with you</span>
+                <span class="text-sm text-foreground"><b>${playerLink(null, other)}</b> proposed a trade agreement with you</span>
                 <span class="flex gap-2">
                     <button data-ta-confirm="${t.id}" class="h-8 px-3 rounded-md bg-green-700 hover:bg-green-600 text-white text-xs font-medium">Confirm</button>
                     <button data-ta-cancel="${t.id}" class="h-8 px-3 rounded-md border border-border hover:bg-secondary text-xs">Decline</button>
@@ -1143,7 +1149,7 @@ function renderTaBoard() {
         const c1 = taCount(p1.name.toLowerCase(), agreements);
         const full1 = c1 >= maxTas;
         html += `<tr>
-            <td class="sticky left-0 bg-black px-2 py-1 md:px-3 md:py-1.5 font-semibold text-foreground border border-border/40 whitespace-nowrap">${esc(p1.name)}${p1.isTrader ? ' <span class="text-yellow-400">T</span>' : ''}</td>
+            <td class="sticky left-0 bg-black px-2 py-1 md:px-3 md:py-1.5 font-semibold text-foreground border border-border/40 whitespace-nowrap">${playerLink(p1.id ?? p1.player_id, p1.name)}${p1.isTrader ? ' <span class="text-yellow-400">T</span>' : ''}</td>
             <td class="px-2 py-1 md:px-3 md:py-1.5 text-center border border-border/40 ${full1 ? 'text-green-400 font-bold' : 'text-muted-foreground'}">${c1}/${maxTas}</td>`;
         members.forEach(p2 => {
             html += taCell(p1, p2, { me: meLower, isAdmin, maxTas, traderSet, agreements, full1 });
