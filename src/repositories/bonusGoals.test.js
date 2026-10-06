@@ -334,8 +334,16 @@ const milestoneGoal = bonusGoals.createGoal({
     enabled: true,
 });
 
+// A non-member crossing first must leave the milestone open, not use it up.
+db.prepare(`INSERT INTO players (id, name, energy, biology) VALUES (949, 'EnemyScientist', 50, 30)`).run();
+const enemyEval = bonusGoals.evaluatePlayerStatsForGoals(949);
+ok('a player with no hub account crossing every threshold awards nothing', enemyEval.length === 0, enemyEval);
+
 db.prepare(`INSERT INTO players (id, name, energy, biology) VALUES (950, 'Scientist', 42, 20)`).run();
+db.prepare(`INSERT INTO app_users (id, game_name, password_hash) VALUES (960, 'scientist', 'x'), (961, 'LateArrival', 'x')`).run();
 const firstEval = bonusGoals.evaluatePlayerStatsForGoals(950);
+ok('a member (linked case-insensitively) still claims the 40 milestone the non-member crossed first',
+    firstEval.some(a => a.threshold === 40), firstEval);
 ok('energy 42 crosses the 40 threshold but not 45 — one award, not two',
     firstEval.length === 1 && firstEval[0].points === 30 && firstEval[0].threshold === 40, firstEval);
 ok('biology 20 does not reach its 25 threshold — no award for that milestone', !firstEval.some(a => a.stat === 'biology'), firstEval);
