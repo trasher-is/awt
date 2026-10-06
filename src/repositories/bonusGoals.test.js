@@ -107,12 +107,13 @@ ok('a DISABLED goal never counts as stale, even with no snapshot', !staleAfterDi
 console.log('\n── evaluateBattleReportForGoals: crediting a hit on a ranked planet ' + '─'.repeat(4));
 db.prepare(`INSERT INTO players (id, name) VALUES (700, 'Raider700')`).run();
 db.prepare(`
-    INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_id, att_player_name, def_lost_cv, killed_population)
-    VALUES (88001, '2026-09-11T10:00:00Z', 500, 3, 700, 'Raider700', 250, 5)
+    INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_id, att_player_name,
+        def_lost_cv, killed_population, conquered_planet, att_alliance_id, def_alliance_id)
+    VALUES (88001, '2026-09-11T10:00:00Z', 500, 3, 700, 'Raider700', 250, 5, 1, 10, 20)
 `).run();
 
 const awarded = bonusGoals.evaluateBattleReportForGoals(88001);
-ok('a real hit on the #1-ranked planet awards the tier-1 points (100)',
+ok('conquering the #1-ranked planet from another alliance awards the tier-1 points (100)',
     awarded.length === 1 && awarded[0].points === 100, awarded);
 
 const awardRow = db.prepare(`SELECT * FROM bonus_goal_awards WHERE goal_id = ? AND source_key = ?`).get(goal.id, 'br:88001');
@@ -135,6 +136,34 @@ db.prepare(`
 `).run();
 const unrankedEval = bonusGoals.evaluateBattleReportForGoals(88003);
 ok('a real hit on a planet NOT in any active ranking snapshot awards nothing', unrankedEval.length === 0, unrankedEval);
+
+// The 2026-10-06 rule: damage alone no longer scores a ranked planet — real data had 42 of
+// 45 awards coming from members farming starbases on their own alliance's planets.
+const insertRankedHit = db.prepare(`
+    INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_id, att_player_name,
+        def_lost_cv, killed_population, conquered_planet, att_alliance_id, def_alliance_id)
+    VALUES (@id, '2026-09-11T13:00:00Z', 500, 3, 700, 'Raider700', @def_lost_cv, 0, @conquered, @att, @def)
+`);
+insertRankedHit.run({ id: 88004, def_lost_cv: 99, conquered: 0, att: 10, def: 20 });
+const enemyNoConquestEval = bonusGoals.evaluateBattleReportForGoals(88004);
+ok('a damaging hit on a ranked enemy planet that does NOT take it awards nothing',
+    enemyNoConquestEval.length === 0, enemyNoConquestEval);
+
+insertRankedHit.run({ id: 88005, def_lost_cv: 99, conquered: 0, att: 10, def: 10 });
+const allyFarmEval = bonusGoals.evaluateBattleReportForGoals(88005);
+ok('starbase farming on an own-alliance ranked planet awards nothing (the Harpyie/Moardin25 case)',
+    allyFarmEval.length === 0, allyFarmEval);
+
+insertRankedHit.run({ id: 88006, def_lost_cv: 5, conquered: 1, att: 10, def: 10 });
+const allyHandoverEval = bonusGoals.evaluateBattleReportForGoals(88006);
+ok('conquering a ranked planet from an ally (a handover) awards nothing',
+    allyHandoverEval.length === 0, allyHandoverEval);
+
+insertRankedHit.run({ id: 88007, def_lost_cv: 5, conquered: 1, att: 10, def: null });
+const unalliedConquestEval = bonusGoals.evaluateBattleReportForGoals(88007);
+ok('conquering a ranked planet whose defender has no alliance still awards',
+    unalliedConquestEval.length === 1 && unalliedConquestEval[0].points === 100, unalliedConquestEval);
+db.prepare(`DELETE FROM bonus_goal_awards WHERE source_key = 'br:88007'`).run();
 
 const noLocationEval = bonusGoals.evaluateBattleReportForGoals(999999);
 ok('evaluating a nonexistent report id is a no-op, not a crash', Array.isArray(noLocationEval) && noLocationEval.length === 0);

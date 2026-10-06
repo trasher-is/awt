@@ -2,7 +2,7 @@
 // database.js's bonus_goals/bonus_goal_awards/ranking_snapshot_rows comment for the
 // secrecy reasoning (generic code + DB-only config, since the repo is public but the
 // database is not). Goal `type`s implemented so far:
-//   'ranking_match'  — award tiered points when a member's battle lands on a planet
+//   'ranking_match'  — award tiered points when a member's battle CONQUERS a planet
 //                      currently placed in some in-game ranking page (which page, which
 //                      tiers, is purely config, never named here).
 //   'random_target'  — pick a random planet somewhere in the galaxy on an irregular
@@ -159,7 +159,8 @@ function computeRankPoints(config, rank) {
 // --- ranking_match: award on a battle report ---
 
 const battleReportForEvalStmt = db.prepare(`
-    SELECT id, system_id, planet_index, att_player_id, att_player_name, def_lost_cv, killed_population
+    SELECT id, system_id, planet_index, att_player_id, att_player_name, def_lost_cv, killed_population,
+           conquered_planet, att_alliance_id, def_alliance_id
     FROM battle_reports WHERE id = ?
 `);
 const currentRankStmt = db.prepare(`
@@ -179,6 +180,11 @@ const insertAwardStmt = db.prepare(`
 // goes to whoever brought the fight), and only for a report that did real damage — a
 // report with neither a population kill nor any CV lost by the defender is a probe/no-op,
 // not a genuine hit on the planet.
+// ranking_match is stricter: only a report that took the planet (conquered_planet) from
+// someone outside the attacker's own alliance scores. Until 2026-10-06 any damaging hit
+// counted, and 42 of the first 45 awards turned out to be members farming starbases on
+// their own alliance's ranked planets — XP practice, not glory. An ally-to-ally handover
+// is excluded for the same reason; a planet with no defending alliance still counts.
 // `now` is injectable for the same reason every other function in this file takes one: the
 // random_target lookup below is time-bounded, and a test that pins the activation clock but
 // not the evaluation clock is testing whatever today's date happens to be. That is exactly
@@ -191,7 +197,9 @@ function evaluateBattleReportForGoals(reportId, now = new Date()) {
     if (!didDamage) return [];
 
     const awarded = [];
-    for (const goal of listEnabledGoalsByType('ranking_match')) {
+    const sameAlliance = report.att_alliance_id != null && report.att_alliance_id === report.def_alliance_id;
+    const tookPlanet = report.conquered_planet === 1 && !sameAlliance;
+    for (const goal of (tookPlanet ? listEnabledGoalsByType('ranking_match') : [])) {
         const current = currentRankStmt.get(goal.id, report.system_id, report.planet_index);
         if (!current) continue;
         const points = computeRankPoints(goal.config, current.rank);

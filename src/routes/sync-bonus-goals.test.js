@@ -104,8 +104,8 @@ function request(server, method, urlPath, body) {
         console.log('\n── ship-detail sync triggers goal evaluation once location is known ' + '─'.repeat(4));
         db.prepare(`INSERT INTO players (id, name) VALUES (800, 'ShipDetailAttacker')`).run();
         db.prepare(`
-            INSERT INTO battle_reports (id, started_at, att_player_id, att_player_name, def_lost_cv, killed_population)
-            VALUES (77001, '2026-09-11T09:00:00Z', 800, 'ShipDetailAttacker', 300, 8)
+            INSERT INTO battle_reports (id, started_at, att_player_id, att_player_name, def_lost_cv, killed_population, conquered_planet)
+            VALUES (77001, '2026-09-11T09:00:00Z', 800, 'ShipDetailAttacker', 300, 8, 1)
         `).run();
 
         const shipDetailRes = await request(server, 'POST', '/hub-api/sync/battle-report-ship-detail', {
