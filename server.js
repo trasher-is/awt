@@ -402,6 +402,10 @@ initDiscordBot(process.env.DISCORD_TOKEN);
 // this hub), so it runs here rather than in a member's browser.
 require('./src/utils/bonus-goals-scheduler').startBonusGoalsScheduler();
 
+// Asks GitHub every six hours whether newer AWT code exists and shows it on the admin page —
+// see src/utils/update-check.js for exactly what is sent. UPDATE_CHECK=off turns it off.
+require('./src/utils/update-check').updateCheck.start();
+
 // pm2 sends SIGINT/SIGTERM on restart and deploy. Stop accepting connections and close
 // the database handle so a WAL write is not cut off mid-transaction.
 let shuttingDown = false;

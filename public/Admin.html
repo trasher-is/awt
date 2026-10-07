@@ -361,6 +361,23 @@
 
         <section class="flex flex-col gap-4">
             <div>
+                <h2 class="text-xl font-bold tracking-tight border-b border-border pb-2">Versions</h2>
+            </div>
+
+            <div class="bg-card border border-border rounded-lg p-4 shadow-sm flex flex-col gap-3">
+                <h3 class="text-sm font-semibold">This hub vs. GitHub</h3>
+                <div id="versions-hub" class="text-sm text-muted-foreground">Loading…</div>
+            </div>
+
+            <div class="bg-card border border-border rounded-lg p-4 shadow-sm flex flex-col gap-3">
+                <h3 class="text-sm font-semibold">Open member tabs</h3>
+                <p class="text-xs text-muted-foreground">An open tab updates itself once its member stops clicking for 10 minutes or switches away. A tab marked old after that is being played in: ask them to refresh. Tabs report every 5 minutes, and one that has not reloaded since this list was added does not report until it does.</p>
+                <div id="versions-tabs" class="text-sm text-muted-foreground">Loading…</div>
+            </div>
+        </section>
+
+        <section class="flex flex-col gap-4">
+            <div>
                 <h2 class="text-xl font-bold tracking-tight text-destructive border-b border-destructive/30 pb-2">Danger Zone</h2>
             </div>
             
@@ -426,6 +443,7 @@
                     // Fire global data loaders smoothly on boot
                     loadUsers();
                     loadStatus();
+                    loadVersions();
                     loadBroadcasts();
                     loadSettings();
                     loadRounds();
@@ -883,6 +901,79 @@
                 document.getElementById('stat-ply').innerText = data.stats.players.toLocaleString();
                 document.getElementById('stat-flt').innerText = data.stats.fleets.toLocaleString();
                 document.getElementById('stat-uptime').innerText = formatUptime(data.stats.uptime);
+            }
+        }
+
+        function agoText(iso) {
+            const ms = Date.now() - Date.parse(iso);
+            if (!Number.isFinite(ms)) return '';
+            const min = Math.round(ms / 60000);
+            if (min < 1) return 'just now';
+            if (min < 60) return `${min} min ago`;
+            const h = Math.round(min / 60);
+            return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
+        }
+
+        function renderHubVersion(hub) {
+            const repoLink = `<a class="underline" href="https://github.com/${esc(hub.repo)}" target="_blank" rel="noopener">${esc(hub.repo)}</a>`;
+            const short = hub.local_sha ? `<span class="font-mono">${esc(hub.local_sha.slice(0, 7))}</span>` : '';
+            const checked = hub.checked_at ? ` <span class="text-xs">(checked ${esc(agoText(hub.checked_at))})</span>` : '';
+            const steps = `<pre class="bg-black/40 rounded p-2 text-xs font-mono text-foreground overflow-x-auto">cd /path/to/awt      # the folder the hub runs from
+git pull
+npm ci
+pm2 restart awt      # or whatever your pm2 process is called</pre>
+                <p class="text-xs">Back up <span class="font-mono">awt.db</span> first. Database changes apply by themselves on restart. Open tabs reload onto the new version on their own.</p>`;
+            switch (hub.status) {
+                case 'disabled':
+                    return 'The update check is off (<span class="font-mono">UPDATE_CHECK=off</span> in .env).';
+                case 'no_git':
+                    return 'Cannot tell which version this hub runs: there is no <span class="font-mono">.git</span> folder (installed from a download?). Install with <span class="font-mono">git clone</span> to get update notices.';
+                case 'pending':
+                    return `Running ${short}. The first check runs a minute after the server starts.`;
+                case 'up_to_date':
+                    return `<span class="text-green-400 font-medium">Up to date</span> with ${repoLink} ${esc(hub.branch)} (${short}).${checked}`;
+                case 'behind': {
+                    const items = (hub.changes || []).map(c => c.number
+                        ? `<li><a class="underline" href="https://github.com/${esc(hub.repo)}/pull/${Number(c.number)}" target="_blank" rel="noopener">#${Number(c.number)}</a> ${esc(c.title)}</li>`
+                        : `<li>${esc(c.title)}</li>`).join('');
+                    const more = hub.compare_url ? `<a class="underline text-xs" href="${esc(hub.compare_url)}" target="_blank" rel="noopener">All changes on GitHub</a>` : '';
+                    return `<span class="text-amber-400 font-medium">${Number(hub.behind_by)} new change(s)</span> on ${repoLink} ${esc(hub.branch)} that this hub (${short}) is not running.${checked}
+                        <ul class="list-disc pl-5 text-xs text-foreground mt-2">${items}</ul>${more}
+                        <p class="text-xs mt-2">To update, on the server:</p>${steps}`;
+                }
+                case 'local_changes':
+                    return `This hub (${short}) has changes that are not on ${repoLink} ${esc(hub.branch)}, and is not missing any from it.${checked}`;
+                case 'diverged':
+                    return `This hub (${short}) has its own changes <em>and</em> is missing ${Number(hub.behind_by)} from ${repoLink} ${esc(hub.branch)}. Updating needs a merge, not just a pull.${checked}`;
+                case 'unknown_commit':
+                    return `GitHub does not know the commit this hub runs (${short}): local changes that were never pushed, a fork, or a wrong <span class="font-mono">UPDATE_CHECK_REPO</span>.${checked}`;
+                default:
+                    return `The check failed: ${esc(hub.error || 'unknown error')}. It retries in six hours.${checked}`;
+            }
+        }
+
+        async function loadVersions() {
+            const hubBox = document.getElementById('versions-hub');
+            const tabsBox = document.getElementById('versions-tabs');
+            try {
+                const res = await fetch('/hub-api/admin/versions');
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || 'failed');
+                hubBox.innerHTML = renderHubVersion(data.hub);
+                tabsBox.innerHTML = data.tabs.length
+                    ? `<ul class="flex flex-col gap-1">${data.tabs.map(t => `
+                        <li class="flex flex-wrap gap-x-3 gap-y-0.5 items-center">
+                            <span class="font-medium text-foreground">${esc(t.game_name)}</span>
+                            ${t.current
+                                ? '<span class="text-[10px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded uppercase font-bold tracking-wider">Current</span>'
+                                : '<span class="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded uppercase font-bold tracking-wider">Old: ask to refresh</span>'}
+                            <span class="text-xs"><i class="fa-solid fa-${t.mobile ? 'mobile-screen' : 'desktop'} mr-1"></i>${esc(t.browser)}</span>
+                            <span class="text-xs">${esc(agoText(t.seen_at))}</span>
+                        </li>`).join('')}</ul>`
+                    : 'No open tabs have reported yet.';
+            } catch (err) {
+                hubBox.textContent = 'Could not load version status.';
+                tabsBox.textContent = '';
             }
         }
 

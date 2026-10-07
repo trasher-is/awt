@@ -18,6 +18,9 @@ const defenceChoicesRepo = require('../repositories/defenceChoices');
 const tradeRepo = require('../repositories/trade');
 const routingRepo = require('../repositories/routing');
 const { archiveRound, listRounds, roundDetail } = require('../utils/round-archive');
+const { buildVersion } = require('../utils/build-version');
+const { hubTabs } = require('../utils/hub-tabs');
+const { updateCheck } = require('../utils/update-check');
 const router = express.Router();
 
 // Reject empty or whitespace-only passwords before they reach bcrypt. hashSync(undefined)
@@ -252,6 +255,27 @@ router.get('/admin/status', requireAdmin, (req, res) => {
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch status' });
     }
+});
+
+// --- VERSIONS ---
+// Two questions an admin has after a deploy: whose open tab is still running the old build
+// (src/utils/hub-tabs.js), and is this hub itself behind the code on GitHub
+// (src/utils/update-check.js).
+router.get('/admin/versions', requireAdmin, (req, res) => {
+    const current = buildVersion();
+    const names = new Map();
+    const tabs = hubTabs.list().map(t => {
+        if (!names.has(t.userId)) {
+            const row = usersRepo.getUserNameById(t.userId);
+            names.set(t.userId, row ? row.game_name : null);
+        }
+        return {
+            game_name: names.get(t.userId), build: t.build, current: t.build === current,
+            browser: t.browser, mobile: t.mobile, seen_at: new Date(t.seenAt).toISOString(),
+        };
+    }).filter(t => t.game_name !== null)
+        .sort((a, b) => (a.current - b.current) || a.game_name.localeCompare(b.game_name));
+    res.json({ success: true, current_build: current, tabs, hub: updateCheck.getState() });
 });
 
 // Clear Old Fleets (> 10 Days)

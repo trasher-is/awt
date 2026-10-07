@@ -33,7 +33,19 @@ router.use(require('./landRush'));
 // body-less: it has to keep answering for a tab whose session has lapsed (that tab is
 // exactly the one most likely to be running something ancient), and a content hash of
 // files already public discloses nothing.
+// A tab that already knows which build it loaded also says so (?tab=&build=), so the admin
+// page can list whose open tab is behind (src/utils/hub-tabs.js). Recorded only for a logged-in
+// session; the answer is the same either way.
 const { buildVersion } = require('../utils/build-version');
-router.get('/version', (req, res) => res.json({ version: buildVersion() }));
+const { hubTabs } = require('../utils/hub-tabs');
+const { browserFamily } = require('../utils/scan-run');
+router.get('/version', (req, res) => {
+    const userId = req.session && req.session.userId;
+    if (Number.isInteger(userId) && req.query.tab && req.query.build) {
+        const { browser, mobile } = browserFamily(req.get('user-agent'));
+        hubTabs.report({ userId, tabId: String(req.query.tab), build: String(req.query.build), browser, mobile });
+    }
+    res.json({ version: buildVersion() });
+});
 
 module.exports = router;

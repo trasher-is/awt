@@ -131,6 +131,25 @@ alliance to use — SSH access, Node/pm2 setup, a domain with HTTPS via Nginx/Ce
 login, wiring up the Discord bot, and day-to-day operation — see the full walkthrough:
 [Running AWT](https://claude.ai/code/artifact/de0752cc-dae1-409d-9736-c1b87c8eeab6).
 
+## Updating
+
+The admin page's **Versions** card says when the AWT repository on GitHub has changes this
+hub is not running, and lists them. The check asks GitHub every six hours and sends only the
+commit id the hub runs; `UPDATE_CHECK=off` in `.env` turns it off. It needs a `git clone`
+install, because it reads the running commit from `.git`.
+
+To update, back up `awt.db` (see below), then in the hub's folder:
+
+```bash
+git pull
+npm ci
+pm2 restart awt      # or whatever your pm2 process is called
+```
+
+Database changes apply by themselves on start. Members' open tabs reload onto the new
+version on their own once they are idle, and the same card lists any tab still running the
+old one.
+
 ## Backups and round resets
 
 Both databases run in WAL mode, so copying `awt.db` while the hub is up is **not** a

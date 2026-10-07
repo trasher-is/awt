@@ -34,6 +34,7 @@ function build({ version = 'v1', hasFrame = true } = {}) {
     const intervals = [];
     const listeners = { doc: {}, frame: {}, frameDoc: {} };
     let served = version;
+    const fetches = [];
 
     const listenerBag = (bag) => ({
         addEventListener: (type, fn) => { (bag[type] = bag[type] || []).push(fn); },
@@ -53,7 +54,7 @@ function build({ version = 'v1', hasFrame = true } = {}) {
         Date: { now: () => now },
         document,
         window: { location: { reload: () => { reloads++; } } },
-        fetch: async () => ({ ok: true, json: async () => ({ version: served }) }),
+        fetch: async (url) => { fetches.push(url); return { ok: true, json: async () => ({ version: served }) }; },
         setInterval: (fn) => { intervals.push(fn); return intervals.length; },
         console: { warn: () => {} },
     });
@@ -71,6 +72,7 @@ function build({ version = 'v1', hasFrame = true } = {}) {
         hide: () => { document.hidden = true; fire(listeners.doc, 'visibilitychange'); },
         get reloads() { return reloads; },
         get notices() { return notices; },
+        get fetches() { return fetches; },
     };
 }
 
@@ -89,6 +91,23 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
         h.retryReload();
         ok('an unchanged build never reloads, however long the tab sits idle', h.reloads === 0);
         ok('and says nothing', h.notices.length === 0, h.notices);
+    }
+
+    console.log('\n── Each poll says which build this tab loaded (for the admin page) ' + '─'.repeat(10));
+    {
+        const h = build({ version: 'abc123def456' });
+        h.init();
+        await flush();
+        await flush();
+        ok('the first poll cannot know its build yet and sends nothing', h.fetches[0] === '/hub-api/version', h.fetches);
+        const report = /^\/hub-api\/version\?tab=([A-Za-z0-9-]{8,64})&build=abc123def456$/;
+        ok('it reports straight away once it knows', h.fetches.length === 2 && report.test(h.fetches[1]), h.fetches);
+        h.deploy('fff000fff000');
+        await h.check();
+        const m1 = report.exec(h.fetches[1]), m2 = report.exec(h.fetches[2]);
+        ok('later polls report the build the tab LOADED, not the one the server now serves',
+            m2 !== null, h.fetches);
+        ok('with the same tab id every time', m1 && m2 && m1[1] === m2[1], h.fetches);
     }
 
     console.log('\n── A new build, with the member actively using the hub ' + '─'.repeat(22));
