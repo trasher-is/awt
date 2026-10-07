@@ -30,9 +30,18 @@ let lastActivity = Date.now();
 let started = false;
 let reloading = false;
 
+// Once this tab knows which build it loaded, every poll also reports it, so the admin page can
+// show whose open tab is behind (src/utils/hub-tabs.js). The id only tells this tab apart from
+// the same member's other tabs; it is new on every page load.
+const tabId = (() => {
+    try { if (crypto.randomUUID) return crypto.randomUUID(); } catch (err) { /* not a secure context */ }
+    return `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+})();
+
 async function fetchVersion() {
+    const query = bootVersion ? `?tab=${encodeURIComponent(tabId)}&build=${encodeURIComponent(bootVersion)}` : '';
     try {
-        const res = await fetch('/hub-api/version', { cache: 'no-store' });
+        const res = await fetch(`/hub-api/version${query}`, { cache: 'no-store' });
         if (!res.ok) return null;
         const body = await res.json();
         return typeof body.version === 'string' && body.version ? body.version : null;
@@ -96,6 +105,8 @@ export function initVersionWatch(onNotice = () => {}) {
             // A wrapper that says nothing predates this file entirely and cannot notice a
             // deploy on its own, so the frame reloads it once — see stale-wrapper-reload.js.
             try { window.__hubBuildVersion = version; } catch (err) { /* not fatal */ }
+            // Report straight away rather than five minutes from now.
+            fetchVersion();
             return;
         }
         if (version === bootVersion || version === pendingVersion) return;

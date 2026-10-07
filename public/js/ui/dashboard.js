@@ -224,6 +224,24 @@ export function showToast(message) {
 }
 window.showToast = showToast;
 
+// A dot on the admin button when GitHub has AWT changes this hub is not running, so an admin
+// learns of it without visiting the admin page (where the details and the update steps are).
+// Shows nothing when the check is off, has not run yet, or failed.
+async function markAdminButtonIfUpdateAvailable(adminBtn) {
+    if (!adminBtn) return;
+    try {
+        const res = await fetch('/hub-api/admin/versions');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.hub || data.hub.status !== 'behind') return;
+        adminBtn.style.position = 'relative';
+        const dot = document.createElement('span');
+        dot.style.cssText = 'position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:#f59e0b;';
+        adminBtn.appendChild(dot);
+        adminBtn.title = `Admin Settings: ${data.hub.behind_by} new AWT change(s) on GitHub`;
+    } catch (err) { /* a missing dot costs nothing */ }
+}
+
 async function initWrapper() {
     try {
         const res = await fetch('/hub-api/me');
@@ -232,6 +250,7 @@ async function initWrapper() {
             if (toolUser.role === 'admin') {
                 const adminBtn = document.getElementById('admin-panel-btn');
                 if (adminBtn) adminBtn.style.display = 'flex';
+                markAdminButtonIfUpdateAvailable(adminBtn);
             }
         }
     } catch (err) {}
