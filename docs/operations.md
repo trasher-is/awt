@@ -73,6 +73,11 @@ FROM population_trace t JOIN galaxy_scan_runs r ON r.run_id = t.run_id
 WHERE t.outcome IN ('drop_pending', 'drop_blip') ORDER BY t.id DESC LIMIT 20;
 ```
 
+A late post no longer overwrites fresher data. `/sync/system` dates a live scan read by when it
+was fetched (arrival minus `fetch_age_ms`), so a frozen tab that resumes and posts an old fetch
+is answered `skipped: 'stale_observation'` whenever another read of that system has been applied
+since. If nothing fresher exists it still applies, because it is then the newest data anyone has.
+
 Rows from a browser tab that has not reloaded since this shipped carry no run id and join to
 nothing; that is expected for a day or so after a deploy. `cache_state` is `unknown` when the
 browser withheld its timing data (an old engine, or a full timing buffer).

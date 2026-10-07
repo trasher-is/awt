@@ -122,9 +122,19 @@ router.post('/sync/system', requireAuth, (req, res) => {
     // cannot be treated as live, or an old build's payload manufactures a watermark newer
     // than any real capture and locks out the clients doing the right thing — confirmed
     // live, that is exactly what happened.
+    //
+    // "Just now" means when the data was FETCHED, not when it reached us (2026-10-06): a
+    // galaxy scan fetches Map/sectors once and posts system after system from it, and a
+    // suspended mobile tab resumed 43 minutes later and posted the rest of a 06:27 fetch at
+    // 07:10. Stamped on arrival, that outranked another member's whole-map scan from 07:10
+    // and announced four colonised planets as lost, then colonised again seconds later. The
+    // scan says how old its data is (fetch_age_ms, a duration measured in the tab, so no
+    // clock is trusted); a payload without it (DOM reads, older builds) is stamped on arrival
+    // as before.
+    const payloadAgeMs = sanitizeAgeMs(req.body.fetch_age_ms);
     const observedAt = captured_at
         ? parseObservationTime(captured_at)
-        : (observation_live ? new Date() : null);
+        : (observation_live ? new Date(Date.now() - (payloadAgeMs || 0)) : null);
     const observedAtIso = observedAt ? observedAt.toISOString() : null;
     if (observedAtIso) {
         const applied = systemsRepo.getSystemObservedAt(system_id);
@@ -175,7 +185,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
         // Which scan sent this and how old its data was when it was posted: lets a traced change be
         // joined to its row in galaxy_scan_runs. Absent from clients that predate them.
         run_id: sanitizeRunId(req.body.run_id),
-        payload_age_ms: sanitizeAgeMs(req.body.fetch_age_ms),
+        payload_age_ms: payloadAgeMs,
     };
     const traceHoursSince = (observedAt) => {
         const at = parseSqliteUtc(observedAt);
