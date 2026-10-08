@@ -177,22 +177,24 @@ function deleteStrongestFleetOlderThan5Days() {
     return deleteStrongestFleetOlderThan5DaysStmt.run();
 }
 
-// Upsert, NOT wholesale-replace (2026-09-20 revision — see database.js's table comment for
-// the full reasoning): a player missing from today's scrape simply isn't touched, so their
-// last-known row survives until the 5-day purge above removes it. This is what lets the
-// table hold more than one day's top-50 at once. The sync route is responsible for
-// collapsing a player's multiple simultaneous fleets down to one row (largest cv) before
-// calling this, and for never calling it with a player_id that doesn't resolve to a known
-// player — there is no stable identity to upsert an unknown owner against.
-const upsertStrongestFleetStmt = db.prepare(`
-    INSERT INTO strongest_fleet (player_id, rank, destroyers, cruisers, battleships, cv, updated_at)
-    VALUES (@playerId, @rank, @destroyers, @cruisers, @battleships, @cv, @updatedAt)
-    ON CONFLICT(player_id) DO UPDATE SET
-        rank = excluded.rank, destroyers = excluded.destroyers, cruisers = excluded.cruisers,
-        battleships = excluded.battleships, cv = excluded.cv, updated_at = excluded.updated_at
+// Replaces every row of one player with the fleets this sync saw for them; players the
+// sync did not list are left alone, which is how the table keeps more than one day's top
+// 50 (see database.js's table comment). The sync route only calls this with a player_id
+// that resolves to a known player — there is no identity to file an unknown owner under.
+const deleteStrongestFleetsForPlayerStmt = db.prepare(`DELETE FROM strongest_fleet WHERE player_id = ?`);
+const insertStrongestFleetStmt = db.prepare(`
+    INSERT INTO strongest_fleet (player_id, rank, destroyers, cruisers, battleships, cv, system_id, planet_index, planet_label, updated_at)
+    VALUES (@playerId, @rank, @destroyers, @cruisers, @battleships, @cv, @system_id, @planet_index, @planet_label, @updatedAt)
 `);
-function upsertStrongestFleet(playerId, rank, destroyers, cruisers, battleships, cv, updatedAt) {
-    upsertStrongestFleetStmt.run({ playerId, rank, destroyers, cruisers, battleships, cv, updatedAt });
+function replaceStrongestFleetsForPlayer(playerId, fleets, updatedAt) {
+    deleteStrongestFleetsForPlayerStmt.run(playerId);
+    for (const f of fleets) {
+        insertStrongestFleetStmt.run({
+            playerId, updatedAt, rank: f.rank,
+            destroyers: f.destroyers || 0, cruisers: f.cruisers || 0, battleships: f.battleships || 0, cv: f.cv,
+            system_id: f.system_id ?? null, planet_index: f.planet_index ?? null, planet_label: f.planet_label ?? null,
+        });
+    }
 }
 
 const deleteAllStrongestFleetStmt = db.prepare(`DELETE FROM strongest_fleet`);
@@ -202,114 +204,69 @@ function deleteAllStrongestFleet() {
 
 const getStrongestFleetFullStmt = db.prepare(`
     SELECT sf.rank, sf.player_id, sf.destroyers, sf.cruisers, sf.battleships, sf.cv, sf.updated_at,
+           sf.system_id, sf.planet_index, sf.planet_label,
            p.name as owner_name, a.id as alliance_id, a.tag as alliance_tag
     FROM strongest_fleet sf
     LEFT JOIN players p ON p.id = sf.player_id
     LEFT JOIN alliances a ON a.id = p.alliance_id
-    ORDER BY sf.rank ASC
+    ORDER BY sf.rank ASC, sf.cv DESC
 `);
 function getStrongestFleetFull() {
     return getStrongestFleetFullStmt.all();
 }
 
-// --- fleet location cross-match (war-tool groundwork: locate a StrongestFleet entry by
-// matching its CV against best_guarded, 2026-09-20) ---
+// --- fleet locations (2026-10-08: read from the ranking's own Planet column) ---
 //
-// best_guarded carries no ship-composition breakdown, only a total CV per planet, so a
-// match can only ever be established by CV equality — there is nothing on that side of the
-// join for a destroyer/cruiser/battleship comparison to help disambiguate. Two different
-// players occasionally field the literally identical fleet (confirmed live 2026-09-20: two
-// players both at 105 CV / 35 destroyers on the same day) — but that is NOT automatically
-// ambiguous: each of those two also owns a planet whose OWN best_guarded entry happens to
-// be that same cv (each is simply sitting home, and their numbers coincide by chance), and
-// self-ownership resolves that cleanly without needing to pick between them. So self-match
-// is checked FIRST, before any collision logic runs at all: if a fleet's cv matches a
-// planet it owns, that's `home`, full stop, regardless of how many unrelated players
-// elsewhere happen to share the same cv. Only fleets that don't self-resolve enter the
-// leftover pool, where a genuine collision (multiple candidate planets, or multiple other
-// unclaimed fleets contending for one) comes back `location_status: 'ambiguous'` with
-// every candidate listed rather than a silent pick — a wrong "he's parked at X" is worse
-// than an honest "unknown". `away` means the fleet's cv matches no top-50 guarded planet at
-// all: travelling, staged somewhere not worth top-50 defense, or genuinely unlocatable —
-// the "gone" signal the war-tool design leaned on, since best_guarded can never show a
-// fleet sitting on its owner's own OTHER, non-guarded home planet either.
-const getBestGuardedForMatchStmt = db.prepare(`
-    SELECT bg.game_planet_id,
-           CAST(REPLACE(REPLACE(bg.cv, ',', ''), ' ', '') AS INTEGER) AS cv,
-           bg.updated_at,
-           p.system_id, p.planet_index, p.owner_id,
-           s.name AS system_name, u.name AS owner_name, a.id AS owner_alliance_id, a.tag AS owner_tag
-    FROM best_guarded bg
-    JOIN planets p ON p.game_planet_id = bg.game_planet_id
-    LEFT JOIN systems s ON s.id = p.system_id
-    LEFT JOIN players u ON u.id = p.owner_id
-    LEFT JOIN alliances a ON a.id = u.alliance_id
+// Until 2026-10-08 the ranking printed no location, and this guessed one by matching each
+// fleet's CV against /Ranking/BestGuarded. The page now names the planet, so the guess is
+// gone. location_status:
+//  - 'home'    the fleet sits on a planet its owner holds;
+//  - 'parked'  it sits on someone else's planet, or an unowned one;
+//  - 'unknown' no system on record for it: a row from before the Planet column, or a
+//              system name the hub has never scanned (planet_label still says where).
+const getStrongestFleetLocatedStmt = db.prepare(`
+    SELECT sf.rank, sf.player_id, sf.destroyers, sf.cruisers, sf.battleships, sf.cv, sf.updated_at,
+           sf.system_id, sf.planet_index, sf.planet_label,
+           p.name AS owner_name, a.id AS alliance_id, a.tag AS alliance_tag,
+           s.name AS system_name, pl.game_planet_id, pl.owner_id AS planet_owner_id,
+           u.name AS planet_owner_name, ua.id AS planet_owner_alliance_id, ua.tag AS planet_owner_tag
+    FROM strongest_fleet sf
+    LEFT JOIN players p ON p.id = sf.player_id
+    LEFT JOIN alliances a ON a.id = p.alliance_id
+    LEFT JOIN systems s ON s.id = sf.system_id
+    LEFT JOIN planets pl ON pl.system_id = sf.system_id AND pl.planet_index = sf.planet_index
+    LEFT JOIN players u ON u.id = pl.owner_id
+    LEFT JOIN alliances ua ON ua.id = u.alliance_id
+    WHERE (@playerId IS NULL OR sf.player_id = @playerId)
+    ORDER BY sf.rank ASC, sf.cv DESC
 `);
-
-function getFleetLocationMatches() {
-    const fleets = getStrongestFleetFullStmt.all();
-    const guarded = getBestGuardedForMatchStmt.all();
-    const asCandidate = (g) => ({
-        game_planet_id: g.game_planet_id, system_id: g.system_id, system_name: g.system_name,
-        planet_index: g.planet_index, owner_id: g.owner_id, owner_name: g.owner_name,
-        owner_alliance_id: g.owner_alliance_id, owner_tag: g.owner_tag, guard_updated_at: g.updated_at,
-    });
-
-    const guardedByCv = new Map();
-    for (const g of guarded) {
-        if (!guardedByCv.has(g.cv)) guardedByCv.set(g.cv, []);
-        guardedByCv.get(g.cv).push(g);
-    }
-
-    // Pass 1: resolve every fleet that can self-match (owns a planet at its own cv) —
-    // these are certain and must never be pulled into another fleet's collision count.
-    // Keyed by player_id (the table's real primary key since the 2026-09-20 history
-    // revision), not rank — rank is now just "last known rank" and can repeat across
-    // different players' rows on different days, so it is no longer a safe map key.
-    const selfResolved = new Map(); // player_id -> location
-    for (const f of fleets) {
-        const candidates = guardedByCv.get(f.cv) || [];
-        const self = candidates.find((g) => g.owner_id === f.player_id);
-        if (self) selfResolved.set(f.player_id, asCandidate(self));
-    }
-
-    // Pass 2: among fleets that did NOT self-resolve, count how many are still contending
-    // for each cv — this is the real collision count, with self-matched fleets removed
-    // from contention (their cv coincidence with someone else is no longer anyone's problem).
-    const unresolvedCountByCv = new Map();
-    for (const f of fleets) {
-        if (selfResolved.has(f.player_id)) continue;
-        unresolvedCountByCv.set(f.cv, (unresolvedCountByCv.get(f.cv) || 0) + 1);
-    }
-
-    return fleets.map((f) => {
-        const home = selfResolved.get(f.player_id);
-        if (home) return { ...f, location_status: 'home', location: home, candidates: [] };
-
-        const candidates = guardedByCv.get(f.cv) || [];
-        if (candidates.length === 0) {
-            return { ...f, location_status: 'away', location: null, candidates: [] };
-        }
-        if (candidates.length > 1 || unresolvedCountByCv.get(f.cv) > 1) {
-            return { ...f, location_status: 'ambiguous', location: null, candidates: candidates.map(asCandidate) };
-        }
-
-        return { ...f, location_status: 'parked', location: asCandidate(candidates[0]), candidates: [] };
-    });
+function toLocatedFleet(r) {
+    const base = {
+        rank: r.rank, player_id: r.player_id, destroyers: r.destroyers, cruisers: r.cruisers,
+        battleships: r.battleships, cv: r.cv, updated_at: r.updated_at,
+        owner_name: r.owner_name, alliance_id: r.alliance_id, alliance_tag: r.alliance_tag,
+        planet_label: r.planet_label,
+    };
+    if (r.system_id == null) return { ...base, location_status: 'unknown', location: null };
+    return {
+        ...base,
+        location_status: r.planet_owner_id === r.player_id ? 'home' : 'parked',
+        location: {
+            game_planet_id: r.game_planet_id, system_id: r.system_id, system_name: r.system_name,
+            planet_index: r.planet_index, owner_id: r.planet_owner_id, owner_name: r.planet_owner_name,
+            owner_alliance_id: r.planet_owner_alliance_id, owner_tag: r.planet_owner_tag,
+        },
+    };
 }
-
-// Player-profile card (2026-09-20): the same cross-match as above, for exactly one player.
-// Recomputes the full match set rather than querying strongest_fleet WHERE player_id = ?
-// directly — the collision/self-match logic genuinely needs every OTHER fleet at the same
-// cv to answer correctly (see the ambiguous-vs-home distinction above), and this table is
-// small enough (5 days of a top-50 ranking, at most a few hundred rows) that recomputing
-// is simpler than trying to answer the question from one row in isolation.
-function getFleetLocationMatchForPlayer(playerId) {
-    return getFleetLocationMatches().find((f) => f.player_id === playerId) || null;
+function getFleetLocationMatches() {
+    return getStrongestFleetLocatedStmt.all({ playerId: null }).map(toLocatedFleet);
+}
+function getFleetLocationMatchesForPlayer(playerId) {
+    return getStrongestFleetLocatedStmt.all({ playerId }).map(toLocatedFleet);
 }
 
 // Best-known home location for a player, used ONLY as a fallback below when a rankings
-// entry has no live best_guarded match — same COALESCE(home_system_id, origin_system) /
+// entry has no location of its own (a row from before the Planet column) — same COALESCE(home_system_id, origin_system) /
 // COALESCE(home_planet_index, 1) convention already used for the intercept-homes queries
 // elsewhere in players.js.
 const getHomeFallbackStmt = db.prepare(`
@@ -333,16 +290,13 @@ function getHomeFallback(playerId) {
 // here deduplicates across sources — a battle report and a rankings snapshot from the same
 // day are two separate confirmations worth keeping side by side, not one row to merge:
 //
-//  - 'rankings'      the player's current strongest_fleet row (at most one, since that
-//                     table is itself upserted per player — see its own comment), located
-//                     via the same self-match/collision logic as getFleetLocationMatches
-//                     when that resolves (home/parked). When it doesn't (away/ambiguous —
-//                     no best_guarded planet to point to), this falls back to the player's
-//                     own registered home planet instead of leaving location blank: the
-//                     Last Seen column already carries the "how sure are we, and since
-//                     when" signal, so an unconfirmed-but-plausible location beats a bare
-//                     dash. `location_confirmed: false` marks that fallback case so a
-//                     caller can still tell the two apart if it wants to.
+//  - 'rankings'      one entry per strongest_fleet row the player holds (a player can
+//                     have several fleets ranked at once), at the planet the ranking
+//                     page printed for it. A row from before the Planet column has no
+//                     location, and falls back to the player's own registered home planet
+//                     instead of a bare dash: the Last Seen column already carries the "how
+//                     sure are we, and since when" signal. `location_confirmed: false`
+//                     marks that fallback so a caller can tell the two apart.
 //  - 'battle_report' every battle report in the window with ship detail scraped, showing
 //                     what SURVIVED that fight (committed minus lost per ship type), not
 //                     what was fielded — a wiped-out ship type reads as 0, and a report
@@ -364,22 +318,22 @@ function getFleetSightingHistory(playerId, days = 5) {
 
     const entries = [];
 
-    const rankingsRow = db.prepare(`
-        SELECT destroyers, cruisers, battleships, cv, updated_at
-        FROM strongest_fleet WHERE player_id = ? AND updated_at > datetime('now', ?)
-    `).get(playerId, cutoff);
-    if (rankingsRow) {
-        const match = getFleetLocationMatchForPlayer(playerId);
-        let loc = match && match.location ? match.location : null;
+    const windowStart = Date.now() - Math.max(1, Math.round(Number(days) || 5)) * 86400000;
+    const rankingFleets = getFleetLocationMatchesForPlayer(playerId).filter((f) => {
+        const seen = parseTimestamp(f.updated_at);
+        return seen && seen.getTime() > windowStart;
+    });
+    for (const f of rankingFleets) {
+        let loc = f.location;
         const locationConfirmed = !!loc;
         if (!loc) loc = getHomeFallback(playerId);
         entries.push({
-            source: 'rankings', source_id: null, seen_at: rankingsRow.updated_at,
+            source: 'rankings', source_id: null, seen_at: f.updated_at,
             system_id: loc ? loc.system_id : null, system_name: loc ? loc.system_name : null,
             planet_index: loc ? loc.planet_index : null,
-            location_status: match ? match.location_status : null, location_confirmed: locationConfirmed,
-            destroyers: rankingsRow.destroyers, cruisers: rankingsRow.cruisers, battleships: rankingsRow.battleships,
-            transports: null, colony_ships: null, cv: rankingsRow.cv,
+            location_status: f.location_status, location_confirmed: locationConfirmed,
+            destroyers: f.destroyers, cruisers: f.cruisers, battleships: f.battleships,
+            transports: null, colony_ships: null, cv: f.cv,
         });
     }
 
@@ -447,6 +401,6 @@ module.exports = {
     insertFleetForAllianceStats, updateFleetGameId,
     getMemberIdsForTags, replaceEnemyFleetsForSystem,
     getInterceptFleetsByAlliance, getInterceptFleetsByActiveUsers,
-    deleteStrongestFleetOlderThan5Days, deleteAllStrongestFleet, upsertStrongestFleet, getStrongestFleetFull,
-    getFleetLocationMatches, getFleetLocationMatchForPlayer, getFleetSightingHistory,
+    deleteStrongestFleetOlderThan5Days, deleteAllStrongestFleet, replaceStrongestFleetsForPlayer, getStrongestFleetFull,
+    getFleetLocationMatches, getFleetLocationMatchesForPlayer, getFleetSightingHistory,
 };

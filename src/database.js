@@ -103,6 +103,66 @@ function migrateStrongestFleetToPlayerKeyed() {
     db.prepare(`INSERT INTO app_settings (key, value) VALUES (?, CURRENT_TIMESTAMP)`).run(STRONGEST_FLEET_PLAYER_KEYED_MIGRATION_KEY);
 }
 
+// One-shot (2026-10-08): strongest_fleet goes from one row per player to one row per fleet,
+// with the fleet's planet (see the table's own comment). It also repairs what the ranking
+// page's new Planet column did to the old scraper since 2026-10-04: every value landed one
+// column to the right, so `destroyers` held the CV, `cruisers` the destroyers, `battleships`
+// the cruisers and `cv` the planet number, and the real battleship count was dropped. A
+// shifted row is recognised by its CV not adding up (3·DS + 24·CR + 60·BS) while the
+// shifted reading does, with the battleships recovered from the remainder. The planet
+// number survives but its system does not, so a repaired row keeps no location.
+const STRONGEST_FLEET_PER_FLEET_MIGRATION_KEY = 'strongest_fleet_per_fleet_migration_v1_at';
+const fleetCv = (d, c, b) => 3 * d + 24 * c + 60 * b;
+function repairShiftedStrongestFleetRow(r) {
+    if (r.cv === fleetCv(r.destroyers, r.cruisers, r.battleships)) return r;
+    const cv = r.destroyers, destroyers = r.cruisers, cruisers = r.battleships;
+    const rest = cv - fleetCv(destroyers, cruisers, 0);
+    if (rest < 0 || rest % 60 !== 0) return null;
+    return { ...r, destroyers, cruisers, battleships: rest / 60, cv };
+}
+function migrateStrongestFleetToPerFleet() {
+    const done = db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(STRONGEST_FLEET_PER_FLEET_MIGRATION_KEY);
+    if (done) return;
+    const isPlayerKeyed = db.prepare(`PRAGMA table_info(strongest_fleet)`).all()
+        .some(c => c.name === 'player_id' && c.pk === 1);
+    if (isPlayerKeyed) {
+        const old = db.prepare(`SELECT player_id, rank, destroyers, cruisers, battleships, cv, updated_at FROM strongest_fleet`).all();
+        let repaired = 0, dropped = 0;
+        db.transaction(() => {
+            db.exec(`ALTER TABLE strongest_fleet RENAME TO strongest_fleet_player_keyed`);
+            db.exec(`
+                CREATE TABLE strongest_fleet (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    player_id INTEGER NOT NULL,
+                    rank INTEGER NOT NULL,
+                    destroyers INTEGER NOT NULL DEFAULT 0,
+                    cruisers INTEGER NOT NULL DEFAULT 0,
+                    battleships INTEGER NOT NULL DEFAULT 0,
+                    cv INTEGER NOT NULL,
+                    system_id INTEGER,
+                    planet_index INTEGER,
+                    planet_label TEXT,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+                )
+            `);
+            const insert = db.prepare(`
+                INSERT INTO strongest_fleet (player_id, rank, destroyers, cruisers, battleships, cv, updated_at)
+                VALUES (@player_id, @rank, @destroyers, @cruisers, @battleships, @cv, @updated_at)
+            `);
+            for (const row of old) {
+                const fixed = repairShiftedStrongestFleetRow(row);
+                if (!fixed) { dropped++; continue; }
+                if (fixed !== row) repaired++;
+                insert.run(fixed);
+            }
+            db.exec(`DROP TABLE strongest_fleet_player_keyed`);
+        })();
+        console.log(`[DB] Migrated strongest_fleet to per-fleet rows (${old.length - dropped} kept, ${repaired} repaired from the shifted scrape, ${dropped} dropped).`);
+    }
+    db.prepare(`INSERT INTO app_settings (key, value) VALUES (?, CURRENT_TIMESTAMP)`).run(STRONGEST_FLEET_PER_FLEET_MIGRATION_KEY);
+}
+
 function initDatabase() {
     // 1. Admin Control
     db.exec(`
@@ -364,41 +424,30 @@ function initDatabase() {
         )
     `);
 
-    // Strongest Fleet ranking watch (2026-09-20, war-tool groundwork; revised same day once
-    // real data showed the top-50-only, wholesale-replace design was too narrow) — keyed by
-    // `player_id`, holding each player's single largest known fleet, UPSERTED on every
-    // sync rather than wholesale-replaced: a player who drops out of today's top-50 keeps
-    // their last-known row (rank/cv/composition/updated_at all frozen at whatever they were
-    // last seen at) instead of vanishing, so the table naturally grows to hold more than 50
-    // players as different people rotate through the ranking across days. The 5-day
-    // staleness purge (still run first, every sync — see /sync/strongest-fleet) is what
-    // actually bounds this, not the ranking page's own cutoff.
+    // Strongest Fleet ranking watch (2026-09-20, war-tool groundwork). One row per FLEET,
+    // not per player (2026-10-08): the ranking page now prints each fleet's planet, so a
+    // player's simultaneous fleets (Hypnos held three on 2026-10-08) are distinct sightings
+    // at distinct places, and keeping only the largest would throw the others' locations
+    // away. Each sync replaces every row of the players it lists and leaves everyone else
+    // alone, so a player who drops out of today's top 50 keeps their last-known fleets until
+    // the 5-day purge (run first, every sync — see /sync/strongest-fleet) ages them out.
     //
-    // player_id is the PRIMARY KEY, not `rank`, DESPITE a single player occasionally
-    // holding more than one simultaneous fleet in the ranking (confirmed live 2026-09-20:
-    // Wearic at both 99 CV and 93 CV at once) — a per-fleet-instance key isn't available
-    // from anything the game exposes, and the whole point of this revision is durable
-    // per-player history, which needs a stable identity to upsert against. The tradeoff:
-    // when a player has two simultaneous fleets, only the larger is kept; the smaller is
-    // used for that sync's location cross-match (nothing upstream is blind to it) but is
-    // not separately remembered afterward. A row whose owner cannot be resolved to a known
-    // player is not stored at all (unlike the first version of this table) — there's no
-    // stable identity to upsert against, so keeping it would just re-litigate the very
-    // "yesterday's 300 destroyers and today's 400 as separate rows" problem this table
-    // exists to avoid, for an owner we can't even name.
-    //
-    // destroyers/cruisers/battleships/cv are stored as INTEGER (unlike best_guarded's `cv`
-    // TEXT column, kept as raw page text purely for display) because this table's whole
-    // purpose is numeric cross-matching against best_guarded to locate a fleet by
-    // composition — every consumer would otherwise repeat the same CAST(REPLACE(...)) noise.
+    // system_id/planet_index are resolved from the page's "System #N" text when the system
+    // is known; planet_label keeps that text as printed either way. Rows written before the
+    // Planet column existed carry no location at all (system_id and planet_label NULL).
+    // A row whose owner cannot be resolved to a known player is not stored.
     db.exec(`
         CREATE TABLE IF NOT EXISTS strongest_fleet (
-            player_id INTEGER PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id INTEGER NOT NULL,
             rank INTEGER NOT NULL,
             destroyers INTEGER NOT NULL DEFAULT 0,
             cruisers INTEGER NOT NULL DEFAULT 0,
             battleships INTEGER NOT NULL DEFAULT 0,
             cv INTEGER NOT NULL,
+            system_id INTEGER,
+            planet_index INTEGER,
+            planet_label TEXT,
             updated_at TEXT NOT NULL,
             FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
         )
@@ -717,6 +766,8 @@ function initDatabase() {
     // marker lives in app_settings, which only exists as of the statement right above.
     resetIntelVisibilityBaseline();
     migrateStrongestFleetToPlayerKeyed();
+    migrateStrongestFleetToPerFleet();
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_strongest_fleet_player ON strongest_fleet(player_id)`);
 
     // --- DISCORD INCOMING ALERT TRACKING ---
     // Maps a game attacking-fleet id to the Discord message announcing it, so the

@@ -26,7 +26,7 @@ const router = express.Router();
 // merges transports/colony_ships (from the player's latest ship-detail battle report) and
 // last_battle_seen (the same source !lastseen uses) onto one
 // fleetsRepo.getFleetLocationMatches row. See that repo function's own comment for what
-// location_status means and why a CV collision is reported honestly rather than guessed.
+// location_status means.
 function enrichFleetMatch(f) {
     const extra = f.player_id != null ? battleReportsRepo.getLatestShipCompositionExtra(f.player_id) : null;
     const lastSeen = f.player_id != null ? battleReportsRepo.getRecentPlanets(f.player_id, 1)[0] : null;
@@ -460,17 +460,13 @@ router.get('/intel/fleets_db', requireAuth, (req, res) => {
     }
 });
 
-// War-tool groundwork (2026-09-20): every /Ranking/StrongestFleet entry, cross-matched
-// against /Ranking/BestGuarded by combat value to say where (if anywhere visible) that
-// fleet currently is. See fleetsRepo.getFleetLocationMatches's own comment for what
-// location_status ('home' | 'parked' | 'away' | 'ambiguous') means and why a CV collision
-// is reported honestly rather than resolved by a guess.
+// War-tool groundwork (2026-09-20): every /Ranking/StrongestFleet entry, at the planet the
+// ranking page prints for it (since 2026-10-04). See fleetsRepo.getFleetLocationMatches's
+// own comment for what location_status ('home' | 'parked' | 'unknown') means.
 //
 // transports/colony_ships and last_battle_seen come from enrichFleetMatch above — see its
-// own comment. Most valuable for `away`/`ambiguous` fleets, where best_guarded has nothing
-// to offer, but included for every fleet since a `home`/`parked` match can itself go stale
-// between ranking-page visits and a recent battle report is a stronger, independent
-// confirmation.
+// own comment. The ranking only changes once a day, so a recent battle report is a
+// fresher, independent confirmation of where a fleet is.
 router.get('/intel/fleet-locations', requireAuth, (req, res) => {
     try {
         const fleets = fleetsRepo.getFleetLocationMatches().map(enrichFleetMatch);
