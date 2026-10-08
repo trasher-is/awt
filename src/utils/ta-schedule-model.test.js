@@ -91,5 +91,59 @@ ok('and more TR%-days are delivered', M.trDays(richer, NOW + 30 * 24 * H) >= M.t
 ok('every step goes live on a trade cycle', poorer.steps.every(st => st.activeAt === RoadToTA.nextTradeActivation(st.acceptAt)));
 ok('nobody accepts before the offer is sent', poorer.steps.every(st => st.acceptAt >= st.sendAt));
 
+// 10. Sending an offer must not reshuffle the plan (reported 2026-10-08). Before, a sent
+// offer either stayed a "confirmed" pair, so the sender paid a second time from a balance
+// already 20k lower, or became "done" and vanished with the acceptor's fee and its TR%.
+// Replanning at the moment the first offer goes out, with the sender's balance down by
+// what they paid, must give the same dates for everything.
+{
+    const people = [member('Ann', 25000, 800), member('Bob', 5000, 900), member('Cid', 12000, 700), member('Dee', 0, 1200, { trader: true })];
+    const allPairs = [['Ann', 'Bob'], ['Ann', 'Cid'], ['Bob', 'Dee'], ['Cid', 'Dee'], ['Bob', 'Cid']];
+    const before = M.plan({ now: NOW, members: people, pairs: allPairs });
+    const first = before.steps[0];
+    const t = first.sendAt;
+    // Everyone's balance at t had nobody sent anything: saved + income since NOW.
+    const atT = people.map(m => ({ ...m, saved: m.saved + m.rate * (t - NOW) / H - (m.name === first.sender ? 20000 : 0) }));
+    const rest = allPairs.filter(([x, y]) => !([x, y].includes(first.sender) && [x, y].includes(first.acceptor)));
+    const after = M.plan({ now: t, members: atT, pairs: rest, inFlight: [{ a: first.sender, b: first.acceptor, state: 'pending', sender: first.sender, since: t }] });
+    const key = st => [st.sender, st.acceptor].sort().join('|');
+    const was = new Map(before.steps.map(st => [key(st), st]));
+    ok('every agreement is still planned after the send', after.steps.length === before.steps.length && !after.unfunded.length, after.steps.map(key));
+    ok('the sent one keeps its acceptance and its cycle', after.steps[0].state === 'pending' && after.steps[0].acceptAt === first.acceptAt && after.steps[0].activeAt === first.activeAt,
+        [after.steps[0].acceptAt - first.acceptAt]);
+    ok('and nothing else moves', after.steps.every(st => was.get(key(st)) && was.get(key(st)).activeAt === st.activeAt),
+        after.steps.map(st => [key(st), (st.activeAt - was.get(key(st)).activeAt) / H]));
+    // The old behaviour, for contrast: the same pair planned as still-confirmed.
+    const old = M.plan({ now: t, members: atT, pairs: allPairs });
+    ok('(planning it as a confirmed pair, as before, did move things)', old.finish !== before.finish || old.steps.some(st => was.get(key(st)).activeAt !== st.activeAt));
+}
+
+// 11. In-flight details.
+{
+    const ppl = [member('Ann', 0, 1000), member('Bob', 0, 1000)];
+    let r = M.plan({ now: NOW, members: ppl, pairs: [], inFlight: [{ a: 'Ann', b: 'Bob', state: 'pending', sender: 'Ann', since: NOW }] });
+    let st = r.steps[0];
+    ok('pending: only the acceptor pays, after 20h of income', st.acceptor === 'Bob' && Math.abs(st.acceptAt - (NOW + 20 * H)) < 5 * 60e3, (st.acceptAt - NOW) / H);
+    ok('pending: expiry is 2 days after it was sent, and 20h is in time', st.expiresAt === NOW + 48 * H && !st.late);
+    r = M.plan({ now: NOW, members: [member('Ann', 0, 1000), member('Bob', 0, 100)], pairs: [], inFlight: [{ a: 'Ann', b: 'Bob', state: 'pending', sender: 'Ann', since: NOW }] });
+    ok('pending: an acceptor who cannot pay in 2 days is flagged late', r.steps[0].late === true);
+    r = M.plan({ now: NOW, members: [member('Ann', 0, 100), member('Bob', 0, 1000)], pairs: [], inFlight: [{ a: 'Ann', b: 'Bob', state: 'pending', sender: null, since: NOW }] });
+    ok('pending, sender unknown: the side that can pay sooner is taken as acceptor', r.steps[0].acceptor === 'Bob' && r.steps[0].senderKnown === false, r.steps[0]);
+    r = M.plan({ now: NOW, members: ppl, pairs: [], inFlight: [{ a: 'Ann', b: 'Bob', state: 'pending', sender: 'Ann', since: NOW - 49 * H }] });
+    ok('pending over 2 days old: reported as expired, not planned', !r.steps.length && r.expired.length === 1, r);
+    r = M.plan({ now: NOW, members: ppl, pairs: [], inFlight: [{ a: 'Ann', b: 'Bob', state: 'establishing', sender: 'Bob', since: NOW }] });
+    st = r.steps[0];
+    ok('establishing: nobody pays, live at the next cycle', st && st.activeAt === RoadToTA.nextTradeActivation(NOW) && st.sender === 'Bob', st);
+    r = M.plan({ now: NOW, members: ppl, pairs: [], inFlight: [{ a: 'Ann', b: 'Bob', state: 'establishing', sender: 'Bob', since: NOW - 7 * H }] });
+    ok('establishing seen before a cycle that has passed: already live, not planned', !r.steps.length);
+    // Its TR% still raises later income: Ann's next agreement comes sooner with it.
+    const three = [member('Ann', 0, 1000, { pop10: 30, tr: 0 }), member('Bob', 0, 1000, { pop10: 30, tr: 0 }), member('Cid', 40000, 0)];
+    const withIt = M.plan({ now: NOW, members: three, pairs: [['Ann', 'Cid']], inFlight: [{ a: 'Ann', b: 'Bob', state: 'establishing', sender: 'Ann', since: NOW }] });
+    const without = M.plan({ now: NOW, members: three, pairs: [['Ann', 'Cid']] });
+    const ac = r => r.steps.find(x => [x.sender, x.acceptor].includes('Cid'));
+    ok('establishing: its TR% boost feeds the members\' later agreements', ac(withIt).activeAt <= ac(without).activeAt && ac(withIt).acceptAt < ac(without).acceptAt,
+        [(ac(withIt).acceptAt - NOW) / H, (ac(without).acceptAt - NOW) / H]);
+}
+
 if (failed > 0) { console.error(`${failed} check(s) failed`); process.exit(1); }
 console.log('All checks passed');

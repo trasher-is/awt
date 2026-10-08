@@ -1319,6 +1319,10 @@ async function runTradeSchedule() {
             me: (ta.me || taState?.me || '').toLowerCase(),
             traders: (ta.traders || []).map(t => t.toLowerCase()),
             pairs: ta.agreements.filter(t => t.status === 'confirmed').map(t => [t.player_a, t.player_b]),
+            // Sent in game but not live yet (Status column of the Agreements page).
+            inFlight: ta.agreements
+                .filter(t => t.status === 'done' && (t.offer_state === 'pending' || t.offer_state === 'establishing'))
+                .map(t => ({ a: t.player_a, b: t.player_b, state: t.offer_state, sender: t.offer_sender, since: t.offer_state_at })),
         };
         const box = document.getElementById('ta-sell-hoard');
         if (box && !box.dataset.wired) { box.dataset.wired = '1'; box.addEventListener('change', renderTradeSchedule); }
@@ -1372,20 +1376,20 @@ function renderTradeSchedule() {
     const now = Date.now();
     const sell = !!document.getElementById('ta-sell-hoard')?.checked;
     const { members, estimated } = scheduleMembers(inputs, sell);
-    const result = Model.plan({ now, members, pairs: inputs.pairs });
+    const result = Model.plan({ now, members, pairs: inputs.pairs, inFlight: inputs.inFlight });
 
     const sumTime = document.getElementById('ta-sum-time'), sumTrades = document.getElementById('ta-sum-trades');
     // The cycle itself, the same instant each row's "live" shows (activeAt adds the 5-minute
     // TR recalculation on top).
     const lastCycle = result.steps.length ? Math.max(...result.steps.map(st => st.cycleAt)) : null;
     if (sumTime) sumTime.textContent = lastCycle ? fmtTaWhen(lastCycle) : '–';
-    if (sumTrades) sumTrades.textContent = String(inputs.pairs.length);
+    if (sumTrades) sumTrades.textContent = String(result.steps.length + result.unfunded.length);
 
     // What selling would change, stated against the other setting so the toggle is honest
     // both ways.
     const delta = document.getElementById('ta-sell-delta');
     if (delta) {
-        const other = Model.plan({ now, members: scheduleMembers(inputs, !sell).members, pairs: inputs.pairs });
+        const other = Model.plan({ now, members: scheduleMembers(inputs, !sell).members, pairs: inputs.pairs, inFlight: inputs.inFlight });
         const withSell = sell ? result : other, without = sell ? other : result;
         const hours = (without.finish && withSell.finish) ? Math.round((without.finish - withSell.finish) / 3600000) : 0;
         delta.classList.toggle('hidden', !(hours > 0));
@@ -1394,7 +1398,7 @@ function renderTradeSchedule() {
             : '';
     }
 
-    if (!inputs.pairs.length) {
+    if (!result.steps.length) {
         body.innerHTML = '<p class="text-center py-6 text-green-400">No confirmed agreements pending.</p>';
     } else {
         body.innerHTML = result.steps.map((s, i) => {
@@ -1402,11 +1406,26 @@ function renderTradeSchedule() {
                 ? `<span class="text-yellow-400">${esc(s.acceptor)}</span> accepts free`
                 : `${esc(s.acceptor)} accepts`;
             const cycle = fmtTaWhen(s.cycleAt);
+            const pair = s.senderKnown === false
+                ? `${esc(s.sender)} <i class="fa-solid fa-arrows-left-right text-muted-foreground mx-1"></i> ${esc(s.acceptor)}`
+                : `${esc(s.sender)} <i class="fa-solid fa-arrow-right text-muted-foreground mx-1"></i> ${esc(s.acceptor)}`;
+            let sendText, acceptText;
+            if (s.state === 'establishing') {
+                sendText = '<span class="text-emerald-400">accepted</span>';
+                acceptText = `waiting for the trade cycle at <span class="text-foreground font-mono">${esc(cycle)}</span>`;
+            } else if (s.state === 'pending') {
+                sendText = `<span class="text-sky-400">offer sent</span>${s.senderKnown ? ` by <b class="text-foreground">${esc(s.sender)}</b>` : ''}, expires <span class="text-foreground font-mono">${esc(fmtTaWhen(s.expiresAt))}</span>`;
+                acceptText = `${accept} from <span class="text-foreground font-mono">${esc(fmtTaWhen(s.acceptAt))}</span>, before <span class="text-foreground font-mono">${esc(cycle)}</span>`
+                    + (s.late ? ' <span class="text-red-400">— after the offer expires</span>' : '');
+            } else {
+                sendText = `<b class="text-foreground">${esc(s.sender)}</b> sends from <span class="text-foreground font-mono">${esc(fmtTaWhen(s.sendAt))}</span>`;
+                acceptText = `${accept} from <span class="text-foreground font-mono">${esc(fmtTaWhen(s.acceptAt))}</span>, before <span class="text-foreground font-mono">${esc(cycle)}</span>`;
+            }
             return `<div class="bg-zinc-950 border border-border rounded-md px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1">
                 <span class="text-muted-foreground font-mono w-5">${i + 1}</span>
-                <span class="font-medium text-foreground min-w-[12rem]">${esc(s.sender)} <i class="fa-solid fa-arrow-right text-muted-foreground mx-1"></i> ${esc(s.acceptor)}</span>
-                <span class="text-xs text-muted-foreground"><b class="text-foreground">${esc(s.sender)}</b> sends from <span class="text-foreground font-mono">${esc(fmtTaWhen(s.sendAt))}</span></span>
-                <span class="text-xs text-muted-foreground">${accept} from <span class="text-foreground font-mono">${esc(fmtTaWhen(s.acceptAt))}</span>, before <span class="text-foreground font-mono">${esc(cycle)}</span></span>
+                <span class="font-medium text-foreground min-w-[12rem]">${pair}</span>
+                <span class="text-xs text-muted-foreground">${sendText}</span>
+                <span class="text-xs text-muted-foreground">${acceptText}</span>
                 <span class="text-xs ml-auto"><span class="text-emerald-400 font-mono">live ${esc(cycle)}</span> <span class="text-muted-foreground">+${s.senderGain}% / +${s.acceptorGain}% TR</span></span>
             </div>`;
         }).join('');
@@ -1414,8 +1433,9 @@ function renderTradeSchedule() {
 
     const notes = [];
     if (result.unfunded.length) notes.push(`<span class="text-red-400">Cannot be funded within 90 days at current income: ${esc(result.unfunded.map(p => p.join(' ↔ ')).join(', '))}</span>`);
+    if (result.expired.length) notes.push(`<span class="text-aw-warning">Offer sent over 2 days ago and probably expired (re-open the Agreements page to refresh): ${esc(result.expired.map(p => p.join(' ↔ ')).join(', '))}</span>`);
     if (result.missing.length) notes.push(`<span class="text-aw-warning">No alliance-stats data for: ${esc(result.missing.join(', '))}</span>`);
-    const pendingNames = new Set(inputs.pairs.flat().map(n => n.toLowerCase()));
+    const pendingNames = new Set(inputs.pairs.flat().concat(inputs.inFlight.flatMap(f => [f.a, f.b])).map(n => n.toLowerCase()));
     const est = estimated.filter(n => pendingNames.has(n.toLowerCase()));
     if (est.length) notes.push(`Estimated from total production (no banking planets ticked in My Savings): ${esc(est.join(', '))}. Planets still building make these dates optimistic.`);
     if (!sell) {

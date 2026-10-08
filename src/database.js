@@ -695,6 +695,14 @@ function initDatabase() {
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     `);
+    // The in-game state behind a 'done' pair, read from the Status column of a member's
+    // /Game/Trade/Agreements page: 'pending' (offer sent, only the sender has paid),
+    // 'establishing' (accepted, both paid, live at the next trade cycle) or 'active'.
+    // offer_sender is who sent it (null when unknown), offer_state_at (epoch ms) when the
+    // hub first saw this state. The Schedule plans the rest of a pending offer from these.
+    addColumn('trade_agreements', 'offer_state', 'TEXT');
+    addColumn('trade_agreements', 'offer_sender', 'TEXT');
+    addColumn('trade_agreements', 'offer_state_at', 'INTEGER');
 
     // --- GENERIC KEY/VALUE SETTINGS STORE ---
     db.exec(`
