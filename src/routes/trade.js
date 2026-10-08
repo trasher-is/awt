@@ -176,6 +176,8 @@ router.post('/admin/trade-agreements', requireAdmin, (req, res) => {
     res.json({ success: true });
 });
 
+const OFFER_STATES = new Set(['pending', 'establishing', 'active']);
+
 // --- COMPLETION SYNC: scraped from a member's /Game/Trade/Agreements page ---
 // Body: { partners: ["NameA","NameB", ...] } — every partner listed on the logged-in
 // member's own Existing Agreements table right now, regardless of that row's Status text
@@ -190,6 +192,13 @@ router.post('/sync/trade-agreements', requireAuth, (req, res) => {
     const me = req.session.gameName;
     const partners = Array.isArray(req.body.partners) ? req.body.partners : [];
     if (!me) return res.status(400).json({ error: 'No session identity' });
+    // Each row's Status (2026-10-08); absent from an old cached bundle, which then leaves
+    // the stored state alone.
+    const states = new Map();
+    if (Array.isArray(req.body.rows)) for (const row of req.body.rows) {
+        if (row && typeof row.name === 'string' && OFFER_STATES.has(row.state)) states.set(row.name.trim().toLowerCase(), row.state);
+    }
+    const now = Date.now();
 
     const tx = db.transaction((list) => {
         const seen = new Set();
@@ -197,8 +206,20 @@ router.post('/sync/trade-agreements', requireAuth, (req, res) => {
             const partner = canonicalName(String(raw).trim());
             if (!partner || partner.toLowerCase() === me.toLowerCase()) continue;
             seen.add(partner.toLowerCase());
+            const key = pairKey(me, partner);
+            const before = tradeRepo.getAgreementByPairKey(key);
             const [a, b] = [me, partner].sort((x, y) => x.toLowerCase().localeCompare(y.toLowerCase()));
-            tradeRepo.markAgreementDoneByInitiator(pairKey(me, partner), a, b, me);
+            tradeRepo.markAgreementDoneByInitiator(key, a, b, me);
+            const state = states.get(String(raw).trim().toLowerCase());
+            if (state && (!before || state !== before.offer_state)) {
+                // Offers are sent from this very page, so the first member to report a new
+                // pending offer is the one who just sent it. A pair the hub already had as
+                // done before states were read (or that the alliance scan marked done) has
+                // no such evidence: its sender stays unknown.
+                let sender = before ? before.offer_sender : null;
+                if (state === 'pending') sender = before && before.status === 'done' ? null : me;
+                tradeRepo.setOfferState(key, state, sender, now);
+            }
         }
 
         const stale = tradeRepo.getDoneAgreementsForPlayer(me).filter((row) => {

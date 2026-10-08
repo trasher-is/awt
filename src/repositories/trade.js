@@ -119,6 +119,19 @@ function markAgreementDoneByScan(pairKey, playerA, playerB) {
     markAgreementDoneByScanStmt.run(pairKey, playerA, playerB);
 }
 
+const getAgreementByPairKeyStmt = db.prepare(`SELECT * FROM trade_agreements WHERE pair_key = ?`);
+function getAgreementByPairKey(pairKey) {
+    return getAgreementByPairKeyStmt.get(pairKey);
+}
+
+const setOfferStateStmt = db.prepare(`
+    UPDATE trade_agreements SET offer_state = ?, offer_sender = ?, offer_state_at = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE pair_key = ?
+`);
+function setOfferState(pairKey, state, sender, at) {
+    setOfferStateStmt.run(state, sender, at, pairKey);
+}
+
 // Reconciliation (2026-09-20): a member's own /Game/Trade/Agreements page is a complete,
 // current snapshot of every real agreement they're party to. If a pair we marked 'done'
 // (see markAgreementDoneByInitiator/ByScan) no longer has that partner listed there, the
@@ -154,5 +167,5 @@ module.exports = {
     getActivePairKeys, getActiveAgreements, getAgreementStatusByPairKey, getAgreementById, getPartnerObservations,
     proposeAgreement, confirmAgreement, cancelAgreement, forceSetAgreement,
     markAgreementDoneByInitiator, markAgreementDoneByScan, deleteAllTradeAgreements,
-    getDoneAgreementsForPlayer, cancelAgreementsByIds,
+    getDoneAgreementsForPlayer, cancelAgreementsByIds, getAgreementByPairKey, setOfferState,
 };

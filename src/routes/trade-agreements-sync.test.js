@@ -100,6 +100,44 @@ const statusOf = (pairKey) => { const row = tradeRepo.getAgreementStatusByPairKe
         r = await request(server, 'POST', '/hub-api/sync/trade-agreements', { partners: [] });
         ok('sync succeeds', r.status === 200 && r.body.success, r.body);
         ok('a done pair between two other members is untouched', statusOf('erin|frank') === 'done', statusOf('erin|frank'));
+
+        console.log('\n── Offer state from the Status column (2026-10-08) ' + '─'.repeat(25));
+        const row = (key) => tradeRepo.getAgreementByPairKey(key);
+        // A confirmed Board pair: caveman sends from his Agreements page, which reloads.
+        tradeRepo.proposeAgreement('caveman|gina', 'caveman', 'gina', 'caveman');
+        tradeRepo.confirmAgreement(row('caveman|gina').id);
+        sessionGameName = 'caveman';
+        r = await request(server, 'POST', '/hub-api/sync/trade-agreements', { partners: ['bob', 'gina'], rows: [{ name: 'gina', state: 'pending' }] });
+        ok('sync succeeds', r.status === 200 && r.body.success, r.body);
+        let g = row('caveman|gina');
+        ok('a newly pending offer: done for the Board, pending, sent by the reporter', g.status === 'done' && g.offer_state === 'pending' && g.offer_sender === 'caveman' && g.offer_state_at > 0, g);
+        const firstSeen = g.offer_state_at;
+
+        sessionGameName = 'gina';
+        r = await request(server, 'POST', '/hub-api/sync/trade-agreements', { partners: ['caveman'], rows: [{ name: 'caveman', state: 'pending' }] });
+        g = row('caveman|gina');
+        ok('the acceptor seeing it pending keeps sender and first-seen time', g.offer_sender === 'caveman' && g.offer_state_at === firstSeen, g);
+
+        r = await request(server, 'POST', '/hub-api/sync/trade-agreements', { partners: ['caveman'], rows: [{ name: 'caveman', state: 'establishing' }] });
+        g = row('caveman|gina');
+        ok('accepted: establishing, sender kept', g.offer_state === 'establishing' && g.offer_sender === 'caveman', g);
+
+        r = await request(server, 'POST', '/hub-api/sync/trade-agreements', { partners: ['caveman'] });
+        g = row('caveman|gina');
+        ok('an old bundle without rows leaves the state alone', g.offer_state === 'establishing', g);
+
+        r = await request(server, 'POST', '/hub-api/sync/trade-agreements', { partners: ['caveman'], rows: [{ name: 'caveman', state: 'active' }] });
+        ok('then active', row('caveman|gina').offer_state === 'active', row('caveman|gina'));
+
+        // A pair already done before states were read: whoever reports it pending first is
+        // not evidence of who sent it.
+        sessionGameName = 'caveman';
+        tradeRepo.markAgreementDoneByInitiator('caveman|hank', 'caveman', 'hank', 'hank');
+        r = await request(server, 'POST', '/hub-api/sync/trade-agreements', { partners: ['bob', 'gina', 'hank'], rows: [{ name: 'hank', state: 'pending' }] });
+        const h = row('caveman|hank');
+        ok('pending on an already-done pair: sender unknown', h.offer_state === 'pending' && h.offer_sender === null, h);
+        ok('junk states are ignored', (await request(server, 'POST', '/hub-api/sync/trade-agreements', { partners: ['bob', 'gina', 'hank'], rows: [{ name: 'hank', state: 'drop table' }] })).status === 200
+            && row('caveman|hank').offer_state === 'pending');
     } finally {
         server.close();
     }
