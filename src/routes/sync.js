@@ -5,6 +5,7 @@ const { announceSystemChanges, announceSystemMilestones, sendVariousChangeEmbed 
 const { friendlyAllianceTags, ownAllianceTags } = require('../utils/friendly-alliance-tags');
 const { parseSqliteUtc } = require('../../public/js/utils/sqlite-time.js');
 const { decideIntelVisibilityChange } = require('../utils/intel-visibility');
+const { cvOf } = require('../../public/js/utils/battle-model.js');
 
 // Best Guarded / various-changes: "close by" means within this many straight-line systems
 // of friendly territory (2026-09-12 — a flat radius, not per-player biology).
@@ -1496,52 +1497,56 @@ router.post('/sync/highest-population-snapshot', requireAuth, (req, res) => {
     }
 });
 
-// --- RANKING: STRONGEST FLEET (war-tool groundwork, 2026-09-20; revised same day for
-// durable history once real data showed the wholesale-replace, top-50-only design was too
-// narrow — see database.js's table comment for the full reasoning) ---
-// Rows carry a destroyer/cruiser/battleship breakdown, not just a rank, because CV alone
-// collides between players with identical fleet composition (confirmed live: two players
-// both at 105 CV / 35 destroyers on the same day). A 5-day staleness purge runs first, so a
-// scraper that stops being fed (nobody visits the ranking page) ages old rows out instead
-// of leaving them looking current indefinitely.
+// --- RANKING: STRONGEST FLEET (war-tool groundwork, 2026-09-20; one row per fleet with
+// its planet since 2026-10-08 — see database.js's table comment) ---
+// A 5-day staleness purge runs first, so a scraper that stops being fed (nobody visits the
+// ranking page) ages old rows out instead of leaving them looking current indefinitely.
 //
-// A row is upserted, never inserted fresh, keyed by player_id — so a player missing from
-// this particular scrape keeps their last-known row rather than being wiped, which is what
-// lets the table hold more than one day's top-50 at once. Two consequences fall out of
-// that: (1) a row whose owner can't be resolved to a known player is skipped entirely (no
-// stable identity to upsert against — unlike the table's first version, this is NOT kept
-// with player_id NULL); (2) when the SAME player appears more than once in one scrape (a
-// rare real case — a player can hold two simultaneous fleets), only their highest-cv row is
-// upserted, since player_id can only ever hold one row now.
+// Every player listed in this scrape has their rows replaced with the fleets listed now;
+// a player missing from it keeps their last-known fleets. A row whose owner isn't a known
+// player is skipped: there is no identity to file it under.
+//
+// A row whose CV is not 3·DS + 24·CR + 60·BS is rejected rather than stored. All 50 rows
+// of the 2026-10-08 page add up exactly, and when the game inserted the Planet column on
+// 2026-10-04 the old scraper wrote every field one column over for four days without any
+// error; this check turns the next layout change into rejected rows instead.
+const FLEET_PLANET_RE = /^(.*\S)\s*#\s*(\d+)$/;
+function resolveRankingPlanet(text) {
+    const label = typeof text === 'string' ? text.trim() : '';
+    const m = FLEET_PLANET_RE.exec(label);
+    if (!m) return { system_id: null, planet_index: null, planet_label: label || null };
+    return { system_id: systemsRepo.getSystemIdByName(m[1]), planet_index: parseInt(m[2], 10), planet_label: label };
+}
+
 router.post('/sync/strongest-fleet', requireAuth, (req, res) => {
     const { rows } = req.body;
     if (!Array.isArray(rows)) {
         return res.status(400).json({ error: 'Invalid payload' });
     }
     const syncedAt = new Date().toISOString();
+    let rejected = 0;
 
     const syncTx = db.transaction((entries) => {
         fleetsRepo.deleteStrongestFleetOlderThan5Days();
 
         const byPlayer = new Map();
         for (const row of entries) {
-            if (!Number.isInteger(row.rank) || !Number.isInteger(row.cv)) continue;
+            if (!Number.isInteger(row.rank) || !Number.isInteger(row.cv)) { rejected++; continue; }
+            const destroyers = Number(row.destroyers) || 0, cruisers = Number(row.cruisers) || 0, battleships = Number(row.battleships) || 0;
+            if (cvOf({ destroyers, cruisers, battleships }) !== row.cv) { rejected++; continue; }
             if (!Number.isInteger(row.player_id) || !playersRepo.playerExistsById(row.player_id)) continue;
-            const existing = byPlayer.get(row.player_id);
-            if (!existing || row.cv > existing.cv) byPlayer.set(row.player_id, row);
+            if (!byPlayer.has(row.player_id)) byPlayer.set(row.player_id, []);
+            byPlayer.get(row.player_id).push({ rank: row.rank, destroyers, cruisers, battleships, cv: row.cv, ...resolveRankingPlanet(row.planet) });
         }
-        for (const [playerId, row] of byPlayer) {
-            fleetsRepo.upsertStrongestFleet(
-                playerId, row.rank,
-                Number(row.destroyers) || 0, Number(row.cruisers) || 0, Number(row.battleships) || 0,
-                row.cv, syncedAt
-            );
+        for (const [playerId, fleets] of byPlayer) {
+            fleetsRepo.replaceStrongestFleetsForPlayer(playerId, fleets, syncedAt);
         }
     });
 
     try {
         syncTx(rows);
-        res.json({ success: true, skipped: false });
+        if (rejected > 0) console.warn(`[Sync] Strongest Fleet: rejected ${rejected} of ${rows.length} row(s) whose CV does not match their ships — has the ranking page layout changed?`);
+        res.json({ success: true, skipped: false, rejected });
     } catch (err) {
         console.error('[DB Error] Strongest Fleet snapshot sync failure:', err);
         res.status(500).json({ error: 'Database ranking sync error event' });

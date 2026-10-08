@@ -63,8 +63,9 @@ function getJson(server, urlPath) {
         db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (901, 'kralgar', 1)`).run();
         db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (900, 'Praepes', 0, 0)`).run();
         db.prepare(`INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id) VALUES (90001, 900, 6, 901)`).run();
-        db.prepare(`INSERT INTO best_guarded (game_planet_id, cv, updated_at) VALUES (90001, '975', '2026-09-19T22:00:00.000Z')`).run();
-        fleetsRepo.upsertStrongestFleet(901, 1, 325, 0, 0, 975, '2026-09-20T10:00:00.000Z');
+        fleetsRepo.replaceStrongestFleetsForPlayer(901, [
+            { rank: 1, destroyers: 325, cruisers: 0, battleships: 0, cv: 975, system_id: 900, planet_index: 6, planet_label: 'Praepes #6' },
+        ], '2026-09-20T10:00:00.000Z');
 
         // A ship-detail-scraped battle report (source of transports/colony_ships).
         db.prepare(`
@@ -81,7 +82,7 @@ function getJson(server, urlPath) {
         r = await getJson(server, '/hub-api/intel/fleet-locations');
         ok('request succeeds', r.status === 200 && r.body.success, r);
         const kralgar = r.body.fleets.find(f => f.player_id === 901);
-        ok('the fleet still resolves home, via the untouched cross-match logic',
+        ok('the fleet resolves home, at the planet the ranking printed',
             kralgar && kralgar.location_status === 'home', kralgar);
         ok('transports/colony_ships are merged in from the battle report, not from strongest_fleet',
             kralgar.transports === 20 && kralgar.colony_ships === 1, kralgar);
@@ -93,16 +94,6 @@ function getJson(server, urlPath) {
                 && kralgar.last_battle_seen.system_name === 'Praepes'
                 && kralgar.last_battle_seen.planet_index === 6, kralgar);
 
-        console.log('\n── a fleet with no player_id skips both merges cleanly, not a crash ' + '─'.repeat(5));
-        db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (910, 'Orphan', 5, 5)`).run();
-        db.prepare(`INSERT INTO planets (game_planet_id, system_id, planet_index) VALUES (91001, 910, 1)`).run();
-        db.prepare(`INSERT INTO best_guarded (game_planet_id, cv, updated_at) VALUES (91001, '42', '2026-09-19T22:00:00.000Z')`).run();
-        // No matching strongest_fleet row for player-less data is possible (player_id is
-        // the table's PK and NOT NULL in practice — see database.js's table comment), so
-        // this branch is instead exercised by confirming the merge guards on `f.player_id
-        // != null` don't throw for a fleet whose match legitimately has none to look up.
-        r = await getJson(server, '/hub-api/intel/fleet-locations');
-        ok('a second request with more best_guarded noise still succeeds', r.status === 200 && r.body.success, r);
     } finally {
         server.close();
     }

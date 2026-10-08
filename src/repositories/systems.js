@@ -75,6 +75,17 @@ function searchSystemsByQueryPrefix(likeTerm, prefixTerm, limit) {
     return searchSystemsByQueryPrefixStmt.all(likeTerm, prefixTerm, limit);
 }
 
+// Exact name first, then case-insensitive: the ranking pages print system names as the
+// map does, but an ASCII case difference must not cost a location.
+const getSystemIdByNameStmt = db.prepare(`
+    SELECT id FROM systems WHERE name = ? OR name = ? COLLATE NOCASE
+    ORDER BY (name = ?) DESC, id LIMIT 1
+`);
+function getSystemIdByName(name) {
+    const row = getSystemIdByNameStmt.get(name, name, name);
+    return row ? row.id : null;
+}
+
 const searchSystemsByNameOrIdStmt = db.prepare(`
     SELECT id, name, x, y
     FROM systems
@@ -725,7 +736,7 @@ function deleteAllTakeovers() {
 
 module.exports = {
     countSystems, countPlanets, getSystemCoords, getSystemIdByCoords, getFullSystem, listSystemIds, listNamedSystems, getSystemsByIds,
-    listSystemsWithCoordsLimited, searchSystemsByQueryPrefix, searchSystemsByNameOrId,
+    listSystemsWithCoordsLimited, searchSystemsByQueryPrefix, searchSystemsByNameOrId, getSystemIdByName,
     getSystemsDbSummary, getGalaxyMapSystems, getGalaxyMapOwnership, upsertSystemStub,
     upsertSystemFull, setSystemInVision, getSystemObservedAt, advanceSystemObservedAt,
     deleteAllSystems, countBestGuardedAt, clearBestGuarded, insertBestGuarded,

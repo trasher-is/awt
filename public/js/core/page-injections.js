@@ -1370,8 +1370,8 @@ function buildBuildingsCard(p) {
 
 // Fleets card (2026-09-20, war-tool groundwork; revised same day to a 5-day sighting
 // history instead of a single current-state row): one row per sighting from
-// fleetsRepo.getFleetSightingHistory — 'rankings' (StrongestFleet, cross-matched to
-// BestGuarded for a location), 'battle_report' (linked to the actual report, same as the
+// fleetsRepo.getFleetSightingHistory — 'rankings' (StrongestFleet, at the planet the
+// ranking prints), 'battle_report' (linked to the actual report, same as the
 // !lastseen Discord command), or 'vision' (a live system-map sighting, no link — there is
 // no per-sighting page to link to). Newest first, already sorted server-side; only the
 // first 5 rows show by default, with a "Show N more" link revealing the rest, since the
@@ -1394,8 +1394,8 @@ function fleetLocationCell(entry) {
     if (entry.system_id == null) return `<span class="lowlight" title="No location on record">—</span>`;
     const name = entry.system_name ? `${esc(entry.system_name)} ` : '';
     const label = `[${entry.system_id}] ${name}#${entry.planet_index}`;
-    // Not confirmed via a live Best Guarded match (rankings entries only, when the fleet is
-    // away/ambiguous) -- this is the player's registered home planet instead, offered
+    // A rankings entry from before the ranking printed planets has no location of its own
+    // -- this is the player's registered home planet instead, offered
     // because a plausible location plus the Last Seen column beats a bare dash, but marked
     // so it's never mistaken for a live sighting.
     const suffix = entry.location_confirmed === false ? ' <span class="lowlight" title="Not confirmed live — this is the registered home planet, shown as a best guess">(home base)</span>' : '';
@@ -2382,38 +2382,57 @@ export async function initEcoBonusJoinDates() {
     }
 })();
 
-// War-tool groundwork (2026-09-20): /Ranking/StrongestFleet top-50, same wholesale-replace
-// idea as autoScrapeRankings above but keyed by `rank`, not by owner — a player can hold
-// more than one fleet in the ranking at once (confirmed live: two separate destroyer
-// stacks under the same name), so rank is the only value guaranteed unique per row. The
-// destroyer/cruiser/battleship breakdown is captured alongside cv specifically so a later
-// cross-match against best_guarded doesn't have to rely on cv alone, which collides
-// whenever two players field identical fleet composition (also confirmed live: two
-// different players both at 105 CV / 35 destroyers on the same day).
+// War-tool groundwork (2026-09-20): /Ranking/StrongestFleet top-50, keyed by `rank` —
+// a player can hold more than one fleet in the ranking at once, so rank is the only value
+// unique per row. Since 2026-10-04 the page also prints each fleet's planet. Columns are
+// found by their header text, not position: that new Planet column shifted every field
+// one place to the right under the old fixed indices, and the server stored CV as
+// destroyers for four days. The server also rejects any row whose CV does not add up
+// from its ships, so a future shift fails loudly instead.
+function strongestFleetColumns(table) {
+    const cols = {};
+    table.querySelectorAll('thead th').forEach((th, i) => {
+        const t = th.textContent.toLowerCase();
+        if (t.includes('planet')) cols.planet = i;
+        else if (t.includes('combat value') || /\bcv\b/.test(t)) cols.cv = i;
+        else if (t.includes('destroyer')) cols.destroyers = i;
+        else if (t.includes('cruiser')) cols.cruisers = i;
+        else if (t.includes('battleship')) cols.battleships = i;
+    });
+    return ['cv', 'destroyers', 'cruisers', 'battleships'].every(k => cols[k] != null) ? cols : null;
+}
+
 (function autoScrapeStrongestFleet() {
     if (!window.location.pathname.toLowerCase().includes('/ranking/strongestfleet')) return;
 
     console.log('[Hub Tracker] Strongest Fleet ranking channel recognized. Evaluating metrics...');
 
-    const rows = document.querySelectorAll('table.table tbody tr');
-    const processedEntries = [];
+    const table = document.querySelector('table.table');
+    const cols = table && strongestFleetColumns(table);
+    if (!cols) {
+        console.warn('[Hub Tracker] Strongest Fleet: column headers not recognised, not syncing.');
+        return;
+    }
 
-    rows.forEach(row => {
+    const processedEntries = [];
+    table.querySelectorAll('tbody tr').forEach(row => {
         const tds = row.querySelectorAll('td');
         if (tds.length < 6) return;
 
         const rank = parseInt(tds[0].innerText.trim(), 10);
         const ownerLink = row.querySelector('a[href^="/Game/Players/Profile/"]');
         const playerId = ownerLink ? parseInt(ownerLink.getAttribute('href').split('/').pop(), 10) : null;
+        const num = (key) => Math.round(parseLocaleNumber(tds[cols[key]].innerText));
 
         if (isNaN(rank)) return;
         processedEntries.push({
             rank,
             player_id: isNaN(playerId) ? null : playerId,
-            cv: Math.round(parseLocaleNumber(tds[2].innerText)),
-            destroyers: Math.round(parseLocaleNumber(tds[3].innerText)),
-            cruisers: Math.round(parseLocaleNumber(tds[4].innerText)),
-            battleships: Math.round(parseLocaleNumber(tds[5].innerText)),
+            planet: cols.planet != null ? tds[cols.planet].innerText.trim() : null,
+            cv: num('cv'),
+            destroyers: num('destroyers'),
+            cruisers: num('cruisers'),
+            battleships: num('battleships'),
         });
     });
 

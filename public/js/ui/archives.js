@@ -238,8 +238,7 @@ function ageLabel(iso) {
 const LOCATION_STATUS_STYLE = {
     home: { label: 'Home', cls: 'text-green-400' },
     parked: { label: 'Parked', cls: 'text-aw-warning' },
-    away: { label: 'Away', cls: 'text-muted-foreground' },
-    ambiguous: { label: 'Ambiguous', cls: 'text-red-400' },
+    unknown: { label: 'Unknown', cls: 'text-muted-foreground' },
 };
 
 function renderFleetLocationsTable() {
@@ -255,7 +254,7 @@ function renderFleetLocationsTable() {
     if (!tbody) return;
 
     if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="15" class="text-center py-8 text-muted-foreground">${rawFleetLocations.length === 0 ? 'No fleets on record yet.' : 'No match.'}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="14" class="text-center py-8 text-muted-foreground">${rawFleetLocations.length === 0 ? 'No fleets on record yet.' : 'No match.'}</td></tr>`;
         return;
     }
 
@@ -265,8 +264,7 @@ function renderFleetLocationsTable() {
         const at = (l) => planetLink({ planetId: l.game_planet_id, systemId: l.system_id }, `${l.system_name || 'Unknown'} #${l.planet_index}`);
         if (f.location_status === 'home') locationText = at(f.location);
         else if (f.location_status === 'parked') locationText = `${at(f.location)} (${f.location.owner_name ? playerLink(f.location.owner_id, f.location.owner_name) : 'Unowned'}${f.location.owner_tag ? ` ${allianceLink(f.location.owner_alliance_id, f.location.owner_tag)}` : ''})`;
-        else if (f.location_status === 'ambiguous') locationText = `${f.candidates.length} candidate${f.candidates.length === 1 ? '' : 's'} at this CV`;
-        else locationText = '—';
+        else locationText = f.planet_label ? esc(f.planet_label) : '—';
 
         const lastBattleText = f.last_battle_seen
             ? systemLink(f.last_battle_seen.system_id, `${f.last_battle_seen.system_name || 'Unknown'} #${f.last_battle_seen.planet_index ?? '?'}`)
@@ -287,7 +285,6 @@ function renderFleetLocationsTable() {
             <td class="p-3">${locationText}</td>
             <td class="p-3 border-l border-border" title="${f.last_battle_seen ? ageLabel(f.last_battle_seen.occurred_at) : ''}">${lastBattleText}</td>
             <td class="p-3 border-l border-border text-muted-foreground">${ageLabel(f.updated_at)}</td>
-            <td class="p-3 text-muted-foreground">${f.location ? ageLabel(f.location.guard_updated_at) : '—'}</td>
             <td class="p-3 text-muted-foreground">${ageLabel(f.composition_at)}</td>
         </tr>`;
     }).join('');
@@ -309,7 +306,7 @@ export async function openFleetLocationsPanel() {
     panel.classList.replace('translate-x-full', 'translate-x-0');
     if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
 
-    document.getElementById('fltloc-table-body').innerHTML = '<tr><td colspan="15" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading...</td></tr>';
+    document.getElementById('fltloc-table-body').innerHTML = '<tr><td colspan="14" class="text-center py-8 text-muted-foreground"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading...</td></tr>';
     try {
         const res = await fetch('/hub-api/intel/fleet-locations');
         const data = await res.json();
@@ -318,7 +315,7 @@ export async function openFleetLocationsPanel() {
             renderFleetLocationsTable();
         }
     } catch (err) {
-        document.getElementById('fltloc-table-body').innerHTML = '<tr><td colspan="15" class="text-center py-8 text-red-500">Failed to load data.</td></tr>';
+        document.getElementById('fltloc-table-body').innerHTML = '<tr><td colspan="14" class="text-center py-8 text-red-500">Failed to load data.</td></tr>';
     }
 }
 
