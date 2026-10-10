@@ -72,7 +72,7 @@
         } : null;
         const worstDef = normal('def'), worstAtk = normal('atk');
         const rows = [{ source: 'intel', label: 'Intel', values: null, reason: 'Selected players do not both have observed intel.' }];
-        if (selected.every(side => sides[side].player.has_intel)) {
+        if (selected.every(side => model.hasCurrentIntel(sides[side].player))) {
             rows[0].values = summarize(run(worstDef, worstAtk), worstDef, worstAtk);
             rows[0].reason = null;
         }

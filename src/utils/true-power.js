@@ -51,8 +51,9 @@ function observedCombatSciences(row) {
     const intelTime = observationTime(row.intel_updated_at);
     const sheetTime = observationTime(row.sheet_sciences_updated_at);
     const observed = field => {
-        const intel = row.has_intel ? scienceValue(row[field]) : null;
-        const sheet = scienceValue(row[`sheet_${field}`]);
+        const intel = battleModel.hasCurrentIntel(row) ? scienceValue(row[field]) : null;
+        const sheet = battleModel.hasCurrentIntel({ ...row, has_intel: 1, intel_updated_at: row.sheet_sciences_updated_at })
+            ? scienceValue(row[`sheet_${field}`]) : null;
         if (sheet != null && sheetTime != null && (intel == null || intelTime == null || sheetTime > intelTime)) return sheet;
         return intel;
     };
@@ -64,7 +65,7 @@ function ownSide(row, raceEnvelope) {
     if (!row) return null;
     const sciences = observedCombatSciences(row);
     if (sciences.physics == null) return null;
-    if (!row.has_intel) {
+    if (!battleModel.hasCurrentIntel(row)) {
         const resolved = battleModel.resolveStats(row, raceEnvelope);
         if (resolved.source !== 'estimate') return null;
         // Race estimates never manufacture sciences. An observed member sheet is
@@ -112,6 +113,8 @@ function truePowerForAllianceRow(r, ceilings, raceEnvelope = null) {
         level: r.pl_level,
         science_level: r.pl_science_level,
         intel_updated_at: r.pl_intel_updated_at,
+        joined: r.pl_joined,
+        battle_race_not_before: r.pl_battle_race_not_before,
         sheet_physics: r.physics,
         sheet_mathematics: r.mathematics,
         sheet_sciences_updated_at: r.sciences_updated_at,

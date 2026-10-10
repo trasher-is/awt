@@ -1,6 +1,7 @@
 import { esc } from '../utils/escape.js';
 import { readUtcTimestamp } from '../utils/fleet-time.js';
 import { mountBattleRaceIntel } from '../ui/battle-race-intel.js';
+import '../utils/battle-model.js';
 import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
 import '../utils/game-rate-limit.js';
 import '../utils/game-tables.js';    // side-effect import: empire-model.js's own dependency
@@ -1186,7 +1187,7 @@ export async function initProfileHubIntel() {
         </div>`;
     anchor.parentNode.insertBefore(wrap, anchor);
     mountFleetsCardExpand(wrap);
-    mountBattleRaceIntel(wrap, { playerId, hasBio: !!p.has_intel, hasLiveIntel });
+    mountBattleRaceIntel(wrap, { playerId, hasBio: globalThis.AWBattleModel.hasCurrentIntel(p), hasLiveIntel });
     // Only where the hub has no live view of its own: with the game's real Intelligence
     // Report on screen there is nothing to type in, and offering to overwrite a live capture
     // with a hand-typed one would be a way to make good data worse.

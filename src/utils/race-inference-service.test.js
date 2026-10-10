@@ -91,7 +91,7 @@ function request(server,url,role='admin',body){return new Promise((resolve,rejec
             repository.calibrationRows(modelVersion()).every(row=>Array.isArray(row.raw_credible_values)&&row.raw_credible_values.length>0));
         const after=db.prepare('SELECT race_attack,race_defense FROM players WHERE id=11').get();
         ok('nothing writes inferred values to players race intel',JSON.stringify(before)===JSON.stringify(after));
-        db.prepare('UPDATE players SET has_intel=1 WHERE id=11').run();
+        db.prepare('UPDATE players SET has_intel=1,intel_updated_at=CURRENT_TIMESTAMP WHERE id=11').run();
         ok('bio locks and clears shadow estimates',service.recompute(11).status==='bio_locked'&&!repository.getEstimate(11).attack);
         ok('bio truth is never overwritten on subsequent scans',service.recordCalibration(11,{has_intel:1,race_attack:-4,race_defense:-4})===0);
         ok('unknown players do not create empty persistent guesses',service.recompute(999).status==='not_found');

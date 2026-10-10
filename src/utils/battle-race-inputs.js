@@ -4,13 +4,14 @@
 // the script's numbers describe the card, not a second implementation of it.
 const { inferBattleRace, VERSION } = require('./battle-race-inference');
 const { evidenceStart, contextCeilings } = require('./battle-context');
+const { hasCurrentIntel } = require('../../public/js/utils/battle-model');
 
 const statements = new WeakMap();
 function prepared(db) {
     if (!statements.has(db)) {
         statements.set(db, {
             player: db.prepare(`
-                SELECT id, has_intel, joined, battle_race_inference, battle_race_not_before, science_level, level
+                SELECT id, has_intel, intel_updated_at,joined, battle_race_inference, battle_race_not_before, science_level, level
                 FROM players WHERE id = ?
             `),
             reports: db.prepare(`
@@ -24,7 +25,7 @@ function prepared(db) {
                 FROM players WHERE id = ?
             `),
             unknownPlayers: db.prepare(`
-                SELECT id FROM players WHERE has_intel = 0 AND id IN (
+                SELECT id,has_intel,intel_updated_at,joined,battle_race_not_before FROM players WHERE id IN (
                     SELECT att_player_id FROM battle_reports UNION SELECT def_player_id FROM battle_reports
                 ) ORDER BY id
             `),
@@ -38,8 +39,9 @@ const notBefore = evidenceStart;
 
 function readBattleRaceInputs(db, playerId) {
     const statement = prepared(db);
-    const player = statement.player.get(playerId);
-    if (!player) return null;
+    const recordedPlayer = statement.player.get(playerId);
+    if (!recordedPlayer) return null;
+    const player = { ...recordedPlayer, has_intel: hasCurrentIntel(recordedPlayer) ? 1 : 0 };
     const reports = statement.reports.all(playerId, playerId);
     const opponents = {};
     for (const report of reports) {
@@ -56,6 +58,7 @@ function readBattleRaceInputs(db, playerId) {
 function inferFromInputs(playerId, inputs, options = {}) {
     return inferBattleRace(playerId, inputs.reports, {
         ...options, notBefore: notBefore(inputs.player), subject: inputs.subject, opponents: inputs.opponents,
+        resigned: inputs.player.joined === 'N/A',
         contextCeilingsByReport: inputs.contextCeilingsByReport,
     });
 }
@@ -72,7 +75,7 @@ function measureBattleRace(db, options = {}) {
         reports_seen: 0, reports_eligible: 0, skipped: {},
         saved: { by_version: {}, defense_narrowed: 0 },
     };
-    for (const { id } of prepared(db).unknownPlayers.all()) {
+    for (const { id } of prepared(db).unknownPlayers.all().filter(row => !hasCurrentIntel(row) && row.joined !== 'N/A')) {
         const inputs = readBattleRaceInputs(db, id);
         const result = inferFromInputs(id, inputs, options);
         summary.players++;

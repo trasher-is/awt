@@ -7,6 +7,7 @@ const { requireAuth } = require('./_middleware');
 const { postIncomingOnce, replyToIncoming, replyIncomingCover } = require('../discord_bot');
 const { SOURCE_TAG, computeInterceptors } = require('../utils/interceptors');
 const { resolveStats } = require('../utils/battle');
+const { hasCurrentIntel } = require('../../public/js/utils/battle-model');
 const incomingDefenceRepo = require('../repositories/incomingDefence');
 const { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, sbLevels, counterFight, landBefore, ownerReinforce, pct, fleetText, secondaryRaceEstimate } = require('../utils/incoming-battle');
 const { toggleCovering, getCovering, renderCoverLine } = require('../utils/covering');
@@ -26,7 +27,7 @@ function statLine(s) {
     if (!s) return '';
     const sign = (n) => (n > 0 ? '+' : '') + (n || 0);
     const lvl = s.level ? ` pl${s.level}` : '';
-    if (!s.has_intel) return `(no intel)${lvl}`;
+    if (!hasCurrentIntel(s)) return `(no intel)${lvl}`;
     return `${sign(s.race_speed)}/${sign(s.race_attack)}/${sign(s.race_defense)} p${s.physics || 0} m${s.mathematics || 0} e${s.energy || 0}${lvl}`;
 }
 
@@ -91,7 +92,7 @@ function buildAnnounce(data, stats, result, alertKey, owner) {
     // The battle lines assume the worst about what we do not know; say so where it applies.
     const sline = statLine(stats);
     if (!stats) L.push('🧬 `never scanned` — worst case assumed (+4 attack, +4 defence)');
-    else if (!stats.has_intel) L.push(`🧬 \`${sline}\` — race unknown, worst case assumed (+4/+4)`);
+    else if (!hasCurrentIntel(stats)) L.push(`🧬 \`${sline}\` — race unknown, worst case assumed (+4/+4)`);
     else if (sline) L.push(`🧬 \`${sline}\``);
 
     const ships = [];
@@ -257,7 +258,7 @@ function attachBattle(result, data, planet, arrivalUnix, nowUnix) {
             fight = planetFight(ctx);
             if (fight) {
                 result.planet = { ...fight, ownerName: planet.owner_name, seenAt: planet.updated_at };
-                if (enemyRow && !enemyRow.has_intel) {
+                if (enemyRow && !hasCurrentIntel(enemyRow)) {
                     const enemyId = enemyRow.id || data.attacker?.id;
                     const envelope = Number.isSafeInteger(enemyId)
                         ? require('../utils/race-display').raceDisplay(enemyId) : null;
@@ -669,7 +670,7 @@ router.get('/defence/attack', requireAuth, (req, res) => {
             success: true,
             key: row.alert_key, nowUnix: Math.floor(Date.now() / 1000), viewer: req.session.gameName || null,
             attacker: { name: data.attacker.name, tag: data.attacker.tag, statLine: stats ? stats.statLine : null,
-                scanned: !!stats, raceKnown: !!(stats && stats.has_intel) },
+                scanned: !!stats, raceKnown: hasCurrentIntel(stats) },
             target: data.target, ownerName: owner ? owner.name : null,
             cv: data.cv, ships: data.ships, arrivalUnix: data.arrivalUnix || row.arrival_unix || null,
             window: result ? result.window : null,

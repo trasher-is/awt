@@ -184,11 +184,36 @@
     //     science_level (the public ceiling).
     //   • race known but the intel sciences are stale (>24h) -> keep the race, but use
     //     science_level for physics & maths.
+    // Incarnation dates and SQLite CURRENT_TIMESTAMP are UTC. Keep this policy in
+    // the dual-runtime model so a browser and a server never disagree on old bio.
+    function intelTime(value) {
+        if (typeof value !== 'string') return null;
+        const match = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})?)?$/.exec(value);
+        if (!match) return null;
+        const [, day, hour = '00', minute = '00', second = '00', fraction = '', zone = 'Z'] = match;
+        const date = new Date(day + 'T00:00:00Z');
+        if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== day
+            || +hour > 23 || +minute > 59 || +second > 59) return null;
+        const instant = Date.parse(`${day}T${hour}:${minute}:${second}.${fraction.slice(0, 3).padEnd(3, '0')}${zone}`);
+        return Number.isFinite(instant) ? instant : null;
+    }
+    function hasCurrentIntel(p) {
+        if (!p?.has_intel || p.joined === 'N/A') return false;
+        if (p.battle_race_not_before && intelTime(p.battle_race_not_before) === null) return false;
+        const boundaries = [p.joined, p.battle_race_not_before].map(intelTime).filter(value => value !== null);
+        // Legacy rows with no known boundary retain the existing bio contract.
+        if (!boundaries.length) return !p.battle_race_not_before;
+        const observed = intelTime(p.intel_updated_at);
+        // SQLite records bio to whole seconds. Equality within that recorded
+        // second is valid, including a fresh scan in the Joined/reset transaction.
+        const precision = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(p.intel_updated_at) ? 1000 : 1;
+        return observed !== null && observed >= Math.floor(Math.max(...boundaries) / precision) * precision;
+    }
     function resolveStats(p, envelope = null) {
         if (!p) return { ra: 4, rd: 4, phys: 0, math: 0, lvl: 0, unknown: true, source: 'worst' };
         const sci = p.science_level || 0;
-        if (p.has_intel) {
-            const ts = p.intel_updated_at ? Date.parse(p.intel_updated_at) : 0;
+        if (hasCurrentIntel(p)) {
+            const ts = intelTime(p.intel_updated_at);
             const fresh = ts && (Date.now() - ts < 24 * 3600 * 1000);
             return {
                 ra: p.race_attack || 0,
@@ -201,6 +226,7 @@
             };
         }
         const worst = { ra: 4, rd: 4, phys: sci, math: sci, lvl: p.level || 0, unknown: true, source: 'worst' };
+        if (p.joined === 'N/A') return worst;
         if (!envelope || typeof envelope !== 'object') return worst;
         const { estimate, gate, check } = envelope;
         const currentVersion = typeof globalThis.AWRaceInference?.modelVersion === 'function'
@@ -423,7 +449,7 @@
         SHIPS, TOUGH, sbCV, sbHalf,
         cvOf, attOf, toughOf, toFleet,
         clampScience, clampRace, clampStarbase, clampLevel, normalizeInputs,
-        resolveStats, simulate, winChance, winBand, strengthOf, sbStrength,
+        hasCurrentIntel, resolveStats, simulate, winChance, winBand, strengthOf, sbStrength,
         uncertainty: { BASE_ERROR_PP, MIXED_FLEET_EXTRA_PP },
         constants: {
             N_EXP,

@@ -1,6 +1,7 @@
 const db = require('../database');
 const { notBefore } = require('../utils/battle-race-inputs');
 const arithmetic = require('../../public/js/utils/race-inference');
+const { hasCurrentIntel } = require('../../public/js/utils/battle-model');
 const parse = value => { try { return JSON.parse(value); } catch (_) { return null; } };
 function decode(row) {
     if (!row) return null;
@@ -64,8 +65,8 @@ function clearPlayer(playerId) {
     db.prepare('DELETE FROM player_race_estimates WHERE player_id = ?').run(playerId);
 }
 function recordCalibration(playerId, incoming) {
-    const before = db.prepare('SELECT has_intel,joined,battle_race_not_before FROM players WHERE id = ?').get(playerId);
-    if (!before || before.has_intel || incoming.has_intel !== 1) return 0;
+    const before = db.prepare('SELECT has_intel,intel_updated_at,joined,battle_race_not_before FROM players WHERE id = ?').get(playerId);
+    if (!before || hasCurrentIntel(before) || incoming.has_intel !== 1) return 0;
     if (incoming.joined === 'N/A') return 0;
     const boundary = notBefore({ ...before, ...incoming });
     if (incoming.joined && incoming.joined !== before.joined && !boundary) return 0;

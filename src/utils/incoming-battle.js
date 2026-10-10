@@ -45,7 +45,7 @@ const HOLDS = 0.995;
 function allySide(row) {
     // No scan of our own player: resolveStats() would assume +4/+4 race — the worst case
     // for an ENEMY, the most flattering one for us. Neutral 0/0 instead.
-    if (!row || !row.has_intel) {
+    if (!row || !battleModel.hasCurrentIntel(row)) {
         const seen = row ? observedCombatSciences(row) : { physics: null, mathematics: null };
         return { ra: 0, rd: 0, phys: seen.physics || 0, math: seen.mathematics || 0, lvl: (row && row.level) || 0,
             totalXp: row && Number.isFinite(row.total_xp) ? row.total_xp : null, unknown: true };

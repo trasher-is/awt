@@ -5,11 +5,13 @@ const estimates = require('../repositories/raceEstimates');
 const inference = require('./race-inference-service');
 const checks = require('./race-llm-service');
 const { resolveRaceStats } = require('./race-resolve');
+const { hasCurrentIntel } = require('../../public/js/utils/battle-model');
 
 function raceDisplay(playerId, { role = 'user' } = {}) {
-    const player = db.prepare(`SELECT id,name,has_intel,race_attack,race_defense,physics,mathematics,
+    const recordedPlayer = db.prepare(`SELECT id,name,has_intel,race_attack,race_defense,physics,mathematics,
         science_level,level,intel_updated_at,joined,battle_race_not_before FROM players WHERE id=?`).get(playerId);
-    if (!player) return null;
+    if (!recordedPlayer) return null;
+    const player = { ...recordedPlayer, has_intel: hasCurrentIntel(recordedPlayer) ? 1 : 0 };
     const calibration = inference.getCalibrationSummary();
     const reasons = [];
     if (calibration.players < 30) reasons.push('At least 30 players with calibration pairs are required.');

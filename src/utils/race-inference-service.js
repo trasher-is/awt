@@ -3,10 +3,12 @@ const repository = require('../repositories/raceEstimates');
 const { readBattleRaceInputs } = require('./battle-race-inputs');
 const evidence = require('./race-evidence');
 const arithmetic = require('../../public/js/utils/race-inference');
+const { hasCurrentIntel } = require('../../public/js/utils/battle-model');
 
 function recompute(playerId) {
     const inputs = readBattleRaceInputs(db, playerId);
     if (!inputs) return { status: 'not_found' };
+    if (inputs.player.joined === 'N/A') { repository.clearPlayer(playerId); return { status: 'resigned' }; }
     if (inputs.player.has_intel) { repository.clearPlayer(playerId); return { status: 'bio_locked' }; }
     const target = new URL(process.env.TARGET_URL || 'https://astrowars.games');
     const built = evidence.buildEvidence(playerId, inputs, { universe: target.hostname.startsWith('redzone.') ? 'redzone' : 'standard' });
@@ -54,8 +56,9 @@ function flush() {
     }
 }
 function recomputeAll() {
-    return db.prepare(`SELECT id FROM players WHERE has_intel=0 AND id IN
+    return db.prepare(`SELECT id,has_intel,intel_updated_at,joined,battle_race_not_before FROM players WHERE id IN
         (SELECT att_player_id FROM battle_reports UNION SELECT def_player_id FROM battle_reports)`).all()
+        .filter(row => !hasCurrentIntel(row) && row.joined !== 'N/A')
         .map(row => ({ player_id: row.id, status: recompute(row.id).status }));
 }
 function recordCalibration(playerId, incomingIntel) { return repository.recordCalibration(playerId, incomingIntel); }

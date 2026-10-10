@@ -623,7 +623,7 @@ function sideStats(side, playerId, startedAt) {
     const when = context.time(startedAt);
     if (cutoff !== null && (when === null || when < cutoff)) return none;
     const p = context.nearestCombatContext(db, playerId, startedAt) || current;
-    if (!p || p.has_intel !== 1) return none;
+    if (!p || !require('../../public/js/utils/battle-model').hasCurrentIntel(p)) return none;
     return {
         [`${side}_race_attack`]: p.race_attack, [`${side}_race_defense`]: p.race_defense,
         [`${side}_physics`]: p.physics, [`${side}_mathematics`]: p.mathematics,

@@ -5,7 +5,7 @@ const { announceSystemChanges, announceSystemMilestones, sendVariousChangeEmbed 
 const { friendlyAllianceTags, ownAllianceTags } = require('../utils/friendly-alliance-tags');
 const { parseSqliteUtc } = require('../../public/js/utils/sqlite-time.js');
 const { decideIntelVisibilityChange } = require('../utils/intel-visibility');
-const { cvOf } = require('../../public/js/utils/battle-model.js');
+const { cvOf, hasCurrentIntel } = require('../../public/js/utils/battle-model.js');
 
 // Best Guarded / various-changes: "close by" means within this many straight-line systems
 // of friendly territory (2026-09-12 — a flat radius, not per-player biology).
@@ -1067,10 +1067,12 @@ router.post('/sync/player-detail', requireAuth, (req, res) => {
     // player with no race on record yet still gets the API's values written normally.
     if (detail.has_intel === 1) {
         const existingRace = playersRepo.getPlayerRaceValues(p.id);
+        const identity = playersRepo.joinedTransition(p.id, p.joined);
         // has_intel, not "is the column non-zero", is the real "race already on record"
         // signal — race_* columns default to 0 for every player row, so testing the raw
         // value would lock in zeros for every player on their very first detail sync.
-        if (existingRace && existingRace.has_intel) {
+        if (existingRace && !identity.confirmed && hasCurrentIntel({ ...existingRace,
+            joined: identity.joined, battle_race_not_before: identity.cutoff })) {
             for (const f of RACE_FIELDS) detail[f] = existingRace[f];
         }
     }

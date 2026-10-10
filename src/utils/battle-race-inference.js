@@ -84,6 +84,7 @@ function starbaseLevel(report, defFleet) {
 // (same alliance means full intel) or a scouted player outside the alliance.
 function knownSide(stats, when) {
     if (!stats || stats.has_intel !== 1) return { skip: 'no_known_side' };
+    if (!battleModel.hasCurrentIntel(stats)) return { skip: 'ally_stats_unknown' };
     const recorded = timestamp(stats.intel_updated_at);
     if (!Number.isFinite(recorded) || Math.abs(recorded - when) > KNOWN_SIDE_MAX_AGE_HOURS * HOUR_MS) {
         return { skip: 'ally_stats_unknown' };
@@ -304,7 +305,8 @@ function buildRaceObservations(playerId, reports, options = {}) {
     for (const report of reports) {
         if (!report || (report.att_player_id !== playerId && report.def_player_id !== playerId)) continue;
         let skip;
-        if (options.universe && options.universe !== 'standard') skip = 'unsupported_ruleset';
+        if (options.resigned) skip = 'resigned_player';
+        else if (options.universe && options.universe !== 'standard') skip = 'unsupported_ruleset';
         else if (!Number.isFinite(cutoff) && cutoff !== -Infinity) skip = 'invalid_player_cutoff';
         else if (!Number.isSafeInteger(report.id) || report.id <= 0) skip = 'invalid_report_id';
         else if (seen.has(report.id)) skip = 'duplicate_report';

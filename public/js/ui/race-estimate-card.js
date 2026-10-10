@@ -3,6 +3,7 @@ import '../utils/race-inference.js';
 import '../utils/race-estimate-display.js';
 import '../utils/sqlite-time.js';
 const Display = globalThis.AWRaceEstimateDisplay;
+const Model = globalThis.AWBattleModel;
 const { formatLocalDateTime } = globalThis.AWSqliteTime;
 const mounted = new WeakMap();
 
@@ -31,13 +32,13 @@ export function mountRaceEstimateCard(container, { playerId, hasBio = false, has
     for (const node of [heading, status, traits, details, gate, retry, requestCheck]) card.appendChild(node);
     container.appendChild(card);
     let snapshot = null, busy = false, error = '', authFailed = false;
-    let bioAvailable = !!hasBio || !!hasLiveIntel;
+    let liveBioAvailable = !!hasLiveIntel;
     function respectLiveIntel() {
         // The open profile may acquire stronger evidence before hub sync catches up.
-        if (snapshot?.player?.has_intel || (typeof document.querySelectorAll === 'function'
+        if (typeof document.querySelectorAll === 'function'
             && [...document.querySelectorAll('.race-summary, .ir-summary')]
-                .some(table => !table.closest('.overflow-auto')))) bioAvailable = true;
-        return bioAvailable;
+                .some(table => !table.closest('.overflow-auto'))) liveBioAvailable = true;
+        return liveBioAvailable || (snapshot ? Model.hasCurrentIntel(snapshot.player) : !!hasBio);
     }
     function render() {
         const locked = respectLiveIntel();
@@ -52,7 +53,7 @@ export function mountRaceEstimateCard(container, { playerId, hasBio = false, has
         status.textContent = locked ? 'Observed intel is available; it remains authoritative.'
             : error || (busy ? 'Loading saved race estimate…' : !snapshot ? 'Saved estimate unavailable.'
             : snapshot.estimate ? `Estimate · ${Display.checkLabel(snapshot.check)}.`
-                : snapshot.player?.has_intel ? 'Observed intel is available; it remains authoritative.'
+                : Model.hasCurrentIntel(snapshot.player) ? 'Observed intel is available; it remains authoritative.'
                     : 'No member-visible estimate. Worst case remains in calculations.');
         traits.replaceChildren(); explanation.replaceChildren();
         details.hidden = locked || !snapshot?.estimate;

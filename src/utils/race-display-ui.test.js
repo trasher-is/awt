@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const Display = require('../../public/js/utils/race-estimate-display');
+const Model = require('../../public/js/utils/battle-model');
 const Time = require('../../public/js/utils/sqlite-time');
 const Inference = require('../../public/js/utils/race-inference');
 const { truePower } = require('./true-power');
@@ -55,6 +56,14 @@ ok('a fully gated estimate produces a separately labelled range alongside worst 
     && rows.find(row => row.source === 'worst').label.includes('Worst case'));
 rows = Display.comparisonRows(inputs, { atk: { ...envelope, check: { ...envelope.check, state: 'held' } } });
 ok('a held estimate cannot produce comparison numbers', rows.find(row => row.source === 'estimate').values === null);
+const historicalBio = { ...envelope.player, has_intel: 1, race_attack: -3, race_defense: -2,
+    joined: '2026-10-01', intel_updated_at: '2026-09-02 12:00:00', battle_race_not_before: '2026-10-01 00:00:00' };
+rows = Display.comparisonRows(inputs, { atk: { ...envelope, player: historicalBio } });
+ok('a preserved bio flag before the current incarnation cannot produce an Intel comparison',
+    rows.find(row => row.source === 'intel').values === null);
+rows = Display.comparisonRows(inputs, { atk: { ...envelope, player: { ...historicalBio, intel_updated_at: '2026-10-02 12:00:00' } } });
+ok('fresh bio after the current incarnation supplies the separately labelled Intel comparison',
+    !!rows.find(row => row.source === 'intel').values);
 const broad = { ...envelope, estimate: { ...envelope.estimate,
     attack: { ...trait(2), hard_candidates: [-4, 2, 4], set90_values: [-4, 2, 4], set90_kind: 'conservative_compatibility' } } };
 rows = Display.comparisonRows(inputs, { atk: broad });
@@ -86,13 +95,13 @@ const response = (data, status = 200) => ({ ok: status >= 200 && status < 300, s
 const source = fs.readFileSync(path.join(__dirname, '../../public/js/ui/race-estimate-card.js'), 'utf8');
 const load = new Function('document', 'fetch', 'globalThis', `${source.replace(/^import .*;\s*$/gm, '').replace(/^export /gm, '')};return mountRaceEstimateCard;`);
 const flush = () => new Promise(resolve => setImmediate(resolve));
-function setup(snapshot, { liveIntel = false } = {}) {
+function setup(snapshot, { liveIntel = false, hasBio = false, hasLiveIntel = false } = {}) {
     const calls = [], replies = [response(snapshot)];
     const fetch = async (url, init = {}) => { calls.push({ url, ...init }); return replies.shift() || response({ success: true }); };
     const mount = load({ createElement: tag => new Node(tag), querySelectorAll: () => liveIntel ? [{ closest: () => null }] : [] }, fetch,
-        { AWSqliteTime: Time, AWRaceEstimateDisplay: Display });
+        { AWSqliteTime: Time, AWRaceEstimateDisplay: Display, AWBattleModel: Model });
     const root = new Node('main'); root.connected = true;
-    const controller = mount(root, { playerId: 710 });
+    const controller = mount(root, { playerId: 710, hasBio, hasLiveIntel });
     return { root, calls, replies, controller, mount };
 }
 (async () => {
@@ -140,6 +149,26 @@ function setup(snapshot, { liveIntel = false } = {}) {
     ok('visible Bio intel overrides stale saved estimates before profile sync catches up',
         /Observed intel is available/.test(bio.root.textContent) && !/estimate ~/.test(bio.root.textContent)
         && descendants(bio.root).find(node => node.tagName === 'button' && /Run AI check/.test(node.textContent)).hidden);
+    const historical = setup({ success: true, ...envelope, player: historicalBio,
+        viewer_role: 'admin', check_request_allowed: true, llm_enabled: true }, { hasBio: true });
+    await historical.controller.ready;
+    ok('a current snapshot removes an initial stale bio lock and keeps its estimate available',
+        /estimate ~/.test(historical.root.textContent) && !/Observed intel is available/.test(historical.root.textContent)
+        && !descendants(historical.root).find(node => node.tagName === 'button' && /Run AI check/.test(node.textContent)).hidden);
+    const beforeReset = setup({ success: true, ...envelope,
+        player: { ...historicalBio, intel_updated_at: '2026-10-02 12:00:00' },
+        viewer_role: 'admin', check_request_allowed: true, llm_enabled: true });
+    await beforeReset.controller.ready;
+    ok('a snapshot with current bio locks the stored-estimate card', /Observed intel is available/.test(beforeReset.root.textContent));
+    beforeReset.replies.push(response({ success: true, ...envelope, player: historicalBio,
+        viewer_role: 'admin', check_request_allowed: true, llm_enabled: true }));
+    await beforeReset.controller.refresh();
+    ok('a later reset snapshot can invalidate stored bio without latching the old lock', /estimate ~/.test(beforeReset.root.textContent));
+    const explicitLive = setup({ success: true, ...envelope, player: historicalBio,
+        viewer_role: 'admin', check_request_allowed: true }, { hasLiveIntel: true });
+    await explicitLive.controller.ready;
+    ok('explicit genuine live bio stays authoritative even when the stored snapshot is historical',
+        /Observed intel is available/.test(explicitLive.root.textContent) && !/estimate ~/.test(explicitLive.root.textContent));
     const wrong = setup({ success: true, ...envelope, player: { ...envelope.player, id: 999 } });
     await wrong.controller.ready;
     ok('a response for a different player cannot appear on this profile',

@@ -9,7 +9,7 @@
     const WINDOW_MS = 48 * 3600000;
     // Bump whenever likelihoods, nuisance assumptions or set construction change.
     // A constants-only hash would incorrectly reuse calibration from another estimator.
-    const ESTIMATOR_VERSION = 1;
+    const ESTIMATOR_VERSION = 2;
     // Versioning is deterministic in both runtimes; this hash identifies constants,
     // while the server's separate SHA-256 evidence hash binds a check to its inputs.
     function modelVersion() {

@@ -8,6 +8,7 @@ const modelVersion = () => arithmetic.modelVersion();
 function buildEvidence(playerId, inputs, options = {}) {
     return buildRaceObservations(playerId, inputs.reports, { ...options,
         notBefore: notBefore(inputs.player), subject: inputs.subject, opponents: inputs.opponents,
+        resigned: inputs.player.joined === 'N/A',
         contextCeilingsByReport: inputs.contextCeilingsByReport });
 }
 function hashEvidence(observations, statuses = {}) {

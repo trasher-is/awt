@@ -1,6 +1,7 @@
 // Context comes only from observations already synced by a member. A historical read
 // is dated; it is never silently substituted for an exact battle-time measurement.
 const HOUR = 3600000;
+const { hasCurrentIntel } = require('../../public/js/utils/battle-model');
 
 function time(value) {
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)?$/.test(value)) return null;
@@ -79,10 +80,10 @@ function nearestCombatContext(db, playerId, startedAt) {
 function enqueueRelatedEstimates(db, playerId, enqueue) {
     if (!Number.isSafeInteger(playerId) || playerId <= 0) return;
     try {
-        const rows = db.prepare(`SELECT DISTINCT p.id FROM players p JOIN battle_reports b
+        const rows = db.prepare(`SELECT DISTINCT p.id,p.has_intel,p.intel_updated_at,p.joined,p.battle_race_not_before FROM players p JOIN battle_reports b
             ON p.id=b.att_player_id OR p.id=b.def_player_id
-            WHERE p.has_intel=0 AND (b.att_player_id=? OR b.def_player_id=?)`).all(playerId, playerId);
-        for (const row of rows) enqueue(row.id);
+            WHERE b.att_player_id=? OR b.def_player_id=?`).all(playerId, playerId);
+        for (const row of rows) if (!hasCurrentIntel(row)) enqueue(row.id);
     } catch (error) { console.error('[Race] Context recompute unavailable:', error.message); }
 }
 
