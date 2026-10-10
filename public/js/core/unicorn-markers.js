@@ -1,6 +1,7 @@
 // Only annotates locations already present in the page. All ranking data comes from the
 // wrapper's hub snapshot; this module has no request path and never visits game pages.
 import '../utils/sqlite-time.js';
+import '../utils/api-planet-statistics.js';
 const { formatLocalDateTime } = globalThis.AWSqliteTime;
 const OWNED = 'awt-unicorn-owned';
 const KINDS = { HF: 'Hydroponic Farm', RF: 'Robotic Factory', GC: 'Galactic Cybernet', RL: 'Research Lab' };
@@ -30,11 +31,18 @@ export function isUnicornMutation(record) {
     return nodes.length > 0 && nodes.every(node => node.classList?.contains(OWNED));
 }
 
-export function renderUnicornMarkers(doc, payload) {
+export function renderUnicornMarkers(doc, payload, now = Date.now()) {
     const rows = (Array.isArray(payload?.rows) ? payload.rows : [])
         .filter(row => positiveInt(row.game_planet_id) && positiveInt(row.rank) && row.rank <= 50);
     const leaders = (Array.isArray(payload?.leaders) ? payload.leaders : [])
         .filter(row => KINDS[row.kind] && positiveInt(row.game_planet_id));
+    const statistics = (Array.isArray(payload?.statistics) ? payload.statistics : [])
+        .filter(row => positiveInt(row.game_planet_id) && positiveInt(row.system_id)
+            && positiveInt(row.planet_index) && row.planet_index <= 99)
+        .map(row => ({ ...row, active: globalThis.AWPlanetStatistics?.activeCategories(row.categories, row.observed_at, now) || [] }))
+        .filter(row => row.active.length);
+    const statsById = new Map(statistics.map(row => [Number(row.game_planet_id), row]));
+    const statsByLocation = new Map(statistics.map(row => [`${row.system_id}:${row.planet_index}`, row]));
     const ranksById = new Map(rows.map(row => [Number(row.game_planet_id), row]));
     const ranksByLocation = new Map(rows.filter(row => positiveInt(row.system_id) && positiveInt(row.planet_index))
         .map(row => [`${row.system_id}:${row.planet_index}`, row]));
@@ -44,6 +52,13 @@ export function renderUnicornMarkers(doc, payload) {
         if (!id) continue;
         if (!systems.has(id)) systems.set(id, []);
         systems.get(id).push(row.kind ? `Top 50 ${KINDS[row.kind]} leader` : `Best Planets #${row.rank}`);
+    }
+    const rankingSystems = new Set(systems.keys());
+    for (const row of statistics) {
+        const id = Number(row.system_id);
+        if (!systems.has(id)) systems.set(id, []);
+        const captured = formatLocalDateTime(row.observed_at, undefined, 'unknown');
+        systems.get(id).push(`${row.active.map(kind => globalThis.AWPlanetStatistics.CATEGORIES[kind].label).join(' · ')} · API snapshot ${captured} (your local time)`);
     }
 
     const wanted = new Set();
@@ -69,7 +84,7 @@ export function renderUnicornMarkers(doc, payload) {
         const label = node.querySelector('span');
         const match = label?.textContent.match(/\[(\d+)\]/);
         const entries = match ? systems.get(Number(match[1])) : null;
-        if (entries) badge(node, 'map', '🦄', `${entries.join(' · ')}${stamp}`, 'awt-unicorn-map-marker');
+        if (entries) badge(node, 'map', '🦄', `${entries.join(' · ')}${rankingSystems.has(Number(match[1])) ? stamp : ''}`, 'awt-unicorn-map-marker');
     });
 
     const systemId = systemIdForDocument(doc);
@@ -89,6 +104,15 @@ export function renderUnicornMarkers(doc, payload) {
         for (const leader of matches) {
             const level = Number.isFinite(leader.level) ? ` · level ${leader.level}` : '';
             badge(cell, leader.kind, `🦄 ${leader.kind}`, `Top 50 ${KINDS[leader.kind]} leader${level}${stamp}`, `awt-unicorn-${leader.kind.toLowerCase()}`);
+        }
+        const stats = id ? statsById.get(id) : statsByLocation.get(`${systemId}:${index}`);
+        if (stats) {
+            const captured = formatLocalDateTime(stats.observed_at, undefined, 'unknown');
+            for (const kind of stats.active) {
+                const category = globalThis.AWPlanetStatistics.CATEGORIES[kind];
+                badge(cell, `api-${kind}`, category.icon,
+                    `${category.label} · API snapshot ${captured} (your local time)`, 'awt-unicorn-api-statistic');
+            }
         }
     });
 
