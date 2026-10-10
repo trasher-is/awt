@@ -46,7 +46,8 @@ function createRepository(db, { now = () => new Date() } = {}) {
         const existing = db.prepare("SELECT id FROM llm_calls WHERE request_id=? AND status='reserved'").get(requestId);
         if (existing) return { error: 'already_running' };
         const held = getCheck(request.player_id);
-        if (held?.status === 'ok' && held.verdict === 'disagrees' && !held.resolved_by) return { error: 'held_requires_resolution' };
+        if (held?.status === 'ok' && held.verdict === 'disagrees'
+            && (!held.resolved_by || held.output?.resolution?.decision === 'keep')) return { error: 'held_requires_resolution' };
         // A separate provider gate. It never borrows the game's agreed traffic budget.
         if (db.prepare("SELECT id FROM llm_calls WHERE status='reserved' LIMIT 1").get()) return { error: 'provider_busy' };
         const last = db.prepare('SELECT created_at FROM llm_calls ORDER BY id DESC LIMIT 1').get();
@@ -87,7 +88,9 @@ function createRepository(db, { now = () => new Date() } = {}) {
         if (!['release', 'keep'].includes(decision)) return { error: 'invalid_resolution' };
         const check = getCheck(playerId);
         if (!check || check.status !== 'ok' || check.verdict !== 'disagrees') return { error: 'not_held' };
-        if (decision === 'release') db.prepare('UPDATE player_race_checks SET resolved_by=? WHERE player_id=?').run(adminId, playerId);
+        const output = { ...check.output, resolution: { decision, decided_at: stamp() } };
+        db.prepare('UPDATE player_race_checks SET resolved_by=?,output=? WHERE player_id=?')
+            .run(adminId, JSON.stringify(output), playerId);
         return { decision, check: getCheck(playerId) };
     });
     return { userRole, getRequest, getCheck,

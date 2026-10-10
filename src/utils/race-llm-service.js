@@ -86,7 +86,8 @@ function createService({ repository = require('../repositories/raceChecks'),
         const proof = { input_hash: check?.input_hash || null, current_input_hash: currentHash,
             model_version: check?.model_version || null, current_model_version: current?.modelVersion || null };
         if (!check) return { ...proof, state: 'not_checked' };
-        const held = check.status === 'ok' && check.verdict === 'disagrees' && !check.resolved_by;
+        const held = check.status === 'ok' && check.verdict === 'disagrees'
+            && (!check.resolved_by || check.output?.resolution?.decision === 'keep');
         const isCurrent = check.input_hash === currentHash && check.model_version === current?.modelVersion
             && check.prompt_version === PROMPT_VERSION;
         const checks = check.output?.trait_checks || [];

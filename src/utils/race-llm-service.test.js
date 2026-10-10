@@ -145,6 +145,12 @@ async function main() {
         (await f.service.runCheck(981234567, { userId: 1 })).error === 'held_requires_resolution');
     ok('members cannot resolve and keeping leaves the hold intact', f.service.resolveCheck(981234567, 2).error === 'forbidden'
         && f.service.resolveCheck(981234567, 1, 'keep').decision === 'keep' && f.service.checkState(981234567).state === 'held');
+    const kept = f.repository.getCheck(981234567);
+    ok('keeping a hold records the reviewing admin and persisted decision', kept.resolved_by === 1
+        && kept.output.resolution.decision === 'keep');
+    f.advance();
+    ok('reviewed keep decision still prevents replacement provider calls',
+        (await f.service.runCheck(981234567, { userId: 1 })).error === 'held_requires_resolution');
     ok('admin release is recorded and lifts the hold', f.service.resolveCheck(981234567, 1).check.resolved_by === 1
         && f.service.checkState(981234567).state === 'outdated');
     f.db.close();
