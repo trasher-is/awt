@@ -16,9 +16,16 @@ Levels not listed in a table are levels the game does not show; where a table sk
 The separate RedZone server (`redzone.astrowars.games`) runs at ×10 pace and changes a
 handful of values; those are marked inline with an **`RZ:`** callout right next to the
 standard number (issue #53 — one document, no separate RedZone file to drift). A section
-without an `RZ:` note is *believed* to hold on both servers, not confirmed. The consolidated
-list, with how sure we are of each value, is in
+without an `RZ:` note is a standard-round reference, not a verified RedZone value. The
+consolidated list is in
 [player-guide.md → RedZone rounds](player-guide.md#redzone-rounds).
+
+**RedZone source check: 2026-10-10.** The callouts below compare the public
+[standard Game Options](https://astrowars.games/About/GameOptions) and
+[RedZone Game Options](https://redzone.astrowars.games/About/GameOptions). Names such as
+`Fleet` and `Output` identify sections of those pages. A configured value verifies the
+round's setting; it does not verify every interaction in play. The remaining RedZone
+player review and timer questions are listed in the player guide.
 
 ## Contents
 
@@ -80,7 +87,7 @@ negative, so the grand total still lands on 0:
 
 | Pick | Cost | Effect |
 |---|---|---|
-| **Startup Lab (SUL)** | 1 | Starts with 12 research-lab buildings already built |
+| **Startup Lab (SUL)** | 1 | Starts with 12 research-lab buildings already built; **RZ: 15** (`RaceOptions.StartUpLabResearchLevel`) |
 | **Trader** | 6 | Can accept trade agreements for free (no A$ cost to accept) |
 
     (sum of the 7 trait picks) + (1 if SUL) + (6 if Trader) = 0
@@ -138,10 +145,13 @@ Worked example from the info page: a planet with 10 hydroponic farms has a base 
 growth points; with a +93% growth bonus that is `11 × 1.93 = 21.23` points per hour. At
 population level 20 the next level needs 3,783 points, so `3,783 / 21.23 = 7d 10h:11m:28s`.
 
-> **RZ:** the per-hour rates in this section, in [Production](#production), [Science](#science)
-> and [Culture](#culture-and-planet-slots) are *game* hours; RedZone runs at ×10 pace, so the
-> same 21.23 points per game hour arrive in about six real minutes and that 7d 10h example is
-> under 18 real hours. The point tables themselves are not known to differ.
+> **RZ:** `Output.Factor` is **10**, compared with **1** on standard. For the same farms and
+> total bonus, this example becomes **212.3 points per real hour**, compared with 21.23;
+> the point target takes about **17h 49m** before update rounding. RedZone's hosting schedule
+> applies population output every **minute**, compared with standard's observed **5-minute**
+> economic cycle. Use the current in-game rate without multiplying it a second time. These
+> are output and update settings; the level-cost table below remains a standard reference
+> pending a RedZone player check.
 
 | Level | Growth Points | Aggregated |
 |---|---|---|
@@ -256,6 +266,11 @@ hour**, then the production bonus/malus applies.
 Worked example: 11 factories and population level 20 is a base of `(11 + 20) × 1.0 = 31.0`,
 and with +62.1% that is `31 × 1.62 = 50.26` production points per hour.
 
+**RZ:** production uses the same **×10 output setting** as growth, and its hosting interval
+is **1 minute**, compared with the standard **5-minute** cycle. Check the planet's displayed
+rate; RedZone also enables planet-type bonuses (`Galaxy.PlanetTypesFeature`, disabled on
+standard), so the output multiplier alone is not a prediction for every planet.
+
 ## Buildings
 
 Cost to raise any building one level. **Aggregated** is the running total from level 0.
@@ -297,7 +312,8 @@ Cost to raise any building one level. **Aggregated** is the running total from l
 
 Past the point production points can no longer raise a building (the PP cost table above
 tops out), further levels are bought with **Supply Units (SU)** instead. A Supply Unit's own
-starting price (to buy one, at the very start of a round) is **$750** — after that it moves
+starting price (to buy one, at the very start of a round) is **$750** (**RZ: $1,000**, from
+`InitialStockPrices`) — after that it moves
 with the market like everything else (see Market volatility below).
 
 Using a Supply Unit on a specific building type has its own live market price in A$ on the
@@ -432,6 +448,10 @@ what unlocks the next colony slot.
 
 ### Culture growth
 
+**RZ:** culture output has **×10** pace (`Output.Factor`) and a **1-minute** hosting interval,
+compared with standard's **5-minute** economic cycle. The point requirements below have
+not been re-recorded from RedZone; do not divide the points or planet-slot counts by ten.
+
 | Level | Points | Aggregated |
 |---|---|---|
 | 1 | 0 | 0 |
@@ -542,6 +562,11 @@ has its own. The rate shown in game **already includes** the percentage bonus ba
 it, so the pre-bonus base is `rate ÷ (1 + bonus)`.
 
     sci/h = (research labs + population) × science bonus
+
+**RZ:** science output has **×10** pace (`Output.Factor`) and a **1-minute** hosting interval,
+compared with standard's **5-minute** cycle. Estimate research duration from remaining
+points divided by the currently displayed science rate, allowing for an update boundary.
+The science cost table is a standard reference; the ×10 setting does not itself change costs.
 
 | Level | Science Points | Aggregated |
 |---|---|---|
@@ -655,6 +680,10 @@ Each of the six science fields does something different besides its raw growth r
   Fleets can only be sent to systems currently visible on the map. **At level 25**, the whole
   map opens up and fleets can be sent by System ID directly instead of needing the system's
   name.
+  **RZ:** `Map.VisionFactor` is **2**, compared with **1** on standard; the standard one-square
+  rule is not a RedZone range formula. RedZone enables a separate intel/scanning feature
+  (`IntelsFeature`, disabled on standard), so use its live visibility and scanner controls
+  rather than assuming the standard six-Biology-level intel rule is sufficient.
 - **Economy** — reduces ship construction cost (see [Economy (ship costs)](#economy-ship-costs)
   for the exact curve and the 8×/20× destroyer-cruiser-battleship ratio, and
   [Economy bonus](#economy-bonus) for the join-cohort +5%).
@@ -663,10 +692,11 @@ Each of the six science fields does something different besides its raw growth r
   benefit until they land and launch again. Landing on a planet you or an ally controls
   **always halves** the flight time. (Matches `public/js/utils/travel-model.js` exactly —
   `ENERGY_BASE = 0.91`, alliance/own-destination ×0.5.)
-  **RZ:** per the RedZone changelog (5.2–5.3, round 7): Energy is **95% per level**
-  (`0.95^energy`), the base flight time is **halved**, and a flight to an allied planet runs
-  at **75%** rather than 50%. Not yet re-verified in game; the travel model in this repo is
-  the standard server's.
+  **RZ:** the current `Fleet` options use **95% per level** (`0.95^energy`), compared with
+  standard's 91%, and **75%** for allied flights, compared with 50%. Fixed minimums and
+  reducible coefficients also differ; see [Fleet and combat notes](#fleet-and-combat-notes).
+  These are independent of ×10 economic output. The travel model in this repo implements
+  standard settings; use the game's RedZone travel calculator.
 - **Mathematics** — reduces combat losses (more survivors). **Level 12** lets you manually
   choose any energy level from 1 up to your max at launch, instead of always launching at
   max energy. **Level 15** is required to build Cruisers.
@@ -803,6 +833,13 @@ scaled by economy like the three combat ships above.
 
 ## Starbase
 
+**RZ:** advanced starbase modules are **enabled**, compared with disabled on standard
+(`Starbase.AdvancedStarbaseFeature`). The current `Starbase.TradeBonus` setting is **3**,
+compared with **0** on standard. The
+[official changelog](https://astrowars.games/Changelog) (5.3.0-beta) introduces Jammer,
+Combat and Trade modules; the combat/cost table below describes the standard starbase,
+not a complete model of those modules. Their present effects need a RedZone player review.
+
 **Costs** is the cost of that level; **aggregated** is the running total.
 
 | Level | Attack | Defence | Combat Value | Costs | Aggregated |
@@ -889,6 +926,26 @@ treat it as relative, not current).
 | 20 | Memory Jar 3 | +0% | +30% | +0% | +30% | $65,025 | $72,735.17 |
 | 21 | Heart Of Rana 3 | +30% | +30% | +30% | +30% | $260,100 | $273,813.51 |
 
+**RZ:** the initial prices differ from every standard starting-price row above. Current
+`InitialStockPrices` for the same economic artifacts are shown below in **A$**, ordered
+**tier 1 / tier 2 / tier 3**. These are starting prices, not live market quotes or verified
+RedZone bonus percentages.
+
+| Artifact | Standard starting prices | RZ starting prices |
+|---|---|---|
+| Basalt Monolith | 2,500 / 10,000 / 22,500 | **15,000 / 68,000 / 306,000** |
+| Astrolabe | 1,225 / 4,900 / 11,025 | **12,000 / 55,000 / 248,000** |
+| Celestial Prism | 1,225 / 4,900 / 11,025 | **10,000 / 41,000 / 185,000** |
+| Crystal Rod | 7,225 / 28,900 / 65,025 | **24,000 / 110,000 / 495,000** |
+| Charcoal Diamond | 2,500 / 10,000 / 22,500 | **18,000 / 82,000 / 369,000** |
+| Memory Jar | 7,225 / 28,900 / 65,025 | **30,000 / 137,000 / 617,000** |
+| Heart Of Rana | 28,900 / 115,600 / 260,100 | **80,000 / 360,000 / 1,620,000** |
+
+**RZ:** combat artifacts are **enabled**, compared with disabled on standard
+(`CombatArtefacts`). The artifact cooldown setting is **1 hour**, compared with no
+configured cooldown on standard (`Trade.ArtefactCoolDown`). Do not divide that hour by ten.
+The standard economic-artifact table is not a RedZone combat-artifact guide.
+
 ## Alliance
 
 | Action | Fee |
@@ -900,6 +957,11 @@ treat it as relative, not current).
 
 **No cap on member count**, and **no member-kick feature** — removing a member requires
 contacting a game admin.
+
+**RZ:** the current configuration automatically assigns players to **4 alliances**
+(`Alliance.AutoAssignment = True`, standard `False`). Name/tag changes are disabled
+(`CanChangeTagAndName = False`, standard `True`), so their standard fees do not imply those
+actions are available in RedZone.
 
 ## Non-aggression pacts
 
@@ -922,18 +984,23 @@ other. It can be terminated **with prior warning** (honorable) or **without warn
 ## Trade agreements
 
 - Cost **20,000 A$**, paid by **both** sides — to send and to accept.
-  **RZ: 120,000 A$ per side** (confirmed in game, round 7, July 2026) — the trade-agreement
+  **RZ: 120,000 A$ per side** (`Trade.AgreementFee`, checked 2026-10-10) — the trade-agreement
   planner at `/ta` is RedZone-only and uses that price.
 - **Maximum 5** trade agreements per player (same on RedZone).
 - The **trader race** pick can accept for free, but pays for it with **-6 race points**.
   **RZ:** still waives only the *accept* fee, so two agreements the Trader initiates still
   cost 240,000 A$.
 - New trade agreements are only **accepted at four fixed times a day: 00:00, 06:00, 12:00,
-  18:00 CET/CEST** — not immediately on request. **RZ:** whether this cycle scales with the
-  ×10 pace has not been checked.
+  18:00 CET/CEST** — not immediately on request. **RZ:** its exact acceptance schedule
+  remains unverified; ×10 economic output does not establish those clock times.
 - An unaccepted trade agreement offer **expires after 2 days**.
+  **RZ:** the same **2-day** setting (`Trade.AgreementOfferExpiration`), not 4.8 hours.
 - The **trade rate (TR%) bonus recalculates every 5 minutes**, independent of the 6-hourly
   acceptance cycle.
+  **RZ:** the trade-bonus population threshold is **12**, compared with **10** on standard
+  (`Trade.PopulationLevelForBonus`). RedZone's public hosting page lists
+  `Trade.ExecuteAllOpenOrders` every **3 hours**, but does not establish the exact TA
+  acceptance clock times or TR% update behavior. Those still need a player check.
 
 ### Economy bonus
 
@@ -942,6 +1009,9 @@ in that cohort of 25 has the highest economy science gets a **+5% economy bonus*
 **additive to TR%** (not a separate multiplicative factor) — e.g. 80% TR% + 5% economy bonus
 combine to 85% before being multiplied with everything else. See
 [Bonuses stack multiplicatively](#bonuses-stack-multiplicatively-not-additively).
+
+**RZ:** the join cohort contains **10 players**, compared with **25** on standard
+(`Join.EcoBonusGroupSize`); the economy-bonus setting remains **5%** on both servers.
 
 ## Max Combat Value
 
@@ -955,6 +1025,13 @@ military strength by empire size and social development.
 
 Note the factor is **11**, and starbase combat value is multiplied by **zero** — starbases
 do not consume the limit.
+
+**RZ:** the current `Fleet` settings use **10** for `MaxCombatValueFactor`, compared with
+**11** on standard, and count starbase CV at **50%**, compared with **0%**. They also enable
+CV-limit decrease (`CanMaxCombatValueDecrease = True`, standard `False`) with a **0.1**
+decrease factor; the [official changelog](https://astrowars.games/Changelog) (5.0.0-beta)
+describes a 10% hourly decrease when achieved Max CV exceeds current CV. The permanence
+statement and standard formulas above must not be reused unchanged for RedZone.
 
 ## Spending production points
 
@@ -1005,6 +1082,10 @@ those 20 slots crosses 85%, the **next block of 5 systems opens**, and **one Unk
 in one of them, with 2 Free planets next to it** — same shape as a player spawn, just
 game-created instead of player-owned.
 
+**RZ:** the current `Map.CultureRatioSpawning` setting is **0.9**, compared with **0.75**
+on the current standard options page (checked 2026-10-10). The **0.85** in the recorded
+explanation above is historical; the exact spawning trigger still needs a player check.
+
 ### Capturing a populated planet
 
 **Conquering never keeps the target's existing buildings** — this applies whether you're
@@ -1032,9 +1113,14 @@ and caps on its buildings — though the exact numbers aren't published.
   ETA calculator shows a flight as **"pending"** for up to 2 minutes after it's ordered — it's
   not resolved until the current cycle ends (not "up to one minute," as the old help text
   says).
+  **RZ:** the configured `Fleet.Arrival` hosting interval is **1 minute**, compared with the
+  standard **2-minute** cycle. Standard counter-attack-window examples below are not
+  RedZone timing instructions.
 - **Standard server hosting cycle**: separately, every 5 minutes (also starting at
   `00:00:00`) all planets receive 5 minutes' worth of growth, production, science and culture
   at once, rather than continuously.
+  **RZ:** population, production, science and culture hosting intervals are each **1 minute**,
+  with **×10** economic output. A hosting interval and an output factor are separate settings.
 - **Battle survivors are shown as a fraction**, and the fractional part is a **survival
   chance**, not a rounding artifact: e.g. "10.7 destroyers survived" means 10 definitely
   survived and an 11th has a 70% chance of having survived.
@@ -1079,12 +1165,15 @@ and caps on its buildings — though the exact numbers aren't published.
   time plus the 20min/45min floor on top — matches
   `public/js/utils/travel-model.js` exactly (`SAME_SYSTEM_MIN=1200s` + `SAME_SYSTEM_PLANET=
   14400s`, `DEEP_SPACE_MIN=2700s` + `DEEP_SPACE_DIST=36000s`).
-  **RZ:** the RedZone changelog halves base flight times and moves allied flights to 75%
-  (see Energy under [Science fields](#science-fields--effects)); whether the fixed floors
-  scale too is unverified.
-- **RZ: the player-level combat bonus is capped at 15%** on RedZone (changelog 5.2–5.3,
-  round 7) — the battle model in this repo was harvested from the standard calculator and
-  has no such cap. Not yet re-verified in game.
+  **RZ:** the current `Fleet` options set fixed floors to **10 min / 25 min**, compared with
+  **20 min / 45 min** on standard; reducible coefficients are **2h / 5h**, compared with
+  **4h / 10h**. The inter-system floor is not exactly half the standard floor. Energy uses
+  **0.95** instead of **0.91**, and allied flights use **0.75** instead of **0.5**. A standard
+  ETA divided by ten does not implement RedZone travel; jammed routes also need the game's
+  calculator.
+- **RZ: the player-level combat bonus is capped at 15%**, compared with no configured cap
+  on standard (`Battle.MaxPlayerLevelBonus`, checked 2026-10-10). awt's standard battle
+  model does not implement this cap or RedZone combat artifacts.
 
 ## Battle formula
 
@@ -1192,14 +1281,22 @@ get catch-up bonuses that scale with how late they are: **+100 production points
 best time to join a round — the later you join, the bigger the one-time catch-up, but you
 also start further behind on everything else.
 
+**RZ:** starts with **150 PP**, compared with **300 PP** on standard (`Join`). The
+`LateJoinBonus` settings are **+1,000 PP/day**, **+1.5 culture levels/day** and
+**+1.5 research levels/day**, compared with **+100 / +0.15 / +0.15** on standard. These are
+explicit per-day settings; do not apply the ×10 output factor to them again.
+
 ## Win conditions
 
 - A **player** wins by reaching or exceeding **400 points for a total of 5 days**.
+  **RZ:** individual victory is **disabled** (`PlayerWinningConditions.IsEnabled = False`).
 - An **alliance** wins by reaching or exceeding **300 average alliance points for a total of
   3 days**, with a minimum of **3 members**.
-  **RZ:** round 7 (July 2026) required **750 alliance points for 3 days**; the RedZone
-  targets are set per round, so check the round's own win screen. The RedZone player target
-  has not been recorded.
+  **RZ:** the current target is **1,000 points for 3 days**, compared with standard's
+  **300 for 3 days** (`AllianceWinningConditions`, checked 2026-10-10). The former round-7
+  target of 750 is historical. Duration is explicitly configured as 3 days; do not shorten
+  it to 7.2 hours because output is ×10. The minimum member-score setting is **15**, compared
+  with **0** on standard; confirm its effect on the counted roster with a RedZone player.
 
 ## Alliance ranking and points
 
@@ -1329,6 +1426,10 @@ the hub's battle reports (2026-10-04): 1,481 of 1,534 match exactly, and most of
 the reduced 25% payout, seen when the winner kept fewer than 2 ships. The loser gains nothing.
 Beating a starbase therefore pays its whole CV (SB 12 = 515 XP), which can lift a low-level
 attacker a level or two before a counter-attack lands; the incoming alerts count that.
+
+**RZ:** `Fleet.ExperiencePointsFactorFromAllied` is **0.25**, compared with standard's **1**.
+The standard XP examples above must therefore not be treated as full RedZone allied-battle
+payouts; interaction with reduced-XP eligibility still needs a player check.
 
 ### Autogrowth (unverified — needs a thorough check)
 
