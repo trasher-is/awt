@@ -9,7 +9,9 @@ process.env.ADMIN_BOOTSTRAP_PASSWORD = 'synthetic-test-password';
 delete process.env.DISCORD_TOKEN;
 const db = require('../database');
 const battleModel = require('../../public/js/utils/battle-model');
-const { readBattleRaceInputs, notBefore, measureBattleRace } = require('./battle-race-inputs');
+const { readBattleRaceInputs, inferFromInputs, notBefore, measureBattleRace } = require('./battle-race-inputs');
+const { VERSION } = require('./battle-race-inference');
+const battleRace = require('../repositories/battleRace');
 
 let failed = 0;
 function ok(name, condition, detail) {
@@ -69,6 +71,23 @@ try {
     ok('the summary carries no names or ids', !/Synthetic|\b10[12]\b/.test(JSON.stringify(summary)), summary);
     ok('measuring never writes results', db.prepare('SELECT battle_race_inference FROM players WHERE id = 3').get()
         .battle_race_inference === null);
+
+    const beforeRescan = inferFromInputs(2, readBattleRaceInputs(db, 2));
+    db.prepare(`UPDATE battle_reports SET stats_snapshot_at = '2026-09-05 12:05:00',
+        def_race_attack = 0, def_race_defense = 0, def_physics = 10, def_mathematics = 12,
+        def_player_level = 20, def_intel_at = '2026-09-05 10:00:00' WHERE id = 101`).run();
+    db.prepare(`UPDATE players SET has_intel = 0, mathematics = 40, intel_updated_at = '2026-09-10 12:00:00' WHERE id = 1`).run();
+    const afterRescan = inferFromInputs(2, readBattleRaceInputs(db, 2));
+    ok('the shared database read retains captured known-side intel after a later player scan',
+        afterRescan.eligible_report_count === 1 && JSON.stringify(afterRescan.defense) === JSON.stringify(beforeRescan.defense), afterRescan);
+    ok('the read-only measurement still counts the captured eligible report',
+        measureBattleRace(db).defense_narrowed === 1);
+
+    const updated = battleRace.updateBattleRace(2);
+    ok('the repository saves captured-intel results at the new method version',
+        updated.status === 'updated' && updated.inference.version === VERSION && VERSION === 3, updated);
+    db.prepare('UPDATE players SET battle_race_inference = ? WHERE id = 2').run(JSON.stringify({ ...updated.inference, version: 2 }));
+    ok('a result saved by the old current-row version is invalidated', battleRace.getBattleRace(2).inference === null);
 } finally {
     db.close();
     fs.rmSync(tmp, { recursive: true, force: true });

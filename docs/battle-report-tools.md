@@ -85,18 +85,21 @@ formula (most factors multiply, the science brackets and the level advantage add
 2026-09-12, has no standard-server PL cap (`MaxPlayerLevelBonus=null`) and disables combat
 artefacts (`CombatArtefacts=False`).
 
-Reports do not record historical sciences or player levels, and the hub keeps only
-current values, not their history (#277). (Reports stored from 2026-10-01 on carry a
-snapshot of both sides' stats, see [the stats
-snapshot](battle-model.md#per-battle-stats-snapshot); this inference does not use it yet,
-and older reports have none.) Using today's values as the values at an older
-battle would create false precision. The inference therefore measures each report against
+Reports stored from 2026-10-01 on carry a snapshot of both sides' intel, see [the stats
+snapshot](battle-model.md#per-battle-stats-snapshot). The inference uses the known side's
+captured read so a later player scan cannot replace the stats that explained an older
+battle. Only legacy reports without a capture use the current player row. This is still
+a read taken at report sync time, not a history of exact battle-time sciences (#277).
+The inference therefore measures each report against
 a **known side** and treats the player's own historical stats as unknowns under ceilings:
 
 - **Known side.** The opponent in the report must have bio intel recorded within 48 hours
   of the battle: our own member (same alliance means full intel) or a scouted player
   outside the alliance. That intel supplies the opponent's race, Physics, Mathematics and
-  player level. A report whose opponent has no bio is skipped as `no_known_side`; one whose
+  player level. For captured reports, missing intel remains `no_known_side`, even if a
+  later scan obtained bio; partial or malformed captured stats remain `ally_stats_unknown`.
+  They never fall back to today's values. A legacy report whose opponent has no bio is
+  skipped as `no_known_side`; one whose
   opponent intel is further than 48 hours from the battle is skipped as
   `ally_stats_unknown`. The largest gap used is saved as `known_side_intel_max_age_hours`.
 - **Ceilings for the player.** Their Mathematics at the battle is anywhere from 0 to their
@@ -126,8 +129,8 @@ as a substitute.
 
 Only published, consistently identified winning sides with complete fleet and loss counts
 are eligible. Losing-side losses are approximate in the game and are not used. Both fleets
-must have internally consistent CV. A defender's starbase is allowed: its fleet's losses do
-not depend on the starbase level. An attacker's losses do, so the starbase level must follow
+must have internally consistent CV. A defender's starbase is allowed. Both sides' losses
+depend on its level (the starbase shares the defender's fleet loss fraction), so that level must follow
 from the defender's stored CV (fleet CV plus the CV of exactly one starbase level); when the
 stored CV covers the fleet only, the report is skipped as `starbase_level_unknown`. Civilian
 ships, an attacking starbase, unopposed encounters, winners with fewer than four fighting

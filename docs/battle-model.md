@@ -370,12 +370,15 @@ Reading it:
 - It is captured when the report is *synced*, normally minutes after the battle, not at
   battle time. Compare `*_intel_at` with `started_at`: sciences and level only rise, so a
   read from before the battle is a lower bound and one from after it an upper bound.
-- Race attack and defense never change, so they are exact whenever present.
+- Race attack and defense stay fixed within an account incarnation; a resign starts a
+  new one, and the race inference excludes reports before the subject's identity cutoff.
 - The stamp dates the intel read. It does not promise that every science inside was
   re-read then, so a large gap is a reason for caution and a small one is not a guarantee.
 - Old rows stay NULL on purpose: today's stats are not the stats of a battle last week.
-- Nothing consumes the snapshot yet. It exists so battles can be checked against the
-  real calculator while their stats are still known:
+- The race-range card consumes the known side's captured intel, subject to the existing
+  48-hour age and complete-stat checks. Captured missing, partial or stale intel never
+  borrows a newer player scan; only legacy rows without a capture use current intel.
+  The snapshot can also be used to check a battle against the real calculator:
 
 ```sql
 -- Reports with both sides' stats captured, newest first, with the calculator inputs

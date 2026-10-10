@@ -1,14 +1,16 @@
 // Conservative compatibility bounds, not a race detector or a probability model.
 // This module never fills bio/intel fields. A player's current public science level and
 // player level are used only as ceilings on their historical values, never as the values.
-// The opponent's stats come from intel recorded close to the battle (a known side).
+// The opponent's stats come from intel captured with the report, or the current intel
+// for legacy reports only, recorded close to the battle (a known side).
 const battleModel = require('../../public/js/utils/battle-model');
 
-// 2: two-sided Defence from a known opponent (#282). Results saved by version 1 used
-// a one-sided bound and must not be shown as current.
-const VERSION = 2;
+// 3: consume the immutable known-side intel captured with reports (#307). Version 2
+// used today's player row even when the report preserved an older read.
+const VERSION = 3;
 // How far intel on the opponent may be from the battle time and still stand in for
-// their stats at the battle. The hub keeps current values only, not their history (#277).
+// their stats at the battle. A sync-time snapshot is still an approximate read, not
+// a history of exact battle-time science levels (#277).
 const KNOWN_SIDE_MAX_AGE_HOURS = 48;
 const RACE_PICKS = Object.freeze(Array.from({ length: 9 }, (_, index) => index - 4));
 // The patch was published on August 28 without a deployment timestamp. Ignore that
@@ -93,6 +95,27 @@ function knownSide(stats, when) {
         return { skip: 'ally_stats_unknown' };
     }
     return { stats: values, ageHours: Math.abs(recorded - when) / HOUR_MS };
+}
+
+function reportKnownSide(report, side, when, opponents) {
+    // NULL means this report predates snapshots. Once a capture exists, its missing or
+    // invalid intel must stay unknown; borrowing a later scan would rewrite the past.
+    if (report.stats_snapshot_at == null) {
+        return knownSide(opponents ? opponents[report[`${side}_player_id`]] : null, when);
+    }
+    const capturedAt = timestamp(report.stats_snapshot_at);
+    const stats = {
+        has_intel: 1,
+        race_attack: report[`${side}_race_attack`], race_defense: report[`${side}_race_defense`],
+        physics: report[`${side}_physics`], mathematics: report[`${side}_mathematics`],
+        level: report[`${side}_player_level`], intel_updated_at: report[`${side}_intel_at`],
+    };
+    if (!Number.isFinite(capturedAt)) return { skip: 'ally_stats_unknown' };
+    if (Object.entries(stats).every(([key, value]) => key === 'has_intel' || value == null)) {
+        return { skip: 'no_known_side' };
+    }
+    if (timestamp(stats.intel_updated_at) > capturedAt) return { skip: 'ally_stats_unknown' };
+    return knownSide(stats, when);
 }
 
 function defenseObservation(report, playerId, notBefore, { subject, opponents }) {
@@ -186,7 +209,7 @@ function defenseObservation(report, playerId, notBefore, { subject, opponents })
     if (lossLow > lossHigh + EPSILON) return { skip: 'inconsistent_loss_fractions' };
     if (lossLow <= 0) return { skip: 'losses_below_rounding_resolution' };
 
-    const known = knownSide(opponents ? opponents[report[`${enemy}_player_id`]] : null, when);
+    const known = reportKnownSide(report, enemy, when, opponents);
     if (known.skip) return known;
     // Assumed: sciences and player level do not go down within one incarnation of an
     // account (the resign cutoff ends an incarnation), so today's public values bound the
@@ -259,8 +282,8 @@ function inferBattleRace(playerId, reports, {
         report_count: relevant.length,
         eligible_report_count: 0,
         used_report_ids: [],
-        // The hub keeps current intel only (#277): the largest gap between a used report
-        // and the opponent intel it relied on.
+        // Largest gap between a used report and the captured (or legacy current) intel
+        // it relied on; capture time itself is not the intel observation time.
         known_side_intel_max_age_hours: null,
         attack: unknownAttack(),
         defense: {
@@ -275,6 +298,8 @@ function inferBattleRace(playerId, reports, {
             'The player\'s Mathematics at the battle is anywhere from 0 to their current public science level, '
                 + 'and their player level anywhere from 0 to their current level; neither is used as a point value.',
             `The opponent's race, sciences and player level come from bio intel recorded within ${KNOWN_SIDE_MAX_AGE_HOURS} h of the battle.`,
+            'Reports with a stats capture use that immutable known-side intel; only legacy reports use the current player row. '
+                + 'The capture happens at sync time, not at the battle, and does not prove exact historical science levels.',
             'Standard-server artefacts have the documented economy effects; RedZone combat artefacts are unsupported.',
             'Only published, consistent winning fleet reports are used; fractional survivors allow random rounding.',
             'Reports before 2026-08-29 UTC and any supplied current-player cutoff are excluded.',
