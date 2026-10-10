@@ -117,7 +117,7 @@ const basic = infer([synth({ rd: 0, math: 8 })]);
 ok('the result declares conditional compatibility and supported race range',
     basic.version === VERSION && basic.assumptions.some(text => /not a probability/.test(text))
     && basic.assumptions.some(text => /supported -4 to \+4/.test(text)), basic);
-ok('captured intel changes the method, invalidating current-row results saved as version 2', VERSION === 3);
+ok('captured intel changes the method, invalidating current-row results saved as version 2', VERSION > 2);
 ok('ATK stays unresolved: the stored win_chance column is the dice roll',
     basic.attack.status === 'insufficient' && equal(basic.attack.candidates, ALL_PICKS)
     && /dice/.test(basic.attack.reason) && /#277/.test(basic.attack.reason), basic.attack);

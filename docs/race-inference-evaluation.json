@@ -1,0 +1,21 @@
+{
+  "evaluated_on": "2026-10-10",
+  "scope": "Existing calculator samples and synthetic observations; no production player database",
+  "posterior_status": "uncalibrated",
+  "fixed_calculator_fixtures": {"cases": 39, "posterior_interval_contains_truth": 39, "exact_intervals": 30},
+  "stored_calculator_samples": {
+    "cases": 3483,
+    "hard_range_eligible": 3294,
+    "hard_range_contains_truth": 3294,
+    "unambiguous_cases": 1145,
+    "unambiguous_exact_recovery": 1145,
+    "raw_posterior_interval_contains_truth": 3362,
+    "raw_posterior_exact_intervals": 1167,
+    "conservative_display_set_contains_truth": 3483
+  },
+  "seeded_gaussian_noise": {"seed": 278, "non_capped_cases": 135, "posterior_interval_contains_truth": 134, "high_band_cases": 111, "high_band_correct": 111},
+  "calibration_requirement": {"requested_coverage_percent": [88, 92], "passed": false, "reason": "Observed coverage 99.26%; discrete sets are conservative. This is not evidence of calibrated 90% coverage."},
+  "fixed_defect": "Unknown subject player level affects the known mixed-fleet opponent's level gap even when the subject itself fields fewer than three types. All eight original hard-range exclusions came from fixing that nuisance level to zero.",
+  "prior_sensitivity_example": {"sample_file": "mixed_results.jsonl", "sample_index": 164, "true_attack": -2, "compatible_values": [-2, -1, 1, 2, 3, 4], "posterior_probability_of_truth": 0.04275465828453942, "raw_interval": [-1, 4], "conservative_display_keeps_truth": true},
+  "live_acceptance": {"production_copy_measurement": "not performed", "loser_loss_comparison": "not performed", "blurred_hub_screenshots": "not performed", "empirical_bio_calibration": "requires real later bio pairs"}
+}

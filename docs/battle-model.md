@@ -399,11 +399,49 @@ The battle-report race card (`src/utils/battle-race-inference.js`,
 does not carry its own formula. For each Defence pick it calls `simulate` with the
 opponent's recorded intel and every Mathematics level up to the player's public science
 level, and keeps the pick when the winner's surviving ships come out within 1.5 ships of the
-report. It uses only the survivor half of the model: Attack waits for a real win chance
-(above).
+report. Attack uses only the separate `att_win_chance` field when it is present; the
+legacy `win_chance` dice field above is never substituted for it. Unknown subject player
+level must be varied when either fleet fields all three types, because a single-type
+subject's level also sets its mixed-fleet opponent's level advantage.
 
 Only the **winner's** losses are used. The official changelog calls losing-side losses
 approximate, and they have not been checked against stored reports yet: comparing the
 loser's losses with the model, for fights that were not at the certainty cap and did not
 annihilate the loser, needs a copy of the production database (#282). Until that check is
 done and written down here, the loser's losses stay out of the inference.
+
+### Deterministic shadow distributions
+
+`public/js/utils/race-inference.js` replays observations from the same builder used by
+the hard-range card. It stores a log-likelihood matrix per report (race pick × unknown
+science), multiplies reports sharing a 48-hour window before marginalizing that science,
+and treats separate windows independently. Player-level uncertainty is marginalized
+per report. The prior is uniform and displayed. Certainty-cap observations use step
+support, dice-only observations use a weak bound, and outcomes alone supply no Attack
+evidence. Annihilation and the survivor floor supply no point Defence observation.
+
+The raw posterior's 90% values are `credible_values`. They depend on the nuisance-science
+prior: a pick explained by many Physics/Mathematics levels can outweigh another pick
+explained by only one level. These are **uncalibrated probabilities**. The stored display
+set (`set90_values`, `set90_kind=conservative_compatibility`) instead retains every hard
+compatible pick, including low-prior sparse explanations. Its envelope is `set90_low` /
+`set90_high`; the exact array preserves any gaps. A high band is suppressed whenever
+more than two hard-compatible values remain.
+
+Synthetic and calculator-sample validation is recorded in
+[race-inference-evaluation.json](race-inference-evaluation.json). It revealed and fixed
+a real player-level error: eight harvested observations excluded the true Attack because
+the opponent's mixed-fleet advantage was computed against an assumed subject level of
+zero. Every eligible sample now keeps the truth in the hard range, and every unambiguous
+sample recovers it exactly. This validates arithmetic and compatibility, **not** the
+requested 88–92% posterior calibration. Discrete credible sets were more conservative in
+the seeded noise evaluation; nuisance-prior effects still exclude some fixed-sample
+truths from the raw 90% posterior set. The conservative display set keeps those truths.
+
+The service saves calibration pairs immediately before previously unknown bio becomes
+known, rejecting evidence from an older account incarnation. Production use requires
+at least 30 different scouted players, confidence calibration error at most 5 percentage
+points, and at least 90% correct selections in a nonempty high-band sample under the
+current model hash. Synthetic samples cannot open that gate. Admins see shadow results
+and can include or exclude conflicting reports; no inferred value is written to confirmed
+`players.race_*` intel.

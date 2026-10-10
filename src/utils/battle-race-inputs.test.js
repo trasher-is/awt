@@ -85,7 +85,7 @@ try {
 
     const updated = battleRace.updateBattleRace(2);
     ok('the repository saves captured-intel results at the new method version',
-        updated.status === 'updated' && updated.inference.version === VERSION && VERSION === 3, updated);
+        updated.status === 'updated' && updated.inference.version === VERSION && VERSION > 2, updated);
     db.prepare('UPDATE players SET battle_race_inference = ? WHERE id = 2').run(JSON.stringify({ ...updated.inference, version: 2 }));
     ok('a result saved by the old current-row version is invalidated', battleRace.getBattleRace(2).inference === null);
 } finally {

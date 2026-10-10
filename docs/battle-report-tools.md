@@ -121,18 +121,26 @@ exclude high **and** low Defence picks: heavy losses rule out high picks, good s
 rules out low ones. With large, clean reports a single compatible pick is common. It is
 still a model-based estimate, not confirmed bio.
 
-Attack remains at the full supported range. The stored `win_chance` column holds the dice
-roll, not the win chance (see [battle-model.md](battle-model.md#the-win_chance-column-is-the-dice-roll)),
-so the stored reports carry no usable win chance. Attack can be estimated only after the
-report-page capture records the real win chance (#277). Wins, losses and dice are not used
-as a substitute.
+The legacy `win_chance` column holds the dice roll (see
+[battle-model.md](battle-model.md#the-win_chance-column-is-the-dice-roll)). It is never used
+as a probability. A separately captured `att_win_chance`, when present, constrains Attack
+by replaying all supported Physics and player-level hypotheses. A missing real chance
+leaves the hard Attack range unresolved. The shadow estimator may use a normalized dice
+and outcome as a weak bound; an outcome alone is never evidence of Attack. The available
+report-page source still needs a confirmed real-probability field before legacy reports
+can supply that observation (#277).
+
+Player level is a nuisance parameter for win odds when **either** fleet fields all three
+ship types: even a single-type subject's level determines its mixed-fleet opponent's
+positive level gap. Defence still uses the subject's player-level toughness only when its
+own fleet fields all three types.
 
 Only published, consistently identified winning sides with complete fleet and loss counts
 are eligible. Losing-side losses are approximate in the game and are not used. Both fleets
 must have internally consistent CV. A defender's starbase is allowed. Both sides' losses
 depend on its level (the starbase shares the defender's fleet loss fraction), so that level must follow
 from the defender's stored CV (fleet CV plus the CV of exactly one starbase level); when the
-stored CV covers the fleet only, the report is skipped as `starbase_level_unknown`. Civilian
+  stored CV covers the fleet only, the report is skipped as `starbase_level_unknown`. Civilian
 ships, an attacking starbase, unopposed encounters, winners with fewer than four fighting
 ships, annihilated winners, and losses below rounding resolution are excluded. Each
 fighting ship type allows 1.5 ships of rounding/model tolerance. No real player data is
