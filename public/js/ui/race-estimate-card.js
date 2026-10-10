@@ -44,8 +44,10 @@ export function mountRaceEstimateCard(container, { playerId, hasBio = false, has
         card.setAttribute('aria-busy', String(busy));
         retry.disabled = busy || authFailed;
         requestCheck.hidden = locked || snapshot?.check_request_allowed !== true;
-        requestCheck.disabled = busy || authFailed;
         const admin = snapshot?.viewer_role === 'admin';
+        const paidChecksDisabled = admin && snapshot.llm_enabled !== true;
+        requestCheck.disabled = busy || authFailed || paidChecksDisabled;
+        requestCheck.title = paidChecksDisabled ? 'AI checks are disabled in the hub configuration.' : '';
         requestCheck.textContent = admin ? 'Run AI check (paid)' : 'Request AI check for admin approval';
         status.textContent = locked ? 'Observed intel is available; it remains authoritative.'
             : error || (busy ? 'Loading saved race estimate…' : !snapshot ? 'Saved estimate unavailable.'
@@ -80,7 +82,9 @@ export function mountRaceEstimateCard(container, { playerId, hasBio = false, has
                 explanation.appendChild(reports);
             }
             explanation.appendChild(element('p', 'mb-1', `AI check: ${Display.checkLabel(snapshot.check)}.`));
-            if (typeof snapshot.check?.explanation === 'string') explanation.appendChild(element('p', 'mb-1', snapshot.check.explanation));
+            if (typeof snapshot.check?.explanation === 'string' && snapshot.check.explanation.trim()) {
+                explanation.appendChild(element('p', 'mb-1', `AI-written explanation: ${snapshot.check.explanation}`));
+            }
         }
         const state = snapshot?.gate;
         gate.textContent = state ? `Calculation gate: ${state.allowed ? 'calibration passed; a current agreeing AI check is still required' : 'display only'}. `
@@ -107,6 +111,7 @@ export function mountRaceEstimateCard(container, { playerId, hasBio = false, has
     }
     async function askForCheck() {
         if (busy || snapshot?.check_request_allowed !== true || !card.isConnected || respectLiveIntel()) return;
+        if (snapshot.viewer_role === 'admin' && snapshot.llm_enabled !== true) return;
         busy = true; error = ''; render();
         try {
             const admin = snapshot.viewer_role === 'admin';

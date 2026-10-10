@@ -96,7 +96,8 @@ function setup(snapshot, { liveIntel = false } = {}) {
     return { root, calls, replies, controller, mount };
 }
 (async () => {
-    const admin = setup({ success: true, ...envelope, viewer_role: 'admin', check_request_allowed: true,
+    const admin = setup({ success: true, ...envelope, viewer_role: 'admin', check_request_allowed: true, llm_enabled: true,
+        check: { ...envelope.check, explanation: 'Synthetic AI note.' },
         gate: { ...envelope.gate, allowed: false, players: 0, pairs: 0, reasons: ['Calibration is required.'] } });
     await admin.controller.ready;
     ok('mounting the admin card reads the stored endpoint without computation or paid calls',
@@ -106,6 +107,7 @@ function setup(snapshot, { liveIntel = false } = {}) {
         /Attack: estimate ~\+2/.test(admin.root.textContent) && /Defence: estimate ~-1/.test(admin.root.textContent)
         && /compatible range/.test(admin.root.textContent) && /uncalibrated/.test(admin.root.textContent) && /prior: uniform/.test(admin.root.textContent)
         && /Evidence reports/.test(admin.root.textContent) && /0\/30/.test(admin.root.textContent));
+    ok('AI-written prose has an explicit origin label', /AI-written explanation: Synthetic AI note\./.test(admin.root.textContent));
     ok('repeated mounting does not add cards or fetches', admin.mount(admin.root, { playerId: 710 }) === admin.controller
         && admin.root.children.length === 1 && admin.calls.length === 1);
     const paid = descendants(admin.root).find(node => node.tagName === 'button' && node.textContent === 'Run AI check (paid)');
@@ -114,7 +116,13 @@ function setup(snapshot, { liveIntel = false } = {}) {
     ok('only an explicit paid admin button calls the AI-check action', admin.calls.length === 2
         && admin.calls[1].url === '/hub-api/admin/race/710/check' && admin.calls[1].method === 'POST'
         && /AI check completed/.test(admin.root.textContent));
-    const member = setup({ success: true, ...envelope, viewer_role: 'user', check_request_allowed: true });
+    const off = setup({ success: true, ...envelope, viewer_role: 'admin', check_request_allowed: true, llm_enabled: false });
+    await off.controller.ready;
+    const disabled = descendants(off.root).find(node => node.tagName === 'button' && node.textContent === 'Run AI check (paid)');
+    ok('the paid admin action is disabled when the hub AI switch is off', disabled.disabled === true);
+    disabled.events.click(); await flush();
+    ok('the action handler also blocks disabled paid checks before any request', off.calls.length === 1);
+    const member = setup({ success: true, ...envelope, viewer_role: 'user', check_request_allowed: true, llm_enabled: false });
     await member.controller.ready;
     const ask = descendants(member.root).find(node => node.tagName === 'button' && /Request AI check/.test(node.textContent));
     member.replies.push(response({ request: { id: 42, status: 'pending' } }));
