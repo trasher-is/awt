@@ -36,7 +36,10 @@ class Node {
 }
 
 const src = fs.readFileSync(path.join(__dirname, '../../public/js/ui/battle-race-intel.js'), 'utf8');
-const load = new Function('document', 'fetch', `${src.replace(/^import .*$/gm, '').replace(/^export /gm, '')}\nreturn mountBattleRaceIntel;`);
+// This suite isolates the existing hard-range card; the mounted stored-estimate
+// card has its own behavioral suite and must not add requests to this stand-in.
+const loadCard = new Function('document', 'fetch', 'mountRaceEstimateCard', `${src.replace(/^import .*$/gm, '').replace(/^export /gm, '')}\nreturn mountBattleRaceIntel;`);
+const load = (document, fetch) => loadCard(document, fetch, () => null);
 const deferred = () => {
     let resolve;
     const promise = new Promise(done => { resolve = done; });

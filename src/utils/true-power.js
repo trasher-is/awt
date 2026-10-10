@@ -60,12 +60,19 @@ function observedCombatSciences(row) {
 }
 
 // Turn a stats row into the model's side shape, or null without observed race/physics.
-function ownSide(row) {
-    if (!row || !row.has_intel) return null;
+function ownSide(row, raceEnvelope) {
+    if (!row) return null;
     const sciences = observedCombatSciences(row);
     if (sciences.physics == null) return null;
+    if (!row.has_intel) {
+        const resolved = battleModel.resolveStats(row, raceEnvelope);
+        if (resolved.source !== 'estimate') return null;
+        // Race estimates never manufacture sciences. An observed member sheet is
+        // still required to give this player a meaningful rating.
+        return { ...resolved, phys: sciences.physics, math: sciences.mathematics || 0, lvl: row.level || 0 };
+    }
     return { ra: row.race_attack || 0, rd: row.race_defense || 0,
-        phys: sciences.physics, math: sciences.mathematics || 0, lvl: row.level || 0 };
+        phys: sciences.physics, math: sciences.mathematics || 0, lvl: row.level || 0, source: 'intel' };
 }
 
 function pct(win) {
@@ -78,8 +85,8 @@ function pct(win) {
  *               intel_updated_at, sheet_physics, sheet_mathematics, sheet_sciences_updated_at }
  *   ceilings  { max_level, max_physics } from playersRepo.getCombatCeilings
  */
-function truePower(row, ceilings = {}) {
-    const me = ownSide(row);
+function truePower(row, ceilings = {}, raceEnvelope = null) {
+    const me = ownSide(row, raceEnvelope);
     if (!me) return { tp: null, tpx: null };
 
     const equal = { ra: 0, rd: 0, phys: me.phys, math: me.math, lvl: me.lvl };
@@ -90,12 +97,13 @@ function truePower(row, ceilings = {}) {
     const toughest = { ra: TOUGHEST_RACE_ATTACK, rd: 0, phys: Math.max(maxPhys, me.phys), math: me.math, lvl: Math.max(maxLvl, 0) };
     const tpx = battleModel.winChance(REFERENCE_FLEET, me, REFERENCE_FLEET, toughest);
 
-    return { tp: pct(tp), tpx: pct(tpx) };
+    return { tp: pct(tp), tpx: pct(tpx), source: me.source };
 }
 
 // The alliance-stats rows alias every players column with a pl_ prefix; map them back.
-function truePowerForAllianceRow(r, ceilings) {
+function truePowerForAllianceRow(r, ceilings, raceEnvelope = null) {
     return truePower({
+        id: r.player_id,
         has_intel: r.pl_has_intel,
         race_attack: r.pl_race_attack,
         race_defense: r.pl_race_defense,
@@ -107,7 +115,7 @@ function truePowerForAllianceRow(r, ceilings) {
         sheet_physics: r.physics,
         sheet_mathematics: r.mathematics,
         sheet_sciences_updated_at: r.sciences_updated_at,
-    }, ceilings);
+    }, ceilings, raceEnvelope);
 }
 
 module.exports = { REFERENCE_FLEET, TOUGHEST_RACE_ATTACK, observedCombatSciences, truePower, truePowerForAllianceRow };

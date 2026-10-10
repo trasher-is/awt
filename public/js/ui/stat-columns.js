@@ -328,8 +328,11 @@ function idleBadge(row, activityField) {
 }
 
 // A True Power percentage (issue #154), or "?" when the hub has no intel to rate the player.
-function truePowerCell(v) {
-    return v == null || Number.isNaN(Number(v)) ? Q : `${Math.round(Number(v))}%`;
+function truePowerCell(v, source = 'intel') {
+    if (v == null || Number.isNaN(Number(v))) return Q;
+    return source === 'estimate'
+        ? `<span title="True Power estimate; calibrated and AI-checked">~${Math.round(Number(v))}%</span>`
+        : `<span title="True Power from observed intel">${Math.round(Number(v))}%</span>`;
 }
 
 // Opens the profile in the game frame (game-links.js), like every other sidebar link — it
@@ -601,9 +604,9 @@ export const ALLY_STATS_COLUMNS = [
     // True Power (issue #154): computed server-side in /intel/alliance-stats from the battle
     // model (src/utils/true-power.js), percent with one decimal; null when the race is not
     // scouted, shown as "?" like every other deep-scan value.
-    col('pl_tp', 'TP', { group: 'Combat', default: false, cell: 'text-orange-300', render: r => truePowerCell(r.pl_tp),
+    col('pl_tp', 'TP', { group: 'Combat', default: false, cell: 'text-orange-300', render: r => truePowerCell(r.pl_tp, r.pl_tp_source),
         title: 'True Power: chance to win 100 DS vs 100 DS at equal sciences and player level against an enemy with 0 race attack — your race-attack pick alone (battle model)' }),
-    col('pl_tpx', 'TPx', { group: 'Combat', default: false, cell: 'text-orange-400', render: r => truePowerCell(r.pl_tpx),
+    col('pl_tpx', 'TPx', { group: 'Combat', default: false, cell: 'text-orange-400', render: r => truePowerCell(r.pl_tpx, r.pl_tp_source),
         title: 'True Power vs the toughest: 100 DS vs 100 DS against +4 race attack, the highest player level and the highest physics in the database. Player level only enters the model when a side fields all three ship types, so it is neutral in this duel.' }),
     col('pl_active', 'Active', { group: 'Member', default: false, sortValue: r => computeIdleDisplay(r, { activityField: 'pl_last_activity_at' }).secs, align: 'left', render: r => idleBadge(r, 'pl_last_activity_at') }),
     col('pl_intel_updated_at', 'Last Intel', { group: 'Member', default: false, sort: 'string', cell: 'text-zinc-400', render: r => fmtIntelDate(r.pl_intel_updated_at) }),

@@ -8,9 +8,14 @@
 
 import { esc } from '../utils/escape.js';
 import '../utils/battle-model.js';
+import '../utils/race-inference.js';
+import '../utils/race-estimate-display.js';
 
 const M = globalThis.AWBattleModel;
 const { SHIPS, sbCV } = M;
+const RaceDisplay = globalThis.AWRaceEstimateDisplay;
+const selectedSides = { def: null, atk: null };
+const selectionGeneration = { def: 0, atk: 0 };
 
 let playerCache = null;
 
@@ -25,6 +30,51 @@ function fmt(n) {
 // The normalised inputs are kept so render() can ask winBand() how wide the uncertainty
 // is for this particular fight.
 let lastInputs = { def: {}, atk: {} };
+
+function fillPlayerStats(prefix, player, envelope = null) {
+    const resolved = M.resolveStats(player, envelope);
+    for (const [field, value] of Object.entries({ phys: resolved.phys, math: resolved.math,
+        ra: resolved.ra, rd: resolved.rd, lvl: resolved.lvl })) {
+        const input = document.getElementById(`bc-${prefix}-${field}`);
+        if (input) input.value = value;
+    }
+}
+
+async function loadRaceEnvelope(prefix, player, generation) {
+    try {
+        const response = await fetch(`/hub-api/intel/player/${encodeURIComponent(player.id)}/race-estimate`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!data || data.success !== true || selectionGeneration[prefix] !== generation
+            || Number(selectedSides[prefix]?.player.id) !== Number(player.id)) return;
+        const currentPlayer = data.player && Number(data.player.id) === Number(player.id) ? data.player : player;
+        selectedSides[prefix] = { ...data, player: currentPlayer };
+        fillPlayerStats(prefix, currentPlayer, selectedSides[prefix]);
+        render();
+    } catch (_) {
+        // Failure preserves the selected player's observed intel/worst-case inputs.
+        // It can never promote an old or unavailable estimate.
+    }
+}
+
+function raceComparisonHtml() {
+    const rows = RaceDisplay.comparisonRows(lastInputs, selectedSides);
+    if (!rows.length) return '';
+    const band = value => value ? `${value.low === value.high ? value.low : `${value.low}–${value.high}`}%` : 'unavailable';
+    const assumptions = ['def', 'atk'].map(side => {
+        const selected = selectedSides[side];
+        const source = selected ? M.resolveStats(selected.player, selected).source : 'manual inputs';
+        return `${side === 'def' ? 'Defender' : 'Attacker'}: ${source === 'worst' ? 'worst case' : source}`;
+    }).join(' · ');
+    return `<div class="w-full border-t border-border pt-3 text-xs" aria-label="Race sources and win-chance comparison">
+        <p class="text-muted-foreground">${esc(assumptions)}</p>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">${rows.map(row => `<div class="rounded border border-border p-2">
+            <strong>${esc(row.label)}</strong>
+            <p>${row.values ? `Defender ${row.source === 'estimate' ? '~' : ''}${band(row.values.defender)} · Attacker ${row.source === 'estimate' ? '~' : ''}${band(row.values.attacker)}` : esc(row.reason || 'unavailable')}</p>
+            ${row.values && row.reason ? `<p class="text-zinc-500">${esc(row.reason)}</p>` : ''}
+        </div>`).join('')}</div>
+    </div>`;
+}
 
 function calc() {
     const g = id => parseFloat(document.getElementById(id)?.value) || 0;
@@ -84,6 +134,7 @@ function render() {
         : '';
 
     el.innerHTML = `
+        ${raceComparisonHtml()}
         <div class="grid grid-cols-2 gap-4 w-full">
             <div class="flex flex-col gap-2">
                 <div class="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1">Defender survivors</div>
@@ -140,6 +191,8 @@ function setupPlayerSearch(inputId, dropdownId, prefix) {
     if (!input || !dropdown) return;
 
     input.addEventListener('input', async () => {
+        selectedSides[prefix] = null;
+        selectionGeneration[prefix]++;
         const q = input.value.trim().toLowerCase();
         if (!q) { dropdown.classList.add('hidden'); return; }
 
@@ -164,16 +217,11 @@ function setupPlayerSearch(inputId, dropdownId, prefix) {
                 if (!p) return;
                 input.value = p.name;
                 dropdown.classList.add('hidden');
-                const set = (id, val) => {
-                    const el = document.getElementById(id);
-                    if (el && val != null) el.value = val;
-                };
-                set(`bc-${prefix}-phys`, p.physics      || 0);
-                set(`bc-${prefix}-math`, p.mathematics  || 0);
-                set(`bc-${prefix}-ra`,   p.race_attack   || 0);
-                set(`bc-${prefix}-rd`,   p.race_defense  || 0);
-                set(`bc-${prefix}-lvl`,  p.level         || 0);
+                selectedSides[prefix] = { player: p };
+                const generation = ++selectionGeneration[prefix];
+                fillPlayerStats(prefix, p);
                 render();
+                void loadRaceEnvelope(prefix, p, generation);
             });
         });
     });
@@ -189,7 +237,11 @@ export function initBattleCalc() {
     });
 
     document.querySelectorAll('#battle-calc-panel .bc-num-input').forEach(el => {
-        el.addEventListener('input', render);
+        el.addEventListener('input', () => {
+            const side = el.id?.match(/^bc-(def|atk)-/)?.[1];
+            if (side) { selectedSides[side] = null; selectionGeneration[side]++; }
+            render();
+        });
     });
 
     setupPlayerSearch('bc-def-player-input', 'bc-def-player-dropdown', 'def');

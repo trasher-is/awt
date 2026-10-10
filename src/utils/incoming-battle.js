@@ -133,6 +133,30 @@ function planetFight({ enemyFleet, enemy, sbLevel, garrison, owner }) {
     };
 }
 
+// Advisory secondary result only. The caller keeps its existing planetFight()
+// headline and reinforcement decisions. A saved estimate is usable here only
+// through the same current model, calibration, AI hash and band checks as every
+// other calculation; an unavailable estimate produces no invented number.
+function secondaryRaceEstimate({ enemyFleet, sbLevel, garrison, owner, enemyRow, enemyEnvelope }) {
+    const { resolveRaceStats } = require('./race-resolve');
+    const Display = require('../../public/js/utils/race-estimate-display');
+    const enemy = resolveRaceStats(enemyRow, enemyEnvelope);
+    if (enemy.source !== 'estimate') return null;
+    const point = planetFight({ enemyFleet, enemy, sbLevel, garrison, owner });
+    if (!point) return null;
+    const chances = Display.compatibleSet(enemyEnvelope.estimate.attack).map(ra =>
+        planetFight({ enemyFleet, enemy: { ...enemy, ra }, sbLevel, garrison, owner })?.holds)
+        .filter(Number.isFinite);
+    if (!chances.length) return null;
+    return {
+        source: 'estimate', label: 'Estimated planet defence',
+        holds: point.holds, holds_low: Math.min(...chances), holds_high: Math.max(...chances),
+        race_attack: enemy.ra, race_defence: enemy.rd,
+        band: Display.effectiveBand(enemyEnvelope.estimate.attack, enemyEnvelope.check, 'attack'),
+        range_basis: 'Compatible Attack picks; owner stats and unknown sciences unchanged.',
+    };
+}
+
 // Production points a planet will have saved by `hours` from now, if nobody spends them.
 function ppAfter(planet, hours) {
     return Math.max(0, (planet.production_pp || 0) + (planet.production_rate || 0) * Math.max(0, hours));
@@ -229,5 +253,5 @@ function pct(p) {
     return `${Math.round(v)}%`;
 }
 
-module.exports = { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, sbLevels, counterFight, landBefore, ownerReinforce, pct,
+module.exports = { HOLDS, allySide, planetFight, secondaryRaceEstimate, ppAfter, sbUpgrade, sbLevels, counterFight, landBefore, ownerReinforce, pct,
     levelForXp, xpGained, levelAfter, fleetText, ceilFleet, floorFleet };
