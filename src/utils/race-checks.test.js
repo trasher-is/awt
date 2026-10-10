@@ -1,6 +1,11 @@
 // Test only a local HTTP server and injected service. No provider transport exists.
 const http = require('http');
 const express = require('express');
+const fs = require('fs'), os = require('os'), path = require('path');
+const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'awt-race-checks-http-'));
+process.env.AWT_DB_PATH = path.join(temporary, 'unused-isolated.db');
+process.env.ADMIN_BOOTSTRAP_PASSWORD = 'synthetic-test-password';
+delete process.env.DISCORD_TOKEN; delete process.env.BATTLE_DISCORD_TOKEN;
 const { createRouter } = require('../routes/race-checks');
 let failed = 0, calls = 0;
 function ok(name, condition) {
@@ -55,5 +60,8 @@ server.once('listening', async () => {
         ok('unsafe integer ids are rejected before service invocation',
             (await send('POST', '/admin/race/9007199254740993/check', 'admin')).status === 400 && calls === 2);
     } catch (error) { failed++; console.error(error); }
-    finally { server.close(() => { process.exitCode = failed ? 1 : 0; }); }
+    finally { server.close(() => {
+        fs.rmSync(temporary, { recursive: true, force: true });
+        process.exitCode = failed ? 1 : 0;
+    }); }
 });

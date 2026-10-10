@@ -3,6 +3,10 @@
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
+const temporary = fs.mkdtempSync(path.join(require('os').tmpdir(), 'awt-race-ai-replay-'));
+process.env.AWT_DB_PATH = path.join(temporary, 'unused-isolated.db');
+process.env.ADMIN_BOOTSTRAP_PASSWORD = 'synthetic-test-password';
+delete process.env.DISCORD_TOKEN; delete process.env.BATTLE_DISCORD_TOKEN;
 const { createRepository } = require('../repositories/raceChecks');
 const { createClient, pseudonymize, reservationCost, requestParameters } = require('./llm-client');
 const { createService, modelRanges } = require('./race-llm-service');
@@ -251,5 +255,6 @@ async function main() {
 }
 main().catch(error => { failed++; console.error(error); }).finally(() => {
     global.fetch = originalFetch;
+    fs.rmSync(temporary, { recursive: true, force: true });
     process.exitCode = failed ? 1 : 0;
 });
