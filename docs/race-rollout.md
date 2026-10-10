@@ -32,6 +32,13 @@ combat intel **before** the battle, within 48 hours and after that side's resign
 The observation timestamp preserves its age. Legacy current-intel fallback remains age
 checked, and cannot use a new race for a battle before the known side's restart.
 
+A confirmed Joined/resign/rejoin transition invalidates the current bio flag while
+retaining every historical race/science value and its observation timestamp. The
+heuristic restart reset still preserves that data; a shared UTC eligibility rule
+keeps observations before the identity boundary out of both estimators, member
+calculations and estimated True Power. Fresh bio captured in the same sync is saved
+normally, and real Bio/IR visible on the game page remains authoritative.
+
 A dated public read after a battle supplies a science/level **upper bound**, not an
 exact battle-time value. Earlier reads are lower bounds and never substitute for a
 ceiling. Reported levels gained are removed from a later player-level ceiling.
