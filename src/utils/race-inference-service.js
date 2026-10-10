@@ -10,10 +10,14 @@ function recompute(playerId) {
     if (inputs.player.has_intel) { repository.clearPlayer(playerId); return { status: 'bio_locked' }; }
     const target = new URL(process.env.TARGET_URL || 'https://astrowars.games');
     const built = evidence.buildEvidence(playerId, inputs, { universe: target.hostname.startsWith('redzone.') ? 'redzone' : 'standard' });
+    const version = evidence.modelVersion();
     const previous = repository.getEstimate(playerId), oldRows = repository.evidenceForPlayer(playerId);
-    const knownRows = new Set(oldRows.map(row => `${row.battle_report_id}:${row.kind}`));
+    const knownRows = new Set(oldRows.filter(row => row.model_version === version).map(row => `${row.battle_report_id}:${row.kind}`));
     const statuses = {};
-    const oldStatuses = Object.fromEntries(oldRows.map(row => [`${row.battle_report_id}:${row.kind}`, row.status]));
+    // An admin's exclusion belongs to the report. Automatic conflicts belong to
+    // the model that found them, and must be rebuilt when that model changes.
+    const oldStatuses = Object.fromEntries(oldRows.filter(row => row.model_version === version || row.status === 'excluded')
+        .map(row => [`${row.battle_report_id}:${row.kind}`, row.status]));
     const matrices = [];
     for (const observation of built.observations) for (const trait of ['attack', 'defence']) {
         const matrix = arithmetic.evidenceMatrix(observation, trait);
@@ -21,7 +25,9 @@ function recompute(playerId) {
         matrices.push(matrix);
         const key = `${matrix.report_id}:${matrix.kind}`;
         statuses[key] = oldStatuses[key] || 'ok';
-        if (!knownRows.has(key) && evidence.predictiveCompatibility(previous[trait], matrix) < 0.01) statuses[key] = 'conflict';
+        const priorEstimate = previous[trait]?.model_version === version ? previous[trait] : null;
+        if (statuses[key] !== 'excluded' && !knownRows.has(key)
+            && evidence.predictiveCompatibility(priorEstimate, matrix) < 0.01) statuses[key] = 'conflict';
     }
     for (const kind of ['win', 'loss']) for (const window of arithmetic.windows(matrices.filter(row => row.kind === kind), arithmetic.WINDOW_MS)) {
         for (const row of window.rows) row.window_key = String(window.start);
@@ -30,7 +36,7 @@ function recompute(playerId) {
         ...(['conflict', 'excluded'].includes(statuses[`${row.report_id}:win`]) ? { observedWin: null, dice: null, attack_candidates: null } : {}),
         ...(['conflict', 'excluded'].includes(statuses[`${row.report_id}:loss`]) ? { defense_candidates: null, survivors: null } : {}) }));
     const hardRanges = evidence.hardRanges(accepted), estimate = arithmetic.estimate(accepted, { hardRanges });
-    const version = evidence.modelVersion(), hash = evidence.hashEvidence(built.observations, statuses);
+    const hash = evidence.hashEvidence(built.observations, statuses);
     repository.saveEstimate(playerId, estimate, matrices, version, hash, statuses);
     return { status: 'updated', estimate: repository.getEstimate(playerId), skipped: built.skipped };
 }

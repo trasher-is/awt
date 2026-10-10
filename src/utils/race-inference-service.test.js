@@ -70,6 +70,18 @@ function request(server,url,role='admin',body){return new Promise((resolve,rejec
         for(const row of repository.evidenceForPlayer(11).filter(row=>row.status==='conflict')){repository.setEvidenceStatus(row.id,'excluded');}
         service.recompute(11);
         ok('resolved conflicts no longer withhold the estimate',!repository.getEstimate(11).attack.withheld_reason);
+        // A new formula cannot inherit automatic conflict decisions or compare new
+        // evidence against a posterior produced by a different likelihood model.
+        db.prepare("UPDATE race_evidence SET model_version='synthetic-old-model' WHERE player_id=11").run();
+        db.prepare("UPDATE race_evidence SET status='conflict' WHERE player_id=11 AND battle_report_id=901 AND kind='win'").run();
+        db.prepare("UPDATE player_race_estimates SET model_version='synthetic-old-model',dist='[1,0,0,0,0,0,0,0,0]' WHERE player_id=11").run();
+        const refreshed=service.recompute(11);
+        const refreshedRows=repository.evidenceForPlayer(11);
+        ok('a model change rebuilds automatic conflict decisions without an old posterior',
+            !refreshed.estimate.attack.withheld_reason&&refreshedRows.every(row=>row.model_version===modelVersion())
+            &&refreshedRows.find(row=>row.battle_report_id===901&&row.kind==='win').status==='ok',refreshed);
+        ok('explicit admin exclusions survive a model change',
+            refreshedRows.some(row=>row.battle_report_id===target.battle_report_id&&row.kind===target.kind&&row.status==='excluded'));
         const before=db.prepare('SELECT race_attack,race_defense FROM players WHERE id=11').get();
         ok('a changed Joined date cannot calibrate an old incarnation',service.recordCalibration(11,{has_intel:1,race_attack:2,race_defense:1,joined:'2026-10-02T00:00:00Z'})===0);
         ok('bio calibration pairs capture the estimate before intel arrives',service.recordCalibration(11,{has_intel:1,race_attack:2,race_defense:1})===2);
