@@ -71,8 +71,8 @@ function recordCalibration(playerId, incoming) {
     if (incoming.joined && incoming.joined !== before.joined && !boundary) return 0;
     const estimate = getEstimate(playerId); let recorded = 0;
     const insert = db.prepare(`INSERT OR IGNORE INTO race_estimate_calibrations
-        (player_id,trait,dist,set90_low,set90_high,band,truth,model_version,evidence_hash)
-        VALUES (@player_id,@trait,@dist,@set90_low,@set90_high,@band,@truth,@model_version,@evidence_hash)`);
+        (player_id,trait,dist,set90_low,set90_high,band,truth,model_version,evidence_hash,raw_credible_values)
+        VALUES (@player_id,@trait,@dist,@set90_low,@set90_high,@band,@truth,@model_version,@evidence_hash,@raw_credible_values)`);
     for (const [trait, field] of [['attack', 'race_attack'], ['defence', 'race_defense']]) {
         const row = estimate[trait], truth = incoming[field];
         if (!row || !row.evidence_count || row.withheld_reason || row.model_version !== arithmetic.modelVersion()
@@ -87,11 +87,13 @@ function recordCalibration(playerId, incoming) {
             })) continue;
         }
         recorded += insert.run({ player_id: playerId, trait, dist: JSON.stringify(row.dist), set90_low: row.set90_low,
-            set90_high: row.set90_high, band: row.band, truth, model_version: row.model_version, evidence_hash: row.evidence_hash }).changes;
+            set90_high: row.set90_high, band: row.band, truth, model_version: row.model_version, evidence_hash: row.evidence_hash,
+            raw_credible_values: JSON.stringify(arithmetic.summarize(row.dist, row.evidence_count).credible_values) }).changes;
     }
     return recorded;
 }
 function calibrationRows(version) {
-    return db.prepare('SELECT * FROM race_estimate_calibrations WHERE model_version = ?').all(version).map(row => ({ ...row, dist: parse(row.dist) }));
+    return db.prepare('SELECT * FROM race_estimate_calibrations WHERE model_version = ?').all(version)
+        .map(row => ({ ...row, dist: parse(row.dist), raw_credible_values: parse(row.raw_credible_values) }));
 }
 module.exports = { getEstimate, listEstimates, evidenceForPlayer, saveEstimate, setEvidenceStatus, clearPlayer, recordCalibration, calibrationRows };

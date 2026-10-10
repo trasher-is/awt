@@ -64,8 +64,8 @@ try {
     ok('only players without bio are measured', summary.players === 2, summary);
     ok('the summary counts players with a narrowed Defence range', summary.defense_narrowed === 1, summary);
     ok('Attack is never narrowed while the stored win chance is the dice', summary.attack_narrowed === 0, summary);
-    ok('skip reasons are summed per player and report', summary.skipped.no_known_side === 1
-        && summary.skipped.not_confirmed_winner === 1, summary.skipped);
+    ok('the shared builder records missing known-side intel on both subject histories', summary.skipped.no_known_side === 2
+        && !summary.skipped.not_confirmed_winner, summary.skipped);
     ok('results saved before this version are summarised as the baseline',
         summary.saved.by_version['1'] === 1 && summary.saved.defense_narrowed === 1, summary.saved);
     ok('the summary carries no names or ids', !/Synthetic|\b10[12]\b/.test(JSON.stringify(summary)), summary);

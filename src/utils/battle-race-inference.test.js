@@ -188,6 +188,10 @@ skipped(`opponent intel more than ${KNOWN_SIDE_MAX_AGE_HOURS} h after the battle
     options({ opponents: { [ENEMY_ID]: { ...MEMBER, intel_updated_at: '2026-09-03 12:01:00' } } }));
 skipped('opponent intel without a timestamp has no known age', synth(), 'ally_stats_unknown',
     options({ opponents: { [ENEMY_ID]: { ...MEMBER, intel_updated_at: null } } }));
+skipped('a legacy report cannot borrow the known opponent race from after its later Joined date', synth(), 'ally_stats_unknown',
+    options({ opponents: { [ENEMY_ID]: { ...MEMBER, joined: '2026-09-01T13:00:00Z', intel_updated_at: '2026-09-01 14:00:00' } } }));
+skipped('a legacy report cannot borrow the known opponent race from after its detected restart', synth(), 'ally_stats_unknown',
+    options({ opponents: { [ENEMY_ID]: { ...MEMBER, battle_race_not_before: '2026-09-01 13:00:00', intel_updated_at: '2026-09-01 14:00:00' } } }));
 ok('the result records how far the opponent intel was from the battle',
     basic.known_side_intel_max_age_hours === 2 && infer([]).known_side_intel_max_age_hours === null, basic);
 ok('opponent intel just inside the window is used',

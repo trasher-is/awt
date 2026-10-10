@@ -7,11 +7,14 @@
     'use strict';
     const PICKS = Object.freeze(Array.from({ length: 9 }, (_, i) => i - 4));
     const WINDOW_MS = 48 * 3600000;
+    // Bump whenever likelihoods, nuisance assumptions or set construction change.
+    // A constants-only hash would incorrectly reuse calibration from another estimator.
+    const ESTIMATOR_VERSION = 1;
     // Versioning is deterministic in both runtimes; this hash identifies constants,
     // while the server's separate SHA-256 evidence hash binds a check to its inputs.
     function modelVersion() {
         let hash = 2166136261;
-        for (const character of JSON.stringify(model.constants)) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+        for (const character of JSON.stringify({ constants: model.constants, estimator_version: ESTIMATOR_VERSION })) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
         return (hash >>> 0).toString(16).padStart(8, '0');
     }
     const log = value => value > 0 ? Math.log(value) : -Infinity;
@@ -152,5 +155,5 @@
             defence: estimateTrait(observations, 'defence', hardRanges.defence || PICKS, weights, windowMs, calibrated),
             prior: prior ? { name: 'supplied', weights } : { name: 'uniform', weights }, window_hours: windowMs / 3600000 };
     }
-    return { PICKS, WINDOW_MS, estimate, evidenceMatrix, summarize, logsum, replay, modelVersion, windows, winSigma };
+    return { PICKS, WINDOW_MS, ESTIMATOR_VERSION, estimate, evidenceMatrix, summarize, logsum, replay, modelVersion, windows, winSigma };
 });

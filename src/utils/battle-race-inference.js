@@ -4,6 +4,7 @@
 // The opponent's stats come from intel captured with the report, or the current intel
 // for legacy reports only, recorded close to the battle (a known side).
 const battleModel = require('../../public/js/utils/battle-model');
+const { evidenceStart } = require('./battle-context');
 
 // 4: share observations with the shadow estimator and constrain Attack only from the
 // separate, real att_win_chance field. Version 3 added captured known-side intel.
@@ -101,7 +102,10 @@ function reportKnownSide(report, side, when, opponents) {
     // NULL means this report predates snapshots. Once a capture exists, its missing or
     // invalid intel must stay unknown; borrowing a later scan would rewrite the past.
     if (report.stats_snapshot_at == null) {
-        return knownSide(opponents ? opponents[report[`${side}_player_id`]] : null, when);
+        const stats = opponents ? opponents[report[`${side}_player_id`]] : null;
+        const boundary = evidenceStart(stats);
+        if (boundary && when < timestamp(boundary)) return { skip: 'ally_stats_unknown' };
+        return knownSide(stats, when);
     }
     const capturedAt = timestamp(report.stats_snapshot_at);
     const stats = {

@@ -56,6 +56,8 @@ function recordCalibration(playerId, incomingIntel) { return repository.recordCa
 function getCalibrationSummary() {
     const rows = repository.calibrationRows(evidence.modelVersion());
     const players = new Set(rows.map(row => row.player_id));
+    const covered = rows.filter(row => Array.isArray(row.raw_credible_values) && row.raw_credible_values.length > 0);
+    const credibleCoverage = covered.length ? covered.filter(row => row.raw_credible_values.includes(row.truth)).length / covered.length : null;
     const high = rows.filter(row => row.band === 'high');
     const highAccuracy = high.length ? high.filter(row => arithmetic.PICKS[row.dist.indexOf(Math.max(...row.dist))] === row.truth).length / high.length : null;
     // Expected probability of the most likely value versus observed accuracy, in bins.
@@ -68,8 +70,10 @@ function getCalibrationSummary() {
         calibrationError += Math.abs(expected - actual) * group.length / rows.length;
     }
     return { players: players.size, pairs: rows.length, high_pairs: high.length, high_accuracy: highAccuracy,
+        credible_coverage: credibleCoverage, coverage_pairs: covered.length,
         calibration_error_pp: calibrationError === null ? null : calibrationError * 100,
-        passed: players.size >= 30 && calibrationError !== null && calibrationError <= 0.05 && highAccuracy !== null && highAccuracy >= 0.9,
+        passed: players.size >= 30 && calibrationError !== null && calibrationError <= 0.05 && highAccuracy !== null && highAccuracy >= 0.9
+            && covered.length === rows.length && credibleCoverage !== null && credibleCoverage >= 0.88 && credibleCoverage <= 0.92,
         model_version: evidence.modelVersion() };
 }
 module.exports = { recompute, recomputeAll, enqueue, flush, recordCalibration, getCalibrationSummary };

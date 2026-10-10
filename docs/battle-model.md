@@ -442,6 +442,9 @@ The service saves calibration pairs immediately before previously unknown bio be
 known, rejecting evidence from an older account incarnation. Production use requires
 at least 30 different scouted players, confidence calibration error at most 5 percentage
 points, and at least 90% correct selections in a nonempty high-band sample under the
-current model hash. Synthetic samples cannot open that gate. Admins see shadow results
+current constants **and estimator algorithm** hash. The raw posterior set is saved with
+each calibration pair and must cover 88–92% of these later truths; conservative display
+bounds are never substituted for that coverage measurement. Missing raw sets keep the
+gate closed. Synthetic samples cannot open that gate. Admins see shadow results
 and can include or exclude conflicting reports; no inferred value is written to confirmed
 `players.race_*` intel.

@@ -75,12 +75,31 @@ function request(server,url,role='admin',body){return new Promise((resolve,rejec
         ok('bio calibration pairs capture the estimate before intel arrives',service.recordCalibration(11,{has_intel:1,race_attack:2,race_defense:1})===2);
         ok('a repeated scan does not duplicate calibration pairs',service.recordCalibration(11,{has_intel:1,race_attack:2,race_defense:1})===0);
         ok('one scouted player does not unlock production estimates',service.getCalibrationSummary().players===1&&!service.getCalibrationSummary().passed);
+        ok('the raw posterior set is stored separately from the conservative display bounds',
+            repository.calibrationRows(modelVersion()).every(row=>Array.isArray(row.raw_credible_values)&&row.raw_credible_values.length>0));
         const after=db.prepare('SELECT race_attack,race_defense FROM players WHERE id=11').get();
         ok('nothing writes inferred values to players race intel',JSON.stringify(before)===JSON.stringify(after));
         db.prepare('UPDATE players SET has_intel=1 WHERE id=11').run();
         ok('bio locks and clears shadow estimates',service.recompute(11).status==='bio_locked'&&!repository.getEstimate(11).attack);
         ok('bio truth is never overwritten on subsequent scans',service.recordCalibration(11,{has_intel:1,race_attack:-4,race_defense:-4})===0);
         ok('unknown players do not create empty persistent guesses',service.recompute(999).status==='not_found');
+
+        // Invented later-bio pairs test the gate itself, not live model quality.
+        db.prepare('DELETE FROM race_estimate_calibrations').run();
+        const probabilities=[0,0,0,0,0,0,0.9,0.1,0];
+        const pair=db.prepare(`INSERT INTO race_estimate_calibrations(player_id,trait,dist,band,truth,model_version,raw_credible_values)
+            VALUES(?,'attack',?,'high',?,?,'[2]')`);
+        for(let i=0;i<30;i++)pair.run(1000+i,JSON.stringify(probabilities),i<27?2:3,modelVersion());
+        const certified=service.getCalibrationSummary();
+        ok('30 unique bio pairs with90% posterior coverage and calibrated high picks pass',
+            certified.passed&&certified.players===30&&certified.coverage_pairs===30&&certified.credible_coverage===0.9,certified);
+        db.prepare("UPDATE race_estimate_calibrations SET dist='[0,0,0,0,0,0,1,0,0]',truth=2").run();
+        const conservative=service.getCalibrationSummary();
+        ok('100% conservative coverage does not certify the requested88–92% posterior calibration',
+            !conservative.passed&&conservative.high_accuracy===1&&conservative.calibration_error_pp===0&&conservative.credible_coverage===1,conservative);
+        db.prepare('UPDATE race_estimate_calibrations SET raw_credible_values=NULL WHERE player_id=1000').run();
+        ok('legacy pairs without a recorded raw set keep the coverage gate closed',
+            !service.getCalibrationSummary().passed&&service.getCalibrationSummary().coverage_pairs===29);
     }finally{await new Promise(resolve=>server.close(resolve));db.close();fs.rmSync(temp,{recursive:true,force:true});}
     process.exitCode=failed?1:0;
 })().catch(error=>{console.error(error);process.exitCode=1;});
