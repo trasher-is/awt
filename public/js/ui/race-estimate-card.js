@@ -61,7 +61,8 @@ export function mountRaceEstimateCard(container, { playerId, hasBio = false, has
                     calibrated: snapshot.gate?.allowed === true, check: snapshot.check, kind,
                 })}.`));
                 if (!trait) continue;
-                explanation.appendChild(element('p', 'mb-1', `${label} prior: ${trait.prior?.name || 'unavailable'}; hard compatible picks: ${Display.setText(trait.hard_candidates || [])}.`));
+                const samples = Number.isSafeInteger(trait.evidence_count) && trait.evidence_count >= 0 ? trait.evidence_count : 0;
+                explanation.appendChild(element('p', 'mb-1', `${label} prior: ${trait.prior?.name || 'unavailable'}; ${samples} evidence samples; hard compatible picks: ${Display.setText(trait.hard_candidates || [])}.`));
                 if (admin && snapshot.gate?.allowed !== true) explanation.appendChild(element('p', 'mb-1',
                     `${label} raw posterior 90% mass set (uncalibrated): ${Display.setText(trait.credible_values || Display.credibleSet(trait))}.`));
                 const updated = formatLocalDateTime(trait.estimated_at, undefined, 'unknown');

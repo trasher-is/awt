@@ -32,6 +32,7 @@ ok('uncalibrated ranges state model compatibility without claiming probability c
     /compatible range.*uncalibrated/.test(Display.traitText(trait(2))) && !/90% set/.test(Display.traitText(trait(2))));
 ok('a disjoint credible set does not claim impossible intermediate picks', Display.setText([1, 4]) === '+1 or +4');
 ok('malformed distributions and held traits fail closed', Display.traitText({ ...trait(2), hard_candidates: [7] }) === 'estimate unavailable'
+    && Display.traitText({ ...trait(2), dist: [1] }) === 'estimate unavailable'
     && Display.traitText({ ...trait(2), withheld_reason: 'conflict' }) === 'estimate unavailable');
 ok('a stale AI hash is always labelled outdated', Display.checkLabel({ ...envelope.check, current_input_hash: 'b'.repeat(64) }) === 'outdated');
 ok('a current AI lower is displayed without ever raising the stored band',
@@ -40,6 +41,9 @@ ok('a current AI lower is displayed without ever raising the stored band',
     && Display.effectiveBand({ ...trait(2), band: 'low' }, envelope.check, 'attack') === 'low');
 ok('an outdated AI lower cannot change the displayed evidence band',
     Display.effectiveBand(trait(2), { ...envelope.check, state: 'outdated', bands: { attack: 'low' } }, 'attack') === 'high');
+ok('a current validated cannot-check verdict still lowers its display band without permitting calculation',
+    Display.effectiveBand(trait(2), { ...envelope.check, state: 'cannot_check', status: 'current',
+        attack: { verdict: 'cannot_check' }, bands: { attack: 'medium' } }, 'attack') === 'medium');
 const inputs = { defFleet: [100, 0, 0], atkFleet: [100, 0, 0], sbLevel: 0,
     def: { ra: 0, rd: 0, phys: 10, math: 10, lvl: 5 }, atk: { ra: 0, rd: 0, phys: 10, math: 10, lvl: 5 } };
 let rows = Display.comparisonRows(inputs, { atk: { ...envelope, gate: { ...envelope.gate, allowed: false } } });

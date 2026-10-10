@@ -38,7 +38,9 @@
         const bands = ['none', 'low', 'medium', 'high'];
         const original = bands.indexOf(trait?.band);
         if (original < 0) return 'none';
-        if (checkLabel(check) !== 'AI-checked') return trait.band;
+        const current = check?.input_hash && check.input_hash === check.current_input_hash
+            && (check.status === 'current' || checkLabel(check) === 'AI-checked');
+        if (!current || check.state === 'outdated') return trait.band;
         const checked = bands.indexOf(check.bands?.[kind]);
         return checked < 0 ? 'none' : bands[Math.min(original, checked)];
     }
@@ -46,7 +48,7 @@
         if (check) trait = trait && { ...trait, band: effectiveBand(trait, check, kind) };
         if (!trait || trait.withheld_reason || !pick(trait.most_likely) || !['high', 'medium', 'low'].includes(trait.band)) return 'estimate unavailable';
         const values = compatibleSet(trait);
-        if (!values.length) return 'estimate unavailable';
+        if (!values.length || !credibleSet(trait).length) return 'estimate unavailable';
         return calibrated
             ? `estimate ~${signed(trait.most_likely)} · ${trait.band} band · compatible range ${setText(values)}`
             : `estimate ~${signed(trait.most_likely)} · compatible range ${setText(values)} · ${trait.band} evidence band (uncalibrated)`;
