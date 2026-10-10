@@ -112,7 +112,13 @@ export function mountRaceEstimateCard(container, { playerId, hasBio = false, has
             const endpoint = admin ? `/hub-api/admin/race/${id}/check` : `/hub-api/intel/race/${id}/check-request`;
             const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
             const data = await response.json().catch(() => null);
-            if (!response.ok || data?.success !== true) throw new Error(typeof data?.error === 'string' ? data.error : 'The AI check request could not be submitted.');
+            // Check actions return a persisted request receipt rather than the
+            // display endpoint's success envelope. A paid call may already have
+            // finished here; never misreport its valid receipt as a failure.
+            const receipt = Number.isSafeInteger(data?.request?.id) && data.request.id > 0;
+            if (!response.ok || !data || data.error || data.success === false || (!receipt && data.success !== true)) {
+                throw new Error(typeof data?.error === 'string' ? data.error : 'The AI check request could not be submitted.');
+            }
             error = admin ? 'AI check completed. Refresh the saved estimate to read its result.' : 'AI check requested. A hub admin will review it before any paid call.';
         } catch (err) { error = err instanceof Error ? err.message : 'The AI check request failed.'; }
         finally { busy = false; if (card.isConnected) render(); }

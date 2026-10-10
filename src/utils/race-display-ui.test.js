@@ -105,14 +105,18 @@ function setup(snapshot, { liveIntel = false } = {}) {
     ok('repeated mounting does not add cards or fetches', admin.mount(admin.root, { playerId: 710 }) === admin.controller
         && admin.root.children.length === 1 && admin.calls.length === 1);
     const paid = descendants(admin.root).find(node => node.tagName === 'button' && node.textContent === 'Run AI check (paid)');
+    admin.replies.push(response({ request: { id: 41, status: 'done' }, check: { status: 'ok' } }));
     paid.click(); await flush();
     ok('only an explicit paid admin button calls the AI-check action', admin.calls.length === 2
-        && admin.calls[1].url === '/hub-api/admin/race/710/check' && admin.calls[1].method === 'POST');
+        && admin.calls[1].url === '/hub-api/admin/race/710/check' && admin.calls[1].method === 'POST'
+        && /AI check completed/.test(admin.root.textContent));
     const member = setup({ success: true, ...envelope, viewer_role: 'user', check_request_allowed: true });
     await member.controller.ready;
     const ask = descendants(member.root).find(node => node.tagName === 'button' && /Request AI check/.test(node.textContent));
+    member.replies.push(response({ request: { id: 42, status: 'pending' } }));
     ask.click(); await flush();
-    ok('members enqueue admin approval and never call the paid admin route', member.calls[1].url === '/hub-api/intel/race/710/check-request');
+    ok('members enqueue admin approval and accept its actual persisted request receipt',
+        member.calls[1].url === '/hub-api/intel/race/710/check-request' && /AI check requested/.test(member.root.textContent));
     const shadow = setup({ success: true, player: envelope.player, estimate: null, viewer_role: 'user', check_request_allowed: false,
         gate: { ...envelope.gate, allowed: false, players: 0, pairs: 0 } });
     await shadow.controller.ready;
