@@ -237,6 +237,27 @@ async function main() {
                 && f.observation.atkFleet[i] - Math.round(alive) <= ranges.losses[i][1]);
     }
     ok('model envelope contains all enumerated historical levels/sciences and whole-ship losses', enclosed);
+    let mixedCovered = true;
+    for (const side of ['att', 'def']) for (const pure of [true, false]) {
+        const observation = { ...f.observation, side,
+            atkFleet: side === 'att' && pure ? [0, 300, 0] : [140, 9, 12],
+            defFleet: side === 'def' && pure ? [0, 300, 0] : [130, 11, 12],
+            sbLevel: 2, scienceCeiling: 12, levelCeiling: 26,
+            known: { ra: 1, rd: 1, phys: 6, math: 6, lvl: 13 } };
+        const envelope = modelRanges(observation, f.estimate);
+        for (let lvl = 0; lvl <= 26; lvl++) for (let phys = 0; phys <= 12; phys++) for (let math = 0; math <= 12; math++) {
+            const subject = { ra: 0, rd: 0, phys, math, lvl };
+            const result = model.simulate({ atkFleet: observation.atkFleet, defFleet: observation.defFleet,
+                sbLevel: observation.sbLevel, atk: side === 'att' ? subject : observation.known,
+                def: side === 'def' ? subject : observation.known });
+            const fleet = side === 'att' ? observation.atkFleet : observation.defFleet;
+            const survivors = side === 'att' ? result.survAtk : result.survDef;
+            mixedCovered &&= result.winA * 100 >= envelope.win[0] && result.winA * 100 <= envelope.win[1]
+                && survivors.every((alive, i) => fleet[i] - Math.round(alive) >= envelope.losses[i][0]
+                    && fleet[i] - Math.round(alive) <= envelope.losses[i][1]);
+        }
+    }
+    ok('level endpoints bound intermediate levels even when only the opponent has all three types', mixedCovered);
     f.db.close();
     const credential = ['ANTHROPIC', 'API', 'KEY'].join('_'), sdkName = ['@anthropic-ai', 'sdk'].join('/');
     const offenders = [];
