@@ -27,8 +27,12 @@ const { normaliseSource, observationKind } = require('../utils/population-trace'
 const { sanitizeScanRun, sanitizeRunId, sanitizeAgeMs } = require('../utils/scan-run');
 const scanRunsRepo = require('../repositories/scanRuns');
 const populationTraceRepo = require('../repositories/populationTrace');
+const battleContext = require('../utils/battle-context');
+const { storePlanetStatistics, applyStatisticsWrite } = require('../utils/api-statistics-store');
 const { createProvisionalDrops, confirmGapFromEnv } = require('../utils/provisional-drop');
 const router = express.Router();
+const queueRaceContext = playerId => battleContext.enqueueRelatedEstimates(db, playerId,
+    id => require('../utils/race-inference-service').enqueue(id));
 
 // A lower population is held back until a later read confirms it (src/utils/provisional-drop.js).
 // POP_DROP_CONFIRM_MS: unset = 2 minutes, 0 = off (every drop is applied and announced at once).
@@ -245,6 +249,7 @@ router.post('/sync/system', requireAuth, (req, res) => {
 
             // Check for history events BEFORE upserting
             const oldP = systemsRepo.getOldPlanet(system_id, p.planet_index);
+            const statisticsWrite = storePlanetStatistics(db, system_id, p, observedAtIso);
 
             let finalOwnerId = p.owner ? p.owner.id : null;
             let finalPopulation = p.population;
@@ -548,6 +553,10 @@ router.post('/sync/system', requireAuth, (req, res) => {
                 typeof p.name === 'string' ? p.name : null,
                 finalSiegeIsFriendly
             );
+            applyStatisticsWrite(db, system_id, p.planet_index, statisticsWrite);
+            if (!p.vision_uncertain && observation_live && Number.isSafeInteger(p.starbase)) {
+                battleContext.recordStarbaseContext(db, system_id, p.planet_index, p.starbase, observedAtIso);
+            }
         }
 
         // OUR OWN fleet positions are still not derived from system scans — they are
@@ -785,7 +794,14 @@ router.post('/sync/player', requireAuth, (req, res) => {
             // alliances.name is NOT NULL and the tag may be missing.
             alliancesRepo.upsertAllianceTagOnly(player.alliance_id, player.alliance_tag ?? null, player.alliance_tag ?? '');
         }
+        if (player.has_intel === 1) {
+            try { require('../utils/race-inference-service').recordCalibration(player.id, { ...p, id: player.id }); }
+            catch (error) { console.error('[Race] Calibration unavailable:', error.message); }
+        }
         playersRepo.upsertPlayerFull(player);
+        battleContext.recordPublicContext(db, p);
+        battleContext.recordCombatContext(db, { ...p, id: player.id });
+        queueRaceContext(player.id);
 
         if (player.logins > 0 && (!oldPlayer || oldPlayer.logins !== player.logins)) {
             playersRepo.insertPlayerLogin(player.id, player.logins);
@@ -881,6 +897,9 @@ router.post('/sync/player-list', requireAuth, (req, res) => {
             p.is_active_player ? 1 : 0,
             typeof p.joined === 'string' ? p.joined : null
         );
+        battleContext.recordPublicContext(db, p);
+
+        queueRaceContext(p.id);
 
         // Resigned/returned enemy: only for a player whose alliance tag was already known
         // and is NOT friendly — a brand-new row (before === undefined) or an unaffiliated
@@ -1082,7 +1101,14 @@ router.post('/sync/player-detail', requireAuth, (req, res) => {
     detail.origin_system = Number.isInteger(originSystemId) ? originSystemId : null;
 
     try {
+        if (detail.has_intel === 1) {
+            try { require('../utils/race-inference-service').recordCalibration(detail.id, detail); }
+            catch (error) { console.error('[Race] Calibration unavailable:', error.message); }
+        }
         playersRepo.upsertPlayerFromApiDetail(detail);
+        battleContext.recordPublicContext(db, detail);
+        battleContext.recordCombatContext(db, detail);
+        queueRaceContext(detail.id);
         // Deliberately does NOT touch intel visibility: this route's has_intel is always 0
         // because the API carries no intelligenceReport, so recording it would only pin the
         // confirmed state at "not visible" forever. See announceIntelVisibility.
@@ -1684,6 +1710,7 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
         // in-game calculator later. Only for reports inserted just now (see the
         // stats_snapshot_at comment in database.js); it cannot fail the sync.
         battleReportsRepo.snapshotStatsForReports(inserted.map(r => r.id));
+        battleContext.refreshDiceChecks(db, inserted.map(r => r.id));
 
         // Planet and ship detail now ride along on the search response (the game's
         // BattleReport change) — store them here so the page sweep never has to fetch
@@ -1788,6 +1815,21 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
             }
         }
 
+        // Stored API ship details are already complete; they do not visit the HTML
+        // detail receiver. Queue the same local computation for either delivery path.
+        const raceQueue = require('../utils/race-inference-service');
+        for (const row of inserted) {
+            for (const playerId of [row.att_player_id, row.def_player_id]) {
+                if (Number.isSafeInteger(playerId) && playerId > 0) raceQueue.enqueue(playerId);
+            }
+        }
+        for (const reportId of published) {
+            const report = db.prepare('SELECT att_player_id,def_player_id FROM battle_reports WHERE id=?').get(reportId);
+            if (report) for (const playerId of [report.att_player_id, report.def_player_id]) {
+                if (Number.isSafeInteger(playerId) && playerId > 0) raceQueue.enqueue(playerId);
+            }
+        }
+
         // newest_started_at is the dashboard scheduler's contract: the next pull uses it
         // as BattleDateFrom so the search window only ever moves forward.
         const newest = battleReportsRepo.getNewestStartedAt();
@@ -1859,10 +1901,23 @@ router.post('/sync/battle-report-ship-detail', requireAuth, (req, res) => {
     normalized.win_chance = typeof detail.win_chance === 'number' && Number.isFinite(detail.win_chance)
         ? detail.win_chance
         : null;
+    normalized.att_win_chance = battleContext.percent(detail.att_win_chance);
+    normalized.dice_roll = battleContext.percent(detail.dice_roll);
     normalized.system_id = Number.isInteger(detail.system_id) ? detail.system_id : null;
     normalized.planet_index = Number.isInteger(detail.planet_index) ? detail.planet_index : null;
     try {
         battleReportsRepo.updateShipDetail(id, normalized);
+        db.prepare(`UPDATE battle_reports SET att_win_chance=COALESCE(?,att_win_chance),
+            dice_roll=COALESCE(?,dice_roll) WHERE id=?`)
+            .run(normalized.att_win_chance, normalized.dice_roll, id);
+        battleContext.refreshDiceChecks(db, [id]);
+        const report = db.prepare('SELECT att_player_id,def_player_id FROM battle_reports WHERE id=?').get(id);
+        if (report) {
+            const inference = require('../utils/race-inference-service');
+            for (const playerId of [report.att_player_id, report.def_player_id]) {
+                if (Number.isSafeInteger(playerId) && playerId > 0) inference.enqueue(playerId);
+            }
+        }
         // A report's system_id/planet_index (and therefore whether it lands on a
         // currently-ranked planet) are only known from this point on — see
         // bonusGoalsRepo.evaluateBattleReportForGoals's own comment. Never let a bonus-goal

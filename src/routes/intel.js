@@ -671,8 +671,9 @@ router.get('/intel/alliance-stats', requireAuth, (req, res) => {
         // of either side's physics here.
         const ceilings = playersRepo.getCombatCeilings();
         const stats = alliancesRepo.getAllianceStatsForArchive().map(r => {
-            const { tp, tpx } = truePowerForAllianceRow(r, ceilings);
-            return { ...r, pl_tp: tp, pl_tpx: tpx };
+            const envelope = r.pl_has_intel ? null : require('../utils/race-display').raceDisplay(r.player_id);
+            const { tp, tpx, source } = truePowerForAllianceRow(r, ceilings, envelope);
+            return { ...r, pl_tp: tp, pl_tpx: tpx, pl_tp_source: source };
         });
         res.json({ success: true, stats, ceilings });
     } catch (err) {

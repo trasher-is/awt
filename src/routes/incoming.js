@@ -8,7 +8,7 @@ const { postIncomingOnce, replyToIncoming, replyIncomingCover } = require('../di
 const { SOURCE_TAG, computeInterceptors } = require('../utils/interceptors');
 const { resolveStats } = require('../utils/battle');
 const incomingDefenceRepo = require('../repositories/incomingDefence');
-const { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, sbLevels, counterFight, landBefore, ownerReinforce, pct, fleetText } = require('../utils/incoming-battle');
+const { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, sbLevels, counterFight, landBefore, ownerReinforce, pct, fleetText, secondaryRaceEstimate } = require('../utils/incoming-battle');
 const { toggleCovering, getCovering, renderCoverLine } = require('../utils/covering');
 const defenceChoicesRepo = require('../repositories/defenceChoices');
 const defenceLive = require('../utils/defence-live');
@@ -228,7 +228,8 @@ function battleSides(data, planet, arrivalUnix) {
         enemyRow = playersRepo.getPlayerCombatStatsById(data.attacker.id);
     }
     if (!enemyRow && data.attacker && data.attacker.name) {
-        enemyRow = playersRepo.getPlayerCombatStatsByName(data.attacker.name.toLowerCase());
+        const identity = playersRepo.getPlayerIdByName(data.attacker.name);
+        enemyRow = identity ? { ...playersRepo.getPlayerCombatStatsByName(data.attacker.name.toLowerCase()), id: identity.id } : null;
     }
     const enemy = {
         ...resolveStats(enemyRow),
@@ -244,18 +245,24 @@ function battleSides(data, planet, arrivalUnix) {
         const beforeIso = arrivalUnix ? new Date(arrivalUnix * 1000).toISOString() : '9999';
         garrison = incomingDefenceRepo.getGarrison(planet.owner_id, data.target.systemId, data.target.planetIndex, beforeIso);
     }
-    return { enemyFleet, enemy, owner, ownerLower, garrison };
+    return { enemyFleet, enemy, enemyRow, owner, ownerLower, garrison };
 }
 
 function attachBattle(result, data, planet, arrivalUnix, nowUnix) {
     try {
-        const { enemyFleet, enemy, owner, ownerLower, garrison } = battleSides(data, planet, arrivalUnix);
+        const { enemyFleet, enemy, enemyRow, owner, ownerLower, garrison } = battleSides(data, planet, arrivalUnix);
         let fight = null;
         if (planet && owner) {
             const ctx = { enemyFleet, enemy, sbLevel: planet.starbase || 0, garrison, owner };
             fight = planetFight(ctx);
             if (fight) {
                 result.planet = { ...fight, ownerName: planet.owner_name, seenAt: planet.updated_at };
+                if (enemyRow && !enemyRow.has_intel) {
+                    const enemyId = enemyRow.id || data.attacker?.id;
+                    const envelope = Number.isSafeInteger(enemyId)
+                        ? require('../utils/race-display').raceDisplay(enemyId) : null;
+                    result.raceEstimatePlanet = secondaryRaceEstimate({ ...ctx, enemyRow, enemyEnvelope: envelope });
+                }
                 if (fight.holds < HOLDS) {
                     // What the owner can put into the starbase by arrival: the planet's own
                     // saved PP, or every planet's PP if it is his home.
@@ -401,6 +408,10 @@ function appendDefenders(L, result, target, alertKey) {
         return;
     }
     appendPlanet(L, result);
+    if (result.raceEstimatePlanet?.source === 'estimate') {
+        const estimate = result.raceEstimatePlanet;
+        L.push(`Estimate: planet holds ~${(estimate.holds_low * 100).toFixed(1)}–${(estimate.holds_high * 100).toFixed(1)}% (${estimate.band}; calibrated and AI-checked). Worst case remains the headline.`);
+    }
     const url = panelUrl(alertKey);
     const link = () => { if (url) L.push(`\n📋 **All options, live:** <${url}>`); };
     if (result.planet && result.planet.holds >= HOLDS) { link(); return; }

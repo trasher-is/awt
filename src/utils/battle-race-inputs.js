@@ -3,6 +3,7 @@
 // (scripts/battle-race-measure.js) passes a read-only copy. Sharing this read is what makes
 // the script's numbers describe the card, not a second implementation of it.
 const { inferBattleRace, VERSION } = require('./battle-race-inference');
+const { evidenceStart, contextCeilings } = require('./battle-context');
 
 const statements = new WeakMap();
 function prepared(db) {
@@ -19,7 +20,7 @@ function prepared(db) {
             // The other side of each report. Its bio intel, if recorded near the battle, is
             // the known side the inference measures the player against.
             opponent: db.prepare(`
-                SELECT id, has_intel, race_attack, race_defense, physics, mathematics, level, intel_updated_at
+                SELECT id, has_intel, race_attack, race_defense, physics, mathematics, level, intel_updated_at,joined,battle_race_not_before
                 FROM players WHERE id = ?
             `),
             unknownPlayers: db.prepare(`
@@ -32,26 +33,8 @@ function prepared(db) {
     return statements.get(db);
 }
 
-// Only unambiguous ISO/SQLite dates can bound an account's current incarnation. A DOM
-// Joined label can be localized: guessing its date order would silently mix old races.
-function timestamp(value) {
-    if (typeof value !== 'string') return null;
-    const parts = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)?$/.exec(value);
-    if (!parts) return null;
-    const [year, month, day, hour, minute, second] = parts.slice(1).map(part => Number(part || 0));
-    const daysInMonth = new Date(Date.UTC(2000 + year % 400, month, 0)).getUTCDate();
-    if (month < 1 || month > 12 || day < 1 || day > daysInMonth || hour > 23 || minute > 59 || second > 59) return null;
-    let normalized = value.replace(' ', 'T');
-    if (normalized.length === 10) normalized += 'T00:00:00';
-    if (!/(Z|[+-]\d{2}:\d{2})$/i.test(normalized)) normalized += 'Z';
-    const ms = Date.parse(normalized);
-    return Number.isFinite(ms) ? ms : null;
-}
-
-function notBefore(player) {
-    const times = [player.joined, player.battle_race_not_before].map(timestamp).filter(t => t !== null);
-    return times.length ? new Date(Math.max(...times)).toISOString() : null;
-}
+// The same cutoff is shared by hard ranges, probabilities and the context history.
+const notBefore = evidenceStart;
 
 function readBattleRaceInputs(db, playerId) {
     const statement = prepared(db);
@@ -65,6 +48,7 @@ function readBattleRaceInputs(db, playerId) {
     }
     return {
         player, reports, opponents,
+        contextCeilingsByReport: contextCeilings(db, player, reports),
         subject: { science_level: player.science_level, level: player.level },
     };
 }
@@ -72,6 +56,7 @@ function readBattleRaceInputs(db, playerId) {
 function inferFromInputs(playerId, inputs, options = {}) {
     return inferBattleRace(playerId, inputs.reports, {
         ...options, notBefore: notBefore(inputs.player), subject: inputs.subject, opponents: inputs.opponents,
+        contextCeilingsByReport: inputs.contextCeilingsByReport,
     });
 }
 

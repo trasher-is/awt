@@ -179,6 +179,10 @@ function renderDefenderData(box, d, target) {
         html += p.holdsAlone
             ? `<div style="font-weight:bold;color:#4ade80">🏰 Holds on its own — ${sb}${garrison}: ${esc(p.holdsText)}. No help needed.</div>`
             : `<div>🏰 <b>Planet alone</b> — ${sb}${garrison}: ${esc(p.outcomeText)}</div>`;
+        if (d.raceEstimatePlanet?.source === 'estimate') {
+            const estimate = d.raceEstimatePlanet;
+            html += `<div>Estimate: planet holds ~${esc((estimate.holds_low * 100).toFixed(1))}–${esc((estimate.holds_high * 100).toFixed(1))}% (${esc(estimate.band)}; calibrated and AI-checked). Worst case remains the headline.</div>`;
+        }
         if (d.sbUpgrade) {
             const u = d.sbUpgrade;
             const effect = u.holds > 0.5 ? `holds ${esc(u.holdsText)}`
