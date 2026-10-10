@@ -24,7 +24,7 @@ const envelope = {
         calibration_error_pp: 1, high_accuracy: 0.95, model_version: version },
     check: { state: 'AI-checked', input_hash: hash, current_input_hash: hash,
         bands: { attack: 'high', defence: 'high' },
-        attack: { verdict: 'agrees' }, defence: { verdict: 'agrees' }, model_version: version },
+        attack: { verdict: 'agrees' }, defence: { verdict: 'agrees' }, model_version: version, current_model_version: version },
 };
 ok('calibrated race values retain the estimate label without claiming compatible picks have 90% coverage',
     /estimate ~\+2.*high band.*compatible range \+2/.test(Display.traitText(trait(2), { calibrated: true }))
@@ -35,7 +35,28 @@ ok('a disjoint credible set does not claim impossible intermediate picks', Displ
 ok('malformed distributions and held traits fail closed', Display.traitText({ ...trait(2), hard_candidates: [7] }) === 'estimate unavailable'
     && Display.traitText({ ...trait(2), dist: [1] }) === 'estimate unavailable'
     && Display.traitText({ ...trait(2), withheld_reason: 'conflict' }) === 'estimate unavailable');
-ok('a stale AI hash is always labelled outdated', Display.checkLabel({ ...envelope.check, current_input_hash: 'b'.repeat(64) }) === 'outdated');
+ok('a stale AI hash is always labelled outdated', Display.checkStatus({ ...envelope.check, current_input_hash: 'b'.repeat(64) }) === 'outdated'
+    && /LLM check outdated/.test(Display.checkLabel({ ...envelope.check, current_input_hash: 'b'.repeat(64) })));
+ok('an unchecked estimate is explicitly probable without an LLM confirmation', Display.checkStatus(null) === 'not_checked'
+    && Display.checkLabel(null) === 'Probable estimate — not checked by LLM');
+ok('only a complete agreeing current proof is labelled confirmed by LLM', Display.checkStatus(envelope.check) === 'AI-checked'
+    && Display.checkLabel(envelope.check) === 'Estimate confirmed by LLM');
+for (const changed of [
+    { state: 'not_checked', status: 'current' },
+    { state: 'cannot_check', status: 'current' },
+    { state: 'held' },
+    { outdated: true },
+    { status: 'outdated' },
+    { current_model_version: 'previous-model' },
+    { current_model_version: null },
+    { current_input_hash: null },
+    { input_hash: ' ', current_input_hash: ' ' },
+    { defence: { verdict: 'cannot_check' } },
+]) ok('held, stale, inconclusive or incomplete proof cannot claim LLM confirmation',
+    Display.checkStatus({ ...envelope.check, ...changed }) !== 'AI-checked'
+    && Display.checkLabel({ ...envelope.check, ...changed }) !== 'Estimate confirmed by LLM', changed);
+ok('a held review takes precedence even when its evidence is outdated', Display.checkStatus({ ...envelope.check,
+    state: 'held', current_input_hash: 'b'.repeat(64) }) === 'held');
 ok('a current AI lower is displayed without ever raising the stored band',
     /medium band/.test(Display.traitText(trait(2), { calibrated: true, kind: 'attack',
         check: { ...envelope.check, bands: { attack: 'medium', defence: 'high' } } }))
@@ -117,6 +138,16 @@ function setup(snapshot, { liveIntel = false, hasBio = false, hasLiveIntel = fal
         && /compatible range/.test(admin.root.textContent) && /uncalibrated/.test(admin.root.textContent) && /prior: uniform/.test(admin.root.textContent)
         && /Evidence reports/.test(admin.root.textContent) && /0\/30/.test(admin.root.textContent));
     ok('AI-written prose has an explicit origin label', /AI-written explanation: Synthetic AI note\./.test(admin.root.textContent));
+    ok('the LLM badge identifies a review of the estimate and keeps its approximate values',
+        /Estimate confirmed by LLM/.test(admin.root.textContent) && /estimate ~\+2/.test(admin.root.textContent)
+        && /calculations and evidence/.test(admin.root.textContent));
+    const unchecked = setup({ success: true, ...envelope, viewer_role: 'admin', check_request_allowed: true,
+        llm_enabled: false, check: { state: 'not_checked' }, gate: { ...envelope.gate, allowed: false } });
+    await unchecked.controller.ready;
+    ok('an admin can read the probable uncalibrated estimate without any LLM call',
+        /Probable estimate — not checked by LLM/.test(unchecked.root.textContent)
+        && /estimate ~\+2/.test(unchecked.root.textContent) && /uncalibrated/.test(unchecked.root.textContent)
+        && unchecked.calls.length === 1 && !unchecked.calls[0].method);
     ok('repeated mounting does not add cards or fetches', admin.mount(admin.root, { playerId: 710 }) === admin.controller
         && admin.root.children.length === 1 && admin.calls.length === 1);
     const paid = descendants(admin.root).find(node => node.tagName === 'button' && node.textContent === 'Run AI check (paid)');

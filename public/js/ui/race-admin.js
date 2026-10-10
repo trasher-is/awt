@@ -124,7 +124,8 @@ async function load() {
             card.append(actions);
             const display = await request(`/intel/player/${estimate.player_id}/race-estimate`);
             const check = display.check || {};
-            card.append(node('p', `AI check: ${check.state || 'not_checked'}`, 'text-sm mt-3'));
+            card.append(node('p', display.has_bio ? 'Observed Bio intel is available; it remains authoritative.'
+                : `LLM review: ${Display.checkLabel(check)}`, 'text-sm mt-3'));
             if (check.explanation) card.append(node('p', `AI-written explanation: ${check.explanation}`, 'text-sm mt-1'));
             if (check.state === 'held') actions.append(
                 button('Release hold', () => request(`/admin/race/${estimate.player_id}/check/resolve`, { decision: 'release' })),

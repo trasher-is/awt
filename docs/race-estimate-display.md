@@ -10,6 +10,14 @@ Before calibration passes, estimates are visible only to admins. Their range is 
 uncalibrated. Members see calibration progress and keep the existing worst-case numbers.
 No empirical accuracy or coverage is claimed from synthetic tests.
 
+Presentation distinguishes probable, unchecked estimates from **Estimate confirmed by
+LLM**. The latter requires an agreeing review of both traits with matching nonempty
+evidence hashes and matching current model versions. It describes a review of the
+estimator's calculations and evidence; Bio remains the observed source. Outdated
+reviews revert to a probable label, unresolved disagreements are withheld, and an
+inconclusive review says the LLM could not confirm. These labels do not bypass either
+the calibration gate or the calculation eligibility rules below.
+
 An estimate enters a calculation only when all these conditions hold:
 
 - The current battle model has at least 30 distinct calibrated players and 30 pairs,

@@ -411,7 +411,7 @@ function appendDefenders(L, result, target, alertKey) {
     appendPlanet(L, result);
     if (result.raceEstimatePlanet?.source === 'estimate') {
         const estimate = result.raceEstimatePlanet;
-        L.push(`Estimate: planet holds ~${(estimate.holds_low * 100).toFixed(1)}–${(estimate.holds_high * 100).toFixed(1)}% (${estimate.band}; calibrated and AI-checked). Worst case remains the headline.`);
+        L.push(`Estimate: planet holds ~${(estimate.holds_low * 100).toFixed(1)}–${(estimate.holds_high * 100).toFixed(1)}% (${estimate.band}; calibrated, estimate confirmed by LLM). Worst case remains the headline.`);
     }
     const url = panelUrl(alertKey);
     const link = () => { if (url) L.push(`\n📋 **All options, live:** <${url}>`); };

@@ -331,7 +331,7 @@ function idleBadge(row, activityField) {
 function truePowerCell(v, source = 'intel') {
     if (v == null || Number.isNaN(Number(v))) return Q;
     return source === 'estimate'
-        ? `<span title="True Power estimate; calibrated and AI-checked">~${Math.round(Number(v))}%</span>`
+        ? `<span title="True Power estimate; calibrated, estimate confirmed by LLM">~${Math.round(Number(v))}%</span>`
         : `<span title="True Power from observed intel">${Math.round(Number(v))}%</span>`;
 }
 

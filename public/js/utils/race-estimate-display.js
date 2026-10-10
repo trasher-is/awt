@@ -39,8 +39,8 @@
         const original = bands.indexOf(trait?.band);
         if (original < 0) return 'none';
         const current = check?.input_hash && check.input_hash === check.current_input_hash
-            && (check.status === 'current' || checkLabel(check) === 'AI-checked');
-        if (!current || check.state === 'outdated') return trait.band;
+            && (check.status === 'current' || checkStatus(check) === 'AI-checked');
+        if (!current || checkStatus(check) === 'outdated') return trait.band;
         const checked = bands.indexOf(check.bands?.[kind]);
         return checked < 0 ? 'none' : bands[Math.min(original, checked)];
     }
@@ -53,12 +53,27 @@
             ? `estimate ~${signed(trait.most_likely)} · ${trait.band} band · compatible range ${setText(values)}`
             : `estimate ~${signed(trait.most_likely)} · compatible range ${setText(values)} · ${trait.band} evidence band (uncalibrated)`;
     }
-    function checkLabel(check) {
-        if (!check) return 'not checked';
+    function checkStatus(check) {
+        if (!check) return 'not_checked';
         if (check.state === 'held') return 'held';
-        if (check.state === 'outdated' || (check.input_hash && check.current_input_hash && check.input_hash !== check.current_input_hash)) return 'outdated';
-        return check.state === 'AI-checked' && check.input_hash && check.input_hash === check.current_input_hash
-            && check.attack?.verdict === 'agrees' && check.defence?.verdict === 'agrees' ? 'AI-checked' : 'not checked';
+        if (check.state === 'outdated' || check.status === 'outdated' || check.outdated === true
+            || (check.input_hash && check.current_input_hash && check.input_hash !== check.current_input_hash)
+            || (check.model_version && check.current_model_version && check.model_version !== check.current_model_version)) return 'outdated';
+        if (check.state === 'AI-checked' && typeof check.input_hash === 'string' && /^[a-f0-9]{64}$/i.test(check.input_hash)
+            && check.input_hash === check.current_input_hash
+            && typeof check.model_version === 'string' && check.model_version
+            && check.model_version === check.current_model_version
+            && check.attack?.verdict === 'agrees' && check.defence?.verdict === 'agrees') return 'AI-checked';
+        return ['cannot_check', 'AI-checked'].includes(check.state) ? 'cannot_check' : 'not_checked';
+    }
+    function checkLabel(check) {
+        return {
+            'AI-checked': 'Estimate confirmed by LLM',
+            not_checked: 'Probable estimate — not checked by LLM',
+            outdated: 'Probable estimate — LLM check outdated',
+            held: 'Estimate withheld — LLM review requires attention',
+            cannot_check: 'Probable estimate — LLM could not confirm',
+        }[checkStatus(check)];
     }
     function comparisonRows(inputs, sides) {
         const selected = ['def', 'atk'].filter(side => sides[side]?.player);
@@ -101,5 +116,5 @@
             values: summarize(run(worstDef, worstAtk), worstDef, worstAtk), reason: null });
         return rows;
     }
-    return { signed, credibleSet, compatibleSet, setText, effectiveBand, traitText, checkLabel, comparisonRows };
+    return { signed, credibleSet, compatibleSet, setText, effectiveBand, traitText, checkStatus, checkLabel, comparisonRows };
 });

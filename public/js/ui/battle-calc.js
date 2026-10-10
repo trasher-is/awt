@@ -64,7 +64,8 @@ function raceComparisonHtml() {
     const assumptions = ['def', 'atk'].map(side => {
         const selected = selectedSides[side];
         const source = selected ? M.resolveStats(selected.player, selected).source : 'manual inputs';
-        return `${side === 'def' ? 'Defender' : 'Attacker'}: ${source === 'worst' ? 'worst case' : source}`;
+        const label = source === 'estimate' ? 'estimate — confirmed by LLM' : source === 'worst' ? 'worst case' : source;
+        return `${side === 'def' ? 'Defender' : 'Attacker'}: ${label}`;
     }).join(' · ');
     return `<div class="w-full border-t border-border pt-3 text-xs" aria-label="Race sources and win-chance comparison">
         <p class="text-muted-foreground">${esc(assumptions)}</p>

@@ -52,7 +52,7 @@ export function mountRaceEstimateCard(container, { playerId, hasBio = false, has
         requestCheck.textContent = admin ? 'Run AI check (paid)' : 'Request AI check for admin approval';
         status.textContent = locked ? 'Observed intel is available; it remains authoritative.'
             : error || (busy ? 'Loading saved race estimate…' : !snapshot ? 'Saved estimate unavailable.'
-            : snapshot.estimate ? `Estimate · ${Display.checkLabel(snapshot.check)}.`
+            : snapshot.estimate ? `${Display.checkLabel(snapshot.check)}.`
                 : Model.hasCurrentIntel(snapshot.player) ? 'Observed intel is available; it remains authoritative.'
                     : 'No member-visible estimate. Worst case remains in calculations.');
         traits.replaceChildren(); explanation.replaceChildren();
@@ -82,7 +82,7 @@ export function mountRaceEstimateCard(container, { playerId, hasBio = false, has
                 if (reportIds.length > 20) reports.appendChild(element('span', '', `; ${reportIds.length - 20} more.`));
                 explanation.appendChild(reports);
             }
-            explanation.appendChild(element('p', 'mb-1', `AI check: ${Display.checkLabel(snapshot.check)}.`));
+            explanation.appendChild(element('p', 'mb-1', `LLM review: ${Display.checkLabel(snapshot.check)}. This reviews the estimate's calculations and evidence; Bio intel remains the observed source.`));
             if (typeof snapshot.check?.explanation === 'string' && snapshot.check.explanation.trim()) {
                 explanation.appendChild(element('p', 'mb-1', `AI-written explanation: ${snapshot.check.explanation}`));
             }

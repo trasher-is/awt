@@ -56,7 +56,7 @@ function raceSummary(display) {
         const band = Display.effectiveBand(trait, display.check, name === 'Attack' ? 'attack' : 'defence');
         return `${name}: estimate ${Display.setText(set)} (${band}; compatible range)`;
     };
-    return `${text('Attack', display.estimate.attack)}; ${text('Defence', display.estimate.defence)}. ${display.check.state}.`;
+    return `${text('Attack', display.estimate.attack)}; ${text('Defence', display.estimate.defence)}. ${require('../../public/js/utils/race-estimate-display').checkLabel(display.check)}.`;
 }
 
 module.exports = { raceDisplay, raceSummary };

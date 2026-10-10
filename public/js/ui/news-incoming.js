@@ -181,7 +181,7 @@ function renderDefenderData(box, d, target) {
             : `<div>🏰 <b>Planet alone</b> — ${sb}${garrison}: ${esc(p.outcomeText)}</div>`;
         if (d.raceEstimatePlanet?.source === 'estimate') {
             const estimate = d.raceEstimatePlanet;
-            html += `<div>Estimate: planet holds ~${esc((estimate.holds_low * 100).toFixed(1))}–${esc((estimate.holds_high * 100).toFixed(1))}% (${esc(estimate.band)}; calibrated and AI-checked). Worst case remains the headline.</div>`;
+            html += `<div>Estimate: planet holds ~${esc((estimate.holds_low * 100).toFixed(1))}–${esc((estimate.holds_high * 100).toFixed(1))}% (${esc(estimate.band)}; calibrated, estimate confirmed by LLM). Worst case remains the headline.</div>`;
         }
         if (d.sbUpgrade) {
             const u = d.sbUpgrade;
