@@ -376,6 +376,45 @@
             </div>
         </section>
 
+        <!-- PEER SHARING: markup only; behaviour lives in js/ui/peer-sharing-admin.js -->
+        <section class="flex flex-col gap-4" id="peer-sharing-section">
+            <div>
+                <h2 class="text-xl font-bold tracking-tight border-b border-border pb-2">Peer Sharing</h2>
+                <p class="text-xs text-muted-foreground mt-2">Share intel with other alliances that run their own AWT hub, and read what they share with you. Each side decides for itself: a partner only gets what you tick for them, and nothing they send you is ever passed on to anyone else. Members see shared intel under <em>Shared Intel</em> in the sidebar.</p>
+            </div>
+
+            <div class="bg-card border border-border rounded-lg p-4 shadow-sm flex flex-col gap-3">
+                <h3 class="font-bold text-foreground"><i class="fa-solid fa-arrow-up-from-bracket text-muted-foreground mr-1"></i> What we share</h3>
+                <div id="peer-links" class="text-sm text-muted-foreground">Loading…</div>
+                <div class="border-t border-border pt-3 flex flex-col gap-2">
+                    <div class="text-xs font-bold uppercase tracking-wider text-muted-foreground">New partner</div>
+                    <div class="flex flex-wrap gap-2 items-center">
+                        <input id="peer-link-name" type="text" maxlength="80" placeholder="Partner alliance name" class="h-9 w-56 rounded-md border border-input bg-transparent px-3 text-sm">
+                        <input id="peer-link-tags" type="text" placeholder="Also hide tags, e.g. NAP2" class="h-9 w-56 rounded-md border border-input bg-transparent px-3 text-sm font-mono">
+                        <label class="flex items-center gap-2 text-xs text-muted-foreground"><input id="peer-link-friendly" type="checkbox" checked> Hide our alliance and allies</label>
+                    </div>
+                    <div id="peer-link-scopes" class="flex flex-wrap gap-3 text-sm"></div>
+                    <button id="peer-link-create" class="h-9 px-4 self-start rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Create link</button>
+                    <div id="peer-link-token" class="hidden rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs"></div>
+                </div>
+            </div>
+
+            <div class="bg-card border border-border rounded-lg p-4 shadow-sm flex flex-col gap-3">
+                <h3 class="font-bold text-foreground"><i class="fa-solid fa-download text-muted-foreground mr-1"></i> What we read</h3>
+                <div id="peer-sources" class="text-sm text-muted-foreground">Loading…</div>
+                <div class="border-t border-border pt-3 flex flex-col gap-2">
+                    <div class="text-xs font-bold uppercase tracking-wider text-muted-foreground">Add a partner's hub</div>
+                    <div class="flex flex-wrap gap-2 items-center">
+                        <input id="peer-source-name" type="text" maxlength="80" placeholder="Partner alliance name" class="h-9 w-48 rounded-md border border-input bg-transparent px-3 text-sm">
+                        <input id="peer-source-url" type="url" placeholder="https://their-hub.example" class="h-9 w-64 rounded-md border border-input bg-transparent px-3 text-sm font-mono">
+                        <input id="peer-source-token" type="password" autocomplete="off" placeholder="awtp_… token they gave you" class="h-9 w-64 rounded-md border border-input bg-transparent px-3 text-sm font-mono">
+                        <button id="peer-source-add" class="h-9 px-4 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors">Add</button>
+                    </div>
+                    <span id="peer-status" class="text-xs text-muted-foreground"></span>
+                </div>
+            </div>
+        </section>
+
         <section class="flex flex-col gap-4">
             <div>
                 <h2 class="text-xl font-bold tracking-tight text-destructive border-b border-destructive/30 pb-2">Danger Zone</h2>
@@ -1067,5 +1106,6 @@ pm2 restart awt      # or whatever your pm2 process is called</pre>
         }
 
     </script>
+    <script type="module" src="/hub-assets/js/ui/peer-sharing-admin.js"></script>
 </body>
 </html>

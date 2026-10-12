@@ -94,6 +94,16 @@ app.use('/rzhub/login', rateLimit({
 
 app.use('/rzhub', express.json(), require('./src/routes/rzhub'));
 
+// --- PEER SHARING FEED (hub-to-hub; see docs/peer-sharing.md) ---
+// Read by partner alliances' hubs with a bearer token issued in Admin -> Peer Sharing — no
+// session, no cookie, GET only. Mounted ahead of sessions so a partner's pull never creates
+// or touches one, and ahead of the catch-all game proxy so it is never forwarded to the game.
+// PEER_FEED_MAX is per caller address per minute; 0 disables the limiter.
+app.use('/peer-api', rateLimit({
+    windowMs: 60 * 1000,
+    max: process.env.PEER_FEED_MAX === undefined ? 120 : Number(process.env.PEER_FEED_MAX)
+}), require('./src/routes/peerFeed'));
+
 // Redzone trade-agreement planner page (self-contained). Carved out of the rz proxy
 // above; open, like the rest of the rz tooling.
 app.get('/ta', (req, res) => res.sendFile(path.join(__dirname, 'public', 'rz-ta.html')));
@@ -413,6 +423,10 @@ try {
 // Asks GitHub every six hours whether newer AWT code exists and shows it on the admin page —
 // see src/utils/update-check.js for exactly what is sent. UPDATE_CHECK=off turns it off.
 require('./src/utils/update-check').updateCheck.start();
+
+// Reads partner hubs' feeds on a timer — see src/utils/peer-pull.js. Talks only to the
+// partner addresses an admin entered, never to the game. PEER_PULL_MINUTES=0 turns it off.
+require('./src/utils/peer-pull').startPeerPullScheduler();
 
 // pm2 sends SIGINT/SIGTERM on restart and deploy. Stop accepting connections and close
 // the database handle so a WAL write is not cut off mid-transaction.
