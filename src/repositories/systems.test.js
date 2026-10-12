@@ -91,19 +91,32 @@ systems.logPlanetEvent(1, 1, 1, null, 42);
 const history = systems.getPlanetHistory(1);
 ok('getPlanetHistory returns the logged event', history.length === 1 && history[0].new_value === 42);
 
-// getRecentPopDrop: used by /sync/news to credit a non-battle conquest's population.
+// findLoggedConquest: used by /sync/news to fill a 'battle-conquer' row. The scan logs the
+// conquest AFTER it happened, so the lookup must look forward from the News time (the old
+// at-or-before lookup missed every real conquest — 2026-10-12, Moardin25 vs TheOne).
 db.prepare(`
     INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp)
-    VALUES (1, 5, 2, 20, 10, '2026-09-05 19:00:00'), (1, 5, 2, 10, 0, '2026-09-05 19:10:00')
+    VALUES (1, 5, 2, 9, 7, '2026-09-05 12:00:00'),  -- an older, unrelated bombardment
+           (1, 5, 1, 415, 19, '2026-09-05 19:12:30'), -- OWNER_CHANGE TheOne -> Moardin25
+           (1, 5, 2, 5, 0, '2026-09-05 19:12:30')     -- the same scan's POP_DROP
 `).run();
-const noneYet = systems.getRecentPopDrop(1, 5, '2026-09-05T18:59:59.000Z');
-ok('getRecentPopDrop finds nothing before either drop was logged', noneYet === null, noneYet);
-const firstDrop = systems.getRecentPopDrop(1, 5, '2026-09-05T19:05:00.000Z');
-ok('getRecentPopDrop returns the closest drop AT-OR-BEFORE an ISO timestamp (compared via SQLite datetime(), not raw string equality)',
-    firstDrop && firstDrop.old_value === 20 && firstDrop.new_value === 10, firstDrop);
-const latestDrop = systems.getRecentPopDrop(1, 5, '2026-09-05T19:10:00.000Z');
-ok('getRecentPopDrop picks the LATEST matching drop when several qualify (inclusive at-or-before)',
-    latestDrop && latestDrop.old_value === 10 && latestDrop.new_value === 0, latestDrop);
+const conquest = systems.findLoggedConquest(1, 5, 19, '2026-09-05T19:10:59.000Z');
+ok('findLoggedConquest finds the owner change logged AFTER the News time, with its own scan\'s drop',
+    conquest && conquest.previous_owner_id === 415 && conquest.population_killed === 5, conquest);
+ok('findLoggedConquest ignores an owner change to someone else',
+    systems.findLoggedConquest(1, 5, 20, '2026-09-05T19:10:59.000Z') === null);
+ok('findLoggedConquest ignores an owner change more than 24 hours later',
+    systems.findLoggedConquest(1, 5, 19, '2026-09-04T19:00:00.000Z') === null);
+ok('findLoggedConquest ignores an owner change from well before the News time',
+    systems.findLoggedConquest(1, 5, 19, '2026-09-05T20:00:00.000Z') === null);
+
+db.prepare(`
+    INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp)
+    VALUES (1, 6, 1, NULL, 19, '2026-09-06 08:00:00')  -- free planet with no population: no drop
+`).run();
+const freeConquest = systems.findLoggedConquest(1, 6, 19, '2026-09-06T07:59:59.000Z');
+ok('findLoggedConquest on an empty free planet has no previous owner and no population',
+    freeConquest && freeConquest.previous_owner_id === null && freeConquest.population_killed === null, freeConquest);
 
 systems.upsertTakeover(1, 1, 'caveman', 2, null);
 const board = systems.getTakeoverBoard(1);

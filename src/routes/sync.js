@@ -19,6 +19,7 @@ const { mapApiReport, mapApiDetail, upsertReports, publishReports, formatBattleE
 const battleReportsRepo = require('../repositories/battleReports');
 const newsEventsRepo = require('../repositories/newsEvents');
 const { resolveBombardmentCredit } = require('../utils/news-battle-matching');
+const { resolveConquestCredit } = require('../utils/news-conquest-credit');
 const battlePointsRepo = require('../repositories/battlePoints');
 const bonusGoalsRepo = require('../repositories/bonusGoals');
 const { postEmbed, postBattleEmbed, defuseMentions, settingValue } = require('../utils/discord-post');
@@ -2051,21 +2052,13 @@ router.post('/sync/news', requireAuth, (req, res) => {
                     }
                 }
             } else if (raw.message_type === 'battle-conquer' && raw.game_planet_id) {
-                // The News-page conquest text carries no population number (see
-                // news-battle-events.js's parseConquestRow) — recover it from the closest
-                // logged population drop for this planet, which /sync/system's system-sync
-                // now logs unconditionally rather than only on same-owner ticks. Without
-                // this, every non-battle conquest (an undefended planet, or colonizing an
-                // Unknown planet's leftover population) was invisible to the !mortal
-                // population-killed leaderboard.
-                const loc = systemsRepo.getPlanetLocationByGameId(raw.game_planet_id);
-                if (loc) {
-                    const drop = systemsRepo.getRecentPopDrop(loc.system_id, loc.planet_index, raw.occurred_at);
-                    if (drop && drop.old_value != null && drop.new_value != null && drop.old_value > drop.new_value) {
-                        population_delta = drop.old_value - drop.new_value;
-                        credited_player_id = playerId; // "We conquered..." always refers to the scraping player
-                    }
-                }
+                // The News-page conquest text carries no population number and no previous
+                // owner (see news-battle-events.js's parseConquestRow) — both come from the
+                // scan's log of the planet changing hands (see news-conquest-credit.js).
+                const credit = resolveConquestCredit(raw.game_planet_id, playerId, raw.occurred_at);
+                population_delta = credit.population_delta;
+                credited_player_id = credit.credited_player_id;
+                if (!otherPlayerId) otherPlayerId = credit.other_player_id;
             }
 
             // Insert each entry independently — a constraint violation on one bad entry

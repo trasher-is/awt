@@ -170,21 +170,23 @@ function postJson(server, urlPath, body) {
         ok('watermark advanced using the GOOD entry\'s timestamp, not the garbage one',
             afterWatermark === '2026-08-24T22:00:00.000Z', { beforeWatermark, afterWatermark });
 
-        console.log('\n── (d) battle-conquer is credited from the closest logged POP_DROP ' + '─'.repeat(10));
-        // Regression test: a non-battle conquest (undefended planet, or colonizing an
-        // Unknown planet's leftover population) carries no population number in the News
-        // text at all — /sync/system now logs a POP_DROP for it regardless of whether the
-        // owner also changed in the same tick (see sync.js), and /sync/news is expected to
-        // pick up the closest one at-or-before the conquest and credit the scraping player.
+        console.log('\n── (d) battle-conquer is credited from the scan\'s logged conquest ' + '─'.repeat(10));
+        // Regression test: a non-battle conquest carries no population number and no
+        // previous owner in the News text. Both come from the OWNER_CHANGE + POP_DROP the
+        // scan logged — which is always AFTER the conquest (the scan sees it later). The old
+        // lookup only took drops logged at-or-before the News time, so it never matched a
+        // real conquest (2026-10-12: Moardin25 took TheOne's 5 pop, never credited).
         db.prepare(`INSERT INTO systems (id, name) VALUES (40, 'Minchir')`).run();
         db.prepare(`
             INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population)
-            VALUES (5008, 40, 8, NULL, 0)
+            VALUES (5008, 40, 8, 1, 0)
         `).run();
         db.prepare(`
             INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp)
-            VALUES (40, 8, 2, 51, 0, '2026-09-05 19:10:00')
-        `).run(); // POP_DROP: 51 -> 0, logged a few seconds before the conquest below
+            VALUES (40, 8, 2, 60, 51, '2026-09-05 11:00:00'),  -- earlier, unrelated drop
+                   (40, 8, 1, 2, 1, '2026-09-05 19:12:41'),    -- OWNER_CHANGE Bob -> Alice
+                   (40, 8, 2, 51, 0, '2026-09-05 19:12:41')    -- same scan: 51 -> 0
+        `).run();
 
         const resD = await postJson(server, '/hub-api/sync/news', {
             entries: [{
@@ -205,6 +207,7 @@ function postJson(server, urlPath, body) {
         ok('population_delta recovered from the POP_DROP (51 -> 0 = 51)', rowD && rowD.population_delta === 51, rowD);
         ok('credited_player_id resolved to the scraping player ("We conquered..." is always them)',
             rowD && rowD.credited_player_id === 1, rowD);
+        ok('other_player_id filled with the previous owner from the OWNER_CHANGE', rowD && rowD.other_player_id === 2, rowD);
 
         console.log('\n── (e) battle-conquer with no matching POP_DROP stays uncredited (no fabricated data) ' + '─'.repeat(2));
         db.prepare(`
@@ -228,6 +231,20 @@ function postJson(server, urlPath, body) {
         ok('row was stored', !!rowE, rowE);
         ok('population_delta stays NULL — nothing to recover, not fabricated', rowE && rowE.population_delta === null, rowE);
         ok('credited_player_id stays NULL to match', rowE && rowE.credited_player_id === null, rowE);
+
+        console.log('\n── (f) recreditConquestRows fills rows stored before the scan saw the conquest ' + '─'.repeat(2));
+        // Planet 5010 from (e) is conquered by Alice; the scan only logs it now.
+        db.prepare(`
+            INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp)
+            VALUES (40, 10, 1, 2, 1, '2026-09-06 10:30:05'), (40, 10, 2, 4, 0, '2026-09-06 10:30:05')
+        `).run();
+        const { recreditConquestRows } = require('../utils/news-conquest-credit');
+        const changedF = recreditConquestRows();
+        const rowF = db.prepare(`SELECT * FROM news_events WHERE player_id = 1 AND game_planet_id = 5010`).get();
+        ok('one row changed (the (d) row was already right)', changedF === 1, changedF);
+        ok('the old row now carries the population, credit and previous owner',
+            rowF && rowF.population_delta === 4 && rowF.credited_player_id === 1 && rowF.other_player_id === 2, rowF);
+        ok('running it again changes nothing (idempotent)', recreditConquestRows() === 0);
     } finally {
         server.close();
     }

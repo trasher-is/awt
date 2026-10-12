@@ -402,6 +402,14 @@ initDiscordBot(process.env.DISCORD_TOKEN);
 // this hub), so it runs here rather than in a member's browser.
 require('./src/utils/bonus-goals-scheduler').startBonusGoalsScheduler();
 
+// Fills stored News conquest rows from the scan log — see src/utils/news-conquest-credit.js.
+try {
+    const changed = require('./src/utils/news-conquest-credit').recreditConquestRows();
+    if (changed) console.log(`[News] Re-credited ${changed} conquest row(s) from the scan log.`);
+} catch (err) {
+    console.error('[News] Conquest re-credit failed:', err.message);
+}
+
 // Asks GitHub every six hours whether newer AWT code exists and shows it on the admin page —
 // see src/utils/update-check.js for exactly what is sent. UPDATE_CHECK=off turns it off.
 require('./src/utils/update-check').updateCheck.start();
