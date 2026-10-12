@@ -361,6 +361,16 @@
 
         <section class="flex flex-col gap-4">
             <div>
+                <h2 class="text-xl font-bold tracking-tight border-b border-border pb-2">Race Evidence &amp; AI Checks</h2>
+            </div>
+            <div class="flex flex-wrap items-center justify-between gap-3 bg-card border border-border rounded-lg p-4 shadow-sm">
+                <p class="text-sm text-muted-foreground">Battle-derived race estimates, calibration, the AI check approval queue and evidence review.</p>
+                <a href="/admin/race" class="h-9 px-4 inline-flex items-center rounded-md border border-border hover:bg-secondary text-sm font-medium transition-colors whitespace-nowrap">Open <i class="fa-solid fa-arrow-right ml-2"></i></a>
+            </div>
+        </section>
+
+        <section class="flex flex-col gap-4">
+            <div>
                 <h2 class="text-xl font-bold tracking-tight border-b border-border pb-2">Versions</h2>
             </div>
 
@@ -425,7 +435,6 @@
         </section>
     </main>
 
-    <script type="module" src="/hub-assets/js/ui/race-admin.js"></script>
     <script>
         // --- 1. CORE AUTH & INITIALIZATION ---
         let currentAdminUser = null;
@@ -448,7 +457,6 @@
                     loadBroadcasts();
                     loadSettings();
                     loadRounds();
-                    window.loadRaceAdmin?.();
                 } else {
                     window.location.href = '/dashboard';
                 }

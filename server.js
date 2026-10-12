@@ -375,6 +375,13 @@ app.get('/admin', requireAuth, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'Admin.html'));
 });
 
+// Race evidence lists every stored estimate, so it has its own page instead of the
+// bottom of Command Center.
+app.get('/admin/race', requireAuth, (req, res) => {
+    if (req.session.role !== 'admin') return res.redirect('/dashboard');
+    res.sendFile(path.join(__dirname, 'public', 'RaceAdmin.html'));
+});
+
 // Force all direct browser navigation into the Wrapper g
 app.use('/', requireAuth, proxyCeiling, gameGate, (req, res, next) => {
     // If the browser is requesting a full page document directly (not an iframe or fetch request)
