@@ -28,6 +28,7 @@ if (ROLE === 'hubA') {
     const T = '2026-10-01 10:00:00';
     db.prepare(`INSERT INTO alliances (id, name, tag, updated_at) VALUES (2, 'Them', 'THEM', ?)`).run(T);
     db.prepare(`INSERT INTO players (id, name, alliance_id, race_attack, updated_at) VALUES (20, 'Foe', 2, 3, ?), (21, 'Foe2', 2, 1, ?)`).run(T, T);
+    db.prepare(`UPDATE players SET has_intel = 1, physics = 14, intel_updated_at = ? WHERE id = 21`).run(T);
     db.prepare(`INSERT INTO systems (id, name, x, y, updated_at) VALUES (100, 'Alpha', 1, 2, ?)`).run(T);
     db.prepare(`INSERT INTO fleets (owner_id, system_id, destroyers, updated_at) VALUES (20, 100, 5, ?)`).run(T);
     const { token } = peersRepo.createLink({ name: 'Hub B', scopes: ['players', 'systems'] });
@@ -131,12 +132,12 @@ function startHubA() {
             ok('a second pull with nothing new stores nothing', pull2.body.success && pull2.body.result.received === 0, pull2.body);
 
             session = { userId: 2, gameName: 'MemberB', role: 'user' };
-            const intel = await request(B, 'GET', '/hub-api/peers/intel?kind=players&q=foe2');
-            ok('a member can search shared players', intel.status === 200 && intel.body.rows.length === 1 && intel.body.rows[0].data.race_attack === 1
-                && intel.body.rows[0].sourceName === 'Hub A', intel.body);
-            const summary = await request(B, 'GET', '/hub-api/peers/summary');
-            ok('the member summary names sources and counts', summary.status === 200 && summary.body.sources[0].counts.players === 2, summary.body);
-            ok('…without the partner\'s address or token', !summary.raw.includes('127.0.0.1') && !summary.raw.includes(info.token) && !summary.raw.includes('awtp_'));
+            const intel = await request(B, 'GET', '/hub-api/peers/player/21/intel');
+            ok('a member reads a partner\'s intel report for the profile card', intel.status === 200 && intel.body.intel
+                && intel.body.intel.data.physics === 14 && intel.body.intel.data.race_attack === 1 && intel.body.intel.sourceName === 'Hub A', intel.body);
+            ok('…naming the partner, without its address or token', !intel.raw.includes('127.0.0.1') && !intel.raw.includes(info.token) && !intel.raw.includes('awtp_'));
+            const noIntel = await request(B, 'GET', '/hub-api/peers/player/20/intel');
+            ok('a shared profile without an intel report gives no card', noIntel.status === 200 && noIntel.body.intel === null, noIntel.body);
             const memberAdmin = await request(B, 'GET', '/hub-api/admin/peers');
             ok('members cannot see the admin view', memberAdmin.status === 403);
 

@@ -96,27 +96,13 @@ router.post('/admin/peers/sources/:id/pull', requireAdmin, async (req, res) => {
 
 // ─── MEMBERS ─────────────────────────────────────────────────────────────────
 
-// Sources by name only — members see who shares with us, never the address or token.
-router.get('/peers/summary', requireAuth, (req, res) => {
-    const counts = peersRepo.intelCounts();
-    const sources = peersRepo.listSources().map(s => ({
-        id: s.id, name: s.name, enabled: s.enabled, lastOkAt: s.lastOkAt,
-        counts: Object.fromEntries(counts.filter(c => c.source_id === s.id).map(c => [c.kind, c.n])),
-    }));
-    res.json({ success: true, kinds: kindList(), sources });
-});
-
-router.get('/peers/intel', requireAuth, (req, res) => {
-    const kind = String(req.query.kind || '');
-    if (!KINDS[kind]) return res.status(400).json({ success: false, error: 'Unknown kind' });
-    const sourceId = req.query.source ? Number(req.query.source) : null;
-    const rows = peersRepo.queryIntel({
-        kind,
-        sourceId: Number.isSafeInteger(sourceId) && sourceId > 0 ? sourceId : null,
-        q: String(req.query.q || '').trim().slice(0, 60),
-        limit: Number(req.query.limit) || 200,
-    });
-    res.json({ success: true, kind, rows });
+// The newest partner intelligence report on one player, for the profile page's Hub Intel
+// card (public/js/core/page-injections.js decides whether it beats our own). Partner name
+// only — never the address or token. Display only: nothing here is written to players.
+router.get('/peers/player/:id/intel', requireAuth, (req, res) => {
+    const id = idParam(req);
+    if (!id) return res.status(400).json({ success: false, error: 'Bad player id' });
+    res.json({ success: true, intel: peersRepo.partnerIntelForPlayer(id) });
 });
 
 module.exports = router;

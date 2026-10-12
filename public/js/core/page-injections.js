@@ -1162,6 +1162,11 @@ export async function initProfileHubIntel() {
     const anchor = planetsTable ? planetsTable.closest('.col-12, .col-lg-6') : null;
     if (!anchor || !anchor.parentNode) return;
 
+    // A partner hub's newest report on this player (docs/peer-sharing.md). Optional: a hub
+    // with no partners, or a failed request, just shows our own card as before.
+    const partnerIntelReq = fetch(`/hub-api/peers/player/${playerId}/intel`)
+        .then(r => (r.ok ? r.json() : null)).then(b => (b && b.intel) || null).catch(() => null);
+
     let data;
     try {
         const res = await fetch(`/hub-api/intel/player/${playerId}`);
@@ -1171,6 +1176,7 @@ export async function initProfileHubIntel() {
     }
     if (!data || !data.success || !data.player) return;
     const p = data.player;
+    const partnerIntel = await partnerIntelReq;
 
     const hasLiveIntel = genuineLiveIntelTables(document, '.race-summary, .ir-summary').length > 0;
 
@@ -1208,7 +1214,7 @@ export async function initProfileHubIntel() {
             const intelCol = document.createElement('div');
             intelCol.className = 'col-lg-6';
             intelCol.id = 'awt-hub-intel-col';
-            intelCol.innerHTML = buildIntelCard(p);
+            intelCol.innerHTML = buildIntelCard(p, partnerIntel);
             playerInfoCol.insertAdjacentElement('afterend', intelCol);
         }
     }
@@ -1462,8 +1468,22 @@ function mountFleetsCardExpand(wrap) {
 // renders, with an "X" in every cell, so its absence never reads as "definitely zero" and
 // its presence always tells a member at a glance whether the hub has ANY read on this
 // player, without needing to check a separate signal.
-function buildIntelCard(p) {
-    return p.has_intel ? buildStaleIntelCard(p) : buildNoIntelCard();
+// Only reached when the game shows no live Intelligence Report: live intel is always the
+// newest, so a partner's report never replaces it. Here the newer of ours and the newest
+// partner report is shown, the other one named underneath. A partner's report is display
+// only — it is never written to our players table, so battle maths keep using our own.
+function buildIntelCard(p, partner = null) {
+    const ourAt = p.has_intel ? (p.intel_updated_at || '') : null;
+    if (partner && partner.data && (ourAt === null || partner.intelAt > ourAt)) {
+        const shown = { ...partner.data, intel_source: `partner hub ${esc(partner.sourceName)}`, intel_entered_by: null, intel_updated_at: partner.intelAt };
+        return buildStaleIntelCard(shown) + (ourAt !== null ? olderIntelNote('Our own report', ourAt) : '');
+    }
+    if (!p.has_intel) return buildNoIntelCard();
+    return buildStaleIntelCard(p) + (partner ? olderIntelNote(`${partner.sourceName}'s report`, partner.intelAt) : '');
+}
+
+function olderIntelNote(what, at) {
+    return `<div style="font-size:11px;color:#888;margin:-6px 0 10px;">Older: ${esc(what)} from ${esc(formatSqliteUtc(at, undefined, 'unknown date'))}</div>`;
 }
 
 // Mirrors the game's own Intelligence Report field order exactly, so a member who knows

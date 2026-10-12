@@ -36,6 +36,7 @@ const KINDS = {
             race_growth: int, race_science: int, race_culture: int, race_production: int,
             race_speed: int, race_attack: int, race_defense: int, race_trader: int, race_sul: int,
             biology: int, economy: int, energy: int, mathematics: int, physics: int, social: int,
+            trade_revenue: int, artefact: text,
             total_planets: int, total_population: int, cv_used: int, cv_limit: int,
             production_rate: int, science_rate: int, culture_rate: int,
             origin_system: int, home_system_id: int, home_planet_index: int,

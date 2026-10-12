@@ -24,7 +24,6 @@ import '../utils/vision-model.js';   // side-effect import: the !vision rule, de
 import { initVersionWatch } from './version-watch.js';
 import { initAwtPresence } from './awt-presence.js';
 import { openSleepMapPanel } from './sleep-map.js';
-import { openSharedIntelPanel } from './shared-intel.js';
 import { openDefencePanel, initDefenceWatch } from './defence.js';
 import { openGalaxyDashboardPanel } from './galaxy-dashboard.js';
 import { openSettingsPanel, initSidebarTools } from './settings-panel.js';
@@ -70,7 +69,6 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('open-fleet-locations-btn')?.addEventListener('click', openFleetLocationsPanel);
     document.getElementById('open-battle-calc-btn')?.addEventListener('click', openBattleCalcPanel);
     document.getElementById('open-battle-reports-btn')?.addEventListener('click', openBattleReportsPanel);
-    document.getElementById('open-shared-intel-btn')?.addEventListener('click', openSharedIntelPanel);
     document.getElementById('open-travel-calc-btn')?.addEventListener('click', openTravelCalcPanel);
     document.getElementById('open-route-planner-btn')?.addEventListener('click', openRoutePlannerPanel);
     document.getElementById('open-build-order-btn')?.addEventListener('click', openBuildOrderPanel);

@@ -163,25 +163,26 @@ const storePage = db.transaction((sourceId, kind, items, nextCursor) => {
     return stored;
 });
 
-function queryIntel({ kind, sourceId = null, q = '', limit = 200 }) {
-    const like = `%${String(q).toLowerCase()}%`;
-    const rows = db.prepare(`
-        SELECT i.source_id, s.name AS source_name, i.kind, i.item_key, i.changed_at, i.received_at, i.payload
-        FROM peer_intel i JOIN peer_sources s ON s.id = i.source_id
-        WHERE i.kind = @kind
-          AND (@sourceId IS NULL OR i.source_id = @sourceId)
-          AND (@q = '' OR lower(i.payload) LIKE @like OR i.item_key = @q)
-        ORDER BY i.changed_at DESC
-        LIMIT @limit
-    `).all({ kind, sourceId, q: String(q), like, limit: Math.max(1, Math.min(1000, limit | 0)) });
-    return rows.map(r => ({
-        sourceId: r.source_id, sourceName: r.source_name, key: r.item_key,
-        changedAt: r.changed_at, receivedAt: r.received_at, data: parseJson(r.payload, {}),
-    }));
-}
-
-function intelCounts() {
-    return db.prepare(`SELECT source_id, kind, COUNT(*) AS n FROM peer_intel GROUP BY source_id, kind`).all();
+// The newest intelligence report any partner holds on one player, for the profile page's
+// Hub Intel card. "When" is the partner's intel_updated_at, but never later than the row's
+// own changedAt: a partner can claim any date, and a claim from the future would otherwise
+// always win against ours.
+const TS_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+const partnerIntelStmt = db.prepare(`
+    SELECT s.name AS source_name, i.changed_at, i.payload
+    FROM peer_intel i JOIN peer_sources s ON s.id = i.source_id
+    WHERE i.kind = 'players' AND i.item_key = ? AND s.enabled = 1
+`);
+function partnerIntelForPlayer(playerId) {
+    let best = null;
+    for (const r of partnerIntelStmt.all(String(playerId))) {
+        const data = parseJson(r.payload, {});
+        if (data.has_intel !== 1) continue;
+        const claimed = TS_RE.test(data.intel_updated_at || '') ? data.intel_updated_at : r.changed_at;
+        const intelAt = claimed < r.changed_at ? claimed : r.changed_at;
+        if (!best || intelAt > best.intelAt) best = { sourceName: r.source_name, intelAt, data };
+    }
+    return best;
 }
 
 // Fleet sightings go stale fast and the hub already drops its own after 10 days; received
@@ -200,5 +201,5 @@ module.exports = {
     sha256, cleanTags,
     createLink, getLink, listLinks, updateLink, deleteLink, findEnabledLinkByToken, touchLink,
     createSource, getSource, listSources, updateSource, deleteSource, recordPull,
-    storePage, queryIntel, intelCounts, pruneIntel,
+    storePage, pruneIntel, partnerIntelForPlayer,
 };

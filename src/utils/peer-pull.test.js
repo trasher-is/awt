@@ -97,6 +97,25 @@ function fakeFetch(route) {
     ok('stale fleet locations (5 d) and incomings (10 d) are pruned, profiles kept', left === '2,4,5', left);
     peersRepo.deleteSource(pruneSrc.id);
 
+    // ─── newest partner intel for a profile ───
+    const s1 = peersRepo.createSource({ name: 'Older Partner', baseUrl: 'https://p1.example', token: 'awtp_' + 'q'.repeat(43) });
+    const s2 = peersRepo.createSource({ name: 'Newer Partner', baseUrl: 'https://p2.example', token: 'awtp_' + 'r'.repeat(43) });
+    const s3 = peersRepo.createSource({ name: 'Liar', baseUrl: 'https://p3.example', token: 'awtp_' + 's'.repeat(43) });
+    const intelRow = (src, intelAt, changedAt, extra = {}) => peersRepo.storePage(src.id, 'players',
+        [{ key: '424242', changedAt, data: { name: 'Target', has_intel: 1, physics: 5, intel_updated_at: intelAt, ...extra } }], null);
+    intelRow(s1, '2026-10-01 00:00:00', '2026-10-01 00:00:00');
+    intelRow(s2, '2026-10-05 00:00:00', '2026-10-06 00:00:00', { physics: 9 });
+    intelRow(s3, '2099-01-01 00:00:00', '2026-10-03 00:00:00', { physics: 1 });
+    const best = peersRepo.partnerIntelForPlayer(424242);
+    ok('the newest partner report wins, a claim later than its own row is capped', best && best.sourceName === 'Newer Partner'
+        && best.intelAt === '2026-10-05 00:00:00' && best.data.physics === 9, best);
+    peersRepo.updateSource(s2.id, { enabled: false });
+    const paused = peersRepo.partnerIntelForPlayer(424242);
+    ok('a paused partner is not shown; the liar ranks by its row date', paused && paused.sourceName === 'Liar' && paused.intelAt === '2026-10-03 00:00:00', paused);
+    peersRepo.storePage(s3.id, 'players', [{ key: '424243', changedAt: '2026-10-03 00:00:00', data: { name: 'NoIntel', has_intel: 0 } }], null);
+    ok('a shared profile without an intel report gives nothing', peersRepo.partnerIntelForPlayer(424243) === null);
+    for (const s of [s1, s2, s3]) peersRepo.deleteSource(s.id);
+
     // ─── pulling ───
     const tok = 'awtp_' + 'k'.repeat(43);
     const src = peersRepo.createSource({ name: 'Partner', baseUrl: 'https://partner.example', token: tok });
@@ -118,8 +137,9 @@ function fakeFetch(route) {
     db.prepare(`UPDATE peer_sources SET cursors = '{}' WHERE id = ?`).run(src.id);
     version = { name: 'Foe (stale)', points: 1, changedAt: '2026-09-01 00:00:00' };
     await pullSource(src.id, { fetchImpl: partner });
-    const held = peersRepo.queryIntel({ kind: 'players' })[0];
-    ok('an older observation does not overwrite a newer one', held && held.data.points === 10, held);
+    const heldRows = () => db.prepare(`SELECT payload FROM peer_intel WHERE kind = 'players'`).all().map(r => JSON.parse(r.payload));
+    const held = heldRows()[0];
+    ok('an older observation does not overwrite a newer one', held && held.points === 10, held);
 
     // A partner that says "more" forever with the same cursor.
     let loops = 0;
@@ -137,7 +157,7 @@ function fakeFetch(route) {
     const r4 = await pullSource(src.id, { fetchImpl: down });
     const after4 = peersRepo.getSource(src.id);
     ok('a failed pull reports why', !r4.ok && /503/.test(r4.error) && /503/.test(after4.lastError), r4);
-    ok('…and keeps what we already had', peersRepo.queryIntel({ kind: 'players' }).length === 1);
+    ok('…and keeps what we already had', heldRows().length === 1);
 
     const notJson = fakeFetch(() => ({ body: '<html>login</html>' }));
     const r5 = await pullSource(src.id, { fetchImpl: notJson });

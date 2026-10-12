@@ -46,7 +46,6 @@
         tool('fleets', 'Fleets', 'fa-crow', 'open-fleets-db-btn'),
         tool('fleetLocations', 'Fleet Locations', 'fa-crosshairs', 'open-fleet-locations-btn'),
         tool('battleCalc', 'Battle Calc', 'fa-explosion', 'open-battle-calc-btn', Object.assign({ note: 'Experimental' }, OFF)),
-        tool('sharedIntel', 'Shared Intel', 'fa-people-arrows', 'open-shared-intel-btn'),
         tool('battleReports', 'Battle Reports', 'fa-file-medical', 'open-battle-reports-btn'),
         tool('travelCalc', 'Travel Calc', 'fa-route', 'open-travel-calc-btn'),
         tool('buildOrder', 'Build Order', 'fa-diagram-project', 'open-build-order-btn', OFF),

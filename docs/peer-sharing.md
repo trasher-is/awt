@@ -17,7 +17,7 @@ decides, partner by partner, what it lets that partner read.
           │ ─────────────── JSON page ─────────────► │
           ▼                                          ▼
    reads A's own tables                     stores in peer_intel (kept apart)
-   (what A's members saw)                   members browse it in "Shared Intel"
+   (what A's members saw)                   shown on player profiles (intel report)
 ```
 
 * **Links go one way.** A sharing with B gives A nothing in return. If B wants to share
@@ -71,17 +71,29 @@ next request. What they already received stays with them.
    (`https://…`) and the token they sent you.
 2. **Add** saves it and pulls straight away. After that it pulls every
    `PEER_PULL_MINUTES` (default 5).
-3. Members see the result under **Shared Intel** in the sidebar. Every row shows which
-   partner it came from and when that partner's members observed it.
+3. Members see it on a player's profile in the game. When the game shows no live
+   Intelligence Report there, the Hub Intel card shows whichever is newer: our own last
+   report or the newest one a partner sent. A partner's report is captioned with the
+   partner's name and date, and the older of the two is named underneath. With a live report
+   on screen nothing changes: live intel is always the newest.
+
+   A partner's report is display only. It is never written to our players table, so the
+   battle calculator, defence tools and Discord keep using our own intel. Paused partners are
+   not shown. A partner's claimed date is capped at the time its row last changed, so a
+   partner cannot make an old report win by dating it in the future.
+
+   For now only player intelligence reports are shown. The other kinds are pulled and
+   stored, but no page displays them yet.
 
 **Remove** deletes the partner and everything they ever sent. **Pause** stops pulling but
 keeps what you have.
 
 ## What is deliberately not in this version
 
-* **Shared intel is not merged into Players, Systems, Fleets or the map.** It has its own
-  panel. Merging means deciding, field by field, whether our observation or the partner's
-  is fresher, and showing members where each value came from. That deserves its own change.
+* **Shared intel is not merged into Players, Systems, Fleets or the map.** Only the
+  profile's intelligence report uses it, display only. Merging means deciding, field by
+  field, whether our observation or the partner's is fresher, and showing members where
+  each value came from. That deserves its own change.
 * **No deletions are sent.** If a partner's fleet row disappears, your copy stays until
   it is 10 days old, the same age at which the hub drops its own fleet sightings.
 * **Login and activity data is not shared** (no Sleep Map data). Adding it is a one-line
