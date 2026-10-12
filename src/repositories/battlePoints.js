@@ -1,6 +1,7 @@
 const db = require('../database');
 const settingsRepo = require('./settings');
 const bonusGoalsRepo = require('./bonusGoals');
+const { friendlyAllianceTags } = require('../utils/friendly-alliance-tags');
 
 function settingNumber(key, fallback) {
     const row = settingsRepo.getSetting(key);
@@ -100,11 +101,78 @@ function getCvLeaderboard(sinceIso, limit, scope = 'members', allianceId = null)
     }));
 }
 
+// Conquests without a battle (an undefended planet taken from a player), read from the
+// scan's own log: an OWNER_CHANGE to a player plus the POP_DROP the same scan logged (sync.js
+// logs the two back to back, oldPop -> 0). Credited to the new owner. This replaced crediting
+// 'battle-conquer' News rows, which only existed once the conquering member opened their own
+// News page — most never do, so most such conquests never counted.
+//
+// Only a planet taken from an ACTIVE, NON-FRIENDLY player counts (trasheris, 2026-10-12):
+//   • a free / Unknown planet's leftover population (no previous owner) is a colonization,
+//     not a kill;
+//   • a friendly previous owner — our own tag or an allied one (friendlyAllianceTags) — is a
+//     handover;
+//   • an inactive previous owner (resigned before the conquest, or no activity in the
+//     CONQUEST_ACTIVE_DAYS before it) is farming an idle planet. last_activity_at is only the
+//     player's LATEST activity, so a player seen active after the conquest counts too.
+// A conquest that DID come with a battle is already counted by its battle report
+// (killed_population), so it is skipped here: a conquered_planet report by the new owner on
+// this planet since the planet's previous logged owner change. The +5 minutes absorbs a
+// report time a little ahead of the scan; report times carry a UTC offset, which SQLite's
+// datetime() applies. (Requiring a previous owner also drops the player -> nobody -> same
+// player flips two disagreeing scans produce seconds apart, e.g. 2026-10-06 07:10.) Tags are
+// the players' CURRENT alliance, like the News branch.
+const CONQUEST_ACTIVE_DAYS = 7;
+function loggedConquestBranch(sinceIso, excludedTags) {
+    const ex = exclusionClauseFor('ca.tag', 'oa.tag', excludedTags);
+    const friendly = [...friendlyAllianceTags()];
+    const friendlySql = friendly.length
+        ? `AND (oa.tag IS NULL OR UPPER(oa.tag) NOT IN (${friendly.map(() => '?').join(',')}))`
+        : '';
+    const sinceSql = sinceIso ? `AND oc.timestamp >= datetime(?)` : '';
+    const sql = `
+            SELECT player_id, player_name, pop_credit FROM (
+                SELECT oc.new_value AS player_id, cp.name AS player_name,
+                    (SELECT pd.old_value - pd.new_value FROM planet_events pd
+                     WHERE pd.system_id = oc.system_id AND pd.planet_index = oc.planet_index
+                       AND pd.event_type_id = 2
+                       AND ABS(strftime('%s', pd.timestamp) - strftime('%s', oc.timestamp)) <= 60
+                     ORDER BY ABS(strftime('%s', pd.timestamp) - strftime('%s', oc.timestamp)), pd.id
+                     LIMIT 1) AS pop_credit
+                FROM planet_events oc
+                JOIN players cp ON cp.id = oc.new_value
+                LEFT JOIN players op ON op.id = oc.old_value
+                LEFT JOIN alliances ca ON ca.id = cp.alliance_id
+                LEFT JOIN alliances oa ON oa.id = op.alliance_id
+                WHERE oc.event_type_id = 1
+                  AND op.id IS NOT NULL
+                  AND (op.resigned_at IS NULL OR datetime(op.resigned_at) > datetime(oc.timestamp))
+                  AND datetime(op.last_activity_at) >= datetime(oc.timestamp, '-${CONQUEST_ACTIVE_DAYS} days')
+                  ${friendlySql}
+                  AND NOT EXISTS (
+                      SELECT 1 FROM battle_reports b
+                      WHERE b.conquered_planet = 1 AND b.att_player_id = oc.new_value
+                        AND ((b.system_id = oc.system_id AND b.planet_index = oc.planet_index)
+                             OR (b.system_id IS NULL AND b.def_player_id IS oc.old_value))
+                        AND datetime(b.started_at) <= datetime(oc.timestamp, '+5 minutes')
+                        AND datetime(b.started_at) > COALESCE((
+                            SELECT MAX(prev.timestamp) FROM planet_events prev
+                            WHERE prev.system_id = oc.system_id AND prev.planet_index = oc.planet_index
+                              AND prev.event_type_id = 1 AND prev.id < oc.id
+                        ), '0000-00-00 00:00:00')
+                  )
+                  ${sinceSql} AND ${ex.clause}
+            ) WHERE pop_credit > 0`;
+    const upper = friendly.map(t => String(t).toUpperCase());
+    return { sql, params: sinceIso ? [...upper, sinceIso, ...ex.params] : [...upper, ...ex.params] };
+}
+
 // Population is only ever credited to the attacker (the side whose fleet bombed the
 // target planet) — see the design spec §1/§3 for why the defender never earns pop points.
-// Two sources are unioned: real battle_reports rows, and News-page bombardments that have
+// Three sources are unioned: real battle_reports rows, News-page bombardments that have
 // NO matching battle_reports row (a matched one is already covered by the battle report
-// itself, so it is excluded here to avoid double-counting). News-page rows carry no
+// itself, so it is excluded here to avoid double-counting), and conquests without a battle
+// from the scan log (loggedConquestBranch above). News-page rows carry no
 // alliance-tag columns of their own, so exclusions are applied via a join to players'
 // CURRENT alliance — a known simplification (not the alliance at the time of the event).
 function getPopLeaderboard(sinceIso, limit, scope = 'members', allianceId = null) {
@@ -119,6 +187,7 @@ function getPopLeaderboard(sinceIso, limit, scope = 'members', allianceId = null
     const neSinceSql = sinceIso ? `AND ne.occurred_at >= ?` : '';
     const neWherePart = `${neSinceSql} AND ${ne.clause}`;
     const neParams = sinceIso ? [sinceIso, ...ne.params] : [...ne.params];
+    const lc = loggedConquestBranch(sinceIso, excludedTags);
 
     const { clause: scopeSql, params: scopeParams } = scopeClauseFor(scope, allianceId);
 
@@ -151,13 +220,17 @@ function getPopLeaderboard(sinceIso, limit, scope = 'members', allianceId = null
             END)
             LEFT JOIN alliances ca ON ca.id = cp.alliance_id
             LEFT JOIN alliances oa ON oa.id = op.alliance_id
-            -- 'battle-conquer' rows (issue: non-battle conquests were invisible here) are
-            -- credited by /sync/news from the closest logged POP_DROP, not scraped from
-            -- News text — the game's conquest message never states a population number.
-            WHERE ne.message_type IN ('battle-bombarded', 'battle-conquer')
+            -- 'battle-conquer' News rows are NOT read here any more: non-battle conquests
+            -- come from the scan's own log instead (loggedConquestBranch), which needs no
+            -- member to open their News page. Counting both would double every one.
+            WHERE ne.message_type = 'battle-bombarded'
               AND ne.matched_battle_report_id IS NULL
               AND ne.credited_player_id IS NOT NULL
               ${neWherePart}
+
+            UNION ALL
+
+            ${lc.sql}
         )
         WHERE ${scopeSql}
         GROUP BY player_id
@@ -165,7 +238,7 @@ function getPopLeaderboard(sinceIso, limit, scope = 'members', allianceId = null
         LIMIT ?
     `;
     const ratio = getPopRatio();
-    return db.prepare(sql).all(...brParams, ...neParams, ...scopeParams, limit).map(r => ({
+    return db.prepare(sql).all(...brParams, ...neParams, ...lc.params, ...scopeParams, limit).map(r => ({
         player_id: r.player_id,
         player_name: r.player_name,
         raw: r.raw_pop || 0,
@@ -333,6 +406,7 @@ function getPopCreditRows(sinceIso, scope, allianceId) {
     const neSinceSql = sinceIso ? `AND ne.occurred_at >= ?` : '';
     const neWherePart = `${neSinceSql} AND ${ne.clause}`;
     const neParams = sinceIso ? [sinceIso, ...ne.params] : [...ne.params];
+    const lc = loggedConquestBranch(sinceIso, excludedTags);
 
     const { clause: scopeSql, params: scopeParams } = scopeClauseFor(scope, allianceId);
 
@@ -356,14 +430,18 @@ function getPopCreditRows(sinceIso, scope, allianceId) {
             END)
             LEFT JOIN alliances ca ON ca.id = cp.alliance_id
             LEFT JOIN alliances oa ON oa.id = op.alliance_id
-            WHERE ne.message_type IN ('battle-bombarded', 'battle-conquer')
+            WHERE ne.message_type = 'battle-bombarded'
               AND ne.matched_battle_report_id IS NULL
               AND ne.credited_player_id IS NOT NULL
               ${neWherePart}
+
+            UNION ALL
+
+            ${lc.sql}
         )
         WHERE ${scopeSql}
     `;
-    return db.prepare(sql).all(...brParams, ...neParams, ...scopeParams);
+    return db.prepare(sql).all(...brParams, ...neParams, ...lc.params, ...scopeParams);
 }
 
 // The combined leaderboard: CV + population, each transformed through its own non-linear

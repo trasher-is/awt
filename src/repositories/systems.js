@@ -665,23 +665,34 @@ function getPlanetHistory(sysId) {
     return getPlanetHistoryStmt.all(sysId);
 }
 
-// Latest logged population drop (event_type_id=2) for a planet at or before a given moment
-// — used by /sync/news to credit a 'battle-conquer' entry with the population it actually
-// destroyed, since the conquest itself carries no population number (see sync.js's POP DROP
-// comment). `beforeIso` is compared via SQLite's own datetime() rather than string equality,
-// since planet_events.timestamp is space-separated SQLite UTC while callers pass an ISO8601
-// "...T...Z" string — the two don't compare correctly as raw strings (see the codebase-wide
-// SQLite-UTC-vs-ISO8601 rule).
-const getRecentPopDropStmt = db.prepare(`
-    SELECT old_value, new_value, timestamp
-    FROM planet_events
-    WHERE system_id = ? AND planet_index = ? AND event_type_id = 2
-      AND timestamp <= datetime(?)
-    ORDER BY timestamp DESC, id DESC
+// The scan's record of a conquest the News page reported — used by /sync/news to fill a
+// 'battle-conquer' entry with the population it destroyed and whom it was taken from, since
+// the conquest text carries neither (see sync.js's POP DROP comment). The scan only sees a
+// conquest AFTER it happens (seconds to hours later), so this looks forward from the News
+// time: the first OWNER_CHANGE handing the planet to `newOwnerId` from 10 minutes before
+// `occurredIso` (News times are whole minutes) up to 24 hours after, plus the POP_DROP the
+// same scan logged with it (sync.js logs the two back to back). It used to take the last
+// drop at-or-before the News time, which is before the scan ever saw it — so it found
+// nothing, or an older unrelated drop. `occurredIso` goes through SQLite's datetime(), since
+// planet_events.timestamp is space-separated SQLite UTC and callers pass ISO8601 "...T...Z".
+// Returns { previous_owner_id, population_killed, timestamp } or null; population_killed is
+// null when the planet had no population (a free planet).
+const findLoggedConquestStmt = db.prepare(`
+    SELECT oc.old_value AS previous_owner_id, oc.timestamp,
+        (SELECT pd.old_value - pd.new_value FROM planet_events pd
+         WHERE pd.system_id = oc.system_id AND pd.planet_index = oc.planet_index AND pd.event_type_id = 2
+           AND ABS(strftime('%s', pd.timestamp) - strftime('%s', oc.timestamp)) <= 60
+         ORDER BY ABS(strftime('%s', pd.timestamp) - strftime('%s', oc.timestamp)), pd.id
+         LIMIT 1) AS population_killed
+    FROM planet_events oc
+    WHERE oc.system_id = ? AND oc.planet_index = ? AND oc.event_type_id = 1 AND oc.new_value = ?
+      AND oc.timestamp >= datetime(?, '-10 minutes')
+      AND oc.timestamp <= datetime(?, '+24 hours')
+    ORDER BY oc.timestamp ASC, oc.id ASC
     LIMIT 1
 `);
-function getRecentPopDrop(systemId, planetIndex, beforeIso) {
-    return getRecentPopDropStmt.get(systemId, planetIndex, beforeIso) || null;
+function findLoggedConquest(systemId, planetIndex, newOwnerId, occurredIso) {
+    return findLoggedConquestStmt.get(systemId, planetIndex, newOwnerId, occurredIso, occurredIso) || null;
 }
 
 const deleteAllPlanetEventsStmt = db.prepare(`DELETE FROM planet_events`);
@@ -748,6 +759,6 @@ module.exports = {
     getDistinctSystemsForPlayer, getPlanetCoordsForPlayer, getPlanetsByOwner, getOldPlanet, upsertPlanet,
     getPlanetsForAllianceTag, getPlanetOwnerName, getPlanetOwnersByLocations, getRoutePlanetIntelByLocations,
     getFriendlyRouteAirports, getPlanetNameByLocation, getPlanetNameByGameId, getPlanetLocationByGameId,
-    clearMovedPlanet, deleteAllPlanets, logPlanetEvent, getPlanetHistory, getRecentPopDrop, deleteAllPlanetEvents,
+    clearMovedPlanet, deleteAllPlanets, logPlanetEvent, getPlanetHistory, findLoggedConquest, deleteAllPlanetEvents,
     getTakeoverBoard, upsertTakeover, deleteAllTakeovers,
 };
