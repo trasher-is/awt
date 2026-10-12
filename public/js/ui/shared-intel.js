@@ -45,6 +45,19 @@ const COLUMNS = {
         ['To', r => (r.data.destination_system_id ? systemLink(r.data.destination_system_id, `#${r.data.destination_system_id}`) : '—')],
         ['Ships', r => ships(r.data)], ['CV', r => n(r.data.combat_value)], ['Arrives', r => esc(r.data.arrival_at || '—')],
     ],
+    fleet_locations: [
+        ['Owner', r => `${playerLink(Number(r.key), r.data.owner_name)} ${allianceLink(null, r.data.owner_tag)}`],
+        ['Fleets', r => (r.data.fleets || []).map(f =>
+            `<span class="inline-block mr-2">#${esc(f.rank)} ${ships(f)} · CV ${n(f.cv)} @ `
+            + `${f.system_id ? systemLink(f.system_id, `${f.system_name || '#' + f.system_id}${f.planet_index ? '/' + f.planet_index : ''}`) : esc(f.planet_label || '?')}</span>`).join('') || '—'],
+    ],
+    incomings: [
+        ['Attacker', r => `${playerLink(r.data.attacker_id, r.data.attacker_name)} ${allianceLink(null, r.data.attacker_tag)}`],
+        ['Target', r => (r.data.target_system_id ? systemLink(r.data.target_system_id,
+            r.data.target_planet_name || `#${r.data.target_system_id}/${r.data.target_planet_index ?? '?'}`) : '—')],
+        ['Ships', r => ships(r.data)], ['CV', r => n(r.data.cv)],
+        ['Arrives', r => (r.data.arrival_unix > 0 ? seen(new Date(r.data.arrival_unix * 1000).toISOString().slice(0, 19).replace('T', ' ')) : '—')],
+    ],
     battle_reports: [
         ['When', r => esc(r.data.started_at || '—')],
         ['Attacker', r => `${playerLink(r.data.att_player_id, r.data.att_player_name)} ${allianceLink(r.data.att_alliance_id, r.data.att_alliance_tag)}`],

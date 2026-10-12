@@ -42,17 +42,21 @@ decides, partner by partner, what it lets that partner read.
    | Player profiles & intel | Level, points, rank, race, sciences, planets, CV, home system |
    | Alliances | Tag, name, member count, rank, points |
    | Fleet sightings | Owner, location, destination, ships, CV, arrival time |
+   | Fleet locations | Each player's ranked strongest fleets: rank, ships, CV, the planet the ranking names |
+   | Incomings on our planets | Attacker, target planet, ships, CV, arrival. Not who covers it, the defence plan or the Discord alert |
    | Battle reports | Both sides, CV, losses, ships, winner, location |
 
    The exact fields are listed in `src/utils/peer-kinds.js`. A field not listed there is
    never sent. Logins, activity times, country, who in your alliance entered a piece of
-   intel, and every account, plan, route, incoming, trade, note and Discord table are
-   never shared in any kind.
+   intel, who covers an incoming, defence choices, and every account, plan, route, trade,
+   note and Discord table are never shared in any kind.
 3. **Hide our alliance and allies** is on by default. With it on, the partner gets no
-   player profiles, fleets or battle reports for your own alliance (found from the Alliance
+   player profiles, fleets, fleet locations or battle reports for your own alliance (found from the Alliance
    Stats roster and from the alliances your hub's own accounts play in) or for any tag in
    Alliance Relations → Allied. Planets those alliances own still show owner and population (the
    game's map shows that to anyone with vision), but not starbase, fleet or siege.
+   Incomings are attacks on your own planets, so the target side is never filtered; the
+   switch itself is the choice. The filter applies to the attacker's tag.
    **Also hide tags** hides more alliances for this partner only.
 4. **Create link** shows the hub address and a token **once**. Send both to the partner's
    admin privately. Only a hash of the token is stored, so it cannot be shown again. If it

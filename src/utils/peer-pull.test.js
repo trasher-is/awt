@@ -71,6 +71,32 @@ function fakeFetch(route) {
     ok('a page for the wrong kind is an error', !!validatePage('players', { kind: 'systems', items: [] }).error);
     ok('a page without items is an error', !!validatePage('players', { kind: 'players' }).error);
 
+    const fl = validatePage('fleet_locations', {
+        kind: 'fleet_locations', more: false, next: null,
+        items: [{ key: '7', changedAt: '2026-10-01 00:00:00', data: { owner_name: 'Foe',
+            fleets: [{ rank: 1, cv: '900', system_id: 100, secret: 'x' }, 'junk', ...Array.from({ length: 30 }, (_, i) => ({ rank: i + 2 }))] } }],
+    }, now);
+    const flf = fl.items[0] && fl.items[0].data.fleets;
+    ok('received fleet locations keep only listed fields, nested and capped', flf && flf.length === 15
+        && flf[0].cv === 900 && !('secret' in flf[0]), flf && flf.slice(0, 2));
+    const inc = validatePage('incomings', {
+        kind: 'incomings', more: false, next: null,
+        items: [{ key: '9', changedAt: '2026-10-01 00:00:00', data: { attacker_name: 'Foe', arrival_unix: 1790000000, covering: 'Someone' } }],
+    }, now);
+    ok('a received incoming drops fields outside the list', inc.items.length === 1 && inc.items[0].data.arrival_unix === 1790000000
+        && !('covering' in inc.items[0].data), inc.items);
+
+    // ─── pruning received intel ───
+    const pruneSrc = peersRepo.createSource({ name: 'Prune', baseUrl: 'https://prune.example', token: 'awtp_' + 'p'.repeat(43) });
+    const ago = d => new Date(Date.now() - d * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+    for (const [kind, key, days] of [['fleet_locations', '1', 6], ['fleet_locations', '2', 1], ['incomings', '3', 11], ['incomings', '4', 3], ['players', '5', 90]]) {
+        peersRepo.storePage(pruneSrc.id, kind, [{ key, changedAt: ago(days), data: {} }], null);
+    }
+    peersRepo.pruneIntel();
+    const left = db.prepare(`SELECT item_key FROM peer_intel WHERE source_id = ? ORDER BY item_key`).all(pruneSrc.id).map(r => r.item_key).join();
+    ok('stale fleet locations (5 d) and incomings (10 d) are pruned, profiles kept', left === '2,4,5', left);
+    peersRepo.deleteSource(pruneSrc.id);
+
     // ─── pulling ───
     const tok = 'awtp_' + 'k'.repeat(43);
     const src = peersRepo.createSource({ name: 'Partner', baseUrl: 'https://partner.example', token: tok });

@@ -91,7 +91,42 @@ const QUERIES = {
         )
         SELECT * FROM c ${PAGE}
     `),
+    // One row per player; attachFleetLocations adds that player's ranked fleets.
+    fleet_locations: db.prepare(`
+        WITH c AS (
+            SELECT sf.player_id AS id, p.name AS owner_name, a.tag AS owner_tag,
+                   COALESCE(datetime(MAX(sf.updated_at)), '') AS changed_at
+            FROM strongest_fleet sf
+            LEFT JOIN players p ON p.id = sf.player_id LEFT JOIN alliances a ON a.id = p.alliance_id
+            GROUP BY sf.player_id
+        )
+        SELECT * FROM c ${PAGE}
+    `),
+    // Only rows that hold the attack report; covering, last_ontime and the Discord message
+    // ids are never selected.
+    incomings: db.prepare(`
+        WITH c AS (
+            SELECT rowid AS id, payload, COALESCE(datetime(updated_at), '') AS changed_at
+            FROM incoming_msgs WHERE payload IS NOT NULL
+        )
+        SELECT * FROM c ${PAGE}
+    `),
 };
+
+// incoming_msgs keeps the report as JSON; flatten it to the fields peer-kinds lists.
+function incomingRow(r) {
+    let p = {};
+    try { p = JSON.parse(r.payload) || {}; } catch (e) { /* shared as an empty report */ }
+    const a = p.attacker || {}, t = p.target || {}, s = p.ships || {};
+    return {
+        id: r.id, changed_at: r.changed_at,
+        attacker_id: a.id, attacker_name: a.name, attacker_tag: a.tag,
+        target_system_id: t.systemId, target_planet_index: t.planetIndex, target_planet_name: t.planetName,
+        cv: p.cv, transports: s.transports, destroyers: s.destroyers, cruisers: s.cruisers, battleships: s.battleships,
+        arrival_unix: p.arrivalUnix,
+    };
+}
+const ROW_MAP = { incomings: incomingRow };
 
 // Which tag columns decide whether a row is hidden from this link. Systems are never
 // dropped whole — see attachPlanets.
@@ -101,6 +136,8 @@ const TAG_COLUMNS = {
     alliances: ['tag'],
     fleets: ['owner_tag'],
     battle_reports: ['att_alliance_tag', 'def_alliance_tag'],
+    fleet_locations: ['owner_tag'],
+    incomings: ['attacker_tag'],
 };
 
 function isExcluded(kind, row, exSet) {
@@ -129,6 +166,22 @@ function attachPlanets(rows, exSet) {
     }
 }
 
+const fleetsForPlayersStmt = db.prepare(`
+    SELECT sf.player_id, sf.rank, sf.destroyers, sf.cruisers, sf.battleships, sf.cv,
+           sf.system_id, s.name AS system_name, sf.planet_index, sf.planet_label
+    FROM strongest_fleet sf LEFT JOIN systems s ON s.id = sf.system_id
+    WHERE sf.player_id IN (SELECT value FROM json_each(@ids))
+    ORDER BY sf.player_id, sf.rank
+`);
+
+function attachFleetLocations(rows) {
+    if (!rows.length) return;
+    const byPlayer = new Map(rows.map(r => [r.id, (r.fleets = [])]));
+    for (const f of fleetsForPlayersStmt.all({ ids: JSON.stringify(rows.map(r => r.id)) })) {
+        byPlayer.get(f.player_id)?.push(f);
+    }
+}
+
 function buildFeedPage(link, kind, { after = '', limit = MAX_LIMIT } = {}) {
     if (!QUERIES[kind]) throw Object.assign(new Error('unknown kind'), { status: 400 });
     if (!link.scopes.includes(kind)) throw Object.assign(new Error('kind not shared with this link'), { status: 403 });
@@ -139,8 +192,9 @@ function buildFeedPage(link, kind, { after = '', limit = MAX_LIMIT } = {}) {
 
     const window = QUERIES[kind].all({ ts: cursor.ts, id: cursor.id, limit: lim });
     const last = window[window.length - 1];
-    const rows = window.filter(r => !isExcluded(kind, r, exSet));
+    const rows = window.map(ROW_MAP[kind] || (r => r)).filter(r => !isExcluded(kind, r, exSet));
     if (kind === 'systems') attachPlanets(rows, exSet);
+    if (kind === 'fleet_locations') attachFleetLocations(rows);
     return {
         kind,
         items: rows.map(r => ({ key: String(r.id), changedAt: r.changed_at, data: shape(kind, r) })),

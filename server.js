@@ -98,10 +98,10 @@ app.use('/rzhub', express.json(), require('./src/routes/rzhub'));
 // Read by partner alliances' hubs with a bearer token issued in Admin -> Peer Sharing — no
 // session, no cookie, GET only. Mounted ahead of sessions so a partner's pull never creates
 // or touches one, and ahead of the catch-all game proxy so it is never forwarded to the game.
-// PEER_FEED_MAX is per caller address per minute; 0 disables the limiter.
+// PEER_FEED_MAX is per caller address per minute; blank = 120, 0 disables the limiter.
 app.use('/peer-api', rateLimit({
     windowMs: 60 * 1000,
-    max: process.env.PEER_FEED_MAX === undefined ? 120 : Number(process.env.PEER_FEED_MAX)
+    max: (process.env.PEER_FEED_MAX ?? '') === '' ? 120 : Number(process.env.PEER_FEED_MAX)
 }), require('./src/routes/peerFeed'));
 
 // Redzone trade-agreement planner page (self-contained). Carved out of the rz proxy

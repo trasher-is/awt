@@ -186,8 +186,14 @@ function intelCounts() {
 
 // Fleet sightings go stale fast and the hub already drops its own after 10 days; received
 // ones follow the same rule so a partner who stops sharing does not leave ghosts behind.
+// Ranked fleet locations follow the 5 days strongest_fleet keeps, and incomings have
+// long landed after 10.
 function pruneIntel() {
-    return db.prepare(`DELETE FROM peer_intel WHERE kind = 'fleets' AND changed_at <= datetime('now', '-10 days')`).run().changes;
+    return db.prepare(`
+        DELETE FROM peer_intel
+        WHERE (kind IN ('fleets', 'incomings') AND changed_at <= datetime('now', '-10 days'))
+           OR (kind = 'fleet_locations' AND changed_at <= datetime('now', '-5 days'))
+    `).run().changes;
 }
 
 module.exports = {

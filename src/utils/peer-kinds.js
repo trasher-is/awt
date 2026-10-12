@@ -9,7 +9,8 @@
 // time, anything about who in our alliance entered or scraped something (intel_source,
 // intel_entered_by), and flags that only mean something from our own point of view
 // (planets.is_ally, siege_is_friendly, announced/backfill bookkeeping). Account, plan,
-// route, incoming, trade, notes and Discord tables have no kind at all and never will.
+// route, trade, notes and Discord tables have no kind at all and never will; incomings
+// share the attack report only, never who covers it or the defence plan.
 
 const int = 'int';
 const num = 'num';
@@ -52,6 +53,32 @@ const KINDS = {
             system_id: int, planet_index: int, destination_system_id: int, destination_planet_index: int,
             transports: int, colony_ships: int, destroyers: int, cruisers: int, battleships: int,
             combat_value: int, arrival_at: text,
+        },
+    },
+    // One item per player: the ranking scrape rewrites a player's rows wholesale (new ids
+    // every time), so a per-row key would leave a partner holding every old position.
+    fleet_locations: {
+        label: 'Fleet locations (strongest fleets)',
+        fields: { owner_name: text, owner_tag: text },
+        nested: {
+            fleets: {
+                fields: {
+                    rank: int, destroyers: int, cruisers: int, battleships: int, cv: int,
+                    system_id: int, system_name: text, planet_index: int, planet_label: text,
+                },
+                max: 16,
+            },
+        },
+    },
+    // The attack itself only: attacker, target, ships, arrival. Who covers it, defence
+    // choices and the Discord alert stay ours.
+    incomings: {
+        label: 'Incomings on our planets',
+        fields: {
+            attacker_id: int, attacker_name: text, attacker_tag: text,
+            target_system_id: int, target_planet_index: int, target_planet_name: text,
+            cv: int, transports: int, destroyers: int, cruisers: int, battleships: int,
+            arrival_unix: int,
         },
     },
     battle_reports: {

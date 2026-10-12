@@ -46,7 +46,7 @@ db.prepare(`INSERT INTO battle_reports (id, att_alliance_tag, def_alliance_tag, 
 
 settingsRepo.setSetting('alliance_relations_allied', 'FRND');
 
-const all = ['systems', 'players', 'alliances', 'fleets', 'battle_reports'];
+const all = ['systems', 'players', 'alliances', 'fleets', 'fleet_locations', 'incomings', 'battle_reports'];
 const link = (over = {}) => Object.assign({ id: 1, scopes: all, excludeFriendly: true, excludeTags: [] }, over);
 const keys = page => page.items.map(i => i.key);
 
@@ -85,6 +85,41 @@ ok('a friendly planet keeps owner and population but loses starbase/fleet/siege'
     && fp.starbase === null && fp.has_fleet === null && fp.is_sieged === null, fp);
 ok('an enemy planet keeps its defence details', ep && ep.starbase === 2 && ep.has_fleet === 1 && ep.is_sieged === 1, ep);
 ok('our own is_ally flag never leaves', fp && !('is_ally' in fp));
+
+// ─── fleet locations ───
+const insRanked = db.prepare(`INSERT INTO strongest_fleet (player_id, rank, destroyers, cruisers, battleships, cv, system_id, planet_index, planet_label, updated_at)
+                              VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?, ?)`);
+insRanked.run(20, 3, 30, 300, 100, 2, 'Alpha 2', '2026-10-01T12:00:00.000Z');
+insRanked.run(20, 1, 90, 900, null, null, 'Nowhere 4', '2026-10-01T12:00:00.000Z');
+insRanked.run(10, 2, 60, 600, 100, 1, 'Alpha 1', '2026-10-01T12:00:00.000Z');
+const located = buildFeedPage(link(), 'fleet_locations');
+const foeFleets = located.items.find(i => i.key === '20');
+ok('fleet locations come as one item per player, fleets in rank order', foeFleets && foeFleets.data.fleets.map(f => f.rank).join() === '1,3', foeFleets);
+ok('a ranked fleet carries its system name and the ranking\'s own label', foeFleets
+    && foeFleets.data.fleets[1].system_name === 'Alpha' && foeFleets.data.fleets[0].planet_label === 'Nowhere 4', foeFleets);
+ok('the ranking\'s ISO timestamp becomes a feed timestamp', foeFleets && foeFleets.changedAt === '2026-10-01 12:00:00', foeFleets && foeFleets.changedAt);
+ok('a friendly player\'s fleet locations are not shared', !keys(located).includes('10'), keys(located));
+db.prepare(`DELETE FROM strongest_fleet WHERE player_id = 20`).run();
+insRanked.run(20, 2, 95, 950, 100, 2, 'Alpha 2', '2026-10-02T12:00:00.000Z');
+const relocated = buildFeedPage(link(), 'fleet_locations', { after: located.next });
+ok('a re-scrape (new row ids) updates the same player item instead of adding one', keys(relocated).join() === '20'
+    && relocated.items[0].data.fleets.length === 1 && relocated.items[0].data.fleets[0].cv === 950, relocated.items);
+
+// ─── incomings ───
+const insIncoming = db.prepare(`INSERT INTO incoming_msgs (alert_key, channel_id, message_id, covering, payload, updated_at) VALUES (?, 'chan-1', 'msg-1', 'CoverMember', ?, ?)`);
+const report = (tag, name) => JSON.stringify({ attacker: { id: 20, name, tag }, target: { systemId: 100, planetIndex: 1, planetName: 'Alpha 1' },
+    cv: 420, ships: { transports: 5, destroyers: 40, cruisers: 2, battleships: 0 }, arrivalUnix: 1790000000, fleetId: 4242 });
+insIncoming.run('100:1:foe', report('THEM', 'Foe'), T1);
+insIncoming.run('100:1:fren', report('FRND', 'Fren'), T1);
+db.prepare(`INSERT INTO incoming_msgs (alert_key, channel_id, message_id, updated_at) VALUES ('100:2:noreport', 'c', 'm', ?)`).run(T1);
+const inc = buildFeedPage(link(), 'incomings');
+const hit = inc.items[0];
+ok('only incomings with a stored report are shared, and a friendly attacker\'s is not', inc.items.length === 1 && hit.data.attacker_name === 'Foe', inc.items);
+ok('an incoming carries attacker, target, ships, CV and arrival', hit && hit.data.target_system_id === 100 && hit.data.target_planet_index === 1
+    && hit.data.destroyers === 40 && hit.data.transports === 5 && hit.data.cv === 420 && hit.data.arrival_unix === 1790000000, hit);
+const incJson = JSON.stringify(inc);
+ok('who covers it, the Discord message and the game fleet id never leave', !incJson.includes('CoverMember') && !incJson.includes('chan-1')
+    && !incJson.includes('msg-1') && !incJson.includes('4242'), incJson);
 
 // ─── our own alliance, before the roster scrape has ever run ───
 // No alliance_member_stats rows exist in this database, so friendlyAllianceTags() cannot
