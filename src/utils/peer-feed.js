@@ -36,13 +36,14 @@ const memberAllianceTagsStmt = db.prepare(`
     WHERE a.tag IS NOT NULL AND a.tag <> ''
 `);
 
-// Tags whose players, fleets and battles this link does not see.
+// Tags whose players, fleets and battles this link does not see. Our own alliance and every
+// tag in Alliance Relations -> Allied (our NAP partners) are always hidden — not a per-link
+// choice, since no partner should get our side's or our NAP partners' intel. A link's own
+// list can only hide more.
 function excludedTags(link) {
     const tags = new Set((link.excludeTags || []).map(t => String(t).toUpperCase()));
-    if (link.excludeFriendly) {
-        for (const t of friendlyAllianceTags()) tags.add(String(t).toUpperCase());
-        for (const r of memberAllianceTagsStmt.all()) tags.add(r.tag);
-    }
+    for (const t of friendlyAllianceTags()) tags.add(String(t).toUpperCase());
+    for (const r of memberAllianceTagsStmt.all()) tags.add(r.tag);
     return [...tags];
 }
 
@@ -68,6 +69,7 @@ const QUERIES = {
         WITH c AS (
             SELECT p.*, a.tag AS alliance_tag, COALESCE(datetime(p.updated_at), '') AS changed_at
             FROM players p LEFT JOIN alliances a ON a.id = p.alliance_id
+            WHERE p.has_intel = 1
         )
         SELECT * FROM c ${PAGE}
     `),

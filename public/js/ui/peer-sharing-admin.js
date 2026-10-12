@@ -48,7 +48,6 @@ function renderLinks(links) {
             </div>
             <div class="flex flex-wrap gap-3 text-sm">${scopeBoxes(l.scopes, 'data-scope')}</div>
             <div class="flex flex-wrap items-center gap-3 text-xs">
-                <label class="flex items-center gap-1.5"><input type="checkbox" data-friendly ${l.excludeFriendly ? 'checked' : ''}> Hide our alliance and allies</label>
                 <input type="text" data-tags value="${escAttr(l.excludeTags.join(', '))}" placeholder="Also hide tags" class="h-8 w-48 rounded-md border border-input bg-transparent px-2 font-mono">
                 <button data-save-tags class="h-8 px-3 rounded-md border border-border hover:bg-secondary">Save tags</button>
                 <button data-toggle class="h-8 px-3 rounded-md border border-border hover:bg-secondary">${l.enabled ? 'Pause' : 'Resume'}</button>
@@ -102,7 +101,6 @@ async function createLink() {
         const data = await api('POST', '/hub-api/admin/peers/links', {
             name: $('peer-link-name').value,
             scopes,
-            excludeFriendly: $('peer-link-friendly').checked,
             excludeTags: $('peer-link-tags').value,
         });
         const box = $('peer-link-token');
@@ -177,9 +175,6 @@ async function onLinksChange(e) {
         if (e.target.matches('[data-scope]')) {
             const scopes = [...card.querySelectorAll('[data-scope]:checked')].map(b => b.value);
             await api('PUT', `/hub-api/admin/peers/links/${id}`, { scopes });
-            status('Saved.');
-        } else if (e.target.matches('[data-friendly]')) {
-            await api('PUT', `/hub-api/admin/peers/links/${id}`, { excludeFriendly: e.target.checked });
             status('Saved.');
         }
     } catch (err) { status(err.message, true); await load(); }

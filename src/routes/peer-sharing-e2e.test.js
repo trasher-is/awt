@@ -123,9 +123,9 @@ function startHubA() {
             const sid = add.body.source.id;
 
             const pull = await request(B, 'POST', `/hub-api/admin/peers/sources/${sid}/pull`);
-            ok('pull succeeds and stores what A granted', pull.status === 200 && pull.body.success && pull.body.result.received === 3, pull.body);
+            ok('pull succeeds and stores the one intel report A holds', pull.status === 200 && pull.body.success && pull.body.result.received === 1, pull.body);
             const kinds = db.prepare(`SELECT kind, COUNT(*) n FROM peer_intel GROUP BY kind ORDER BY kind`).all();
-            ok('only players and systems arrived — no fleets', JSON.stringify(kinds) === '[{"kind":"players","n":2},{"kind":"systems","n":1}]', kinds);
+            ok('only intel reports arrived — systems were offered but not pulled, the profile without intel not kept', JSON.stringify(kinds) === '[{"kind":"players","n":1}]', kinds);
             ok('nothing landed in B\'s own player table', db.prepare(`SELECT COUNT(*) n FROM players`).get().n === 0);
 
             const pull2 = await request(B, 'POST', `/hub-api/admin/peers/sources/${sid}/pull`);

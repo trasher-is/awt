@@ -25,7 +25,7 @@ router.post('/admin/peers/links', requireAdmin, (req, res) => {
     const scopes = normaliseScopes(req.body.scopes);
     if (!scopes.length) return res.status(400).json({ success: false, error: 'Pick at least one thing to share' });
     const { link, token } = peersRepo.createLink({
-        name, scopes, excludeFriendly: req.body.excludeFriendly !== false, excludeTags: req.body.excludeTags,
+        name, scopes, excludeTags: req.body.excludeTags,
     });
     console.log(`[Peers] ${req.session.gameName} created share link #${link.id} "${name}" (${scopes.join(', ')})`);
     res.json({ success: true, link, token });
@@ -34,7 +34,7 @@ router.post('/admin/peers/links', requireAdmin, (req, res) => {
 router.put('/admin/peers/links/:id', requireAdmin, (req, res) => {
     const id = idParam(req);
     const patch = {};
-    for (const k of ['name', 'scopes', 'excludeFriendly', 'excludeTags', 'enabled']) {
+    for (const k of ['name', 'scopes', 'excludeTags', 'enabled']) {
         if (req.body[k] !== undefined) patch[k] = req.body[k];
     }
     if (patch.name !== undefined && !cleanName(patch.name)) return res.status(400).json({ success: false, error: 'Name cannot be empty' });

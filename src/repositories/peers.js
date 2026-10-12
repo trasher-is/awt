@@ -22,7 +22,6 @@ function linkRow(r) {
     return {
         id: r.id, name: r.name, tokenHint: r.token_hint,
         scopes: normaliseScopes(parseJson(r.scopes, [])),
-        excludeFriendly: !!r.exclude_friendly,
         excludeTags: r.exclude_tags ? r.exclude_tags.split(',').filter(Boolean) : [],
         enabled: !!r.enabled,
         createdAt: r.created_at, lastReadAt: r.last_read_at, readCount: r.read_count,
@@ -30,13 +29,13 @@ function linkRow(r) {
 }
 
 // The token is shown once, here, and never again: only its hash is stored.
-function createLink({ name, scopes, excludeFriendly = true, excludeTags = '' }) {
+function createLink({ name, scopes, excludeTags = '' }) {
     const token = 'awtp_' + crypto.randomBytes(32).toString('base64url');
     const info = db.prepare(`
-        INSERT INTO peer_links (name, token_hash, token_hint, scopes, exclude_friendly, exclude_tags)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO peer_links (name, token_hash, token_hint, scopes, exclude_tags)
+        VALUES (?, ?, ?, ?, ?)
     `).run(String(name).slice(0, 80), sha256(token), token.slice(-4),
-        JSON.stringify(normaliseScopes(scopes)), excludeFriendly ? 1 : 0, cleanTags(excludeTags));
+        JSON.stringify(normaliseScopes(scopes)), cleanTags(excludeTags));
     return { link: getLink(info.lastInsertRowid), token };
 }
 
@@ -52,11 +51,10 @@ function updateLink(id, patch) {
     const cur = db.prepare(`SELECT * FROM peer_links WHERE id = ?`).get(id);
     if (!cur) return null;
     db.prepare(`
-        UPDATE peer_links SET name = ?, scopes = ?, exclude_friendly = ?, exclude_tags = ?, enabled = ? WHERE id = ?
+        UPDATE peer_links SET name = ?, scopes = ?, exclude_tags = ?, enabled = ? WHERE id = ?
     `).run(
         patch.name !== undefined ? String(patch.name).slice(0, 80) : cur.name,
         patch.scopes !== undefined ? JSON.stringify(normaliseScopes(patch.scopes)) : cur.scopes,
-        patch.excludeFriendly !== undefined ? (patch.excludeFriendly ? 1 : 0) : cur.exclude_friendly,
         patch.excludeTags !== undefined ? cleanTags(patch.excludeTags) : cur.exclude_tags,
         patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : cur.enabled,
         id);

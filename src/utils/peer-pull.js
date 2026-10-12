@@ -12,6 +12,11 @@
 const peersRepo = require('../repositories/peers');
 const { KINDS, shape } = require('./peer-kinds');
 
+// What we read from partners. Only player intelligence reports for now: they are all the
+// hub shows (the profile's Hub Intel card), and pulling the rest would store data nobody
+// sees. A partner may offer more; it is not requested.
+const PULL_KINDS = ['players'];
+
 const TS_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 const KEY_RE = /^\d{1,15}$/;
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
@@ -108,7 +113,7 @@ async function pullSource(sourceId, { fetchImpl = globalThis.fetch } = {}) {
     try {
         const hello = await getJson(`${src.baseUrl}/peer-api/v1/hello`, src.token, fetchImpl);
         offered = Array.isArray(hello.kinds) ? hello.kinds.filter(k => KINDS[k]) : [];
-        for (const kind of offered) {
+        for (const kind of offered.filter(k => PULL_KINDS.includes(k))) {
             let cursor = src.cursors[kind] || '';
             for (let page = 0; page < MAX_PAGES_PER_KIND; page++) {
                 const body = await getJson(
@@ -117,7 +122,9 @@ async function pullSource(sourceId, { fetchImpl = globalThis.fetch } = {}) {
                 const v = validatePage(kind, body);
                 if (v.error) throw new Error(`${kind}: ${v.error}`);
                 dropped += v.dropped;
-                received += peersRepo.storePage(src.id, kind, v.items, v.next);
+                // A profile without an intelligence report is not what we read partners for.
+                const items = kind === 'players' ? v.items.filter(it => it.data.has_intel === 1) : v.items;
+                received += peersRepo.storePage(src.id, kind, items, v.next);
                 // Stop when the partner says so, or when its cursor stops moving — a
                 // partner that keeps answering "more" with the same cursor would
                 // otherwise loop us forever.
@@ -165,4 +172,4 @@ function startPeerPullScheduler() {
     return setInterval(tick, Math.max(1, minutes) * 60 * 1000).unref();
 }
 
-module.exports = { validateBaseUrl, validatePage, pullSource, pullAll, startPeerPullScheduler };
+module.exports = { validateBaseUrl, validatePage, pullSource, pullAll, startPeerPullScheduler, PULL_KINDS };

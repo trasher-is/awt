@@ -1628,7 +1628,6 @@ function initDatabase() {
             token_hash TEXT UNIQUE NOT NULL,
             token_hint TEXT,
             scopes TEXT NOT NULL DEFAULT '[]',
-            exclude_friendly INTEGER NOT NULL DEFAULT 1,
             exclude_tags TEXT,
             enabled INTEGER NOT NULL DEFAULT 1,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

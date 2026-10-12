@@ -29,7 +29,7 @@ const KINDS = {
         nested: { planets: { fields: PLANET_FIELDS, max: 64 } },
     },
     players: {
-        label: 'Player profiles & intel',
+        label: 'Player intel reports',
         fields: {
             name: text, alliance_id: int, alliance_tag: text,
             level: int, science_level: int, culture_level: int, points: int, ranking: int,

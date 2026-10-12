@@ -125,13 +125,30 @@ function fakeFetch(route) {
         if (u.pathname === '/peer-api/v1/hello') return { body: { v: 1, kinds: ['players', 'secrets'] } };
         const after = u.searchParams.get('after');
         if (after) return { body: { kind: 'players', items: [], next: after, more: false } };
-        return { body: { kind: 'players', items: [{ key: '20', changedAt: version.changedAt, data: { name: version.name, points: version.points } }], next: `${version.changedAt}|20`, more: false } };
+        return { body: { kind: 'players', items: [{ key: '20', changedAt: version.changedAt, data: { name: version.name, points: version.points, has_intel: 1 } }], next: `${version.changedAt}|20`, more: false } };
     });
     const r1 = await pullSource(src.id, { fetchImpl: partner });
     ok('first pull stores the item', r1.ok && r1.received === 1, r1);
     ok('the token is sent as a bearer header', partner.calls.every(c => c.auth === `Bearer ${tok}`));
     ok('kinds we do not know are ignored, not requested', r1.kinds.join() === 'players' && !partner.calls.some(c => c.url.includes('secrets')), r1.kinds);
     ok('the cursor is saved', peersRepo.getSource(src.id).cursors.players === '2026-10-02 00:00:00|20');
+
+    // Only intelligence reports are read: a partner offering every kind is asked for players
+    // alone, and a profile without a report is not kept.
+    const generous = peersRepo.createSource({ name: 'Generous', baseUrl: 'https://generous.example', token: 'awtp_' + 'g'.repeat(43) });
+    const offersAll = fakeFetch(u => {
+        if (u.pathname === '/peer-api/v1/hello') return { body: { v: 1, kinds: ['systems', 'players', 'fleets', 'fleet_locations', 'incomings', 'battle_reports', 'alliances'] } };
+        return { body: { kind: 'players', more: false, next: '2026-10-02 00:00:00|31', items: [
+            { key: '30', changedAt: '2026-10-02 00:00:00', data: { name: 'WithReport', has_intel: 1, physics: 4 } },
+            { key: '31', changedAt: '2026-10-02 00:00:00', data: { name: 'ProfileOnly', has_intel: 0 } },
+        ] } };
+    });
+    const rg = await pullSource(generous.id, { fetchImpl: offersAll });
+    const asked = offersAll.calls.filter(c => c.url.includes('/feed')).map(c => new URL(c.url).searchParams.get('kind'));
+    ok('only intel reports are requested, whatever a partner offers', rg.ok && asked.join() === 'players', asked);
+    const keptKeys = db.prepare(`SELECT item_key FROM peer_intel WHERE source_id = ? ORDER BY item_key`).all(generous.id).map(r => r.item_key).join();
+    ok('a shared profile without an intel report is not kept', keptKeys === '30', keptKeys);
+    peersRepo.deleteSource(generous.id);
 
     // An older copy arriving later (partner restored a backup, cursor reset by us) must not win.
     db.prepare(`UPDATE peer_sources SET cursors = '{}' WHERE id = ?`).run(src.id);

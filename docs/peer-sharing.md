@@ -39,7 +39,7 @@ decides, partner by partner, what it lets that partner read.
    | Kind | What it contains |
    |---|---|
    | Systems & planets | System name and position; each planet's owner, population, starbase, siege and fleet flags |
-   | Player profiles & intel | Level, points, rank, race, sciences, planets, CV, home system |
+   | Player intel reports | Players we hold an intelligence report on: race, sciences, trade revenue, artefact, plus level, points, rank, planets, CV, home system |
    | Alliances | Tag, name, member count, rank, points |
    | Fleet sightings | Owner, location, destination, ships, CV, arrival time |
    | Fleet locations | Each player's ranked strongest fleets: rank, ships, CV, the planet the ranking names |
@@ -50,13 +50,13 @@ decides, partner by partner, what it lets that partner read.
    never sent. Logins, activity times, country, who in your alliance entered a piece of
    intel, who covers an incoming, defence choices, and every account, plan, route, trade,
    note and Discord table are never shared in any kind.
-3. **Hide our alliance and allies** is on by default. With it on, the partner gets no
-   player profiles, fleets, fleet locations or battle reports for your own alliance (found from the Alliance
-   Stats roster and from the alliances your hub's own accounts play in) or for any tag in
-   Alliance Relations → Allied. Planets those alliances own still show owner and population (the
-   game's map shows that to anyone with vision), but not starbase, fleet or siege.
-   Incomings are attacks on your own planets, so the target side is never filtered; the
-   switch itself is the choice. The filter applies to the attacker's tag.
+3. **Our own alliance and our NAP partners are never shared**, with any partner. There is no
+   switch for it. That covers your own alliance (found from the Alliance Stats roster and from
+   the alliances your hub's own accounts play in) and every tag in Alliance Relations → Allied.
+   A partner gets no intel reports, fleets, fleet locations or battle reports for them.
+   Planets they own still show owner and population (the game's map shows that to anyone with
+   vision), but not starbase, fleet or siege. For incomings, which are attacks on your own
+   planets, the rule applies to the attacker's tag.
    **Also hide tags** hides more alliances for this partner only.
 4. **Create link** shows the hub address and a token **once**. Send both to the partner's
    admin privately. Only a hash of the token is stored, so it cannot be shown again. If it
@@ -70,7 +70,8 @@ next request. What they already received stays with them.
 1. Admin → Peer Sharing → **What we read** → enter the partner's name, their hub address
    (`https://…`) and the token they sent you.
 2. **Add** saves it and pulls straight away. After that it pulls every
-   `PEER_PULL_MINUTES` (default 5).
+   `PEER_PULL_MINUTES` (default 5). Only player intel reports are pulled, whatever else the
+   partner offers, and a shared profile without an intelligence report is not kept.
 3. Members see it on a player's profile in the game. When the game shows no live
    Intelligence Report there, the Hub Intel card shows whichever is newer: our own last
    report or the newest one a partner sent. A partner's report is captioned with the
@@ -82,8 +83,8 @@ next request. What they already received stays with them.
    not shown. A partner's claimed date is capped at the time its row last changed, so a
    partner cannot make an old report win by dating it in the future.
 
-   For now only player intelligence reports are shown. The other kinds are pulled and
-   stored, but no page displays them yet.
+   For now only player intelligence reports are read and shown (`PULL_KINDS` in
+   `src/utils/peer-pull.js`). Our own feed can still offer the other kinds to a partner.
 
 **Remove** deletes the partner and everything they ever sent. **Pause** stops pulling but
 keeps what you have.

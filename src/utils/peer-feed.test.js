@@ -32,11 +32,12 @@ console.log('peer-feed.test.js');
 const T1 = '2026-10-01 10:00:00';
 const T2 = '2026-10-01 11:00:00';
 db.prepare(`INSERT INTO alliances (id, name, tag, updated_at) VALUES (1, 'Friendly Folk', 'FRND', ?), (2, 'Them', 'THEM', ?), (3, 'Others', 'OTHR', ?)`).run(T1, T1, T1);
-const insPlayer = db.prepare(`INSERT INTO players (id, name, alliance_id, country, race_attack, physics, intel_entered_by, intel_visible, updated_at) VALUES (?, ?, ?, 'XX', 2, 7, 'SomeMember', 1, ?)`);
+const insPlayer = db.prepare(`INSERT INTO players (id, name, alliance_id, country, race_attack, physics, intel_entered_by, intel_visible, has_intel, updated_at) VALUES (?, ?, ?, 'XX', 2, 7, 'SomeMember', 1, 1, ?)`);
 insPlayer.run(10, 'Fren', 1, T1);
 insPlayer.run(20, 'Foe', 2, T1);
 insPlayer.run(30, 'Other', 3, T2);
 insPlayer.run(40, 'Loner', null, T2);
+db.prepare(`INSERT INTO players (id, name, alliance_id, has_intel, updated_at) VALUES (45, 'NoReport', 2, 0, ?)`).run(T2);
 db.prepare(`INSERT INTO systems (id, name, x, y, updated_at) VALUES (100, 'Alpha', 1, 2, ?)`).run(T1);
 db.prepare(`INSERT INTO planets (game_planet_id, system_id, planet_index, owner_id, population, starbase, is_ally, has_fleet, is_sieged, updated_at)
             VALUES (1001, 100, 1, 10, 9, 4, 1, 1, 0, ?), (1002, 100, 2, 20, 5, 2, 0, 1, 1, ?)`).run(T2, T2);
@@ -47,7 +48,7 @@ db.prepare(`INSERT INTO battle_reports (id, att_alliance_tag, def_alliance_tag, 
 settingsRepo.setSetting('alliance_relations_allied', 'FRND');
 
 const all = ['systems', 'players', 'alliances', 'fleets', 'fleet_locations', 'incomings', 'battle_reports'];
-const link = (over = {}) => Object.assign({ id: 1, scopes: all, excludeFriendly: true, excludeTags: [] }, over);
+const link = (over = {}) => Object.assign({ id: 1, scopes: all, excludeTags: [] }, over);
 const keys = page => page.items.map(i => i.key);
 
 // ─── scopes ───
@@ -65,7 +66,8 @@ ok('country, who entered the intel, and our own visibility flags do not leave', 
 // ─── exclusion ───
 ok('an allied (friendly) alliance\'s players are not in the feed', !keys(players).includes('10'), keys(players));
 ok('unallied and alliance-less players are', ['20', '30', '40'].every(k => keys(players).includes(k)), keys(players));
-ok('with exclude-friendly off, the allied player is shared too', keys(buildFeedPage(link({ excludeFriendly: false }), 'players')).includes('10'));
+ok('a player we hold no intel report on is not shared', !keys(players).includes('45'), keys(players));
+ok('a link cannot opt back in to an allied (NAP) alliance', !keys(buildFeedPage(link({ excludeFriendly: false }), 'players')).includes('10'));
 ok('a hand-excluded tag is honoured', !keys(buildFeedPage(link({ excludeTags: ['othr'] }), 'players')).includes('30'));
 
 const fleets = buildFeedPage(link(), 'fleets');
@@ -126,12 +128,12 @@ ok('who covers it, the Discord message and the game fleet id never leave', !incJ
 // know our tag. A hub account playing in OTHR must still be enough to hide OTHR.
 db.prepare(`INSERT INTO app_users (game_name, password_hash, role) VALUES ('other', 'x', 'user')`).run();
 ok('a hub member\'s own alliance is hidden even before the roster scrape', !keys(buildFeedPage(link(), 'players')).includes('30'));
-ok('…and shared again when exclude-friendly is off', keys(buildFeedPage(link({ excludeFriendly: false }), 'players')).includes('30'));
+ok('…and no link can opt back in to it', !keys(buildFeedPage(link({ excludeFriendly: false }), 'players')).includes('30'));
 db.prepare(`DELETE FROM app_users WHERE game_name = 'other'`).run();
 
 // ─── paging ───
 const T3 = '2026-10-02 09:00:00';
-const bulk = db.prepare(`INSERT INTO players (id, name, alliance_id, updated_at) VALUES (?, ?, ?, ?)`);
+const bulk = db.prepare(`INSERT INTO players (id, name, alliance_id, has_intel, updated_at) VALUES (?, ?, ?, 1, ?)`);
 db.transaction(() => {
     // 1200 friendly players first, so whole windows are made of excluded rows...
     for (let i = 0; i < 1200; i++) bulk.run(1000 + i, `F${i}`, 1, T3);
@@ -165,7 +167,7 @@ const everything = [];
 for (const kind of all) {
     let c = '';
     for (let i = 0; i < 20; i++) {
-        const p = buildFeedPage(link({ excludeFriendly: false }), kind, { after: c });
+        const p = buildFeedPage(link(), kind, { after: c });
         everything.push(...p.items.map(it => JSON.stringify(it)));
         if (!p.more) break;
         c = p.next;
