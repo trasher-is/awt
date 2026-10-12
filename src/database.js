@@ -1609,6 +1609,57 @@ function initDatabase() {
         db.exec('ALTER TABLE race_estimate_calibrations ADD COLUMN raw_credible_values TEXT');
     }
 
+
+    // --- PEER SHARING (hub-to-hub, opt-in; see docs/peer-sharing.md) ---
+    // Each alliance runs its own hub and decides, per partner, what it lets that partner
+    // read. Three tables, and the split between them is the point:
+    //   peer_links   — OUTBOUND: partners allowed to read OUR feed. Only a hash of the
+    //                  token is kept, so a leaked database does not hand out read access.
+    //   peer_sources — INBOUND: hubs we read from. Their token has to be stored as-is,
+    //                  because we present it on every pull.
+    //   peer_intel   — what we received, kept apart from the tables our own members fill.
+    //                  The outbound feed reads only those member-filled tables, so a
+    //                  partner's intel can never be passed on to a third hub: A shares
+    //                  with B, B shares with C, and nothing of A's reaches C.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS peer_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            token_hash TEXT UNIQUE NOT NULL,
+            token_hint TEXT,
+            scopes TEXT NOT NULL DEFAULT '[]',
+            exclude_tags TEXT,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_read_at DATETIME,
+            read_count INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS peer_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            base_url TEXT NOT NULL,
+            token TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            cursors TEXT NOT NULL DEFAULT '{}',
+            offered_kinds TEXT,
+            last_pull_at DATETIME,
+            last_ok_at DATETIME,
+            last_error TEXT,
+            last_received INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS peer_intel (
+            source_id INTEGER NOT NULL REFERENCES peer_sources(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            item_key TEXT NOT NULL,
+            changed_at TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (source_id, kind, item_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_peer_intel_kind ON peer_intel(kind, changed_at);
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {
