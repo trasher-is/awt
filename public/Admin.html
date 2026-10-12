@@ -464,6 +464,7 @@
         </section>
     </main>
 
+    <script type="module" src="/hub-assets/js/ui/race-admin.js"></script>
     <script>
         // --- 1. CORE AUTH & INITIALIZATION ---
         let currentAdminUser = null;
@@ -486,6 +487,7 @@
                     loadBroadcasts();
                     loadSettings();
                     loadRounds();
+                    window.loadRaceAdmin?.();
                 } else {
                     window.location.href = '/dashboard';
                 }

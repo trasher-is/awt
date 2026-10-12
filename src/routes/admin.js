@@ -371,6 +371,12 @@ router.post('/admin/nuke-intel', requireAdmin, (req, res) => {
             // the same wiped map). starbase_order_audit is deliberately NOT here: it is an
             // operations record of who sent what through the hub, and that stays true
             // across rounds.
+            // An in-flight AI response must find its request missing and discard it.
+            // Cost accounting survives a reset; the evidence and approvals do not.
+            for (const table of ['race_evidence', 'player_race_estimates', 'race_estimate_calibrations',
+                'player_race_checks', 'llm_requests', 'player_public_history', 'planet_starbase_history', 'player_combat_history']) {
+                db.prepare(`DELETE FROM ${table}`).run();
+            }
             battleReportsRepo.deleteAllBattleReports();
             newsEventsRepo.deleteAllNewsEvents();
             systemsRepo.deleteAllPlanets();

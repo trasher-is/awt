@@ -1529,6 +1529,87 @@ function initDatabase() {
     addColumn('population_trace', 'payload_age_ms', 'INTEGER');
     db.exec(`CREATE INDEX IF NOT EXISTS idx_population_trace_run ON population_trace(run_id)`);
 
+    // Race evidence is stored separately from biology intel. All round-scoped rows
+    // are cleared by the same transaction that removes the reports and players.
+    addColumn('battle_reports', 'att_win_chance', 'REAL');
+    addColumn('battle_reports', 'dice_roll', 'REAL');
+    addColumn('battle_reports', 'dice_consistent', 'INTEGER');
+    addColumn('battle_reports', 'dice_reason', 'TEXT');
+    addColumn('planets', 'api_statistics', 'TEXT');
+    addColumn('planets', 'api_statistics_observed_at', 'TEXT');
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS player_public_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id INTEGER NOT NULL,
+            level INTEGER, science_level INTEGER, joined TEXT,
+            observed_at TEXT NOT NULL,
+            UNIQUE(player_id, observed_at)
+        );
+        CREATE INDEX IF NOT EXISTS idx_player_public_history_time
+            ON player_public_history(player_id, observed_at);
+        CREATE TABLE IF NOT EXISTS planet_starbase_history (
+            system_id INTEGER NOT NULL, planet_index INTEGER NOT NULL,
+            level INTEGER NOT NULL, observed_at TEXT NOT NULL,
+            PRIMARY KEY(system_id, planet_index, observed_at)
+        );
+        CREATE TABLE IF NOT EXISTS player_combat_history (
+            player_id INTEGER NOT NULL, race_attack INTEGER NOT NULL, race_defense INTEGER NOT NULL,
+            physics INTEGER NOT NULL, mathematics INTEGER NOT NULL, level INTEGER NOT NULL,
+            observed_at TEXT NOT NULL, PRIMARY KEY(player_id,observed_at)
+        );
+        CREATE TABLE IF NOT EXISTS race_evidence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id INTEGER NOT NULL, battle_report_id INTEGER NOT NULL,
+            side TEXT NOT NULL CHECK(side IN ('att','def')),
+            kind TEXT NOT NULL CHECK(kind IN ('win','loss')),
+            observed REAL, sigma REAL, window_key TEXT, loglik TEXT NOT NULL,
+            flags TEXT, status TEXT NOT NULL DEFAULT 'ok',
+            model_version TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(player_id,battle_report_id,kind,model_version),
+            FOREIGN KEY(battle_report_id) REFERENCES battle_reports(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS player_race_estimates (
+            player_id INTEGER NOT NULL, trait TEXT NOT NULL CHECK(trait IN ('attack','defence')),
+            dist TEXT, most_likely INTEGER, set90_low INTEGER, set90_high INTEGER,
+            band TEXT NOT NULL, evidence_count INTEGER NOT NULL DEFAULT 0,
+            evidence_report_ids TEXT, model_version TEXT NOT NULL,
+            estimated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            evidence_hash TEXT, hard_candidates TEXT, prior TEXT, withheld_reason TEXT,
+            PRIMARY KEY(player_id,trait)
+        );
+        CREATE TABLE IF NOT EXISTS race_estimate_calibrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, player_id INTEGER NOT NULL,
+            trait TEXT NOT NULL, dist TEXT NOT NULL, set90_low INTEGER, set90_high INTEGER,
+            band TEXT NOT NULL, truth INTEGER NOT NULL, model_version TEXT NOT NULL,
+            evidence_hash TEXT, raw_credible_values TEXT, recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(player_id,trait,model_version)
+        );
+        CREATE TABLE IF NOT EXISTS llm_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, player_id INTEGER NOT NULL,
+            requested_by INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+            approved_by INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            decided_at DATETIME
+        );
+        CREATE TABLE IF NOT EXISTS player_race_checks (
+            player_id INTEGER PRIMARY KEY, request_id INTEGER NOT NULL,
+            input_hash TEXT NOT NULL, model_version TEXT NOT NULL, prompt_version TEXT NOT NULL,
+            model TEXT NOT NULL, verdict TEXT NOT NULL, output TEXT NOT NULL, status TEXT NOT NULL,
+            resolved_by INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS llm_calls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, request_id INTEGER,
+            model TEXT NOT NULL, input_tokens INTEGER, output_tokens INTEGER,
+            cache_read_tokens INTEGER, cache_write_tokens INTEGER, cost_usd REAL,
+            latency_ms INTEGER, status TEXT NOT NULL, error TEXT, input_hash TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+
+    if (!db.prepare('PRAGMA table_info(race_estimate_calibrations)').all().some(column => column.name === 'raw_credible_values')) {
+        db.exec('ALTER TABLE race_estimate_calibrations ADD COLUMN raw_credible_values TEXT');
+    }
+
+
     // --- PEER SHARING (hub-to-hub, opt-in; see docs/peer-sharing.md) ---
     // Each alliance runs its own hub and decides, per partner, what it lets that partner
     // read. Three tables, and the split between them is the point:

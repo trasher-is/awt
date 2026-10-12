@@ -1,5 +1,6 @@
 import '../utils/unicorn-mode.js';
 import '../utils/sqlite-time.js';
+import '../utils/api-planet-statistics.js';
 import { renderUnicornMarkers, clearUnicornMarkers, isUnicornMutation } from '../core/unicorn-markers.js';
 
 const { createStore, createWordDetector } = globalThis.AWUnicornMode;
@@ -9,7 +10,10 @@ const REFRESH_MS = 5 * 60 * 1000;
 
 export function summarizeUnicornData(data, now = Date.now()) {
     const total = Number(data?.total) || 0;
-    if (!total) return 'Best Planets has not been synced yet. Building leaders unavailable.';
+    const statsCount = (Array.isArray(data?.statistics) ? data.statistics : [])
+        .filter(row => globalThis.AWPlanetStatistics?.activeCategories(row.categories, row.observed_at, now).length).length;
+    const availability = statsCount ? ` API statistics available for ${statsCount} located planet${statsCount === 1 ? '' : 's'} (snapshot data).` : '';
+    if (!total) return `Best Planets has not been synced yet. Building leaders unavailable.${availability}`;
     const mapped = Number(data.mapped) || 0;
     const stamp = parseTimestamp(data.synced_at);
     const age = stamp ? Math.max(0, now - stamp.getTime()) : null;
@@ -25,7 +29,7 @@ export function summarizeUnicornData(data, now = Date.now()) {
                 : 'building leaders unavailable';
     const coverage = total < 50 ? `Partial ranking: ${total}/50 entries · ${mapped}/${total} located`
         : `${mapped}/${total} ranked planets located`;
-    return `${coverage} · ${freshness} · ${leaders}.`;
+    return `${coverage} · ${freshness} · ${leaders}.${availability}`;
 }
 
 // One owner for the whole tab, even when storage is blocked. The frame is same-origin;
@@ -147,6 +151,9 @@ export function initUnicornMode(host = window) {
     attachFrame();
     const unsubscribe = store.subscribe(state => {
         updateStatus(state);
+        // The minute countdown also expires transient category badges even when the
+        // game DOM and the five-minute hub refresh have not changed.
+        if (state.active && snapshot?.statistics?.length) scheduleRender();
         if (state.active && !wasActive) {
             wasActive = true;
             refreshSnapshot();

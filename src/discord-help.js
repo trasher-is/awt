@@ -37,6 +37,11 @@ function helpEntries({ bioConfirmed, bioSuspected }) {
                     example: '!intel PlayerOne',
                 },
                 {
+                    names: ['race'], usage: '!race <player>', short: 'stored race estimate and AI check',
+                    detail: 'Reads stored Attack/Defence evidence and its check state. Does not compute estimates or make an AI call. Intel, estimate and worst-case values remain labelled.',
+                    example: '!race PlayerOne',
+                },
+                {
                     names: ['sys'], usage: '!sys <system>', short: 'planets, fleets, plans in a system',
                     detail: 'Displays intel for a specific solar system (Planets, Fleets, Plans).',
                     example: '!sys 123',

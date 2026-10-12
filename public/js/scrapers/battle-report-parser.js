@@ -1,6 +1,6 @@
 // Extracts what BattleReport/search's API response does NOT provide from a rendered
 // /About/BattleReport/{id} page: per-ship-type counts/losses/survivors, the
-// win-probability value, and the planet the battle happened at (the search API has no
+// dice roll, and the planet the battle happened at (the search API has no
 // planet field of any kind). Everything else visible on that page (population change,
 // conquered flag, luckiness, XP/level gained) is already covered by the existing API
 // integration (src/utils/battle-reports.js) and is deliberately NOT re-extracted here.
@@ -63,7 +63,10 @@ function parseBattleReportHtml(html) {
         result[`def_${t.col}`] = null;
         result[`def_${t.col}_lost`] = null;
     }
+    // The legacy name is retained for old clients; it contains dice, never probability.
     result.win_chance = null;
+    result.dice_roll = null;
+    result.att_win_chance = null;
     Object.assign(result, parsePlanetLink(doc));
 
     let matchedAnyShipRow = false;
@@ -116,11 +119,16 @@ function parseBattleReportHtml(html) {
         if (label === 'Victory' && cells.length >= 3) {
             // Row shape: [Victory, def-outcome(colspan=3), dice/win-chance, att-outcome(colspan=3)]
             // — a colspan attribute does not create extra <td> DOM nodes, so this row has
-            // only 4 <td>s total (indices 0-3), and the win-chance value lives at index 2.
+            // only 4 <td>s total (indices 0-3), and the dice roll lives at index 2.
+            // There is no confirmed probability selector. Keep att_win_chance absent
+            // rather than attribute this dice number to Attack.
             const span = cells[2].querySelector('span');
             const text = span ? span.textContent.trim() : cells[2].textContent.trim();
             const n = parseFloat(text);
-            if (Number.isFinite(n)) result.win_chance = n;
+            if (Number.isFinite(n) && n >= 0 && n <= 100) {
+                result.win_chance = n;
+                result.dice_roll = n;
+            }
         }
     }
 

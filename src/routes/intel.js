@@ -15,6 +15,7 @@ const { splitThreats } = require('../utils/threat-vision');
 const { previousNames, findByFormerName } = require('../utils/round-archive');
 const { friendlyAllianceTags, ownAllianceTags } = require('../utils/friendly-alliance-tags');
 const { truePowerForAllianceRow } = require('../utils/true-power');
+const { hasCurrentIntel } = require('../../public/js/utils/battle-model');
 const settingsRepo = require('../repositories/settings');
 const systemClaimsRepo = require('../repositories/systemClaims');
 const systemPlansRepo = require('../repositories/systemPlans');
@@ -671,8 +672,11 @@ router.get('/intel/alliance-stats', requireAuth, (req, res) => {
         // of either side's physics here.
         const ceilings = playersRepo.getCombatCeilings();
         const stats = alliancesRepo.getAllianceStatsForArchive().map(r => {
-            const { tp, tpx } = truePowerForAllianceRow(r, ceilings);
-            return { ...r, pl_tp: tp, pl_tpx: tpx };
+            const envelope = hasCurrentIntel({
+                has_intel: r.pl_has_intel,intel_updated_at: r.pl_intel_updated_at,joined: r.pl_joined,
+                battle_race_not_before: r.pl_battle_race_not_before }) ? null : require('../utils/race-display').raceDisplay(r.player_id);
+            const { tp, tpx, source } = truePowerForAllianceRow(r, ceilings, envelope);
+            return { ...r, pl_tp: tp, pl_tpx: tpx, pl_tp_source: source };
         });
         res.json({ success: true, stats, ceilings });
     } catch (err) {

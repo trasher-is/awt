@@ -1,4 +1,32 @@
 const db = require('../database');
+const { time: identityTime } = require('../utils/battle-context');
+
+const identityStmt = db.prepare('SELECT joined,battle_race_not_before FROM players WHERE id=?');
+// Only the game's explicit Joined signal changes the identity. A heuristic reset
+// continues to preserve every historical intel value (issues #46/#48).
+function joinedTransition(id, incoming, now = Date.now()) {
+    const before = identityStmt.get(id);
+    const old = before?.joined ?? null, prior = identityTime(old), next = identityTime(incoming);
+    const cutoff = identityTime(before?.battle_race_not_before);
+    if (incoming === 'N/A') {
+        return { joined: 'N/A', confirmed: prior !== null,
+            cutoff: prior !== null ? new Date(Math.max(now, cutoff ?? -Infinity)).toISOString().slice(0, 19).replace('T', ' ') : before?.battle_race_not_before ?? null };
+    }
+    if (next === null || next > now || (prior !== null && next < prior)
+        || (old === 'N/A' && cutoff !== null && next < Math.floor(cutoff / 86400000) * 86400000)) {
+        return { joined: old, confirmed: false, cutoff: before?.battle_race_not_before ?? null };
+    }
+    const confirmed = prior !== null ? next > prior : old === 'N/A';
+    return { joined: prior === next ? old : incoming, confirmed,
+        cutoff: confirmed ? new Date(Math.max(next, cutoff ?? -Infinity)).toISOString() : before?.battle_race_not_before ?? null };
+}
+const invalidateIdentityStmt = db.prepare(`UPDATE players SET has_intel=0,
+    battle_race_inference=NULL,battle_race_not_before=? WHERE id=?`);
+function applyJoinedTransition(id, incoming) {
+    const transition = joinedTransition(id, incoming);
+    if (transition.confirmed) invalidateIdentityStmt.run(transition.cutoff, id);
+    return transition.joined;
+}
 
 // --- players: read (intel.js) ---
 
@@ -347,7 +375,10 @@ const upsertPlayerFullStmt = db.prepare(`
         has_intel = CASE WHEN excluded.has_intel = 1 THEN 1 ELSE players.has_intel END
 `);
 function upsertPlayerFull(player) {
-    upsertPlayerFullStmt.run(player);
+    db.transaction(() => {
+        const joined = applyJoinedTransition(player.id, player.joined);
+        upsertPlayerFullStmt.run({ ...player, joined, has_intel: joined === 'N/A' ? 0 : player.has_intel });
+    })();
 }
 
 const insertPlayerLoginStmt = db.prepare(`INSERT INTO player_logins (player_id, total_logins) VALUES (?, ?)`);
@@ -655,7 +686,7 @@ function getPlayerStatsByIds(ids) {
     return db.prepare(`
         SELECT p.id, p.name, p.level, p.has_intel,
                p.race_speed, p.race_attack, p.race_defense,
-               p.physics, p.mathematics, p.energy,
+               p.physics, p.mathematics, p.energy, p.intel_updated_at, p.joined, p.battle_race_not_before,
                a.tag AS alliance_tag
         FROM players p
         LEFT JOIN alliances a ON p.alliance_id = a.id
@@ -663,7 +694,8 @@ function getPlayerStatsByIds(ids) {
     `).all(...ids);
 }
 
-const STAT_COLS = `race_attack, race_defense, physics, mathematics, science_level, level, has_intel, intel_updated_at`;
+const STAT_COLS = `id, race_attack, race_defense, physics, mathematics, science_level, level,
+                   has_intel, intel_updated_at, joined, battle_race_not_before`;
 
 const getPlayerCombatStatsByIdStmt = db.prepare(`SELECT ${STAT_COLS} FROM players WHERE id = ?`);
 function getPlayerCombatStatsById(id) {
@@ -679,7 +711,7 @@ function getPlayerCombatStatsByName(name) {
 
 const getPlayerWithAllianceByNameLowerStmt = db.prepare(`
     SELECT p.id, p.name, p.level, p.has_intel, p.race_speed, p.race_attack, p.race_defense,
-           p.physics, p.mathematics, p.energy, a.tag AS alliance_tag
+           p.physics, p.mathematics, p.energy, p.intel_updated_at, p.joined, p.battle_race_not_before, a.tag AS alliance_tag
     FROM players p LEFT JOIN alliances a ON p.alliance_id = a.id
     WHERE LOWER(p.name) = ?
 `);
@@ -775,7 +807,7 @@ function recordNameChangeIfDifferent(id, newName) {
 // signal — not the raw column value.
 const getPlayerRaceValuesStmt = db.prepare(`
     SELECT race_growth, race_science, race_culture, race_production, race_speed,
-           race_attack, race_defense, race_trader, race_sul, has_intel
+           race_attack, race_defense, race_trader, race_sul, has_intel, intel_updated_at, joined, battle_race_not_before
     FROM players WHERE id = ?
 `);
 function getPlayerRaceValues(id) {
@@ -803,7 +835,9 @@ const upsertPlayerFromApiListStmt = db.prepare(`
         updated_at=CURRENT_TIMESTAMP
 `);
 function upsertPlayerFromApiList(id, name, allianceId, level, points, ranking, country, isActivePlayer, joined) {
-    upsertPlayerFromApiListStmt.run(id, name, allianceId, level, points, ranking, country, isActivePlayer, joined);
+    db.transaction(() => {
+        upsertPlayerFromApiListStmt.run(id, name, allianceId, level, points, ranking, country, isActivePlayer, applyJoinedTransition(id, joined));
+    })();
 }
 
 // New-player announcement queue, mirroring battle_reports.announced (see
@@ -910,12 +944,16 @@ function upsertPlayerFromApiDetail(player) {
     // playerLevelDetails change) should not have to know that. origin_system is COALESCEd
     // away in the upsert so a null never erases a known origin; the xp_*/level_progress_
     // percent columns have no such guard and are plain-overwritten, same as level itself.
-    upsertPlayerFromApiDetailStmt.run({
-        origin_system: null,
-        level_progress_percent: null, xp_earned_in_level: null,
-        xp_required_for_next_level: null, xp_remaining_to_next_level: null, total_xp: null,
-        ...player,
-    });
+    db.transaction(() => {
+        const joined = applyJoinedTransition(player.id, player.joined);
+        upsertPlayerFromApiDetailStmt.run({
+            origin_system: null,
+            level_progress_percent: null, xp_earned_in_level: null,
+            xp_required_for_next_level: null, xp_remaining_to_next_level: null, total_xp: null,
+            ...player,
+            joined, has_intel: joined === 'N/A' ? 0 : player.has_intel,
+        });
+    })();
 }
 
 // When is a player's Player/{id} detail stale enough to re-scan? ONE predicate, shared by
@@ -1025,7 +1063,7 @@ function suggestPlayersTopByPoints(limit) {
 // unscouted player placeholders and undated legacy sheets are not observations.
 const { observedCombatSciences } = require('../utils/true-power');
 const getCombatCeilingsStmt = db.prepare(`
-    SELECT p.level, p.science_level, p.has_intel, p.physics, p.mathematics, p.intel_updated_at,
+    SELECT p.level, p.science_level, p.has_intel, p.physics, p.mathematics, p.intel_updated_at, p.joined, p.battle_race_not_before,
            s.physics AS sheet_physics, s.mathematics AS sheet_mathematics,
            s.sciences_updated_at AS sheet_sciences_updated_at
     FROM players p
@@ -1076,6 +1114,7 @@ function saveManualIntel(values) {
 
 module.exports = {
     saveManualIntel,
+    joinedTransition,
     getWarRoomPlayers, getAllianceIntelPlayerIds, countPlayers, listPlayerIds, listPlayerNameIds, getFullPlayersDb, getJoinedDates,
     getAllianceTagForMembers, getVisionObservers, getPlayerWithPlanetCount,
     getPlayerLoginHistory, getPlayerLoginHeatmap, recordLoginSample, getPlayerLoginSamples,

@@ -581,6 +581,14 @@ async function handleMessage(message) {
     // ----------------------------------------------------
     // !8ball <question> - MAGIC 8-BALL
     // ----------------------------------------------------
+    if (command === 'race') {
+        const player = playersRepo.getPlayerFullByName(args.join(' '));
+        if (!player) return message.reply('Player not found. Usage: `!race <player>`');
+        const { raceDisplay, raceSummary } = require('./utils/race-display');
+        const display = raceDisplay(player.id, { role: 'user' });
+        return message.reply(defuseMentions(raceSummary(display)));
+    }
+
     if (command === '8ball') {
         const answers = [
             'Yes', 'No', 'Maybe',

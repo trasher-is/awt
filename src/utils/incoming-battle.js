@@ -45,7 +45,7 @@ const HOLDS = 0.995;
 function allySide(row) {
     // No scan of our own player: resolveStats() would assume +4/+4 race — the worst case
     // for an ENEMY, the most flattering one for us. Neutral 0/0 instead.
-    if (!row || !row.has_intel) {
+    if (!row || !battleModel.hasCurrentIntel(row)) {
         const seen = row ? observedCombatSciences(row) : { physics: null, mathematics: null };
         return { ra: 0, rd: 0, phys: seen.physics || 0, math: seen.mathematics || 0, lvl: (row && row.level) || 0,
             totalXp: row && Number.isFinite(row.total_xp) ? row.total_xp : null, unknown: true };
@@ -130,6 +130,30 @@ function planetFight({ enemyFleet, enemy, sbLevel, garrison, owner }) {
         // If it holds: what the defence keeps (fleet + starbase CV), and the fleet alone.
         defenceLeftCv: r.cvDefRemain,
         garrisonLeftCv: cvOf(floorFleet(r.survDef)),
+    };
+}
+
+// Advisory secondary result only. The caller keeps its existing planetFight()
+// headline and reinforcement decisions. A saved estimate is usable here only
+// through the same current model, calibration, AI hash and band checks as every
+// other calculation; an unavailable estimate produces no invented number.
+function secondaryRaceEstimate({ enemyFleet, sbLevel, garrison, owner, enemyRow, enemyEnvelope }) {
+    const { resolveRaceStats } = require('./race-resolve');
+    const Display = require('../../public/js/utils/race-estimate-display');
+    const enemy = resolveRaceStats(enemyRow, enemyEnvelope);
+    if (enemy.source !== 'estimate') return null;
+    const point = planetFight({ enemyFleet, enemy, sbLevel, garrison, owner });
+    if (!point) return null;
+    const chances = Display.compatibleSet(enemyEnvelope.estimate.attack).map(ra =>
+        planetFight({ enemyFleet, enemy: { ...enemy, ra }, sbLevel, garrison, owner })?.holds)
+        .filter(Number.isFinite);
+    if (!chances.length) return null;
+    return {
+        source: 'estimate', label: 'Estimated planet defence',
+        holds: point.holds, holds_low: Math.min(...chances), holds_high: Math.max(...chances),
+        race_attack: enemy.ra, race_defence: enemy.rd,
+        band: Display.effectiveBand(enemyEnvelope.estimate.attack, enemyEnvelope.check, 'attack'),
+        range_basis: 'Compatible Attack picks; owner stats and unknown sciences unchanged.',
     };
 }
 
@@ -229,5 +253,5 @@ function pct(p) {
     return `${Math.round(v)}%`;
 }
 
-module.exports = { HOLDS, allySide, planetFight, ppAfter, sbUpgrade, sbLevels, counterFight, landBefore, ownerReinforce, pct,
+module.exports = { HOLDS, allySide, planetFight, secondaryRaceEstimate, ppAfter, sbUpgrade, sbLevels, counterFight, landBefore, ownerReinforce, pct,
     levelForXp, xpGained, levelAfter, fleetText, ceilFleet, floorFleet };
