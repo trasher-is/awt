@@ -137,6 +137,7 @@ db.prepare(`
     VALUES (10, 'battle-conquer', '2026-08-06T01:00:00Z', 10, 51, NULL)
 `).run();
 // ...the same conquest as the scan logged it: OWNER_CHANGE (free planet -> Gina) + POP_DROP.
+// A free planet's leftover population is a colonization, not a kill: it earns nothing.
 db.prepare(`INSERT INTO systems (id, name) VALUES (70, 'S70'), (80, 'S80')`).run();
 db.prepare(`
     INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp)
@@ -145,8 +146,8 @@ db.prepare(`
 
 const boardsWithNews = battlePoints.getLeaderboards(null, 10, 'all');
 const gina = boardsWithNews.pop.find(r => r.player_name === 'Gina');
-ok('Gina gets population points from her unmatched bombardment (400) + her logged conquest (51), counted once',
-    gina && gina.raw === 451, gina);
+ok('Gina gets population points from her unmatched bombardment (400) only — her conquest was a free planet (colonization) and the News row is not summed',
+    gina && gina.raw === 400, gina);
 ok('Hank never appears — his bombardment is already covered by a real battle report',
     !boardsWithNews.pop.some(r => r.player_name === 'Hank'), boardsWithNews.pop);
 
@@ -222,18 +223,29 @@ ok("scope 'all' includes Bob (no membership/alliance filter at all)",
 
 // --- Conquests without a battle, from the scan log (2026-10-12: Moardin25 took TheOne's
 // planet with no battle; the only credit path was his own News page, which he never opened
-// through the hub, so his 5 population never counted). ---
-db.prepare(`INSERT INTO alliances (id, name, tag) VALUES (200, 'Raid', 'RD'), (201, 'Paid', 'PD')`).run();
-db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (40, 'Moa', 200), (41, 'One', 201), (42, 'Lba', 200), (43, 'Sil', 201)`).run();
+// through the hub, so his 5 population never counted). Only a planet taken from an ACTIVE,
+// NON-FRIENDLY player counts. ---
+db.prepare(`INSERT INTO alliances (id, name, tag) VALUES (200, 'Raid', 'RD'), (201, 'Paid', 'PD'), (202, 'Napped', 'NAPX')`).run();
+db.prepare(`INSERT INTO players (id, name, alliance_id, last_activity_at, resigned_at) VALUES
+    (40, 'Moa', 200, '2026-10-12T03:00:00.000Z', NULL),
+    (41, 'One', 201, '2026-10-12T01:47:39.6628922+02:00', NULL),     -- active (game's own +02:00 format)
+    (42, 'Lba', 200, '2026-10-12T03:00:00.000Z', NULL),
+    (43, 'Sil', 201, '2026-10-12T03:00:00.000Z', NULL),
+    (44, 'Idle', 201, '2026-09-01T10:00:00.000Z', NULL),             -- last seen 5+ weeks before
+    (45, 'Quit', 201, '2026-10-12T03:00:00.000Z', '2026-10-08T00:00:00.000Z'), -- resigned before
+    (46, 'Napper', 202, '2026-10-12T03:00:00.000Z', NULL)            -- allied tag`).run();
+db.prepare(`INSERT INTO app_settings (key, value) VALUES ('alliance_relations_allied', 'napx')`).run();
 db.prepare(`
     INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp) VALUES
         (80, 12, 1, 41, 40, '2026-10-09 02:40:49'), (80, 12, 2, 5, 0, '2026-10-09 02:40:49'),  -- One -> Moa, no battle: 5
         (80, 5, 1, 43, 40, '2026-10-09 06:00:00'),  (80, 5, 2, 30, 0, '2026-10-09 06:00:00'),   -- Sil -> Moa, WITH a battle report
-        (80, 6, 1, 40, 42, '2026-10-09 07:00:00'),  (80, 6, 2, 2, 0, '2026-10-09 07:00:00'),    -- Moa -> Lba: ally handover
+        (80, 6, 1, 40, 42, '2026-10-09 07:00:00'),  (80, 6, 2, 2, 0, '2026-10-09 07:00:00'),    -- Moa -> Lba: own-tag handover
         (80, 7, 1, 41, 40, '2026-10-01 07:00:00'),  (80, 7, 2, 7, 0, '2026-10-01 07:00:00'),    -- older, outside a since-window
         (80, 8, 1, 41, 40, '2026-10-09 08:00:00'),                                              -- owner change, no population
-        (80, 9, 1, 40, NULL, '2026-10-06 07:10:49'),                                            -- scan glitch: Moa -> nobody...
-        (80, 9, 1, NULL, 40, '2026-10-06 07:10:51'), (80, 9, 2, 1, 0, '2026-10-06 07:10:51')    -- ...and back 2s later
+        (80, 9, 1, NULL, 40, '2026-10-09 09:00:00'), (80, 9, 2, 1, 0, '2026-10-09 09:00:00'),   -- free planet colonized: 1
+        (80, 10, 1, 44, 40, '2026-10-09 10:00:00'), (80, 10, 2, 3, 0, '2026-10-09 10:00:00'),   -- inactive owner
+        (80, 11, 1, 45, 40, '2026-10-09 11:00:00'), (80, 11, 2, 4, 0, '2026-10-09 11:00:00'),   -- resigned owner
+        (80, 13, 1, 46, 40, '2026-10-09 12:00:00'), (80, 13, 2, 6, 0, '2026-10-09 12:00:00')    -- allied owner
 `).run();
 // The battle conquest of 80:5 (report time in +02:00, before the scan) — its report counts it.
 db.prepare(`
@@ -242,9 +254,9 @@ db.prepare(`
     VALUES (9001, '2026-10-09T07:30:00+02:00', 40, 'Moa', 'RD', 43, 'Sil', 'PD', 1, 30, 80, 5)
 `).run();
 const popMoa = () => battlePoints.getLeaderboards(null, 50, 'all').pop.find(r => r.player_name === 'Moa');
-ok('a conquest without a battle report credits the new owner from the scan log, a battle conquest only once via its report, a scan glitch not at all (5 + 30 + 7)',
+ok('only conquests from active non-friendly players count: One (5) + battle report (30) + older One (7); free, inactive, resigned and allied owners add nothing',
     popMoa() && popMoa().raw === 42, popMoa());
-ok('an ally handover (same tag both sides) earns nothing',
+ok('an own-tag handover earns nothing',
     !battlePoints.getLeaderboards(null, 50, 'all').pop.some(r => r.player_name === 'Lba'));
 const since = battlePoints.getLeaderboards('2026-10-05T00:00:00.000Z', 50, 'all').pop.find(r => r.player_name === 'Moa');
 ok('the since-window applies to logged conquests (2026-10-01 one left out: 5 + 30)', since && since.raw === 35, since);

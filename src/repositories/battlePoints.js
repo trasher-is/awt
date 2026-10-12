@@ -1,6 +1,7 @@
 const db = require('../database');
 const settingsRepo = require('./settings');
 const bonusGoalsRepo = require('./bonusGoals');
+const { friendlyAllianceTags } = require('../utils/friendly-alliance-tags');
 
 function settingNumber(key, fallback) {
     const row = settingsRepo.getSetting(key);
@@ -100,23 +101,34 @@ function getCvLeaderboard(sinceIso, limit, scope = 'members', allianceId = null)
     }));
 }
 
-// Conquests without a battle (an undefended planet, or an Unknown planet's leftover
-// population colonized), read from the scan's own log: an OWNER_CHANGE to a player plus the
-// POP_DROP the same scan logged (sync.js logs the two back to back, oldPop -> 0). Credited
-// to the new owner. This replaced crediting 'battle-conquer' News rows, which only existed
-// once the conquering member opened their own News page — most never do, so most such
-// conquests never counted.
+// Conquests without a battle (an undefended planet taken from a player), read from the
+// scan's own log: an OWNER_CHANGE to a player plus the POP_DROP the same scan logged (sync.js
+// logs the two back to back, oldPop -> 0). Credited to the new owner. This replaced crediting
+// 'battle-conquer' News rows, which only existed once the conquering member opened their own
+// News page — most never do, so most such conquests never counted.
 //
+// Only a planet taken from an ACTIVE, NON-FRIENDLY player counts (trasheris, 2026-10-12):
+//   • a free / Unknown planet's leftover population (no previous owner) is a colonization,
+//     not a kill;
+//   • a friendly previous owner — our own tag or an allied one (friendlyAllianceTags) — is a
+//     handover;
+//   • an inactive previous owner (resigned before the conquest, or no activity in the
+//     CONQUEST_ACTIVE_DAYS before it) is farming an idle planet. last_activity_at is only the
+//     player's LATEST activity, so a player seen active after the conquest counts too.
 // A conquest that DID come with a battle is already counted by its battle report
 // (killed_population), so it is skipped here: a conquered_planet report by the new owner on
 // this planet since the planet's previous logged owner change. The +5 minutes absorbs a
 // report time a little ahead of the scan; report times carry a UTC offset, which SQLite's
-// datetime() applies. Also skipped: a planet that "left" a player for nobody and came back
-// to them within minutes — two scans disagreeing (seen 2026-10-06 07:10 on several planets
-// at once, seconds apart), not a conquest. The victim (for the friendly-fire / excluded-tag clause) is the
-// previous owner, by current alliance like the News branch; a free planet has none.
+// datetime() applies. (Requiring a previous owner also drops the player -> nobody -> same
+// player flips two disagreeing scans produce seconds apart, e.g. 2026-10-06 07:10.) Tags are
+// the players' CURRENT alliance, like the News branch.
+const CONQUEST_ACTIVE_DAYS = 7;
 function loggedConquestBranch(sinceIso, excludedTags) {
     const ex = exclusionClauseFor('ca.tag', 'oa.tag', excludedTags);
+    const friendly = [...friendlyAllianceTags()];
+    const friendlySql = friendly.length
+        ? `AND (oa.tag IS NULL OR UPPER(oa.tag) NOT IN (${friendly.map(() => '?').join(',')}))`
+        : '';
     const sinceSql = sinceIso ? `AND oc.timestamp >= datetime(?)` : '';
     const sql = `
             SELECT player_id, player_name, pop_credit FROM (
@@ -133,6 +145,10 @@ function loggedConquestBranch(sinceIso, excludedTags) {
                 LEFT JOIN alliances ca ON ca.id = cp.alliance_id
                 LEFT JOIN alliances oa ON oa.id = op.alliance_id
                 WHERE oc.event_type_id = 1
+                  AND op.id IS NOT NULL
+                  AND (op.resigned_at IS NULL OR datetime(op.resigned_at) > datetime(oc.timestamp))
+                  AND datetime(op.last_activity_at) >= datetime(oc.timestamp, '-${CONQUEST_ACTIVE_DAYS} days')
+                  ${friendlySql}
                   AND NOT EXISTS (
                       SELECT 1 FROM battle_reports b
                       WHERE b.conquered_planet = 1 AND b.att_player_id = oc.new_value
@@ -145,16 +161,10 @@ function loggedConquestBranch(sinceIso, excludedTags) {
                               AND prev.event_type_id = 1 AND prev.id < oc.id
                         ), '0000-00-00 00:00:00')
                   )
-                  AND NOT EXISTS (
-                      SELECT 1 FROM planet_events flick
-                      WHERE flick.system_id = oc.system_id AND flick.planet_index = oc.planet_index
-                        AND flick.event_type_id = 1 AND flick.id < oc.id
-                        AND oc.old_value IS NULL AND flick.new_value IS NULL AND flick.old_value = oc.new_value
-                        AND flick.timestamp >= datetime(oc.timestamp, '-10 minutes')
-                  )
                   ${sinceSql} AND ${ex.clause}
             ) WHERE pop_credit > 0`;
-    return { sql, params: sinceIso ? [sinceIso, ...ex.params] : [...ex.params] };
+    const upper = friendly.map(t => String(t).toUpperCase());
+    return { sql, params: sinceIso ? [...upper, sinceIso, ...ex.params] : [...upper, ...ex.params] };
 }
 
 // Population is only ever credited to the attacker (the side whose fleet bombed the
