@@ -10,12 +10,11 @@
 // own host (see validateBaseUrl), so a mistyped or malicious source cannot turn this
 // scheduler into unsanctioned automated traffic against astrowars.
 const peersRepo = require('../repositories/peers');
-const { KINDS, shape } = require('./peer-kinds');
+const { KINDS, ENABLED_KINDS, shape } = require('./peer-kinds');
 
-// What we read from partners. Only player intelligence reports for now: they are all the
-// hub shows (the profile's Hub Intel card), and pulling the rest would store data nobody
-// sees. A partner may offer more; it is not requested.
-const PULL_KINDS = ['players'];
+// What we read from partners: ENABLED_KINDS only (intel reports for now), whatever a
+// partner offers. Pulling the rest would store data nothing shows.
+const PULL_KINDS = ENABLED_KINDS;
 
 const TS_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 const KEY_RE = /^\d{1,15}$/;

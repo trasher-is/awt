@@ -97,7 +97,7 @@ function startHubA() {
         ok('no token, a wrong token and a revoked token all get the same 401', [noTok, wrongTok, revoked].every(r => r.status === 401)
             && noTok.raw === wrongTok.raw && wrongTok.raw === revoked.raw, [noTok.status, wrongTok.status, revoked.status]);
         const hello = await request(A, 'GET', '/peer-api/v1/hello', undefined, bearer(info.token));
-        ok('hello lists exactly the kinds granted', hello.status === 200 && JSON.stringify(hello.body.kinds) === '["players","systems"]', hello.body);
+        ok('hello lists only intel reports, even for a link created with more', hello.status === 200 && JSON.stringify(hello.body.kinds) === '["players"]', hello.body);
         const fleets = await request(A, 'GET', '/peer-api/v1/feed?kind=fleets', undefined, bearer(info.token));
         ok('a kind not granted is refused', fleets.status === 403, fleets.status);
         const appUsers = await request(A, 'GET', '/peer-api/v1/feed?kind=app_users', undefined, bearer(info.token));
@@ -125,7 +125,7 @@ function startHubA() {
             const pull = await request(B, 'POST', `/hub-api/admin/peers/sources/${sid}/pull`);
             ok('pull succeeds and stores the one intel report A holds', pull.status === 200 && pull.body.success && pull.body.result.received === 1, pull.body);
             const kinds = db.prepare(`SELECT kind, COUNT(*) n FROM peer_intel GROUP BY kind ORDER BY kind`).all();
-            ok('only intel reports arrived — systems were offered but not pulled, the profile without intel not kept', JSON.stringify(kinds) === '[{"kind":"players","n":1}]', kinds);
+            ok('only intel reports arrived — the profile without intel was not sent', JSON.stringify(kinds) === '[{"kind":"players","n":1}]', kinds);
             ok('nothing landed in B\'s own player table', db.prepare(`SELECT COUNT(*) n FROM players`).get().n === 0);
 
             const pull2 = await request(B, 'POST', `/hub-api/admin/peers/sources/${sid}/pull`);
@@ -146,10 +146,11 @@ function startHubA() {
             ok('a guest cannot create a share link', guestLink.status === 403);
 
             session = { userId: 1, gameName: 'AdminB', role: 'admin' };
-            const mk = await request(B, 'POST', '/hub-api/admin/peers/links', { name: 'Hub C', scopes: ['players', 'nope'] });
-            ok('creating a link returns its token once, unknown scopes dropped', mk.status === 200 && /^awtp_/.test(mk.body.token)
+            const mk = await request(B, 'POST', '/hub-api/admin/peers/links', { name: 'Hub C', scopes: ['players', 'systems', 'nope'] });
+            ok('creating a link returns its token once, kinds not in use and unknown scopes dropped', mk.status === 200 && /^awtp_/.test(mk.body.token)
                 && JSON.stringify(mk.body.link.scopes) === '["players"]', mk.body);
             const listed = await request(B, 'GET', '/hub-api/admin/peers');
+            ok('the admin page offers only intel reports to share', JSON.stringify(listed.body.kinds.map(k => k.key)) === '["players"]', listed.body.kinds);
             ok('the admin list never shows the token or its hash', !listed.raw.includes(mk.body.token) && !listed.raw.includes(peersRepo.sha256(mk.body.token)));
             const empty = await request(B, 'POST', '/hub-api/admin/peers/links', { name: 'Hub D', scopes: [] });
             ok('a link that shares nothing is refused', empty.status === 400);

@@ -4,12 +4,12 @@
 const express = require('express');
 const { requireAuth, requireAdmin } = require('./_middleware');
 const peersRepo = require('../repositories/peers');
-const { KINDS, KIND_NAMES, normaliseScopes } = require('../utils/peer-kinds');
+const { KINDS, ENABLED_KINDS, normaliseScopes } = require('../utils/peer-kinds');
 const { validateBaseUrl, pullSource } = require('../utils/peer-pull');
 
 const router = express.Router();
 
-const kindList = () => KIND_NAMES.map(k => ({ key: k, label: KINDS[k].label }));
+const kindList = () => ENABLED_KINDS.map(k => ({ key: k, label: KINDS[k].label }));
 const idParam = req => { const n = Number(req.params.id); return Number.isSafeInteger(n) && n > 0 ? n : null; };
 const cleanName = v => String(v || '').trim().slice(0, 80);
 

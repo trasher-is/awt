@@ -46,6 +46,10 @@ decides, partner by partner, what it lets that partner read.
    | Incomings on our planets | Attacker, target planet, ships, CV, arrival. Not who covers it, the defence plan or the Discord alert |
    | Battle reports | Both sides, CV, losses, ships, winner, location |
 
+   **For now only Player intel reports can be granted and pulled** (`ENABLED_KINDS` in
+   `src/utils/peer-kinds.js`); the admin page shows only that box. The other kinds stay
+   defined so enabling one later is a one-word change.
+
    The exact fields are listed in `src/utils/peer-kinds.js`. A field not listed there is
    never sent. Logins, activity times, country, who in your alliance entered a piece of
    intel, who covers an incoming, defence choices, and every account, plan, route, trade,
@@ -83,8 +87,8 @@ next request. What they already received stays with them.
    not shown. A partner's claimed date is capped at the time its row last changed, so a
    partner cannot make an old report win by dating it in the future.
 
-   For now only player intelligence reports are read and shown (`PULL_KINDS` in
-   `src/utils/peer-pull.js`). Our own feed can still offer the other kinds to a partner.
+   For now only player intelligence reports are read and shown (`ENABLED_KINDS` in
+   `src/utils/peer-kinds.js`).
 
 **Remove** deletes the partner and everything they ever sent. **Pause** stops pulling but
 keeps what you have.

@@ -101,6 +101,11 @@ const KINDS = {
 
 const KIND_NAMES = Object.keys(KINDS);
 
+// The kinds in use for now: what we pull from partners and what an admin can grant one.
+// Only intel reports, because the profile's Hub Intel card is all that shows partner
+// data. The other kinds stay defined so turning one on is a one-word change here.
+const ENABLED_KINDS = ['players'];
+
 const MAX_TEXT = 200;
 
 // Coerce one value to its declared type; anything that does not fit becomes null rather
@@ -140,7 +145,7 @@ function shape(kind, data) {
 
 function normaliseScopes(list) {
     if (!Array.isArray(list)) return [];
-    return [...new Set(list.map(String).filter(k => KINDS[k]))];
+    return [...new Set(list.map(String).filter(k => ENABLED_KINDS.includes(k)))];
 }
 
-module.exports = { KINDS, KIND_NAMES, shape, normaliseScopes };
+module.exports = { KINDS, KIND_NAMES, ENABLED_KINDS, shape, normaliseScopes };
