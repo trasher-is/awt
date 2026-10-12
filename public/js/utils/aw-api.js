@@ -433,11 +433,44 @@
                 has_fleet: null,
                 is_unknown: !!p.isUnknownOwner,
                 is_sieged: p.hasSiege ? 1 : 0,
+                // v6.0.2 exposes optional category data. Only its availability is
+                // verified here: never interpret nested ranks, CV or battle details.
+                // Older servers/tabs omitting the property must not clear a later read.
+                ...(Object.prototype.hasOwnProperty.call(p, 'statistics')
+                    && normalizePlanetStatistics(p.statistics) !== undefined
+                    ? { api_statistics: normalizePlanetStatistics(p.statistics) } : {}),
             }));
         const payload = { system_id: parseInt(systemId, 10), planets, fleets: [] };
         if (capturedAt) payload.captured_at = capturedAt;
         else if (observationLive) payload.observation_live = true;
         return payload;
+    }
+
+    const PLANET_STATISTICS_KINDS = ['bestPlanet', 'bestGuarded', 'strongestFleets', 'recentBattles'];
+    function normalizePlanetStatistics(value) {
+        if (value === null) return Object.fromEntries(PLANET_STATISTICS_KINDS.map(kind => [kind, false]));
+        if (!value || typeof value !== 'object' || Array.isArray(value)
+            || !PLANET_STATISTICS_KINDS.some(kind => Object.prototype.hasOwnProperty.call(value, kind))) return undefined;
+        const available = item => {
+            if (item === null || item === undefined) return false;
+            if (Array.isArray(item)) return item.length > 0;
+            if (typeof item === 'object') return Object.keys(item).length > 0;
+            if (typeof item === 'string') return item.length > 0;
+            return typeof item === 'boolean' || (typeof item === 'number' && Number.isFinite(item));
+        };
+        return Object.fromEntries(PLANET_STATISTICS_KINDS.map(kind => [kind,
+            Object.prototype.hasOwnProperty.call(value, kind) && available(value[kind])]));
+    }
+
+    // The hub accepts only the minimal transport, never nested player/battle data.
+    // null explicitly clears availability; invalid/absent values make no claim.
+    function validatePlanetStatisticsAvailability(value) {
+        if (value === null) return normalizePlanetStatistics(null);
+        if (!value || typeof value !== 'object' || Array.isArray(value)
+            || Object.keys(value).length !== PLANET_STATISTICS_KINDS.length
+            || !PLANET_STATISTICS_KINDS.every(kind => Object.prototype.hasOwnProperty.call(value, kind)
+                && typeof value[kind] === 'boolean')) return undefined;
+        return Object.fromEntries(PLANET_STATISTICS_KINDS.map(kind => [kind, value[kind]]));
     }
 
     // API system objects (getSolarSystems/searchSolarSystems/Map-sectors shape) -> the
@@ -621,6 +654,7 @@
         getPlayers, getPlayer, searchPlayers,
         getPlayersByIds, getAlliancesByIds, resolvePlanetOwners, resolveSectorOwners,
         systemNameParts, mapPlanetsToSyncPayload, mapSolarSystemsToSyncPayload, mapPlayersToSyncPayload,
+        normalizePlanetStatistics, validatePlanetStatisticsAvailability, PLANET_STATISTICS_KINDS,
         mapSectorAlliancesToSyncPayload,
         mapPlayerDetailToSyncPayload,
         pickHeaders, classifyTransfer, META_HEADERS,

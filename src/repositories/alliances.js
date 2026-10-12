@@ -246,6 +246,7 @@ const getAllianceStatsForArchiveStmt = db.prepare(`
            p.last_activity_at AS pl_last_activity_at, p.has_intel AS pl_has_intel,
            p.physics AS pl_physics, p.mathematics AS pl_mathematics,
            p.stats_scraped_at AS pl_stats_scraped_at, p.intel_updated_at AS pl_intel_updated_at,
+           p.joined AS pl_joined,p.battle_race_not_before AS pl_battle_race_not_before,
            (SELECT COUNT(*) FROM planets WHERE owner_id = s.player_id) AS pl_planet_count,
            -- Battles and luck from the stored reports, not the game's fields (see players.js getWarRoomPlayers).
            (SELECT COUNT(*) FROM battle_reports WHERE att_player_id = s.player_id)

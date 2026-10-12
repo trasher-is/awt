@@ -2,6 +2,7 @@
 // never writes the race/science fields and never presents model compatibility as a
 // calibrated probability. All requests stay on the hub's own stored reports.
 import '../utils/sqlite-time.js';
+import { mountRaceEstimateCard } from './race-estimate-card.js';
 const { formatLocalDateTime } = globalThis.AWSqliteTime;
 
 const mounted = new WeakMap();
@@ -194,5 +195,6 @@ export function mountBattleRaceIntel(container, { playerId, hasBio = false, hasL
     render();
     const controller = { ready: request('GET') };
     mounted.set(container, controller);
+    mountRaceEstimateCard(container, { playerId: id, hasBio, hasLiveIntel });
     return controller;
 }

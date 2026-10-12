@@ -83,6 +83,17 @@ function synth({
     return row;
 }
 
+// The immutable stats read stored when a report first reaches the hub (#307).
+function withSnapshot(row, enemy = MEMBER) {
+    const side = row.att_player_id === SUBJECT_ID ? 'def' : 'att';
+    return {
+        ...row, stats_snapshot_at: '2026-09-01 12:05:00',
+        [`${side}_race_attack`]: enemy.race_attack, [`${side}_race_defense`]: enemy.race_defense,
+        [`${side}_physics`]: enemy.physics, [`${side}_mathematics`]: enemy.mathematics,
+        [`${side}_player_level`]: enemy.level, [`${side}_intel_at`]: enemy.intel_updated_at,
+    };
+}
+
 const infer = (rows, opts = options()) => inferBattleRace(SUBJECT_ID, rows, opts);
 function skipped(name, row, reason, opts) {
     const result = infer([row], opts);
@@ -106,7 +117,7 @@ const basic = infer([synth({ rd: 0, math: 8 })]);
 ok('the result declares conditional compatibility and supported race range',
     basic.version === VERSION && basic.assumptions.some(text => /not a probability/.test(text))
     && basic.assumptions.some(text => /supported -4 to \+4/.test(text)), basic);
-ok('the version changes, so results saved by the one-sided method are not shown as current', VERSION === 2);
+ok('captured intel changes the method, invalidating current-row results saved as version 2', VERSION > 2);
 ok('ATK stays unresolved: the stored win_chance column is the dice roll',
     basic.attack.status === 'insufficient' && equal(basic.attack.candidates, ALL_PICKS)
     && /dice/.test(basic.attack.reason) && /#277/.test(basic.attack.reason), basic.attack);
@@ -177,6 +188,10 @@ skipped(`opponent intel more than ${KNOWN_SIDE_MAX_AGE_HOURS} h after the battle
     options({ opponents: { [ENEMY_ID]: { ...MEMBER, intel_updated_at: '2026-09-03 12:01:00' } } }));
 skipped('opponent intel without a timestamp has no known age', synth(), 'ally_stats_unknown',
     options({ opponents: { [ENEMY_ID]: { ...MEMBER, intel_updated_at: null } } }));
+skipped('a legacy report cannot borrow the known opponent race from after its later Joined date', synth(), 'ally_stats_unknown',
+    options({ opponents: { [ENEMY_ID]: { ...MEMBER, joined: '2026-09-01T13:00:00Z', intel_updated_at: '2026-09-01 14:00:00' } } }));
+skipped('a legacy report cannot borrow the known opponent race from after its detected restart', synth(), 'ally_stats_unknown',
+    options({ opponents: { [ENEMY_ID]: { ...MEMBER, battle_race_not_before: '2026-09-01 13:00:00', intel_updated_at: '2026-09-01 14:00:00' } } }));
 ok('the result records how far the opponent intel was from the battle',
     basic.known_side_intel_max_age_hours === 2 && infer([]).known_side_intel_max_age_hours === null, basic);
 ok('opponent intel just inside the window is used',
@@ -186,6 +201,50 @@ const scouted = infer([synth({ rd: 1, math: 8, enemy: { ...MEMBER, race_attack: 
     options({ opponents: { [ENEMY_ID]: { ...MEMBER, race_attack: -2, physics: 18 } } }));
 ok('a scouted player outside our alliance counts as a known side like a member',
     scouted.eligible_report_count === 1 && scouted.defense.candidates.includes(1) && narrowed(scouted), scouted);
+
+console.log('\n── Captured known-side intel survives later scans ──');
+for (const role of ['att', 'def']) {
+    const row = synth({ role, rd: 1, math: 8 });
+    const captured = withSnapshot(row);
+    const expected = infer([row]);
+    for (const [label, current] of [
+        ['newer sciences', { ...MEMBER, physics: 40, mathematics: 40, level: 40, intel_updated_at: '2026-09-05 12:00:00' }],
+        ['different race', { ...MEMBER, race_attack: 4, race_defense: -4 }],
+        ['cleared intel', { ...MEMBER, has_intel: 0 }],
+        ['missing player row', null],
+    ]) {
+        const result = infer([captured], options({ opponents: { [ENEMY_ID]: current } }));
+        ok(`${role}: ${label} does not replace the report's captured intel`,
+            result.eligible_report_count === 1 && equal(result.defense, expected.defense)
+            && result.known_side_intel_max_age_hours === 2, result);
+    }
+    ok(`${role}: a legacy row with a NULL snapshot stamp keeps the current-intel fallback`,
+        equal(infer([{ ...row, stats_snapshot_at: null }]).defense, expected.defense));
+    const side = role === 'att' ? 'def' : 'att';
+    const blank = Object.fromEntries(['race_attack', 'race_defense', 'physics', 'mathematics', 'player_level', 'intel_at']
+        .map(field => [`${side}_${field}`, null]));
+    skipped(`${role}: captured absence of intel never borrows today's intel`,
+        { ...captured, ...blank }, 'no_known_side');
+    skipped(`${role}: incomplete captured stats never borrow today's intel`,
+        { ...captured, [`${side}_mathematics`]: null }, 'ally_stats_unknown');
+    skipped(`${role}: stale captured intel never borrows today's intel`,
+        { ...captured, [`${side}_intel_at`]: '2026-08-30 11:59:00' }, 'ally_stats_unknown');
+    skipped(`${role}: captured intel without its date never borrows today's intel`,
+        { ...captured, [`${side}_intel_at`]: null }, 'ally_stats_unknown');
+    skipped(`${role}: malformed captured stats never borrow today's intel`,
+        { ...captured, [`${side}_physics`]: '10' }, 'ally_stats_unknown');
+    skipped(`${role}: a malformed capture stamp never borrows today's intel`,
+        { ...captured, stats_snapshot_at: 'yesterday' }, 'ally_stats_unknown');
+    skipped(`${role}: intel dated after the capture is inconsistent`,
+        { ...captured, [`${side}_intel_at`]: '2026-09-01 12:06:00' }, 'ally_stats_unknown');
+    const zeros = { ...MEMBER, race_attack: 0, race_defense: 0, physics: 0, mathematics: 0, level: 0 };
+    const zeroRow = synth({ role, rd: 1, math: 8, enemy: zeros });
+    const zeroResult = infer([withSnapshot(zeroRow, zeros)], options({ opponents: {} }));
+    ok(`${role}: real zero values in the captured intel stay usable`,
+        zeroResult.eligible_report_count === 1 && equal(zeroResult.defense, infer([zeroRow],
+            options({ opponents: { [ENEMY_ID]: zeros } })).defense), zeroResult);
+}
+
 skipped('an unknown public science level is not treated as zero', synth(), 'science_level_unknown',
     options({ subject: { science_level: 0, level: 20 } }));
 skipped('a missing public science level is not guessed', synth(), 'science_level_unknown',

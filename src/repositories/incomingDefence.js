@@ -32,7 +32,7 @@ function getGarrison(ownerId, systemId, planetIndex, beforeIso) {
 // One of our players' combat stats, with the member sheet's sciences beside the scan's —
 // see allySide() in src/utils/incoming-battle.js for why both.
 const getAllyCombatRowStmt = db.prepare(`
-    SELECT p.race_attack, p.race_defense, p.physics, p.mathematics, p.science_level, p.level,
+    SELECT p.id,p.joined,p.battle_race_not_before,p.race_attack, p.race_defense, p.physics, p.mathematics, p.science_level, p.level,
            p.has_intel, p.intel_updated_at, p.total_xp,
            s.physics AS sheet_physics, s.mathematics AS sheet_mathematics,
            s.sciences_updated_at AS sheet_sciences_updated_at
