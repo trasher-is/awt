@@ -116,7 +116,10 @@ attack/defense/combat-value profile, see [Ship types](game-rules.md#ship-types).
 
 Transports have two jobs: capturing a planet that already has population (you need at least
 as many transports as the target's population level), or bombing a planet to kill its
-population and randomly damage its buildings.
+population and randomly damage its buildings. Both are options you tick at launch
+(**Conquer** and **Bomb**): untick both and the transports land on any planet without
+touching it, which is how you park them on a friendly planet before the last jump. See
+[Ship types](game-rules.md#ship-types).
 
 A planet keeps growing population while your fleet is still in flight, so size your transport
 count for what it'll have **on arrival**, not when you launched — especially against an
@@ -352,7 +355,8 @@ uncontested Free planets:
   softer target — it costs them a fight (or a detour) even if that fleet was never the
   actual target.
 - **A forward planet is worth more than its own loot** if it shortens everyone else's route
-  — landing on a planet you or an ally control halves standard flight time (**RZ:** allied
+  — landing on a planet you or an ally control halves standard flight time (decided by who
+  owns it when you launch; the flight time never changes mid-flight) (**RZ:** allied
   flight factor 75%; see
   [Science fields — effects](game-rules.md#science-fields--effects)), so a captured "airport"
   near the frontier lets your whole alliance jump through it and reach further than any single
