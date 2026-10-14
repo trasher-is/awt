@@ -691,7 +691,10 @@ Each of the six science fields does something different besides its raw growth r
   (`0.91^energy`), and this only applies **at launch** — fleets already in flight don't
   benefit until they land and launch again. Landing on a planet you or an ally controls
   **always halves** the flight time. (Matches `public/js/utils/travel-model.js` exactly —
-  `ENERGY_BASE = 0.91`, alliance/own-destination ×0.5.)
+  `ENERGY_BASE = 0.91`, alliance/own-destination ×0.5.) Whether a flight is halved depends on
+  who owns the destination **at launch**, and a flight's duration never changes once it is in
+  the air: a fleet launched at half time keeps flying at half time even if the planet changes
+  hands before it lands. (Stated by the alliance's lead player, 2026-10-14.)
   **RZ:** the current `Fleet` options use **95% per level** (`0.95^energy`), compared with
   standard's 91%, and **75%** for allied flights, compared with 50%. Fixed minimums and
   reducible coefficients also differ; see [Fleet and combat notes](#fleet-and-combat-notes).
@@ -824,6 +827,12 @@ scaled by economy like the three combat ships above.
   20 transports against a planet with 10 population kills all 10 population. Building
   damage from a pop-kill is random and scales with how much PP was spent on the transports
   used in the attack.
+- **Capture and pop-kill are launch options, not automatic.** The launch screen has
+  **Conquer** and **Bomb** checkboxes (alongside **Disregard NAP** and **Allied**). With
+  Conquer and Bomb both unticked, transports can land on **any** planet and do nothing to
+  it: no capture, no population killed. That lets transports wait on a friendly or neutral
+  planet as a jump-off point before the final leg. (Stated by the alliance's lead player,
+  2026-10-14. What the Allied and Disregard NAP options change is not yet recorded here.)
 - **Colony ships** found new colonies. Sending exactly **1 CS** colonizes a free planet with
   **0 buildings and 0 PP**. Sending **more than 1** uses one CS to colonize and the rest
   **disband into PP**, at a rate of **15 PP per extra CS**: 2 CS colonizes but the 1 extra CS
