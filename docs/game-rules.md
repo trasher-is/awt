@@ -1159,6 +1159,10 @@ and caps on its buildings — though the exact numbers aren't published.
   Defence panel and incoming alerts are built on them.)
 - **Colony ships and transports never take damage when their side wins a battle.**
 - **Maximum of 5 fleets in transit at any given time.**
+- **Fleets in flight are invisible except to the destination's owner.** A player sees only
+  the fleets flying into planets they own; vision range and Biology don't reveal fleets in
+  flight elsewhere. A fleet parked on, or flying to, someone else's planet gives nothing
+  away until it launches at one of yours. (Stated by the alliance's lead player, 2026-10-14.)
 - **A fleet of 4 ships or fewer can lose every ship, even in a battle it wins.** A fleet of
   **5 or more** always keeps at least one ship when the fight is not certain (see
   [Battle formula](#battle-formula)).
