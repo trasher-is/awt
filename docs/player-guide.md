@@ -118,8 +118,10 @@ Transports have two jobs: capturing a planet that already has population (you ne
 as many transports as the target's population level), or bombing a planet to kill its
 population and randomly damage its buildings. Both are options you tick at launch
 (**Conquer** and **Bomb**): untick both and the transports land on any planet without
-touching it, which is how you park them on a friendly planet before the last jump. See
-[Ship types](game-rules.md#ship-types).
+touching it, which is how you park them on a friendly planet before the last jump. Don't
+park on a planet of the target's alliance: every member of an alliance is alerted to an
+attack on any of them. See [Ship types](game-rules.md#ship-types) and
+[Fleet and combat notes](game-rules.md#fleet-and-combat-notes).
 
 A planet keeps growing population while your fleet is still in flight, so size your transport
 count for what it'll have **on arrival**, not when you launched — especially against an
