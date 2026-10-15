@@ -24,6 +24,7 @@ const { gameTrafficGate } = require('./src/utils/game-traffic');
 const { hubBody } = require('./src/utils/hub-body');
 const { splitSessionsDatabase } = require('./src/utils/session-store');
 const { sessionAccountGuard } = require('./src/utils/session-account');
+const { hubSessionOptions } = require('./src/utils/session-options');
 const { presenceTouch } = require('./src/utils/presence-touch');
 const usersRepo = require('./src/repositories/users');
 
@@ -149,22 +150,17 @@ if (sessionSplit.action === 'split') {
     console.warn(`[Core] Session split skipped (${sessionSplit.action}): ${sessionSplit.error}. Everyone will need to log in again.`);
 }
 
-app.use(session({
+// Thirty days since the member was last seen, renewed on every request — see
+// src/utils/session-options.js for why the cookie has to be re-sent for that to hold.
+app.use(session(hubSessionOptions({
     // `dir` must be absolute for the same reason .env is loaded from __dirname above:
     // under pm2 the working directory can differ from the project root, and a relative
     // '.' would then point the session store at a different file than the one the split
     // above wrote — logging everyone out with no obvious cause.
     store: new SQLiteStore({ db: 'sessions.db', dir: __dirname }),
     secret: resolveSessionSecret(),
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-        maxAge: 30 * 24 * 60 * 60 * 1000, // Cookies last for 30 days
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: COOKIE_SECURE
-    }
-}));
+    secure: COOKIE_SECURE
+})));
 
 // --- THE ACCOUNT BEHIND THE SESSION ---
 // Directly after the session is loaded and before ANYTHING reads it: the hub routers, the

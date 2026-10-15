@@ -56,6 +56,24 @@ function getUserByGameName(gameName) {
     return getUserByGameNameStmt.get(gameName);
 }
 
+// The login form's lookup. Names are stored as typed when the account was made (mostly
+// lowercase: 'caveman', 'harpyie'), but a phone keyboard capitalises the first letter of a
+// text field — 'Harpyie' — and an exact match turned that into "Invalid credentials" with
+// nothing to say why. So: an exact match wins; otherwise a case-insensitive one, but only
+// when it is unambiguous. game_name is UNIQUE case-sensitively, so 'Bob' and 'bob' can
+// both exist; then 'BOB' matches neither rather than guessing between two accounts.
+// (NOCASE folds ASCII only, which is what game names are.)
+const getUsersByGameNameNoCaseStmt = db.prepare(
+    `SELECT * FROM app_users WHERE game_name = ? COLLATE NOCASE ORDER BY id LIMIT 2`
+);
+function getUserForLogin(gameName) {
+    if (typeof gameName !== 'string' || gameName === '') return undefined;
+    const exact = getUserByGameNameStmt.get(gameName);
+    if (exact) return exact;
+    const matches = getUsersByGameNameNoCaseStmt.all(gameName);
+    return matches.length === 1 ? matches[0] : undefined;
+}
+
 const getUserAllianceIdBridgeStmt = db.prepare(`
     SELECT p.id AS player_id, p.alliance_id AS alliance_id
     FROM app_users u
@@ -284,7 +302,7 @@ function deleteLinkCodesByUserId(userId) {
 module.exports = {
     getUserByDiscordId, getUserByDiscordName, getUserAllianceTagByDiscordName,
     getUserMentionByGameName, getActiveRecipientsExcludingAdmin, getValidActiveUserIds,
-    getUserByGameName, getUserAllianceIdBridge, getUserById, getAllUsersWithIdle,
+    getUserByGameName, getUserForLogin, getUserAllianceIdBridge, getUserById, getAllUsersWithIdle,
     getUserNameById, getUserDiscordInfoById, getUserActiveStatusById, getAdminPasswordHash,
     getActiveMemberNames, touchUserLastSeen, getUserPresence, getSessionAccountById, bumpSessionVersion,
     updateUserGameName, deleteUser, createUser, updateUserDiscordName, clearUserDiscordFields,
