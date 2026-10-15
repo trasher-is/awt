@@ -831,7 +831,9 @@ scaled by economy like the three combat ships above.
   **Conquer** and **Bomb** checkboxes (alongside **Disregard NAP** and **Allied**). With
   Conquer and Bomb both unticked, transports can land on **any** planet and do nothing to
   it: no capture, no population killed. That lets transports wait on a friendly or neutral
-  planet as a jump-off point before the final leg. (Stated by the alliance's lead player,
+  planet as a jump-off point before the final leg. A jump-off planet in the target's own
+  alliance alerts every member of it (see [Fleet and combat notes](#fleet-and-combat-notes)).
+  (Stated by the alliance's lead player,
   2026-10-14. What the Allied and Disregard NAP options change is not yet recorded here.)
 - **Colony ships** found new colonies. Sending exactly **1 CS** colonizes a free planet with
   **0 buildings and 0 PP**. Sending **more than 1** uses one CS to colonize and the rest
@@ -1159,10 +1161,14 @@ and caps on its buildings — though the exact numbers aren't published.
   Defence panel and incoming alerts are built on them.)
 - **Colony ships and transports never take damage when their side wins a battle.**
 - **Maximum of 5 fleets in transit at any given time.**
-- **Fleets in flight are invisible except to the destination's owner.** A player sees only
-  the fleets flying into planets they own; vision range and Biology don't reveal fleets in
-  flight elsewhere. A fleet parked on, or flying to, someone else's planet gives nothing
-  away until it launches at one of yours. (Stated by the alliance's lead player, 2026-10-14.)
+- **Fleets in flight are invisible except to the destination's owner and that owner's
+  alliance.** A player sees the fleets flying into planets they own, and every member of
+  their alliance is alerted to an attack on any member. Vision range and Biology don't reveal
+  fleets in flight anywhere else. A fleet parked on, or flying to, a planet outside your
+  alliance gives nothing away until it launches at one of your alliance's planets. Hopping
+  through any planet of the target's alliance alerts that whole alliance, so the only quiet
+  staging spots are your own planets, unowned planets and other alliances' planets.
+  (Stated by the alliance's lead player, 2026-10-14; alliance-wide alerts added 2026-10-15.)
 - **A fleet of 4 ships or fewer can lose every ship, even in a battle it wins.** A fleet of
   **5 or more** always keeps at least one ship when the fight is not certain (see
   [Battle formula](#battle-formula)).
