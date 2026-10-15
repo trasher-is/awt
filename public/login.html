@@ -55,12 +55,13 @@
                 <div class="space-y-2">
                     <label for="game_name" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">In-Game Name</label>
                     <input type="text" id="game_name" placeholder="e.g. Harpyie" required
+                        autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="username"
                         class="flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-colors">
                 </div>
                 
                 <div class="space-y-2">
                     <label for="password" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Your Tool Password</label>
-                    <input type="password" id="password" placeholder="••••••••" required
+                    <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password"
                         class="flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-colors">
                 </div>
 

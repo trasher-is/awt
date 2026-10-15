@@ -316,7 +316,7 @@ function seedUser(name, pw, role) {
     // next "*/" — including the session mount these anchors sit next to. None of the
     // anchors below can occur inside a comment, so the raw text is the safer read here.
     const serverSrc = readRaw('server.js');
-    const sessionMount = serverSrc.indexOf('app.use(session({');
+    const sessionMount = serverSrc.indexOf('app.use(session(hubSessionOptions(');
     const guardMount = serverSrc.indexOf('app.use(sessionAccountGuard(');
     ok('server.js mounts the guard', guardMount !== -1);
     ok('...after the session middleware', sessionMount !== -1 && guardMount > sessionMount, [sessionMount, guardMount]);

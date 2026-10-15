@@ -11,8 +11,8 @@ const router = express.Router();
 router.post('/login', (req, res) => {
     const { game_name, password } = req.body;
 
-    // Find the user
-    const user = usersRepo.getUserByGameName(game_name);
+    // Find the user — case-insensitively, see getUserForLogin.
+    const user = usersRepo.getUserForLogin(typeof game_name === 'string' ? game_name.trim() : game_name);
 
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
     if (user.is_active === 0) return res.status(403).json({ error: 'Account has been deactivated' });
