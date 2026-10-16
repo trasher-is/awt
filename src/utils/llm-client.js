@@ -1,5 +1,19 @@
 // Only this boundary knows the provider or its credential. Tests inject a transport.
-const Anthropic = require('@anthropic-ai/sdk');
+//
+// The SDK is loaded on first use, never at startup. The race check is off unless RACE_LLM=1,
+// but a top-level require made the whole hub crash on boot (nginx: 502) on any install where
+// the package was missing — a `git pull` without a successful `npm ci`, which is exactly how
+// other alliances' hubs went down updating past #340 (2026-10-16).
+let anthropicModule;
+function loadSdk() {
+    if (anthropicModule === undefined) {
+        try { anthropicModule = require('@anthropic-ai/sdk'); } catch (err) {
+            console.warn('[RaceLLM] @anthropic-ai/sdk is not installed (run npm ci) — the AI race check cannot run.');
+            anthropicModule = null;
+        }
+    }
+    return anthropicModule;
+}
 const { ANSWER_SCHEMA, systemPrompt } = require('./race-llm-prompt');
 const MAX_INPUT_TOKENS = 32768;
 const MAX_OUTPUT_TOKENS = 8000;
@@ -90,6 +104,8 @@ function requestParameters(evidence, modelVersion, config) {
 }
 function providerError(error) {
     if (error instanceof CheckError) return error;
+    const Anthropic = loadSdk();
+    if (!Anthropic) return new CheckError('provider_error');
     if (error instanceof Anthropic.RateLimitError) return new CheckError('provider_rate_limit');
     if (error instanceof Anthropic.AuthenticationError) return new CheckError('provider_authentication');
     if (error instanceof Anthropic.APIConnectionTimeoutError) return new CheckError('provider_timeout');
@@ -103,6 +119,8 @@ function createClient({ transport, config = configuration } = {}) {
         const apiKey = process.env.ANTHROPIC_API_KEY;
         if (!apiKey) throw new CheckError('missing_key');
         // Retries may spend the same reservation twice after an ambiguous timeout.
+        const Anthropic = loadSdk();
+        if (!Anthropic) throw new CheckError('provider_error');
         sdk ||= new Anthropic({ apiKey, baseURL: 'https://api.anthropic.com', maxRetries: 0, timeout: 60000 });
         return sdk.messages.create(params);
     });
