@@ -262,8 +262,28 @@ export function initSpy() {
         });
     }
 
+    // Which game account this browser is playing. Asking costs TWO game requests
+    // (/Game/Players answers with a 302 to the member's own profile), and this frame
+    // reloads on every game page the member opens — so it used to cost two extra requests
+    // per click (2026-10-16). The answer is kept per browser for IDENTITY_TTL_MS instead.
+    const IDENTITY_KEY = 'awt.gameIdentity.v1';
+    const IDENTITY_TTL_MS = 6 * 60 * 60 * 1000;
+    function cachedIdentity() {
+        try {
+            const v = JSON.parse(localStorage.getItem(IDENTITY_KEY) || 'null');
+            if (v && typeof v.name === 'string' && v.name && Date.now() - v.at < IDENTITY_TTL_MS) return v.name;
+        } catch (err) { /* no storage: ask the game */ }
+        return null;
+    }
+
     async function backgroundIdentityCheck() {
-        if (verifiedPlayerName) return; 
+        if (verifiedPlayerName) return;
+        const cached = cachedIdentity();
+        if (cached) {
+            verifiedPlayerName = cached;
+            sendContext();
+            return;
+        }
         try {
             const response = await gameFetch('/Game/Players');
             const html = await response.text();
@@ -272,7 +292,8 @@ export function initSpy() {
             const nameNode = doc.querySelector('th span a[href^="/Game/Players/Profile/"]');
             if (nameNode) {
                 verifiedPlayerName = nameNode.innerText.trim();
-                sendContext(); 
+                try { localStorage.setItem(IDENTITY_KEY, JSON.stringify({ name: verifiedPlayerName, at: Date.now() })); } catch (err) { /* ok */ }
+                sendContext();
             }
         } catch (error) {}
     }

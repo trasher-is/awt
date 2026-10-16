@@ -9,27 +9,15 @@
 // comment for why the specifics live only in config data, never here.
 
 import '../utils/game-rate-limit.js'; // must load before gameFetch resolves the gate
+import { claimSharedJob } from '../utils/shared-job.js';
 import { parseRankingPage } from '../utils/ranking-page-parser.js';
 const { gameFetch } = globalThis.AWGameRate;
 
-// The underlying ranking itself only updates once/day in-game — hourly is more than
-// enough to catch that within an hour of it happening, without spending calls chasing a
-// page that hasn't changed.
-const CHECK_INTERVAL_MS = 60 * 60 * 1000;
-const LOCK_KEY = 'awt.bonusGoalsRankingSync.lock.v1';
-const LOCK_TTL_MS = 55 * 60 * 1000; // shorter than the interval
-
-function claimLock(key, ttlMs) {
-    try {
-        const raw = localStorage.getItem(key);
-        const now = Date.now();
-        if (raw && now - parseInt(raw, 10) < ttlMs) return false;
-        localStorage.setItem(key, String(now));
-        return true;
-    } catch (err) {
-        return true; // no localStorage — degrade to "always run", same fallback as game-rate-limit.js
-    }
-}
+// The ranking only changes once a day in-game, so the hub runs this once per game day,
+// from ONE member's browser, rotating between members (src/repositories/sharedJobs.js).
+// This interval only decides how often this browser ASKS the hub — not game traffic.
+const CHECK_INTERVAL_MS = 15 * 60 * 1000;
+const JOB = 'ranking-bonus-goals';
 
 async function syncOneTarget(target) {
     const path = target && target.config && target.config.ranking_path;
@@ -48,12 +36,13 @@ async function syncOneTarget(target) {
 
 async function runCheck() {
     if (!globalThis.AWGameRate.isMemberActive()) return; // member away: no game traffic on their session (game-rate-limit.js)
-    if (!claimLock(LOCK_KEY, LOCK_TTL_MS)) return;
     try {
         const res = await fetch('/hub-api/sync/bonus-goals/ranking-targets');
         if (!res.ok) return;
         const body = await res.json().catch(() => ({}));
         const targets = Array.isArray(body.targets) ? body.targets : [];
+        if (!targets.length) return;
+        if (!(await claimSharedJob(JOB))) return; // another member has it, or it already ran today
         for (const target of targets) {
             try { await syncOneTarget(target); } catch (err) {
                 console.warn('[BonusGoalsSync] ranking scrape failed for goal', target.goal_id, err.message);

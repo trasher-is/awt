@@ -62,14 +62,15 @@ function build({ version = 'v1', hasFrame = true } = {}) {
 
     return {
         init: (onNotice = (v) => notices.push(v)) => context.__init(onNotice),
-        // intervals[0] is the version check, intervals[1] the "is it a safe moment?" retry.
+        // intervals[0] is the version check (there is no reload retry timer any more).
         check: () => intervals[0](),
-        retryReload: () => intervals[1](),
+        intervalCount: () => intervals.length,
         deploy: (v) => { served = v; },
         advance: (ms) => { now += ms; },
         activityInHub: () => fire(listeners.doc, 'pointerdown'),
         activityInGameFrame: () => fire(listeners.frameDoc, 'pointerdown'),
         hide: () => { document.hidden = true; fire(listeners.doc, 'visibilitychange'); },
+        show: () => { document.hidden = false; fire(listeners.doc, 'visibilitychange'); },
         get reloads() { return reloads; },
         get notices() { return notices; },
         get fetches() { return fetches; },
@@ -88,8 +89,9 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
         await flush();
         await h.check();
         h.advance(IDLE_MS * 2);
-        h.retryReload();
-        ok('an unchanged build never reloads, however long the tab sits idle', h.reloads === 0);
+        h.activityInHub();
+        h.hide(); h.show();
+        ok('an unchanged build never reloads, whatever the member does', h.reloads === 0);
         ok('and says nothing', h.notices.length === 0, h.notices);
     }
 
@@ -119,14 +121,23 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
         await h.check();
         ok('the member is told once', h.notices.length === 1 && h.notices[0] === 'v2', h.notices);
         ok('but is NOT interrupted mid-session', h.reloads === 0);
-
         h.advance(IDLE_MS - 1000);
-        h.retryReload();
-        ok('still not interrupted just short of the idle threshold', h.reloads === 0);
+        h.activityInHub();
+        ok('a click short of the idle threshold does not reload', h.reloads === 0);
+        ok('no timer that could reload by itself', h.intervalCount() === 1, h.intervalCount());
+    }
 
-        h.advance(2000);
-        h.retryReload();
-        ok('reloads once they have been idle long enough', h.reloads === 1);
+    console.log('\n── An idle VISIBLE tab waits for the member to come back ' + '─'.repeat(19));
+    {
+        const h = build({ version: 'v1' });
+        h.init();
+        await flush();
+        h.deploy('v2');
+        await h.check();
+        h.advance(IDLE_MS * 6);
+        ok('nobody there for an hour: no reload (it would be a game request on their session)', h.reloads === 0);
+        h.activityInHub();
+        ok('their first click after the idle spell loads the new build', h.reloads === 1);
     }
 
     console.log('\n── Activity inside the GAME FRAME counts as being busy ' + '─'.repeat(22));
@@ -136,33 +147,31 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
         await flush();
         h.deploy('v2');
         await h.check();
-
-        // Someone playing steadily in the frame touches nothing in the hub document.
         for (let i = 0; i < 5; i++) {
             h.advance(IDLE_MS - 1000);
             h.activityInGameFrame();
-            h.retryReload();
         }
         ok('a member playing in the game frame is never yanked out of it, however long they play',
             h.reloads === 0);
-
         h.advance(IDLE_MS + 1000);
-        h.retryReload();
-        ok('and the reload lands as soon as they actually stop', h.reloads === 1);
+        h.activityInGameFrame();
+        ok('a click in the frame after an idle spell loads it', h.reloads === 1);
     }
 
-    console.log('\n── A hidden tab is free to reload immediately ' + '─'.repeat(31));
+    console.log('\n── A hidden tab never reloads; coming back to it does ' + '─'.repeat(23));
     {
         const h = build({ version: 'v1' });
         h.init();
         await flush();
-        h.activityInHub(); // just used it — would be far too soon on the idle rule alone
+        h.activityInHub();
         h.deploy('v2');
         await h.check();
-        ok('a visible tab in active use holds off', h.reloads === 0);
         h.hide();
-        ok('backgrounding it reloads at once — nobody is looking, let alone playing',
-            h.reloads === 1);
+        h.advance(IDLE_MS * 6);
+        await h.check();
+        ok('hidden, however long: no reload', h.reloads === 0);
+        h.show();
+        ok('the tab shown again loads the new build at once', h.reloads === 1);
     }
 
     console.log('\n── Repeat checks do not repeat themselves ' + '─'.repeat(35));
@@ -175,11 +184,11 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
         await h.check();
         await h.check();
         ok('the same new build is announced once, not once per poll', h.notices.length === 1, h.notices);
-
         h.advance(IDLE_MS * 2);
-        h.retryReload();
-        h.retryReload();
-        ok('and reload is called once, not on every retry tick', h.reloads === 1);
+        h.activityInHub();
+        h.activityInHub();
+        h.hide(); h.show();
+        ok('and reload is called once', h.reloads === 1);
     }
 
     console.log('\n── The server being unreachable is not a reason to do anything ' + '─'.repeat(14));
@@ -192,7 +201,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
         h.deploy(null);
         await h.check().catch(() => {});
         h.advance(IDLE_MS * 2);
-        h.retryReload();
+        h.activityInHub();
         ok('an unusable answer reloads nothing', context.reloads === 0);
     }
 

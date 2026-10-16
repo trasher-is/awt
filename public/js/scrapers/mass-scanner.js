@@ -14,7 +14,7 @@ export async function runPlayerScan(updateProgressCb) {
         // Used to scrape the Ranking/EcoBonus pages for the id list — that page can be
         // empty for stretches of a round (e.g. nothing ranked yet right after a reset) and
         // duplicated work the API-sourced roster (player-api-sync.js's ListPlayer pull,
-        // forced immediately by the Deep Scan button) already gives the hub for free. The
+        // forced immediately by the Player API scan button) already gives the hub for free. The
         // hub's own /hub-api/players — every player id already on record — is the ONE
         // source for "which ids to deep-scan" now; this scan is purely about the
         // page-scrape-only fields (Infrastructure History) the API cannot provide.
@@ -25,7 +25,7 @@ export async function runPlayerScan(updateProgressCb) {
 
         const total = playerIds.length;
         if (!total) {
-            updateProgressCb("Error: no players on record yet — run Deep Scan (API) first", 0, 0);
+            updateProgressCb("Error: no players on record yet — run Player API scan first", 0, 0);
             return;
         }
 

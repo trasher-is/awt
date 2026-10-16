@@ -27,6 +27,7 @@ const { ownerChangeKind } = require('../utils/system-change-lines');
 const { normaliseSource, observationKind } = require('../utils/population-trace');
 const { sanitizeScanRun, sanitizeRunId, sanitizeAgeMs } = require('../utils/scan-run');
 const scanRunsRepo = require('../repositories/scanRuns');
+const sharedJobsRepo = require('../repositories/sharedJobs');
 const populationTraceRepo = require('../repositories/populationTrace');
 const battleContext = require('../utils/battle-context');
 const { storePlanetStatistics, applyStatisticsWrite } = require('../utils/api-statistics-store');
@@ -852,6 +853,28 @@ router.post('/sync/player-scan-claim', requireAuth, (req, res) => {
     const ids = playersRepo.getStalePlayerIdsForApiScan(limit);
     if (ids.length) playersRepo.markPlayersApiScanned(ids);
     res.json({ success: true, ids });
+});
+
+// --- SHARED BACKGROUND JOBS (see repositories/sharedJobs.js) ---
+// A browser asks before running a hub-wide background job; only a granted claim may send
+// game requests. Rotates the job between members so no one's game session carries it alone.
+router.post('/sync/shared-job/:job/claim', requireAuth, (req, res) => {
+    const job = req.params.job;
+    if (!sharedJobsRepo.isClaimable(job)) return res.status(404).json({ success: false, error: 'unknown job' });
+    const result = sharedJobsRepo.claim(job, req.session);
+    res.json({ success: true, granted: result.granted, next_at_ms: result.next_at_ms || null });
+});
+
+// A member pressed a scan button: record who and when, for the "last scan" lines.
+router.post('/sync/shared-job/:job/ran', requireAuth, (req, res) => {
+    const job = req.params.job;
+    if (!sharedJobsRepo.isJob(job)) return res.status(404).json({ success: false, error: 'unknown job' });
+    sharedJobsRepo.record(job, req.session);
+    res.json({ success: true });
+});
+
+router.get('/sync/shared-jobs', requireAuth, (req, res) => {
+    res.json({ success: true, jobs: sharedJobsRepo.status() });
 });
 
 // --- PLAYER API-SCAN STATUS ---

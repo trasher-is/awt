@@ -91,6 +91,13 @@ limit above:
   queue, and every background job checks `AWGameRate.isMemberActive()` before a tick
   (pinned by `src/utils/game-rate-limit-presence.test.js`, which fails for any new
   timer that talks to the game without the check).
+- **Hub-wide jobs run from one member at a time.** Data the whole hub shares (galaxy
+  seed every 10 min; rankings and battle-report details once per game day) is claimed
+  through `/hub-api/sync/shared-job/:job/claim` first (`src/repositories/sharedJobs.js`).
+  The claim rotates between members, and never goes to the same member twice in a row
+  unless their last run was 6 h ago. Players are API-scanned only from the manual
+  "Player API scan" button; there is no background sweep. A new background job that
+  talks to the game should be a shared job, not a per-tab timer.
 
 Server-side scripts still must not accept a production base URL.
 `scripts/collect-travel-fixtures.js` checks `--base` against an allowlist and refuses

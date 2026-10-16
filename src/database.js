@@ -1525,6 +1525,17 @@ function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_galaxy_scan_runs_run      ON galaxy_scan_runs(run_id);
         CREATE INDEX IF NOT EXISTS idx_galaxy_scan_runs_received ON galaxy_scan_runs(received_at);
     `);
+    // Background jobs the whole hub shares (galaxy seed, battle-report detail, ranking pages)
+    // and the manual scan buttons: who ran each one last, and when. A job runs from ONE
+    // member's browser at a time, rotating between members — see repositories/sharedJobs.js.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS shared_jobs (
+            job TEXT PRIMARY KEY,
+            last_user_id INTEGER REFERENCES app_users(id) ON DELETE SET NULL,
+            last_game_name TEXT,
+            last_at_ms INTEGER NOT NULL
+        )
+    `);
     addColumn('population_trace', 'run_id', 'TEXT');
     addColumn('population_trace', 'payload_age_ms', 'INTEGER');
     db.exec(`CREATE INDEX IF NOT EXISTS idx_population_trace_run ON population_trace(run_id)`);
