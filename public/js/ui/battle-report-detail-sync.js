@@ -77,6 +77,7 @@ async function runClaimLoop(claimUrl, maxBatches) {
 let sweeping = false;
 
 async function runSweepTick() {
+    if (!globalThis.AWGameRate.isMemberActive()) return; // member away: no game traffic on their session (game-rate-limit.js)
     if (sweeping) return; // in-tab re-entrancy guard — a slow tick must not stack (see Plan 3's fix for the same class of bug)
     if (!claimLock(SWEEP_LOCK_KEY, SWEEP_LOCK_TTL_MS)) return; // cross-tab guard
     sweeping = true;

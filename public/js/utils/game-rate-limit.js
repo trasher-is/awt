@@ -49,6 +49,28 @@
 // back to per-realm state — the behaviour this file already had. That is a degradation,
 // not a hole: server.js runs the same cap again on the proxy, where every one of these
 // requests has to pass through anyway.
+//
+// ─── ONLY WHILE THE MEMBER IS ACTUALLY HERE ───────────────────────────────────
+// Every request this tool sends to the game rides on the member's own game session, and
+// the game counts that as the member being active. Left alone, an open hub tab kept its
+// member at "0s idle" around the clock: the player sweep every 30s, the page watches every
+// 15 minutes, the map seed every 5 — none of them asked whether anyone was there. That is
+// automation acting without the member (2026-10-16, caveman: "that is too much
+// automation"), so the queue below only drains while the member is present:
+//
+//   • the document is visible (a background tab, a minimised window or a locked phone
+//     sends nothing — an iframe's document.hidden follows the top-level page), AND
+//   • the member touched, clicked, typed, scrolled or moved the mouse in some hub or game
+//     document within the last IDLE_AFTER_MS.
+//
+// Requests made while away are held, not dropped, and go out once the member is back.
+// The background jobs also check isMemberActive() before starting a tick, so a long
+// absence does not pile up a backlog that bursts out on return.
+//
+// The last-input time is shared through localStorage like the rate window, because the
+// member mostly interacts with the game iframe while the timers live in the wrapper.
+// Without localStorage each realm only sees its own input — the safe direction to fail.
+// Outside a browser (Node, the tests) there is no document and the gate is always open.
 (function (root, factory) {
     const api = factory();
     if (typeof module === 'object' && module !== null && module.exports) module.exports = api;
@@ -59,6 +81,10 @@
     const MAX_PER_SECOND = 5;
     const WINDOW_MS = 1000;
     const SHARED_KEY = 'awt.gameRate.window.v1';
+    const INPUT_KEY = 'awt.memberInput.v1';
+    const IDLE_AFTER_MS = 10 * 60 * 1000;
+    const INPUT_WRITE_EVERY_MS = 5 * 1000;   // mousemove fires constantly; storage need not
+    const AWAY_RECHECK_MS = 2 * 1000;
 
     // Start times of the requests inside the current rolling window. Used when no shared
     // store is reachable; otherwise the window lives in localStorage (see the header).
@@ -174,11 +200,55 @@
         return { wait: 0, inWindow: after.length };
     }
 
+    // ─── MEMBER PRESENCE (see the header) ───────────────────────────────────
+    function doc() {
+        const d = globalThis.document;
+        return d && typeof d.addEventListener === 'function' ? d : null;
+    }
+
+    let localInputAt = 0;
+    function noteInput() {
+        const t = now();
+        if (t - localInputAt < INPUT_WRITE_EVERY_MS) return;
+        localInputAt = t;
+        const s = store();
+        if (!s) return;
+        try { s.setItem(INPUT_KEY, String(t)); } catch (err) { /* local time still counts */ }
+    }
+
+    function lastInputAt() {
+        let shared = 0;
+        const s = store();
+        if (s) {
+            try { shared = parseInt(s.getItem(INPUT_KEY), 10) || 0; } catch (err) { shared = 0; }
+        }
+        return Math.max(localInputAt, shared);
+    }
+
+    function isMemberActive() {
+        const d = doc();
+        if (!d) return true;
+        if (d.hidden || d.visibilityState === 'hidden') return false;
+        return now() - lastInputAt() < IDLE_AFTER_MS;
+    }
+
+    const INPUT_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart', 'mousemove', 'scroll'];
+    {
+        const d = doc();
+        if (d) {
+            for (const type of INPUT_EVENTS) {
+                d.addEventListener(type, noteInput, { capture: true, passive: true });
+            }
+        }
+    }
+
     function drain() {
         if (draining) return;
         draining = true;
         const step = () => {
             if (queue.length === 0) { draining = false; return; }
+            // Held, not dropped: nothing leaves on the member's session while they are away.
+            if (!isMemberActive()) { setTimeout(step, AWAY_RECHECK_MS); return; }
             const t = now();
             const { wait, inWindow } = reserve(t);
             if (wait > 0) { setTimeout(step, wait); return; }
@@ -259,6 +329,8 @@
             // document is then doing the same, and the real ceiling is whatever
             // server.js enforces on the proxy.
             shared: !!s,
+            // true while requests are being held because the member is away.
+            paused: !isMemberActive(),
         };
     }
 
@@ -266,10 +338,17 @@
         recent = [];
         queue.length = 0;
         draining = false;
+        localInputAt = 0;
         const s = store();
-        if (s) writeShared(s, []);
+        if (s) {
+            writeShared(s, []);
+            try { s.removeItem ? s.removeItem(INPUT_KEY) : s.setItem(INPUT_KEY, '0'); } catch (err) { /* ignore */ }
+        }
         Object.assign(stats, { sent: 0, queued: 0, maxQueueDepth: 0, maxObservedPerSecond: 0, firstAt: null, lastAt: null });
     }
 
-    return { gameFetch, schedule, snapshot, reset, MAX_PER_SECOND, WINDOW_MS, SHARED_KEY };
+    return {
+        gameFetch, schedule, snapshot, reset, isMemberActive, noteInput,
+        MAX_PER_SECOND, WINDOW_MS, SHARED_KEY, INPUT_KEY, IDLE_AFTER_MS,
+    };
 });

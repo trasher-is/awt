@@ -47,6 +47,7 @@ async function syncOneTarget(target) {
 }
 
 async function runCheck() {
+    if (!globalThis.AWGameRate.isMemberActive()) return; // member away: no game traffic on their session (game-rate-limit.js)
     if (!claimLock(LOCK_KEY, LOCK_TTL_MS)) return;
     try {
         const res = await fetch('/hub-api/sync/bonus-goals/ranking-targets');

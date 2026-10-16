@@ -50,6 +50,11 @@ function build({ pullResult = { ok: true, inserted: 0 }, berlinDay = '2026-09-12
     return { ...mod, calls, timers };
 }
 
+// The module reads the presence gate from game-rate-limit.js (globalThis.AWGameRate);
+// these tests are about scheduling, so the member is present unless a case says otherwise.
+let memberActive = true;
+globalThis.AWGameRate = { isMemberActive: () => memberActive };
+
 (async () => {
     ok('the expected slice is where the test expects it', sliceStart !== -1 && sliceEnd !== -1 && sliceStart < sliceEnd);
 
@@ -119,6 +124,17 @@ function build({ pullResult = { ok: true, inserted: 0 }, berlinDay = '2026-09-12
         const tabB = factory(pullOnce, AWDailyReset, shared, setTimeout_, console_, 'k-day', 'k-attempt', 5 * 60 * 1000, 30 * 60 * 1000, 5);
         ok('the first tab claims the attempt lock', tabA.claimAttemptLock() === true);
         ok('a second tab is refused immediately after', tabB.claimAttemptLock() === false);
+    }
+
+    console.log('\n── Member away: no pull, look again in a minute ' + '─'.repeat(22));
+    {
+        memberActive = false;
+        const mod = build();
+        await mod.tick();
+        memberActive = true;
+        ok('no pull while the member is away', mod.calls.pullOnce === 0);
+        ok('no attempt lock taken (another tab with a member present can pull)', mod.claimAttemptLock() === true);
+        ok('rechecks in about a minute', mod.timers.length === 1 && mod.timers[0].delay <= 60 * 1000 && mod.timers[0].delay > 50 * 1000, mod.timers);
     }
 
     console.log('\n' + '─'.repeat(75));

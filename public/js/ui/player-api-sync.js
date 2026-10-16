@@ -94,6 +94,7 @@ export async function pullPlayerList() {
 }
 
 async function runListPull() {
+    if (!globalThis.AWGameRate.isMemberActive()) return; // member away: no game traffic on their session (game-rate-limit.js)
     if (!claimLock(LIST_LOCK_KEY, LIST_LOCK_TTL_MS)) return;
     try {
         const result = await pullPlayerList();
@@ -164,6 +165,7 @@ async function scanClaimedBatch(limit, onProgress = () => {}) {
 // player detail scans" means the two now take turns instead of racing.
 let scanning = false;
 async function runSweepTick() {
+    if (!globalThis.AWGameRate.isMemberActive()) return; // member away: no game traffic on their session (game-rate-limit.js)
     // Re-entrancy guard: a tick can easily run long (up to SWEEP_BATCH_SIZE sequential
     // getPlayer calls + POSTs can exceed the 60s interval), and the cross-tab
     // claimLock/localStorage check above solves a DIFFERENT problem (another tab/window

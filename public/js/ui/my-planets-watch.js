@@ -43,6 +43,7 @@ async function syncMyPlanets() {
 // switch would be wasteful. Silently a no-op within the lock window — see forceMyPlanetsSync
 // for the explicit "Reload my planets" button, which must not silently do nothing.
 export async function runMyPlanetsCheck() {
+    if (!globalThis.AWGameRate.isMemberActive()) return; // member away: no game traffic on their session (game-rate-limit.js)
     if (!claimLock()) return;
     try { await syncMyPlanets(); }
     catch (err) { console.warn('[MyPlanetsWatch] check failed:', err.message); }

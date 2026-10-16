@@ -322,6 +322,7 @@ function claimAutoSeedLock() {
 }
 
 async function runAutoSeedTick() {
+    if (!globalThis.AWGameRate.isMemberActive()) return; // member away: no game traffic on their session (game-rate-limit.js)
     if (!claimAutoSeedLock()) return;
     try {
         const result = await seedGalaxyFromApi(undefined, { trigger: 'auto' });

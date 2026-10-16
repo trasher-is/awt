@@ -85,6 +85,12 @@ limit above:
   calls the API itself — it has no game session.
 - **No dedicated bot or test accounts.** The Discord bot has no session and stays on the
   local formulas permanently.
+- **Only while the member is present.** Every request on a member's session counts as
+  that member being active in the game, so nothing goes out while the tab is hidden or
+  nobody has touched a hub/game document for 10 minutes: `game-rate-limit.js` holds its
+  queue, and every background job checks `AWGameRate.isMemberActive()` before a tick
+  (pinned by `src/utils/game-rate-limit-presence.test.js`, which fails for any new
+  timer that talks to the game without the check).
 
 Server-side scripts still must not accept a production base URL.
 `scripts/collect-travel-fixtures.js` checks `--base` against an allowlist and refuses

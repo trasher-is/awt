@@ -125,7 +125,7 @@ ok('the generic secret-goal parser retains its original behavior', context.parse
 (async () => {
     const calls = [], posts = [], locks = new Map();
     Object.assign(context, {
-        AWGameRate: { gameFetch: async url => { calls.push(url); return { ok: true, text: async () => 'synthetic' }; } },
+        AWGameRate: { isMemberActive: () => true, gameFetch: async url => { calls.push(url); return { ok: true, text: async () => 'synthetic' }; } },
         DOMParser: class { parseFromString() { return full.doc; } },
         fetch: async (url, init) => { posts.push({ url, init }); return { ok: true }; },
         localStorage: { getItem: key => locks.get(key), setItem: (key, value) => locks.set(key, value) },

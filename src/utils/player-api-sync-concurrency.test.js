@@ -43,6 +43,11 @@ function build({ claimLockResult = true, scanClaimedBatchResult = { ok: true, cl
     return { ...mod, calls };
 }
 
+// The module reads the presence gate from game-rate-limit.js (globalThis.AWGameRate);
+// these tests are about scheduling, so the member is present unless a case says otherwise.
+let memberActive = true;
+globalThis.AWGameRate = { isMemberActive: () => memberActive };
+
 (async () => {
     console.log('── Lifting the shared `scanning` flag + runSweepTick + deepScanPlayers ' + '─'.repeat(4));
     ok('the expected slice is where the test expects it', sliceStart !== -1 && sliceEnd !== -1 && sliceStart < sliceEnd);
@@ -112,6 +117,15 @@ function build({ claimLockResult = true, scanClaimedBatchResult = { ok: true, cl
         try { await mod.deepScanPlayers(150, () => {}); } catch (e) { threw = true; }
         ok('a thrown scanClaimedBatch still propagates (deepScanPlayers has no catch of its own)', threw);
         ok('but `scanning` is still released via finally, not left stuck true', mod.isScanning() === false);
+    }
+
+    console.log('\n── Member away: the sweep tick does nothing ' + '─'.repeat(31));
+    {
+        memberActive = false;
+        const mod = build();
+        await mod.runSweepTick();
+        memberActive = true;
+        ok('no lock claimed and no scan while away', mod.calls.claimLock === 0 && mod.calls.scanClaimedBatch === 0, mod.calls);
     }
 
     console.log('\n' + '─'.repeat(75));

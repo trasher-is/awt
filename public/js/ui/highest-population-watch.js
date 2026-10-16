@@ -27,6 +27,7 @@ function claimLock() {
 }
 
 async function runCheck() {
+    if (!globalThis.AWGameRate.isMemberActive()) return; // member away: no game traffic on their session (game-rate-limit.js)
     if (!claimLock()) return;
     try {
         const pageRes = await gameFetch(RANKING_PATH);
