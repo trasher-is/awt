@@ -85,6 +85,19 @@ limit above:
   calls the API itself — it has no game session.
 - **No dedicated bot or test accounts.** The Discord bot has no session and stays on the
   local formulas permanently.
+- **Only while the member is present.** Every request on a member's session counts as
+  that member being active in the game, so nothing goes out while the tab is hidden or
+  nobody has touched a hub/game document for 10 minutes: `game-rate-limit.js` holds its
+  queue, and every background job checks `AWGameRate.isMemberActive()` before a tick
+  (pinned by `src/utils/game-rate-limit-presence.test.js`, which fails for any new
+  timer that talks to the game without the check).
+- **Hub-wide jobs run from one member at a time.** Data the whole hub shares (galaxy
+  seed every 10 min; rankings and battle-report details once per game day) is claimed
+  through `/hub-api/sync/shared-job/:job/claim` first (`src/repositories/sharedJobs.js`).
+  The claim rotates between members, and never goes to the same member twice in a row
+  unless their last run was 6 h ago. Players are API-scanned only from the manual
+  "Player API scan" button; there is no background sweep. A new background job that
+  talks to the game should be a shared job, not a per-tab timer.
 
 Server-side scripts still must not accept a production base URL.
 `scripts/collect-travel-fixtures.js` checks `--base` against an allowlist and refuses

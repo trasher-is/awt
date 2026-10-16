@@ -4,10 +4,11 @@
 //
 // Runs independently of battle-sync.js (which populates battle_reports rows from the API
 // once a day, after the reset — see that file) — this sweep only ever touches rows that
-// already exist, filling in the one thing the API doesn't provide. Its own 90s clock is
-// unchanged by that: it self-limits (the claim query only ever returns what still needs
-// scraping), so it quietly drains each day's new batch over a couple of hours and then
-// goes idle until the next one, with no need for its own once-a-day schedule.
+// already exist, filling in the one thing the API doesn't provide. Once per game day
+// (2026-10-16, was every 90s): reports only arrive at the reset, so ONE member's browser,
+// rotating between members, drains the day's batch in a single run 30 minutes after it
+// (src/repositories/sharedJobs.js, job 'battle-report-detail'). Every request rides on that
+// member's own game session, which the game counts as them being active.
 //
 // Since the game's BattleReport change the search response carries the planet and the
 // ship table itself, and /sync/battle-reports marks those reports done on arrival — so
@@ -17,25 +18,17 @@
 
 import '../utils/game-rate-limit.js'; // must load before either gameFetch or aw-api resolves the gate
 import '../scrapers/battle-report-parser.js';
+import { claimSharedJob } from '../utils/shared-job.js';
 
 const { scrapeBattleReportShipDetail } = globalThis.BattleReportParser;
 
-const SWEEP_INTERVAL_MS = 90 * 1000; // slower than the player sweep — battle reports are much lower volume
-const SWEEP_LOCK_KEY = 'awt.battleReportDetailSync.lock.v1';
-const SWEEP_LOCK_TTL_MS = 80 * 1000; // shorter than the interval
+// How often this browser ASKS the hub whether today's run is due — a hub request, not game traffic.
+const CHECK_INTERVAL_MS = 15 * 60 * 1000;
+const JOB = 'battle-report-detail';
+// One run drains the day: ~80 reports a day (Oct 2026), and most need no page at all now.
+const MAX_BATCHES_PER_RUN = 30;
 const SWEEP_BATCH_SIZE = 5; // battle-report pages are heavier fetches than a player profile; keep batches small
 
-function claimLock(key, ttlMs) {
-    try {
-        const raw = localStorage.getItem(key);
-        const now = Date.now();
-        if (raw && now - parseInt(raw, 10) < ttlMs) return false;
-        localStorage.setItem(key, String(now));
-        return true;
-    } catch (err) {
-        return true; // no localStorage — degrade to "always run", same fallback philosophy as game-rate-limit.js
-    }
-}
 
 // Shared claim/scrape/sync loop for both endpoints below — the two claim routes
 // (battle-report-ship-detail-claim, battle-report-location-backfill-claim) return the
@@ -77,16 +70,16 @@ async function runClaimLoop(claimUrl, maxBatches) {
 let sweeping = false;
 
 async function runSweepTick() {
+    if (!globalThis.AWGameRate.isMemberActive()) return; // member away: no game traffic on their session (game-rate-limit.js)
     if (sweeping) return; // in-tab re-entrancy guard — a slow tick must not stack (see Plan 3's fix for the same class of bug)
-    if (!claimLock(SWEEP_LOCK_KEY, SWEEP_LOCK_TTL_MS)) return; // cross-tab guard
     sweeping = true;
     try {
-        await runClaimLoop('/hub-api/sync/battle-report-ship-detail-claim', 1);
-        // One backfill batch per tick too — this is a one-time legacy gap (reports
-        // scraped before planet capture existed, or by a stale tab running old JS; see
-        // getReportsNeedingLocationBackfill), so it self-terminates as it catches up
-        // rather than needing its own separate timer.
-        await runClaimLoop('/hub-api/sync/battle-report-location-backfill-claim', 1);
+        if (!(await claimSharedJob(JOB))) return; // another member has it, or it already ran today
+        await runClaimLoop('/hub-api/sync/battle-report-ship-detail-claim', MAX_BATCHES_PER_RUN);
+        // The location backfill is a one-time legacy gap (reports scraped before planet
+        // capture existed, or by a stale tab running old JS; see
+        // getReportsNeedingLocationBackfill), so it rides along and self-terminates.
+        await runClaimLoop('/hub-api/sync/battle-report-location-backfill-claim', MAX_BATCHES_PER_RUN);
     } catch (err) {
         console.warn('[BattleReportDetailSync] sweep tick failed:', err.message);
     } finally {
@@ -98,5 +91,6 @@ let started = false;
 export function initBattleReportDetailSync() {
     if (started) return;
     started = true;
-    setInterval(runSweepTick, SWEEP_INTERVAL_MS);
+    runSweepTick();
+    setInterval(runSweepTick, CHECK_INTERVAL_MS);
 }

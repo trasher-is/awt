@@ -9,6 +9,7 @@
 // fleet visibility away for a scan that finishes in seconds instead of minutes — see PR
 // discussion for why that trade was made deliberately, not by accident.
 import '../utils/game-rate-limit.js';
+import { claimSharedJob } from '../utils/shared-job.js';
 import '../utils/aw-api.js';
 import '../utils/capture-freshness.js'; // side-effect import: puts the model on globalThis
 import { scrapeSystemById } from './system-parser.js';
@@ -293,9 +294,9 @@ async function runSeed(onProgress, ctx) {
 // whatever this seed detects, and detection only happens when it runs. Real, in-vision
 // changes (a conquest, a pop-kill, a colonization) need to be CAUGHT close to when they
 // happen to be worth announcing — once a day turns "who's fighting where, right now" into
-// a single overnight dump. And unlike the player sweep, running this more often costs
-// nothing extra against the agreed budget: it's ONE Map/sectors call per run regardless of
-// interval, so there is no real tradeoff to make here. Real live vision (bio-range) is a
+// a single overnight dump. A run is cheap against the agreed budget (ONE Map/sectors call,
+// plus an alliance lookup), but every run counts as game activity for the member whose
+// session sends it — hence the shared rotation below. Real live vision (bio-range) is a
 // wholly separate concept handled elsewhere — see vision-model.js.
 //
 // IMPORTANT — what this still does NOT fix: even at a tight interval, Map/sectors only
@@ -305,24 +306,18 @@ async function runSeed(onProgress, ctx) {
 // Getting THOSE current still needs either real vision (scouting/holding territory) or a
 // member's browser physically visiting that system's page (spy.js's live DOM scrape, see
 // issue #168 for the fuller writeup).
-const AUTO_SEED_LOCK_KEY = 'awt.galaxyAutoSeed.lock.v1';
-const AUTO_SEED_LOCK_TTL_MS = 4 * 60 * 1000; // shorter than AUTO_SEED_INTERVAL_MS
-const AUTO_SEED_INTERVAL_MS = 5 * 60 * 1000;
-
-function claimAutoSeedLock() {
-    try {
-        const raw = localStorage.getItem(AUTO_SEED_LOCK_KEY);
-        const now = Date.now();
-        if (raw && now - parseInt(raw, 10) < AUTO_SEED_LOCK_TTL_MS) return false;
-        localStorage.setItem(AUTO_SEED_LOCK_KEY, String(now));
-        return true;
-    } catch (err) {
-        return true; // no localStorage — degrade to "always run", same as player-api-sync.js
-    }
-}
+// Hub-wide, every 10 minutes, from ONE member's browser at a time, rotating between members
+// (2026-10-16, was every 5 minutes from every open tab): src/repositories/sharedJobs.js, job
+// 'galaxy-seed'. A member is not handed it twice in a row unless their last run was 6 h ago,
+// so with only one member online it runs for them every 6 h. Every call rides on that
+// member's own game session, which the game counts as them being active.
+// This interval only decides how often this browser ASKS the hub — not game traffic.
+const AUTO_SEED_CHECK_MS = 2 * 60 * 1000;
+const AUTO_SEED_JOB = 'galaxy-seed';
 
 async function runAutoSeedTick() {
-    if (!claimAutoSeedLock()) return;
+    if (!globalThis.AWGameRate.isMemberActive()) return; // member away: no game traffic on their session (game-rate-limit.js)
+    if (!(await claimSharedJob(AUTO_SEED_JOB))) return; // not this member's turn
     try {
         const result = await seedGalaxyFromApi(undefined, { trigger: 'auto' });
         if (!result.ok) console.warn('[GalaxyAutoSeed] tick failed:', result.error);
@@ -336,5 +331,5 @@ export function startAutoGalaxySeed() {
     if (started) return;
     started = true;
     runAutoSeedTick();
-    setInterval(runAutoSeedTick, AUTO_SEED_INTERVAL_MS);
+    setInterval(runAutoSeedTick, AUTO_SEED_CHECK_MS);
 }

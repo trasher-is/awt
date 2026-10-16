@@ -45,6 +45,7 @@ async function syncTradeInventory() {
 // switch would be wasteful. Silently a no-op within the lock window — see
 // forceTradeInventorySync for the explicit "Reload" button, which must not silently do nothing.
 export async function runTradeInventoryCheck() {
+    if (!globalThis.AWGameRate.isMemberActive()) return; // member away: no game traffic on their session (game-rate-limit.js)
     if (!claimLock()) return;
     try { await syncTradeInventory(); }
     catch (err) { console.warn('[TradeInventoryWatch] check failed:', err.message); }

@@ -123,13 +123,15 @@ const permissive = fixture(); permissive.row({ rank: '1x' });
 ok('the generic secret-goal parser retains its original behavior', context.parseRankingPage(permissive.doc).length === 1 && parse(permissive.doc).length === 0);
 
 (async () => {
-    const calls = [], posts = [], locks = new Map();
+    const calls = [], posts = [], locks = new Map(), claims = [];
     Object.assign(context, {
-        AWGameRate: { gameFetch: async url => { calls.push(url); return { ok: true, text: async () => 'synthetic' }; } },
+        AWGameRate: { isMemberActive: () => true, gameFetch: async url => { calls.push(url); return { ok: true, text: async () => 'synthetic' }; } },
         DOMParser: class { parseFromString() { return full.doc; } },
         fetch: async (url, init) => { posts.push({ url, init }); return { ok: true }; },
         localStorage: { getItem: key => locks.get(key), setItem: (key, value) => locks.set(key, value) },
         setInterval() {},
+        // The hub grants the daily ranking job once; every later ask is refused.
+        claimSharedJob: async job => { claims.push(job); return claims.length === 1; },
     });
     vm.runInContext(source('public/js/ui/best-planets-watch.js'), context);
     context.initBestPlanetsWatch();
@@ -139,6 +141,7 @@ ok('the generic secret-goal parser retains its original behavior', context.parse
     ok('existing snapshot carries only rank, planet ID and building values', rows.length === 50 && Object.keys(rows[0]).sort().join() === 'buildings,game_planet_id,rank' && rows.every(row => row.buildings.HF === row.rank));
     context.initBestPlanetsWatch(); await new Promise(resolve => setImmediate(resolve));
     ok('reinitialization creates no additional ranking request', calls.length === 1);
+    ok('the run was claimed from the hub as the shared daily job', claims[0] === 'ranking-best-planets', claims);
     if (failed) process.exitCode = 1;
     else console.log('All best-planets-parser checks passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -79,6 +79,11 @@ async function tick() {
         scheduleWake(AWDailyReset.nextDailyWindow(RESET_BUFFER_MINUTES));
         return;
     }
+    // Member away: look again in a minute (no request, just a timer) — see game-rate-limit.js.
+    if (!globalThis.AWGameRate.isMemberActive()) {
+        scheduleWake(new Date(Date.now() + 60 * 1000));
+        return;
+    }
     if (!claimAttemptLock()) {
         scheduleWake(new Date(Date.now() + RETRY_DELAY_MS));
         return;

@@ -38,6 +38,7 @@ async function syncResearch() {
 }
 
 export async function runResearchCheck() {
+    if (!globalThis.AWGameRate.isMemberActive()) return; // member away: no game traffic on their session (game-rate-limit.js)
     if (!claimLock()) return;
     try { await syncResearch(); }
     catch (err) { console.warn('[ResearchWatch] check failed:', err.message); }

@@ -19,6 +19,7 @@ import {
     openBattleReportsPanel
 } from './archives.js';
 import { runPlayerScan } from '../scrapers/mass-scanner.js';
+import { recordSharedJobRun, fetchSharedJobStatus } from '../utils/shared-job.js';
 import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
 import '../utils/vision-model.js';   // side-effect import: the !vision rule, defined once
 import { initVersionWatch } from './version-watch.js';
@@ -129,10 +130,8 @@ window.addEventListener('DOMContentLoaded', () => {
         .then(({ initBattleSync }) => initBattleSync())
         .catch(err => console.warn('[BattleSync] failed to start:', err));
 
-    // Background player API sync (ListPlayer roster refresh + continuous, least-recently-
-    // scanned-first Player/{id} detail sweep, with a short few-minute staleness floor —
-    // see player-api-sync.js's own comment). Same on-demand-load pattern as battle-sync
-    // above.
+    // Background ListPlayer roster refresh (Player/{id} scans are manual only now — see
+    // player-api-sync.js's own comment). Same on-demand-load pattern as battle-sync above.
     import('./player-api-sync.js')
         .then(({ initPlayerApiSync }) => initPlayerApiSync())
         .catch(err => console.warn('[PlayerApiSync] failed to start:', err));
@@ -256,10 +255,10 @@ async function initWrapper() {
     } catch (err) {}
 
     // A tab left open for hours keeps running the JavaScript it loaded on day one — see
-    // version-watch.js. It reloads itself once a new build exists AND doing so costs
-    // nothing (tab hidden, or nobody clicking here or in the game frame), so this only
-    // ever announces the update; it never demands anything of the member.
-    initVersionWatch(() => showToast('Hub updated — refreshing when you are idle'));
+    // version-watch.js. It reloads itself when the member comes back after a new build
+    // (tab shown again, or the first click after 10 idle minutes) — never while they are
+    // away, since a reload is a game request on their session. This only announces it.
+    initVersionWatch(() => showToast('Hub updated — refreshing when you are next back'));
 
     initAwtPresence();
 
@@ -300,6 +299,8 @@ async function requestDiscordLinkCode() {
 async function logout() {
     // The next account on this browser must not start from this one's switches.
     clearSettingsCache();
+    // ...nor be taken for this account in the game (spy.js caches who is playing).
+    try { localStorage.removeItem('awt.gameIdentity.v1'); } catch (err) { /* ok */ }
     await fetch('/hub-api/logout', { method: 'POST' }); 
     window.location.href = '/hub-assets/login.html'; 
 }
@@ -411,6 +412,7 @@ async function runMassGalaxyScan() {
     // Loaded on demand, same discipline as battle-sync.js/player-api-sync.js below — the
     // dashboard shell never blocks on it.
     const { seedGalaxyFromApi } = await import('../scrapers/api-galaxy-seed.js');
+    recordSharedJobRun('galaxy-seed'); // counts as the hub's latest seed for the rotation
     const result = await seedGalaxyFromApi(updateScanProgress);
     if (result.ok) {
         const msg = `Indexed ${result.systemsIndexed} systems, ${result.alliancesIndexed} alliances, seeded ${result.planetsProcessed} planets across ${result.systemsProcessed} of them`;
@@ -427,13 +429,15 @@ async function runMassGalaxyScan() {
 async function runMassPlayerScan() {
     setScanButtonsDisabled(true);
     container?.classList.replace('hidden', 'flex');
+    recordSharedJobRun('player-page-scan');
     await runPlayerScan(updateScanProgress);
     setScanButtonsDisabled(false);
     setTimeout(() => refreshDbStats(), 500);
+    refreshDeepScanStatus();
 }
 
-// "Deep scan": the manual, immediate, much-bigger cousin of the quiet background sweep
-// (player-api-sync.js's runSweepTick, 15 players/minute). Forces the roster list fresh
+// "Player API scan" (was "Deep scan"): the only way players get API-scanned since the
+// 30-second background sweep was removed (2026-10-16). Forces the roster list fresh
 // first, then claims and scans up to DEEP_SCAN_LIMIT stale players in one shot. Claiming
 // bumps last_api_scan_at right away, so if 150 isn't the whole roster, running it again —
 // from this browser after the cooldown, or from a teammate's browser right now — simply
@@ -445,42 +449,49 @@ async function runDeepScanPlayers() {
     container?.classList.replace('hidden', 'flex');
     const { deepScanPlayers } = await import('./player-api-sync.js');
     const result = await deepScanPlayers(DEEP_SCAN_LIMIT, updateScanProgress);
+    if (result.ok) recordSharedJobRun('player-api-scan');
     if (result.ok) {
-        const msg = `Deep scan: updated ${result.scanned}/${result.claimed} player(s)`
+        const msg = `Player API scan: updated ${result.scanned}/${result.claimed} player(s)`
             + (result.failed ? `, ${result.failed} failed` : '')
             + (result.listUpdated != null ? ` · roster refreshed (${result.listUpdated} active players)` : '');
         updateScanProgress(msg, result.scanned, result.claimed || 1);
         showToast(msg);
     } else if (result.error === 'cooldown') {
-        showToast('Deep scan already ran recently on this browser — try again in a few minutes, or have another member run it.');
+        showToast('Player API scan already ran recently on this browser — try again in a few minutes, or have another member run it.');
     } else if (result.error === 'session') {
-        showToast('Deep scan needs your game session — log into the game first, then try again.');
+        showToast('Player API scan needs your game session — log into the game first, then try again.');
     } else {
-        updateScanProgress(`Deep scan failed: ${result.error}`, 0, 0);
-        showToast(`Deep scan failed: ${result.error}`);
+        updateScanProgress(`Player API scan failed: ${result.error}`, 0, 0);
+        showToast(`Player API scan failed: ${result.error}`);
     }
     setScanButtonsDisabled(false);
     setTimeout(() => refreshDbStats(), 500);
     refreshDeepScanStatus();
 }
 
-// Status line under the Deep scan button: how many players are on record and "fresh" (by
-// the exact same staleness rule the claim itself uses — 6 h, or 1 h for a player who was
-// active around their last scan, see players.js's API_SCAN_STALE_SQL), and when the most recent claim of
-// any size last touched a row — so members can see at a glance whether it's worth clicking
-// again or better left for the cooldown/a teammate.
+// "Last scan" lines under the scan buttons: when each button was last pressed and by whom
+// (recorded hub-wide, src/repositories/sharedJobs.js), plus — for the API scan — how many
+// players are fresh by the exact staleness rule a claim uses (6 h, or 1 h for a player who
+// was active around their last scan, see players.js's API_SCAN_STALE_SQL). Members can see
+// at a glance whether a scan is worth running or a teammate just did it.
+function lastRunText(run) {
+    if (!run || !run.last_at_ms) return 'never';
+    return formatLocalDateTime(run.last_at_ms) + (run.last_by ? ` by ${run.last_by}` : '');
+}
+
 async function refreshDeepScanStatus() {
-    const el = document.getElementById('deep-scan-status');
-    if (!el) return;
+    const apiEl = document.getElementById('deep-scan-status');
+    const pageEl = document.getElementById('player-page-scan-status');
+    const jobs = await fetchSharedJobStatus();
+    if (pageEl) pageEl.textContent = `Players last scan: ${lastRunText(jobs['player-page-scan'])}`;
+    if (!apiEl) return;
     try {
         const res = await fetch('/hub-api/sync/player-scan-status');
         const data = await res.json();
-        if (!data.success) { el.textContent = ''; return; }
-        const fresh = data.total - data.stale;
-        const lastScan = formatSqliteUtc(data.last_scan_at, undefined, 'never');
-        el.textContent = `${fresh}/${data.total} players fresh · last scan: ${lastScan}`;
+        const fresh = data.success ? `${data.total - data.stale}/${data.total} players fresh · ` : '';
+        apiEl.textContent = `${fresh}last scan: ${lastRunText(jobs['player-api-scan'])}`;
     } catch (err) {
-        el.textContent = '';
+        apiEl.textContent = `last scan: ${lastRunText(jobs['player-api-scan'])}`;
     }
 }
 

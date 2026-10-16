@@ -3,31 +3,20 @@
 // ranking_match mechanism even though it, too, could be pointed at this ranking page).
 
 import '../utils/game-rate-limit.js'; // must load before gameFetch resolves the gate
+import { claimSharedJob } from '../utils/shared-job.js';
 import { parseRankingPage } from '../utils/ranking-page-parser.js';
 const { gameFetch } = globalThis.AWGameRate;
 
 const RANKING_PATH = '/Ranking/HighestPopulation';
-// The ranking itself only updates once/day in-game (confirmed via bonus-goals-sync.js) —
-// hourly is more than enough to catch that within an hour, without spending calls chasing
-// a page that hasn't changed.
-const CHECK_INTERVAL_MS = 60 * 60 * 1000;
-const LOCK_KEY = 'awt.highestPopulationWatch.lock.v1';
-const LOCK_TTL_MS = 55 * 60 * 1000; // shorter than the interval
-
-function claimLock() {
-    try {
-        const raw = localStorage.getItem(LOCK_KEY);
-        const now = Date.now();
-        if (raw && now - parseInt(raw, 10) < LOCK_TTL_MS) return false;
-        localStorage.setItem(LOCK_KEY, String(now));
-        return true;
-    } catch (err) {
-        return true; // no localStorage — degrade to "always run", same fallback as game-rate-limit.js
-    }
-}
+// The ranking only changes once a day in-game, so the hub runs this once per game day,
+// from ONE member's browser, rotating between members (src/repositories/sharedJobs.js).
+// This interval only decides how often this browser ASKS the hub — not game traffic.
+const CHECK_INTERVAL_MS = 15 * 60 * 1000;
+const JOB = 'ranking-highest-population';
 
 async function runCheck() {
-    if (!claimLock()) return;
+    if (!globalThis.AWGameRate.isMemberActive()) return; // member away: no game traffic on their session (game-rate-limit.js)
+    if (!(await claimSharedJob(JOB))) return; // another member has it, or it already ran today
     try {
         const pageRes = await gameFetch(RANKING_PATH);
         if (!pageRes.ok) return;

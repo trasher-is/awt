@@ -13,16 +13,19 @@
 // change they did not ask for. So a new build never interrupts: it waits for a moment that
 // is provably free, and says so in the meantime.
 //
-// "Free" means one of:
-//   • the tab is hidden — nobody is looking at it, let alone playing in it, or
-//   • nothing has been clicked or typed for IDLE_BEFORE_RELOAD_MS, in the hub OR in the
-//     game frame. The frame is same-origin (the hub proxies the game), so its own clicks
-//     count as activity; without that a member playing steadily inside the frame looks
-//     perfectly idle from out here, which is precisely the person not to interrupt.
+// WHEN, THEN: the moment the member comes back. Reloading reloads the game frame, which is a
+// request to the game on the member's own session — and the game counts that as them being
+// active. So a tab nobody is using is never reloaded (2026-10-16; it used to reload hidden
+// and idle tabs straight away). Instead the new build loads on whichever comes first:
+//   • the tab becomes visible again, or
+//   • the first click or keypress after IDLE_BEFORE_RELOAD_MS of nothing, in the hub OR in
+//     the game frame. The frame is same-origin (the hub proxies the game), so its own clicks
+//     count; without that a member playing steadily inside the frame looks perfectly idle
+//     from out here, which is precisely the person not to interrupt.
+// A member busy right now is never interrupted; someone just back has nothing in progress.
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const IDLE_BEFORE_RELOAD_MS = 10 * 60 * 1000;
-const SETTLE_CHECK_MS = 30 * 1000;
 
 let bootVersion = null;
 let pendingVersion = null;
@@ -50,7 +53,15 @@ async function fetchVersion() {
     }
 }
 
-function markActive() { lastActivity = Date.now(); }
+// Set by initVersionWatch: loads a waiting build. Called when activity follows an idle spell.
+let onReturn = () => {};
+
+function markActive() {
+    const t = Date.now();
+    const wasIdle = t - lastActivity >= IDLE_BEFORE_RELOAD_MS;
+    lastActivity = t;
+    if (wasIdle) onReturn();
+}
 
 // The game frame navigates constantly, and each navigation replaces its document, so the
 // listeners have to be re-attached on every load. Wrapped because a frame showing a
@@ -70,11 +81,6 @@ function watchGameFrameActivity() {
     attach();
 }
 
-function safeToReload() {
-    if (document.hidden) return true;
-    return Date.now() - lastActivity >= IDLE_BEFORE_RELOAD_MS;
-}
-
 // onNotice(version) fires once per newly-detected build, for whatever the host wants to
 // show the member — the reload itself is not conditional on it.
 export function initVersionWatch(onNotice = () => {}) {
@@ -86,15 +92,15 @@ export function initVersionWatch(onNotice = () => {}) {
     }
     watchGameFrameActivity();
 
-    // Latched: a reload is a navigation, not an instant teardown, so both the retry timer
-    // and a visibilitychange landing in that window would otherwise each call it again and
-    // restart the navigation underneath itself.
-    const reloadIfSafe = () => {
-        if (reloading || !pendingVersion) return;
-        if (!safeToReload()) return;
+    // Latched: a reload is a navigation, not an instant teardown, so a visibilitychange or
+    // a second click landing in that window would otherwise call it again and restart the
+    // navigation underneath itself. Never from a hidden tab — nobody is there.
+    const reloadIfWaiting = () => {
+        if (reloading || !pendingVersion || document.hidden) return;
         reloading = true;
         window.location.reload();
     };
+    onReturn = reloadIfWaiting;
 
     const check = async () => {
         const version = await fetchVersion();
@@ -112,13 +118,11 @@ export function initVersionWatch(onNotice = () => {}) {
         if (version === bootVersion || version === pendingVersion) return;
         pendingVersion = version;
         try { onNotice(version); } catch (err) { /* a failed toast must not block the reload */ }
-        reloadIfSafe();
+        // Nothing more here: the reload waits for the member's return (see the header).
     };
 
     check();
     setInterval(check, CHECK_INTERVAL_MS);
-    // Re-test far more often than we re-ask the server: the answer only changes on a
-    // deploy, but whether this is a safe moment changes every time the member steps away.
-    setInterval(reloadIfSafe, SETTLE_CHECK_MS);
-    document.addEventListener('visibilitychange', reloadIfSafe);
+    // Coming back to the tab: visible again, and nothing in progress yet.
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadIfWaiting(); });
 }
