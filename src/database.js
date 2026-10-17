@@ -1430,6 +1430,20 @@ function initDatabase() {
         )
     `);
 
+    // Update my data (2026-10-17): when each member's own Science, Planets and Trade pages
+    // were last read, so the sidebar can say how old they are. Those reads only happen on a
+    // member's tap or page visit now, never on a timer. One row per player and kind ('science',
+    // 'planets', 'trade'), stamped by the matching /sync route whatever triggered the read.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS member_data_syncs (
+            player_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            synced_at_ms INTEGER NOT NULL,
+            PRIMARY KEY (player_id, kind),
+            FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+        )
+    `);
+
     // Population trace (2026-09-30): where each population change on a planet came from.
     // planet_events only ever recorded DROPS, so a wrong figure that entered as a RISE left
     // no trace of the payload that put it there — the drop that later corrected it was all

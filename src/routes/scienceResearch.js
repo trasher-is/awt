@@ -1,13 +1,14 @@
 const express = require('express');
 const usersRepo = require('../repositories/users');
 const scienceResearchRepo = require('../repositories/scienceResearch');
+const memberDataSyncsRepo = require('../repositories/memberDataSyncs');
 const { buildQueue, schedule, SCIENCES } = require('../../public/js/utils/research-queue.js');
 const { requireAuth } = require('./_middleware');
 const router = express.Router();
 
 // --- RESEARCH TRACKER (2026-09-28) ---
-// A member's browser reports the raw rows of their own /Game/Science page (on a visit, and
-// every 15 minutes in the background — research-watch.js). The order and the finish times
+// A member's browser reports the raw rows of their own /Game/Science page (on a visit, or
+// when they tap "Update my data" — research-watch.js). The order and the finish times
 // are built here, against the server's clock, so every member's times share one clock.
 //
 // A member can only ever report their OWN research: the player is resolved from the
@@ -43,6 +44,7 @@ router.post('/sync/science-research', requireAuth, (req, res) => {
             levels,
             items,
         });
+        memberDataSyncsRepo.stamp(bridge.player_id, 'science', observedAtMs);
         res.json({ success: true, items: items.length });
     } catch (err) {
         console.error('[DB Error] Research sync failure:', err);

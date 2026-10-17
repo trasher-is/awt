@@ -91,8 +91,10 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-mass-scan')?.addEventListener('click', runMassGalaxyScan);
     document.getElementById('btn-mass-scan-players')?.addEventListener('click', runMassPlayerScan);
     document.getElementById('btn-deep-scan-players')?.addEventListener('click', runDeepScanPlayers);
+    document.getElementById('btn-update-my-data')?.addEventListener('click', runUpdateMyData);
     refreshBattleReportsWatermark();
     refreshDeepScanStatus();
+    refreshMyDataStatus();
 
     // --- EVENT DELEGATION FOR DYNAMIC ELEMENTS ---
     // Every player/alliance/system/planet link any sidebar tool paints (game-links.js):
@@ -124,20 +126,20 @@ window.addEventListener('DOMContentLoaded', () => {
     
     initWrapper();
 
-    // Background battle-report sync (first pull 10 s after load, then every 30 min).
-    // Loaded on demand like the galaxy map: the dashboard shell never blocks on it.
+    // Background battle-report sync: once per game day after the reset, from ONE member's
+    // browser for the whole hub (battle-sync.js). Loaded on demand like the galaxy map: the
+    // dashboard shell never blocks on it.
     import('./battle-sync.js')
         .then(({ initBattleSync }) => initBattleSync())
         .catch(err => console.warn('[BattleSync] failed to start:', err));
 
-    // Background ListPlayer roster refresh (Player/{id} scans are manual only now — see
-    // player-api-sync.js's own comment). Same on-demand-load pattern as battle-sync above.
-    import('./player-api-sync.js')
-        .then(({ initPlayerApiSync }) => initPlayerApiSync())
-        .catch(err => console.warn('[PlayerApiSync] failed to start:', err));
+    // Member taps only (2026-10-17): the ListPlayer roster pull, the galaxy seed and the
+    // viewer's own Science / Planets / Trade reads no longer start here. They run from the
+    // sidebar buttons (Player API scan / Players, Galaxy, Update my data) and, for the
+    // member's own pages, from spy.js when the member opens them.
 
-    // Background battle-report ship-detail sweep. Same on-demand-load pattern as the
-    // other two background sync modules above.
+    // Background battle-report ship-detail sweep. Same on-demand-load pattern as
+    // battle-sync above.
     import('./battle-report-detail-sync.js')
         .then(({ initBattleReportDetailSync }) => initBattleReportDetailSync())
         .catch(err => console.warn('[BattleReportDetailSync] failed to start:', err));
@@ -148,13 +150,6 @@ window.addEventListener('DOMContentLoaded', () => {
     import('./bonus-goals-sync.js')
         .then(({ initBonusGoalsSync }) => initBonusGoalsSync())
         .catch(err => console.warn('[BonusGoalsSync] failed to start:', err));
-
-    // Background galaxy/system seed (was manual-button-only — see api-galaxy-seed.js's
-    // startAutoGalaxySeed for what this does and does not fix). Same on-demand-load
-    // pattern as the other background sync modules above.
-    import('../scrapers/api-galaxy-seed.js')
-        .then(({ startAutoGalaxySeed }) => startAutoGalaxySeed())
-        .catch(err => console.warn('[GalaxyAutoSeed] failed to start:', err));
 
     // Various Changes: Best Planets coverage watch (2026-09-12) — hourly check, public
     // and standalone from the secret bonus-goals ranking_match mechanism even though both
@@ -168,25 +163,6 @@ window.addEventListener('DOMContentLoaded', () => {
     import('./highest-population-watch.js')
         .then(({ initHighestPopulationWatch }) => initHighestPopulationWatch())
         .catch(err => console.warn('[HighestPopulationWatch] failed to start:', err));
-
-    // My Savings: background per-planet production sync (2026-09-18) — same on-demand-load
-    // pattern as the others.
-    import('./my-planets-watch.js')
-        .then(({ initMyPlanetsWatch }) => initMyPlanetsWatch())
-        .catch(err => console.warn('[MyPlanetsWatch] failed to start:', err));
-
-    // Research tracker: background read of the viewer's own /Game/Science (2026-09-28), so
-    // /intel research in Discord knows what they are researching — same pattern as above.
-    import('./research-watch.js')
-        .then(({ initResearchWatch }) => initResearchWatch())
-        .catch(err => console.warn('[ResearchWatch] failed to start:', err));
-
-    // My Savings / Hoard A$: background sync of the viewer's own /Game/Trade inventory
-    // value (2026-09-19) — same on-demand-load pattern as the others. Previously this only
-    // updated when the member happened to browse to /Game/Trade in the embedded frame.
-    import('./trade-inventory-watch.js')
-        .then(({ initTradeInventoryWatch }) => initTradeInventoryWatch())
-        .catch(err => console.warn('[TradeInventoryWatch] failed to start:', err));
 });
 
 // --- CORE UI CONTROLS ---
@@ -406,13 +382,66 @@ function setScanButtonsDisabled(disabled) {
     if (deepBtn) deepBtn.disabled = disabled;
 }
 
+// "Update my data" (2026-10-17): the member's own Science, Planets and Trade pages, read on
+// their tap — three game requests. These used to refresh every 15 minutes in the background.
+let updatingMyData = false;
+
+async function runUpdateMyData() {
+    if (updatingMyData) return;
+    updatingMyData = true;
+    const btn = document.getElementById('btn-update-my-data');
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Updating...'; }
+    try {
+        const [{ forceResearchSync }, { forceMyPlanetsSync }, { forceTradeInventorySync }] = await Promise.all([
+            import('./research-watch.js'),
+            import('./my-planets-watch.js'),
+            import('./trade-inventory-watch.js'),
+        ]);
+        const [science, planets, trade] = await Promise.all([forceResearchSync(), forceMyPlanetsSync(), forceTradeInventorySync()]);
+        const failed = [!science && 'Science', !planets && 'Planets', !trade && 'Trade'].filter(Boolean);
+        showToast(failed.length ? `Updated, except: ${failed.join(', ')}` : 'Your Science, Planets and Trade are up to date');
+    } catch (err) {
+        showToast(`Update failed: ${err.message}`);
+    } finally {
+        updatingMyData = false;
+        if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+        refreshMyDataStatus();
+    }
+}
+
+function ageText(ms) {
+    if (!ms) return 'never';
+    const mins = Math.max(0, Math.round((Date.now() - ms) / 60000));
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 48) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+}
+
+// How old each part is — read from the hub, so it also counts page visits and other devices.
+async function refreshMyDataStatus() {
+    const el = document.getElementById('my-data-status');
+    if (!el) return;
+    try {
+        const res = await fetch('/hub-api/my-data-status');
+        const data = await res.json();
+        if (!data.success) { el.textContent = ''; return; }
+        const { science, planets, trade } = data.synced || {};
+        el.textContent = `Science ${ageText(science)} · Planets ${ageText(planets)} · Trade ${ageText(trade)}`;
+    } catch (err) {
+        el.textContent = '';
+    }
+}
+
 async function runMassGalaxyScan() {
     setScanButtonsDisabled(true);
     container?.classList.replace('hidden', 'flex');
     // Loaded on demand, same discipline as battle-sync.js/player-api-sync.js below — the
     // dashboard shell never blocks on it.
     const { seedGalaxyFromApi } = await import('../scrapers/api-galaxy-seed.js');
-    recordSharedJobRun('galaxy-seed'); // counts as the hub's latest seed for the rotation
+    recordSharedJobRun('galaxy-seed'); // for the "Galaxy last scan" line
     const result = await seedGalaxyFromApi(updateScanProgress);
     if (result.ok) {
         const msg = `Indexed ${result.systemsIndexed} systems, ${result.alliancesIndexed} alliances, seeded ${result.planetsProcessed} planets across ${result.systemsProcessed} of them`;
@@ -424,12 +453,23 @@ async function runMassGalaxyScan() {
     }
     setScanButtonsDisabled(false);
     setTimeout(() => refreshDbStats(), 500);
+    refreshDeepScanStatus();
 }
 
 async function runMassPlayerScan() {
     setScanButtonsDisabled(true);
     container?.classList.replace('hidden', 'flex');
     recordSharedJobRun('player-page-scan');
+    // The roster comes from the game's player list, pulled right before the scan so it scans
+    // who is playing now (2026-10-17: that list no longer refreshes on a timer).
+    updateScanProgress('Refreshing the player roster…', 0, 0);
+    try {
+        const { pullPlayerList } = await import('./player-api-sync.js');
+        const listResult = await pullPlayerList();
+        if (!listResult.ok) console.warn('[PlayerScan] roster refresh failed:', listResult.error);
+    } catch (err) {
+        console.warn('[PlayerScan] roster refresh failed:', err.message);
+    }
     await runPlayerScan(updateScanProgress);
     setScanButtonsDisabled(false);
     setTimeout(() => refreshDbStats(), 500);
@@ -484,6 +524,8 @@ async function refreshDeepScanStatus() {
     const pageEl = document.getElementById('player-page-scan-status');
     const jobs = await fetchSharedJobStatus();
     if (pageEl) pageEl.textContent = `Players last scan: ${lastRunText(jobs['player-page-scan'])}`;
+    const galaxyEl = document.getElementById('galaxy-scan-status');
+    if (galaxyEl) galaxyEl.textContent = `Galaxy last scan: ${lastRunText(jobs['galaxy-seed'])}`;
     if (!apiEl) return;
     try {
         const res = await fetch('/hub-api/sync/player-scan-status');

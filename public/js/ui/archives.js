@@ -1016,7 +1016,7 @@ function switchTaTab(tab) {
     });
     document.getElementById('btn-refresh-ta')?.classList.toggle('hidden', tab === 'savings');
     if (tab === 'schedule') runTradeSchedule();
-    if (tab === 'savings') { loadMySavings(); backgroundRefreshMySavings(); }
+    if (tab === 'savings') loadMySavings();
 }
 
 // Name (lowercase) -> { qualified_now, next_hours, next2_hours }, refreshed on every
@@ -1497,23 +1497,6 @@ async function reloadMySavings() {
     } catch (e) {}
     if (btn) { btn.disabled = false; btn.innerHTML = orig; }
     await loadMySavings();
-}
-
-// Fired every time the tab is opened, so the list is never more than a few minutes stale
-// without the member having to remember to click Reload. Lock-gated (see runMyPlanetsCheck /
-// runTradeInventoryCheck), so switching tabs back and forth does not spam the game — most
-// calls are a fast no-op.
-async function backgroundRefreshMySavings() {
-    try {
-        const [{ runMyPlanetsCheck }, { runTradeInventoryCheck }] = await Promise.all([
-            import('./my-planets-watch.js'),
-            import('./trade-inventory-watch.js'),
-        ]);
-        await Promise.all([runMyPlanetsCheck(), runTradeInventoryCheck()]);
-    } catch (e) { return; }
-    const stillOpen = document.getElementById('trade-agreements-panel')?.classList.contains('translate-x-0');
-    const stillOnTab = !document.getElementById('ta-view-savings')?.classList.contains('hidden');
-    if (stillOpen && stillOnTab) loadMySavings();
 }
 
 function renderMySavings(planets, econData) {

@@ -118,13 +118,15 @@ export function parseScienceResearchPage(doc) {
     return { science_rate: readRate(doc), sciences };
 }
 
+// true when the hub stored it.
 export async function postScienceResearch(result) {
-    if (!result) return;
-    await fetch('/hub-api/sync/science-research', {
+    if (!result) return false;
+    const res = await fetch('/hub-api/sync/science-research', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(result),
     });
+    return res.ok;
 }
 
 // In-page: the member is looking at /Game/Science right now. spy.js re-runs its view hooks

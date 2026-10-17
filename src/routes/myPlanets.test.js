@@ -169,6 +169,26 @@ function request(server, method, urlPath, body) {
         ok('the unknown-growth-rate planet is neither counted nor invented as a third crossing', mine.next_hours < mine.next2_hours && Object.keys(mine).length === 4, mine);
 
         ok('a member who has never opened My Savings has no entry at all (not a 0%)', !r.body.members.some(m => m.name.toLowerCase() === 'noplanetsyet'), r.body.members);
+
+        console.log('\n── "Update my data": how old each part is ' + '─'.repeat(33));
+        const memberDataSyncsRepo = require('../repositories/memberDataSyncs');
+        sessionUserId = owner.id;
+        r = await request(server, 'GET', '/hub-api/my-data-status');
+        ok('200 and success', r.status === 200 && r.body.success, r.body);
+        ok('the planet syncs above stamped Planets', Number.isInteger(r.body.synced.planets) && Date.now() - r.body.synced.planets < 60 * 1000, r.body.synced);
+        ok('Science and Trade were never read: null, not 0', r.body.synced.science === null && r.body.synced.trade === null, r.body.synced);
+        memberDataSyncsRepo.stamp(301, 'science', 1760000000000);
+        r = await request(server, 'GET', '/hub-api/my-data-status');
+        ok('a Science read shows up with its own time', r.body.synced.science === 1760000000000, r.body.synced);
+        sessionUserId = neighbour.id;
+        r = await request(server, 'GET', '/hub-api/my-data-status');
+        ok('another member sees only their own times', r.body.success && r.body.synced.science === null, r.body);
+        sessionUserId = 1;
+        r = await request(server, 'GET', '/hub-api/my-data-status');
+        ok('an account with no player on record gets success:false, not an error', r.status === 200 && r.body.success === false, r.body);
+        let threw = false;
+        try { memberDataSyncsRepo.stamp(301, 'galaxy'); } catch (e) { threw = true; }
+        ok('only the three known kinds can be stamped', threw);
     } finally {
         server.close();
     }

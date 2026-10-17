@@ -1301,7 +1301,11 @@ async function seedPlanetsFromSectors() {
     const status = document.getElementById('gm-status');
     const say = (msg) => { if (status) { status.classList.remove('hidden'); status.textContent = msg; } };
     try {
-        const { seedGalaxyFromApi } = await import('../scrapers/api-galaxy-seed.js');
+        const [{ seedGalaxyFromApi }, { recordSharedJobRun }] = await Promise.all([
+            import('../scrapers/api-galaxy-seed.js'),
+            import('../utils/shared-job.js'),
+        ]);
+        recordSharedJobRun('galaxy-seed'); // for the sidebar's "Galaxy last scan" line
         const result = await seedGalaxyFromApi(say);
         if (!result.ok) {
             say(result.error);

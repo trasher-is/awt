@@ -9,7 +9,6 @@
 // fleet visibility away for a scan that finishes in seconds instead of minutes — see PR
 // discussion for why that trade was made deliberately, not by accident.
 import '../utils/game-rate-limit.js';
-import { claimSharedJob } from '../utils/shared-job.js';
 import '../utils/aw-api.js';
 import '../utils/capture-freshness.js'; // side-effect import: puts the model on globalThis
 import { scrapeSystemById } from './system-parser.js';
@@ -286,50 +285,8 @@ async function runSeed(onProgress, ctx) {
     };
 }
 
-// Automatic background seeding — a frequent poll, not once a day.
-// Briefly (2026-09-12) this ran once daily instead, on the theory that out-of-vision
-// systems only truly refresh at the reset so re-asking sooner was wasted budget — true as
-// far as it went, but it missed the actual point of this seed: system-change/pop-drop
-// Discord announcements (src/routes/sync.js's announceSystemChanges) are driven by
-// whatever this seed detects, and detection only happens when it runs. Real, in-vision
-// changes (a conquest, a pop-kill, a colonization) need to be CAUGHT close to when they
-// happen to be worth announcing — once a day turns "who's fighting where, right now" into
-// a single overnight dump. A run is cheap against the agreed budget (ONE Map/sectors call,
-// plus an alliance lookup), but every run counts as game activity for the member whose
-// session sends it — hence the shared rotation below. Real live vision (bio-range) is a
-// wholly separate concept handled elsewhere — see vision-model.js.
-//
-// IMPORTANT — what this still does NOT fix: even at a tight interval, Map/sectors only
-// reports live data for systems currently isInVision (see the isInVision/vision_uncertain
-// handling above and capture-freshness.js). It cannot produce fresh data for systems
-// nobody has vision on — no amount of asking changes what the game will say about them.
-// Getting THOSE current still needs either real vision (scouting/holding territory) or a
-// member's browser physically visiting that system's page (spy.js's live DOM scrape, see
-// issue #168 for the fuller writeup).
-// Hub-wide, every 10 minutes, from ONE member's browser at a time, rotating between members
-// (2026-10-16, was every 5 minutes from every open tab): src/repositories/sharedJobs.js, job
-// 'galaxy-seed'. A member is not handed it twice in a row unless their last run was 6 h ago,
-// so with only one member online it runs for them every 6 h. Every call rides on that
-// member's own game session, which the game counts as them being active.
-// This interval only decides how often this browser ASKS the hub — not game traffic.
-const AUTO_SEED_CHECK_MS = 2 * 60 * 1000;
-const AUTO_SEED_JOB = 'galaxy-seed';
-
-async function runAutoSeedTick() {
-    if (!globalThis.AWGameRate.isMemberActive()) return; // member away: no game traffic on their session (game-rate-limit.js)
-    if (!(await claimSharedJob(AUTO_SEED_JOB))) return; // not this member's turn
-    try {
-        const result = await seedGalaxyFromApi(undefined, { trigger: 'auto' });
-        if (!result.ok) console.warn('[GalaxyAutoSeed] tick failed:', result.error);
-    } catch (err) {
-        console.warn('[GalaxyAutoSeed] tick failed:', err.message);
-    }
-}
-
-let started = false;
-export function startAutoGalaxySeed() {
-    if (started) return;
-    started = true;
-    runAutoSeedTick();
-    setInterval(runAutoSeedTick, AUTO_SEED_CHECK_MS);
-}
+// No automatic seeding (2026-10-17): this runs only when a member taps Galaxy (sidebar) or
+// Seed galaxy (Galaxy Archive). It used to run every 10 minutes from one member's browser,
+// rotating through the hub. The catch: system-change and pop-drop Discord announcements
+// (src/routes/sync.js's announceSystemChanges) are driven by what this seed detects, so they
+// now arrive only after someone taps.
