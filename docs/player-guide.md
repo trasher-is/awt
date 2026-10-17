@@ -487,8 +487,11 @@ uncontested Free planets:
   choose a lower energy at launch (see
   [Science fields — effects](game-rules.md#science-fields--effects)), so a slow fleet can
   already be on its way to a planet before you colonize it. The alliance calls these
-  "ghosts". RAID's rule of thumb is to keep **at least 200 CV** on a newly colonized planet
-  for its **first 3 days** once anyone nearby has Mathematics 12.
+  "ghosts". Once anyone nearby has Mathematics 12, keep a garrison on each newly colonized
+  planet for its **first 3 days**. How big it needs to be depends on the state of the game:
+  in beta 6, **200 CV** was the minimum around day 45, and it has to grow as fleets get
+  bigger later in the round. Size it against the fleets you've actually seen near you, not a
+  fixed number.
 - **Position as a "road bump," not just a defender.** Rather than only reacting once you're
   attacked, put a fleet somewhere the enemy is likely to pass through on their way to a
   softer target — it costs them a fight (or a detour) even if that fleet was never the
