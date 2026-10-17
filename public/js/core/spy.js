@@ -574,6 +574,12 @@ export function initSpy() {
             if (pathLower.includes('/game/planets')) {
                 if (enabled('inject.popTimers')) initPlanetPopTimers();
             }
+            if (/^\/game\/planets\/?(\?|$)/.test(pathLower)) {
+                // The planet list itself, not one planet: feeds My Savings without a game request.
+                import('../utils/my-planets-parser.js')
+                    .then(module => module.scrapeMyPlanets())
+                    .catch(err => console.error('[Spy] my planets scrape failed:', err.message));
+            }
             if (pathLower.includes('/game/science')) {
                 if (enabled('inject.cultureLookahead')) initScienceCultureCalc();
                 if (enabled('inject.scienceTimers')) initScienceTimers();

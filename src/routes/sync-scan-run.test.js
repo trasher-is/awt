@@ -145,7 +145,8 @@ const owner = { id: 7001, name: 'ScanOwner' };
         ok('...and when the scan throws, so no run goes unreported', /catch \(err\) \{\s*reportScanRun\(ctx, \{ ok: false[^}]*\}\);\s*throw err;/.test(seed)
             && /finally\s*\{\s*ctx\.watch\.stop\(\)/.test(seed));
         ok('reporting is wrapped so it can never break a scan', /function reportScanRun[\s\S]*?try \{[\s\S]*?\} catch \(err\)/.test(seed));
-        ok('the background tick labels itself auto; a button stays manual', /seedGalaxyFromApi\(undefined, \{ trigger: 'auto' \}\)/.test(seed) && /opts\.trigger === 'auto' \? 'auto' : 'manual'/.test(seed));
+        // No background seed since 2026-10-17: every scan is a member's tap, logged as manual.
+        ok('no background tick any more; a button scan is logged manual', !/trigger: 'auto'/.test(seed) && !/setInterval\(/.test(seed) && /opts\.trigger === 'auto' \? 'auto' : 'manual'/.test(seed));
         const ops = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', 'operations.md'), 'utf8');
         ok('docs/operations.md lists the table, and says a round reset keeps it', /galaxy_scan_runs/.test(ops));
     } finally {

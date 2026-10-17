@@ -4,6 +4,7 @@ const planetBankingRepo = require('../repositories/planetBanking');
 const alliancesRepo = require('../repositories/alliances');
 const savingsExpensesRepo = require('../repositories/savingsExpenses');
 const tradeInventoryRepo = require('../repositories/tradeInventory');
+const memberDataSyncsRepo = require('../repositories/memberDataSyncs');
 const { requireAuth } = require('./_middleware');
 const router = express.Router();
 
@@ -31,6 +32,19 @@ router.get('/my-planets', requireAuth, (req, res) => {
     } catch (err) {
         console.error('[DB Error] Failed to load My Savings planets:', err);
         res.status(500).json({ success: false, error: 'Failed to load planets' });
+    }
+});
+
+// "Update my data" line in the sidebar: when the member's own Science, Planets and Trade
+// pages were last read (by their tap or by visiting the page), as epoch ms or null.
+router.get('/my-data-status', requireAuth, (req, res) => {
+    try {
+        const playerId = resolveOwnPlayerId(req);
+        if (!playerId) return res.json({ success: false, error: 'No player on record for this account yet.' });
+        res.json({ success: true, synced: memberDataSyncsRepo.getForPlayer(playerId) });
+    } catch (err) {
+        console.error('[DB Error] Failed to load my data status:', err);
+        res.status(500).json({ success: false, error: 'Failed to load status' });
     }
 });
 
@@ -64,6 +78,7 @@ router.post('/sync/my-planets', requireAuth, (req, res) => {
         // there, independent of whether future production is being banked or spent.
         const totalPp = rows.reduce((sum, p) => sum + (p.production_pp || 0), 0);
         alliancesRepo.upsertProductionPoints(playerId, totalPp);
+        memberDataSyncsRepo.stamp(playerId, 'planets');
         res.json({ success: true });
     } catch (err) {
         console.error('[DB Error] My Savings planet sync failure:', err);

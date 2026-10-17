@@ -101,34 +101,51 @@ function installStorage() {
     ok('a keypress in the frame makes the wrapper active', wrapper.isMemberActive() === true);
 
     console.log('\n── Every background job checks presence before a tick ' + '─'.repeat(22));
+    // Member taps only (2026-10-17): these are the ONLY background jobs that may still send
+    // game requests, each once per game day for the whole hub, after the reset. Everything
+    // else that talks to the game runs from a member's tap or a page they opened.
     const jobs = [
-        'public/js/ui/player-api-sync.js',
         'public/js/ui/battle-sync.js',
         'public/js/ui/battle-report-detail-sync.js',
         'public/js/ui/bonus-goals-sync.js',
         'public/js/ui/highest-population-watch.js',
         'public/js/ui/best-planets-watch.js',
-        'public/js/ui/trade-inventory-watch.js',
-        'public/js/ui/my-planets-watch.js',
-        'public/js/ui/research-watch.js',
-        'public/js/scrapers/api-galaxy-seed.js',
     ];
     for (const file of jobs) {
         const src = fs.readFileSync(path.join(repo, file), 'utf8');
         ok(`${file} checks isMemberActive()`, src.includes('isMemberActive()'));
+        ok(`${file} runs only when the hub hands it the day's turn`, src.includes('await claimSharedJob('));
     }
-    // Any new file that runs a timer AND talks to the game must join the list above.
     // spy.js's only timer polls the hub (bonus-goal targets); its one game request is a
     // one-shot identity check on load, which the gate itself holds while the member is away.
     const notGameTimers = new Set(['public/js/core/spy.js']);
     const walk = dir => fs.readdirSync(dir, { withFileTypes: true }).flatMap(e =>
         e.isDirectory() ? walk(path.join(dir, e.name)) : e.name.endsWith('.js') ? [path.join(dir, e.name)] : []);
-    const unguarded = walk(path.join(repo, 'public', 'js'))
+    const gameTimers = walk(path.join(repo, 'public', 'js'))
         .map(f => [path.relative(repo, f), fs.readFileSync(f, 'utf8')])
-        .filter(([f, src]) => /setInterval\(/.test(src) && /gameFetch\(|AWApi\.\w+\(/.test(src)
-            && !src.includes('isMemberActive()') && !notGameTimers.has(f))
+        .filter(([f, src]) => /setInterval\(/.test(src) && /gameFetch\(|AWApi\.\w+\(|searchBattleReports|scrapeBattleReportShipDetail\(/.test(src)
+            && !notGameTimers.has(f))
         .map(([f]) => f);
-    ok('no file runs a timer that talks to the game without the presence check', unguarded.length === 0, unguarded);
+    const extra = gameTimers.filter(f => !jobs.includes(f));
+    ok('no other file runs a timer that talks to the game (a new one needs the owner\'s OK first)', extra.length === 0, extra);
+
+    console.log('\n── Member taps only: no timers left in these ' + '─'.repeat(31));
+    // Science / Planets / Trade (the "Update my data" button), the ListPlayer roster (before a
+    // Player scan) and the galaxy seed (the Galaxy buttons) — no timer, and nothing started
+    // on dashboard load.
+    const tapOnly = {
+        'public/js/ui/research-watch.js': 'initResearchWatch',
+        'public/js/ui/my-planets-watch.js': 'initMyPlanetsWatch',
+        'public/js/ui/trade-inventory-watch.js': 'initTradeInventoryWatch',
+        'public/js/ui/player-api-sync.js': 'initPlayerApiSync',
+        'public/js/scrapers/api-galaxy-seed.js': 'startAutoGalaxySeed',
+    };
+    const dashboard = fs.readFileSync(path.join(repo, 'public', 'js', 'ui', 'dashboard.js'), 'utf8');
+    for (const [file, starter] of Object.entries(tapOnly)) {
+        const src = fs.readFileSync(path.join(repo, file), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+        ok(`${file} has no timer`, !/setInterval\(|setTimeout\(/.test(src));
+        ok(`${file} is not started on dashboard load`, !src.includes(starter) && !dashboard.includes(starter));
+    }
 
     delete globalThis.document;
     delete globalThis.localStorage;

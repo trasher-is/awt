@@ -1,6 +1,7 @@
 // The hub-wide background job rotation (sharedJobs.js): one member's browser at a time,
 // one then another, and never the same member twice in a row unless their last run was
-// 6 h ago. Rankings and battle-report details once per game day, after the reset.
+// 6 h ago. Battle reports, their details and the rankings once per game day, after the
+// reset. The galaxy seed is a button only since 2026-10-17.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -25,18 +26,15 @@ const t0 = Date.UTC(2026, 9, 16, 12, 0, 0); // 14:00 Berlin
 
 console.log('sharedJobs.test.js');
 
-console.log('── galaxy seed: every 10 min, rotating ──');
-ok('never ran: the first member gets it', jobs.claim('galaxy-seed', A, t0).granted === true);
-ok('a second member asking at once does not (no double run)', jobs.claim('galaxy-seed', B, t0 + 1000).granted === false);
-ok('nobody before 10 minutes', jobs.claim('galaxy-seed', B, t0 + 9 * MIN).granted === false);
-ok('after 10 minutes, another member', jobs.claim('galaxy-seed', B, t0 + 10 * MIN).granted === true);
-ok('then a third', jobs.claim('galaxy-seed', C, t0 + 20 * MIN).granted === true);
-ok('A again — B did not run last', jobs.claim('galaxy-seed', A, t0 + 30 * MIN).granted === true);
-ok('A cannot take the next turn too', jobs.claim('galaxy-seed', A, t0 + 40 * MIN).granted === false);
-const refused = jobs.claim('galaxy-seed', A, t0 + 3 * HOUR);
-ok('alone, A still waits until 6 h after their last run', refused.granted === false && refused.next_at_ms === t0 + 30 * MIN + 6 * HOUR, refused);
-ok('...and gets it then', jobs.claim('galaxy-seed', A, t0 + 30 * MIN + 6 * HOUR).granted === true);
-ok('another member is not held to A\'s 6 h', jobs.claim('galaxy-seed', B, t0 + 30 * MIN + 6 * HOUR + 10 * MIN).granted === true);
+console.log('── battle reports: once per game day, for the whole hub, rotating ──');
+const evening = Date.UTC(2026, 9, 16, 19, 0, 0); // 21:00 Berlin, 16 Oct
+const nextReset = Date.UTC(2026, 9, 16, 22, 5, 0); // 00:05 Berlin, 17 Oct (CEST)
+ok('never ran: the first member gets it', jobs.claim('battle-sync', A, evening).granted === true);
+ok('a second member asking at once does not (no double run)', jobs.claim('battle-sync', B, evening + 1000).granted === false);
+ok('nobody else the same game day', jobs.claim('battle-sync', C, evening + 2 * HOUR).granted === false);
+const again = jobs.claim('battle-sync', A, nextReset + 5 * MIN);
+ok('after the reset, A (who ran last, 3 h ago) waits until 6 h after their run', again.granted === false && again.next_at_ms === evening + 6 * HOUR, again);
+ok('...while another member gets it right after the reset', jobs.claim('battle-sync', B, nextReset + 5 * MIN).granted === true);
 
 console.log('── rankings: once per game day ──');
 ok('first ask of the day', jobs.claim('ranking-best-planets', A, t0).granted === true);
@@ -58,8 +56,11 @@ ok('a manual-only job cannot be claimed', threw);
 jobs.record('player-api-scan', B, t0 + 5 * MIN);
 const st = jobs.status();
 ok('a recorded button press shows who and when', st['player-api-scan'].last_by === 'Harpyie' && st['player-api-scan'].last_at_ms === t0 + 5 * MIN, st['player-api-scan']);
-jobs.record('galaxy-seed', C, t0 + 30 * MIN + 6 * HOUR + 12 * MIN);
-ok('a manual galaxy seed counts as the latest seed', jobs.claim('galaxy-seed', A, t0 + 30 * MIN + 6 * HOUR + 15 * MIN).granted === false);
+threw = false;
+try { jobs.claim('galaxy-seed', A, t0); } catch (e) { threw = true; }
+ok('the galaxy seed is a button now: a stale tab cannot claim it as a background job', threw && !jobs.isClaimable('galaxy-seed'));
+jobs.record('galaxy-seed', C, t0 + 12 * MIN);
+ok('a Galaxy button press is recorded for the "last scan" line', jobs.status()['galaxy-seed'].last_by === 'lbahen');
 threw = false;
 try { jobs.record('nonsense', A); } catch (e) { threw = true; }
 ok('unknown jobs are refused', threw && !jobs.isJob('nonsense'));

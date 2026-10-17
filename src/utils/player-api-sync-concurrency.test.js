@@ -1,8 +1,9 @@
-// Player/{id} scans happen only when a member presses "Player API scan" (2026-10-16): the
+// Player/{id} scans happen only when a member presses "Player API scan" (2026-10-16), and the
+// ListPlayer roster pull only right before a scan (2026-10-17). The
 // 30-second background sweep that used to run from every open hub tab is gone, because
 // every call rides on the member's own game session and the game counted them as active
 // around the clock. What remains to pin:
-//   • no timer in player-api-sync.js scans players by itself any more
+//   • no timer in player-api-sync.js: neither scans nor the roster pull run by themselves
 //   • one manual scan at a time per page (the shared `scanning` flag), released even when
 //     the scan throws
 //
@@ -25,7 +26,7 @@ const ok = (name, cond, detail) => {
 const src = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'ui', 'player-api-sync.js'), 'utf8');
 
 const sliceStart = src.indexOf('let scanning = false;');
-const sliceEnd = src.indexOf('\nlet started = false;');
+const sliceEnd = src.length;
 
 function build({ scanClaimedBatch = async () => ({ ok: true, claimed: 0, scanned: 0, failed: 0 }) } = {}) {
     const calls = { claimLock: 0, scanClaimedBatch: 0, pullPlayerList: 0 };
@@ -43,8 +44,8 @@ function build({ scanClaimedBatch = async () => ({ ok: true, claimed: 0, scanned
 (async () => {
     console.log('── No background player sweep ' + '─'.repeat(46));
     ok('the expected slice is where the test expects it', sliceStart !== -1 && sliceEnd !== -1 && sliceStart < sliceEnd);
-    const init = src.slice(src.indexOf('export function initPlayerApiSync'));
-    ok('initPlayerApiSync starts no setInterval', !/setInterval\(/.test(init), init);
+    ok('no timer of any kind: the roster pull runs only before a scan (2026-10-17)', !/setInterval\(|setTimeout\(/.test(src));
+    ok('nothing for the dashboard to start on load', !/initPlayerApiSync/.test(src));
     ok('no sweep tick left in the module', !/runSweepTick|SWEEP_INTERVAL_MS/.test(src));
 
     console.log('\n── One manual scan at a time ' + '─'.repeat(47));

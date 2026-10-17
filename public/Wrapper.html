@@ -181,10 +181,15 @@
 
             <div class="flex flex-col py-4 hide-collapsed mt-auto">
                 <div class="px-4 pb-2 text-s text-muted-foreground font-semibold uppercase tracking-wider">Scrapers</div>
+                <div class="px-4 mb-2">
+                    <button id="btn-update-my-data" class="inline-flex items-center justify-center w-full h-9 rounded-md bg-secondary text-secondary-foreground font-medium hover:bg-secondary/80 transition-colors text-sm gap-2 shadow-sm" title="Read your own Science, Planets and Trade pages now (3 game requests)"><i class="fa-solid fa-rotate"></i> Update my data</button>
+                    <div id="my-data-status" class="mt-1 text-center text-xs text-muted-foreground"></div>
+                </div>
                 <div class="px-4 flex flex-row gap-2">
                     <button id="btn-mass-scan" class="inline-flex items-center justify-center w-1/2 h-9 rounded-md bg-secondary text-secondary-foreground font-medium hover:bg-secondary/80 transition-colors text-sm gap-2 shadow-sm" title="Seed the galaxy — system index and planets, one game API call"><i class="fa-solid fa-satellite-dish"></i> Galaxy</button>
                     <button id="btn-mass-scan-players" class="inline-flex items-center justify-center w-1/2 h-9 rounded-md bg-secondary text-secondary-foreground font-medium hover:bg-secondary/80 transition-colors text-sm gap-2 shadow-sm" title="Scan Players (page scrape)"><i class="fa-solid fa-user-astronaut"></i> Players</button>
                 </div>
+                <div id="galaxy-scan-status" class="px-4 mt-1 text-center text-xs text-muted-foreground"></div>
                 <div id="player-page-scan-status" class="px-4 mt-1 text-center text-xs text-muted-foreground"></div>
                 <div class="px-4 mt-2">
                     <button id="btn-deep-scan-players" class="inline-flex items-center justify-center w-full h-9 rounded-md bg-secondary text-secondary-foreground font-medium hover:bg-secondary/80 transition-colors text-sm gap-2 shadow-sm" title="Force-refresh the roster now and API-scan up to 150 stale players"><i class="fa-solid fa-satellite"></i> Player API scan</button>

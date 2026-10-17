@@ -21,15 +21,17 @@ const { nextDailyWindow } = require('../../public/js/utils/daily-reset.js');
 const HOUR = 60 * 60 * 1000;
 const RESET_BUFFER_MINUTES = 5;
 const JOBS = {
-    'galaxy-seed':                { intervalMs: 10 * 60 * 1000, sameMemberMs: 6 * HOUR },
     // Rankings only change once a day in-game: once per game day, after the reset.
-    // Battle reports are published at the reset too; their details are fetched once, 30 min
-    // later, after battle-sync.js's own daily pull (00:05) has stored the new reports.
+    // Battle reports are published at the reset too: battle-sync pulls them at 00:05 and
+    // their details are fetched once, 30 min later, after that pull has stored them.
+    'battle-sync':                { daily: true,                sameMemberMs: 6 * HOUR },
     'battle-report-detail':       { daily: true, resetBufferMinutes: 30, sameMemberMs: 6 * HOUR },
     'ranking-highest-population': { daily: true,                sameMemberMs: 6 * HOUR },
     'ranking-best-planets':       { daily: true,                sameMemberMs: 6 * HOUR },
     'ranking-bonus-goals':        { daily: true,                sameMemberMs: 6 * HOUR },
-    // Manual buttons only: recorded, never claimed.
+    // Manual buttons only: recorded, never claimed. The galaxy seed was a 10-minute rotating
+    // job until 2026-10-17; a stale tab still asking to claim it is refused.
+    'galaxy-seed':                null,
     'player-api-scan':            null,
     'player-page-scan':           null,
 };

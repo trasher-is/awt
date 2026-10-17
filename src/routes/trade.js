@@ -6,6 +6,7 @@ const alliancesRepo = require('../repositories/alliances');
 const tradeRepo = require('../repositories/trade');
 const settingsRepo = require('../repositories/settings');
 const tradeInventoryRepo = require('../repositories/tradeInventory');
+const memberDataSyncsRepo = require('../repositories/memberDataSyncs');
 const savingsExpensesRepo = require('../repositories/savingsExpenses');
 const router = express.Router();
 
@@ -310,6 +311,7 @@ router.post('/sync/trade-inventory', requireAuth, (req, res) => {
         else alliancesRepo.upsertHoardedAu(row.id, hoardedAu);
         const items = readInventoryItems(req.body.items);
         if (items) tradeInventoryRepo.replaceItems(row.id, items);
+        memberDataSyncsRepo.stamp(row.id, 'trade');
         res.json({ success: true, stored: true });
     } catch (e) {
         console.error('[DB Error] sync trade-inventory:', e);

@@ -1,8 +1,8 @@
-// Regression coverage for battle-sync.js's once-a-day scheduling (2026-09-12, replacing a
-// 30-minute setInterval — battle reports are only posted once a day, at the reset, so
-// polling faster than that just re-asked for the same empty window all day). Mirrors
-// galaxy-auto-seed-scheduling.test.js's extraction discipline exactly, since the two
-// schedulers are deliberately unified around the same day-lock/attempt-lock/retry shape.
+// Regression coverage for battle-sync.js's scheduling (2026-10-17): once per game day for the
+// whole hub. The hub hands the day's pull to ONE member's browser (shared job 'battle-sync',
+// src/repositories/sharedJobs.js — its own test covers the daily window and rotation); this
+// file pins the browser side: no claim, no pull; never more than one pull at a time; and a
+// failure is swallowed instead of crashing the scheduler.
 //
 // Run with: node src/utils/battle-sync-scheduling.test.js
 
@@ -17,125 +17,78 @@ const ok = (name, cond, detail) => {
 
 const src = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'ui', 'battle-sync.js'), 'utf8');
 
-const sliceStart = src.indexOf('function getLastPulledDay() {');
+const sliceStart = src.indexOf('let pulling = false;');
 const sliceEnd = src.indexOf('\nlet started = false;');
 
-function fakeStorage() {
-    const store = new Map();
-    return {
-        getItem: (k) => (store.has(k) ? store.get(k) : null),
-        setItem: (k, v) => store.set(k, String(v)),
-    };
-}
-
-// nextWindow must stay RELATIVE to now (2026-09-13 fix): it used to be the fixed instant
-// 2026-09-13T00:05:00Z, so once real time passed that date the scheduler computed a
-// negative delay, clamped it to the 1s floor, and the "rescheduled for the next daily
-// window, not immediately" case started failing on wall-clock time rather than on anything
-// the code did.
-function build({ pullResult = { ok: true, inserted: 0 }, berlinDay = '2026-09-12', nextWindow = new Date(Date.now() + 6 * 60 * 60 * 1000) } = {}) {
-    const calls = { pullOnce: 0 };
-    const pullOnce = async () => { calls.pullOnce++; return pullResult; };
-    const AWDailyReset = { berlinDateKey: () => berlinDay, nextDailyWindow: () => nextWindow };
-    const localStorage = fakeStorage();
-    const timers = [];
-    const setTimeout_ = (fn, delay) => { timers.push({ fn, delay }); return timers.length; };
-    const console_ = { warn: () => {} };
-    const body = src.slice(sliceStart, sliceEnd).replace(/export\s+/g, '');
-    const factory = new Function(
-        'pullOnce', 'AWDailyReset', 'localStorage', 'setTimeout', 'console', 'DAY_LOCK_KEY', 'ATTEMPT_LOCK_KEY', 'ATTEMPT_LOCK_TTL_MS', 'RETRY_DELAY_MS', 'RESET_BUFFER_MINUTES',
-        `${body}\nreturn { tick, getLastPulledDay, setLastPulledDay, claimAttemptLock };`
-    );
-    const mod = factory(pullOnce, AWDailyReset, localStorage, setTimeout_, console_, 'k-day', 'k-attempt', 5 * 60 * 1000, 30 * 60 * 1000, 5);
-    return { ...mod, calls, timers };
-}
-
-// The module reads the presence gate from game-rate-limit.js (globalThis.AWGameRate);
-// these tests are about scheduling, so the member is present unless a case says otherwise.
 let memberActive = true;
 globalThis.AWGameRate = { isMemberActive: () => memberActive };
+
+function build({ granted = true, pullOnce = async () => ({ ok: true, inserted: 0 }) } = {}) {
+    const calls = { claim: [], pullOnce: 0, warned: 0 };
+    const claimSharedJob = async (job) => { calls.claim.push(job); return granted; };
+    const pull = async () => { calls.pullOnce++; return pullOnce(); };
+    const console_ = { warn: () => { calls.warned++; } };
+    const body = src.slice(sliceStart, sliceEnd);
+    const factory = new Function('claimSharedJob', 'pullOnce', 'console', 'JOB',
+        `${body}\nreturn { tick, isPulling: () => pulling };`);
+    return { ...factory(claimSharedJob, pull, console_, 'battle-sync'), calls };
+}
 
 (async () => {
     ok('the expected slice is where the test expects it', sliceStart !== -1 && sliceEnd !== -1 && sliceStart < sliceEnd);
 
-    console.log('\n── Already pulled today: ticking again does nothing ' + '─'.repeat(18));
+    console.log('\n── The hub says it is this member\'s turn: one pull ' + '─'.repeat(19));
     {
         const mod = build();
-        mod.setLastPulledDay('2026-09-12');
         await mod.tick();
-        ok('pullOnce was never called', mod.calls.pullOnce === 0);
-        ok('rescheduled for the next daily window, not immediately', mod.timers.length === 1 && mod.timers[0].delay > 60 * 1000, mod.timers);
+        ok('asked the hub for the battle-sync job', mod.calls.claim.length === 1 && mod.calls.claim[0] === 'battle-sync', mod.calls.claim);
+        ok('pulled exactly once', mod.calls.pullOnce === 1);
     }
 
-    console.log('\n── Not pulled today: attempts and, on success, marks the day ' + '─'.repeat(9));
+    console.log('\n── Not this member\'s turn (or already pulled today): no game request ' + '─'.repeat(2));
     {
-        const mod = build({ pullResult: { ok: true, inserted: 12 } });
+        const mod = build({ granted: false });
         await mod.tick();
-        ok('pullOnce was called exactly once', mod.calls.pullOnce === 1);
-        ok('the day is now marked pulled', mod.getLastPulledDay() === '2026-09-12');
+        ok('no pull', mod.calls.pullOnce === 0);
     }
 
-    console.log('\n── A failed pull does NOT mark the day, and retries sooner than a full day ' + '─'.repeat(2));
-    {
-        const mod = build({ pullResult: { ok: false, error: 'search failed' } });
-        await mod.tick();
-        ok('pullOnce was called', mod.calls.pullOnce === 1);
-        ok('the day was NOT marked pulled', mod.getLastPulledDay() === null);
-        ok('rescheduled as a short retry (30 min), not tomorrow\'s window', mod.timers.length === 1 && mod.timers[0].delay <= 31 * 60 * 1000, mod.timers);
-    }
-
-    console.log('\n── A thrown pullOnce is caught, not left to crash the scheduler ' + '─'.repeat(6));
-    {
-        const AWDailyReset = { berlinDateKey: () => '2026-09-12', nextDailyWindow: () => new Date('2026-09-13T00:05:00Z') };
-        const localStorage = fakeStorage();
-        const timers = [];
-        const setTimeout_ = (fn, delay) => { timers.push({ fn, delay }); };
-        const pullOnce = async () => { throw new Error('network dead'); };
-        let warned = false;
-        const console_ = { warn: () => { warned = true; } };
-        const body = src.slice(sliceStart, sliceEnd).replace(/export\s+/g, '');
-        const factory = new Function(
-            'pullOnce', 'AWDailyReset', 'localStorage', 'setTimeout', 'console', 'DAY_LOCK_KEY', 'ATTEMPT_LOCK_KEY', 'ATTEMPT_LOCK_TTL_MS', 'RETRY_DELAY_MS', 'RESET_BUFFER_MINUTES',
-            `${body}\nreturn { tick, getLastPulledDay };`
-        );
-        const mod = factory(pullOnce, AWDailyReset, localStorage, setTimeout_, console_, 'k-day', 'k-attempt', 5 * 60 * 1000, 30 * 60 * 1000, 5);
-        let threw = false;
-        try { await mod.tick(); } catch (e) { threw = true; }
-        ok('tick does not propagate the throw', !threw);
-        ok('the failure was logged', warned);
-        ok('the day was NOT marked pulled', mod.getLastPulledDay() === null);
-        ok('still rescheduled (a retry, not left hanging)', timers.length === 1, timers);
-    }
-
-    console.log('\n── Cross-tab: a second tab\'s attempt lock blocks a concurrent one ' + '─'.repeat(5));
-    {
-        const shared = fakeStorage();
-        const pullOnce = async () => ({ ok: true, inserted: 0 });
-        const AWDailyReset = { berlinDateKey: () => '2026-09-12', nextDailyWindow: () => new Date('2026-09-13T00:05:00Z') };
-        const timers = [];
-        const setTimeout_ = (fn, delay) => { timers.push({ fn, delay }); };
-        const console_ = { warn: () => {} };
-        const body = src.slice(sliceStart, sliceEnd).replace(/export\s+/g, '');
-        const factory = new Function(
-            'pullOnce', 'AWDailyReset', 'localStorage', 'setTimeout', 'console', 'DAY_LOCK_KEY', 'ATTEMPT_LOCK_KEY', 'ATTEMPT_LOCK_TTL_MS', 'RETRY_DELAY_MS', 'RESET_BUFFER_MINUTES',
-            `${body}\nreturn { claimAttemptLock };`
-        );
-        const tabA = factory(pullOnce, AWDailyReset, shared, setTimeout_, console_, 'k-day', 'k-attempt', 5 * 60 * 1000, 30 * 60 * 1000, 5);
-        const tabB = factory(pullOnce, AWDailyReset, shared, setTimeout_, console_, 'k-day', 'k-attempt', 5 * 60 * 1000, 30 * 60 * 1000, 5);
-        ok('the first tab claims the attempt lock', tabA.claimAttemptLock() === true);
-        ok('a second tab is refused immediately after', tabB.claimAttemptLock() === false);
-    }
-
-    console.log('\n── Member away: no pull, look again in a minute ' + '─'.repeat(22));
+    console.log('\n── Member away: does not even ask the hub ' + '─'.repeat(28));
     {
         memberActive = false;
         const mod = build();
         await mod.tick();
         memberActive = true;
-        ok('no pull while the member is away', mod.calls.pullOnce === 0);
-        ok('no attempt lock taken (another tab with a member present can pull)', mod.claimAttemptLock() === true);
-        ok('rechecks in about a minute', mod.timers.length === 1 && mod.timers[0].delay <= 60 * 1000 && mod.timers[0].delay > 50 * 1000, mod.timers);
+        ok('no claim (another member who is present can take today\'s turn)', mod.calls.claim.length === 0);
+        ok('no pull', mod.calls.pullOnce === 0);
     }
+
+    console.log('\n── A slow pull does not stack ' + '─'.repeat(40));
+    {
+        const mod = build({ pullOnce: () => new Promise(() => {}) }); // never finishes
+        mod.tick();
+        await new Promise(resolve => setImmediate(resolve));
+        ok('the first tick holds `pulling`', mod.isPulling() === true);
+        await mod.tick();
+        ok('a second tick while it runs neither claims nor pulls', mod.calls.claim.length === 1 && mod.calls.pullOnce === 1, mod.calls);
+    }
+
+    console.log('\n── A failed or thrown pull is logged, not left to crash the scheduler ' + '─'.repeat(1));
+    {
+        const failed = build({ pullOnce: async () => ({ ok: false, error: 'search failed' }) });
+        await failed.tick();
+        ok('a failed pull is logged', failed.calls.warned === 1);
+        const thrown = build({ pullOnce: async () => { throw new Error('network dead'); } });
+        let threw = false;
+        try { await thrown.tick(); } catch (e) { threw = true; }
+        ok('tick does not propagate the throw', !threw);
+        ok('the failure was logged', thrown.calls.warned === 1);
+        ok('`pulling` is released', thrown.isPulling() === false);
+    }
+
+    console.log('\n── No per-browser day-lock left ' + '─'.repeat(38));
+    const code = src.replace(/^\s*\/\/.*$/gm, '');
+    ok('the old localStorage day-lock and its own reset timer are gone', !/localStorage|DAY_LOCK_KEY|nextDailyWindow/.test(code));
+    ok('the job name the hub knows', /const JOB = 'battle-sync';/.test(src));
 
     console.log('\n' + '─'.repeat(75));
     console.log(`${pass} passed, ${fail} failed`);

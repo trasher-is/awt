@@ -150,17 +150,17 @@ nothing about stationed fleets, and `null` keeps "not observed" distinct from a 
 | Feature | API calls | Feeds |
 |---|---|---|
 | Galaxy map "Seed z API" | `getSolarSystems` | `POST /hub-api/sync/galaxy` |
-| Galaxy map "Seed planets (sectors)" | `getMapSectors` | `POST /hub-api/sync/system` (one call per system, via the shared mapper, `scan_mode: 'silent'` to suppress Discord announcements) then `POST /hub-api/sync/system-in-vision` with every system's `isInVision` flag |
+| Galaxy map "Seed planets (sectors)" and the sidebar Galaxy button (member taps only since 2026-10-17, no background seed) | `getMapSectors` | `POST /hub-api/sync/system` (one call per system, via the shared mapper, `scan_mode: 'silent'` to suppress Discord announcements) then `POST /hub-api/sync/system-in-vision` with every system's `isInVision` flag |
 | Travel calculator, game-server line | `getTravelTime`, debounced 400 ms | display only; a mismatch over 2 s against the local formula is `console.warn`ed with full inputs |
 | Travel calculator Update / system-intel refresh | `getSystemPlanets` | `POST /hub-api/sync/system` via the shared mapper |
-| Battle-report sync (dashboard, first pull 10 s after load, then every 30 min) | `searchBattleReports` twice — once per alliance side | `POST /hub-api/sync/battle-reports`; the hub stores idempotently and announces the genuinely new reports on Discord |
+| Battle-report sync (`battle-sync.js`, once per game day after the reset, from one member's browser for the whole hub via shared job `battle-sync`) | `searchBattleReports`, one global pull | `POST /hub-api/sync/battle-reports`; the hub stores idempotently and announces the genuinely new reports on Discord |
 | Starbase order editor (own planets only) | `getSystemPlanets`, then `putOrderGeometry` after an explicit confirm | `POST /hub-api/sync/starbase-audit` after a confirmed 200 |
-| Player list background sync (`player-api-sync.js`, cadence decays with round age) | `getPlayers` | `POST /hub-api/sync/player-list` via the shared `mapPlayersToSyncPayload` mapper |
-| Player detail background sweep (`player-api-sync.js`, staleness-ordered, batched via `/hub-api/sync/player-scan-claim`) | `getPlayer` per claimed id | `POST /hub-api/sync/player-detail` |
+| Player list pull (`player-api-sync.js`, right before a Player API scan or a Players page scan; no timer since 2026-10-17) | `getPlayers` | `POST /hub-api/sync/player-list` via the shared `mapPlayersToSyncPayload` mapper |
+| Player API scan button (`player-api-sync.js`, staleness-ordered, batched via `/hub-api/sync/player-scan-claim`) | `getPlayer` per claimed id | `POST /hub-api/sync/player-detail` |
 | Search live-fallback — player branch (`search.js`'s `searchLiveViaApi('player', …)`) | `searchPlayers` | `POST /hub-api/sync/player-list` via the shared `mapPlayersToSyncPayload` mapper, then the same DB-backed search re-runs |
 | Search live-fallback — alliance branch (`search.js`'s `searchLiveViaApi('alliance', …)`) | `searchAlliances` | `POST /hub-api/sync/alliance-search`, then the same DB-backed search re-runs |
 | Search live-fallback — system branch (`search.js`'s `searchLiveViaApi('system', …)`) | `searchSolarSystems` | `POST /hub-api/sync/galaxy` via the shared `mapSolarSystemsToSyncPayload` mapper, then the same DB-backed search re-runs |
-| Battle-report ship-detail sweep (`battle-report-detail-sync.js`, every 90 s, batched via `/hub-api/sync/battle-report-ship-detail-claim`) | none (page scrape, not an API call) — `scrapeBattleReportShipDetail` above | `POST /hub-api/sync/battle-report-ship-detail` per claimed report |
+| Battle-report ship-detail sweep (`battle-report-detail-sync.js`, once per game day 30 min after the reset via shared job `battle-report-detail`, batched via `/hub-api/sync/battle-report-ship-detail-claim`) | none (page scrape, not an API call) — `scrapeBattleReportShipDetail` above | `POST /hub-api/sync/battle-report-ship-detail` per claimed report |
 
 ## Open questions
 

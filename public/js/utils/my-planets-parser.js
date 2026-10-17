@@ -42,3 +42,29 @@ export function parseMyPlanetsPage(doc) {
     });
     return rows;
 }
+
+// true when the hub stored it. An empty list means the page didn't parse the way we expect —
+// nothing is sent, so the old snapshot stays in place.
+export async function postMyPlanets(planets) {
+    if (!planets.length) return false;
+    const res = await fetch('/hub-api/sync/my-planets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planets }),
+    });
+    return res.ok;
+}
+
+// In-page (2026-10-17): the member is looking at /Game/Planets right now, so reading it costs
+// the game nothing. spy.js re-runs its view hooks on every DOM change, so an unchanged list
+// is not re-posted more than once a minute — same rule as scrapeScienceResearch.
+let lastPost = { key: '', at: 0 };
+export async function scrapeMyPlanets() {
+    const planets = parseMyPlanetsPage(document);
+    if (!planets.length) return;
+    const key = JSON.stringify(planets.map(p => [p.game_planet_id, p.population, p.production_pp]));
+    const now = Date.now();
+    if (key === lastPost.key && now - lastPost.at < 60 * 1000) return;
+    lastPost = { key, at: now };
+    await postMyPlanets(planets);
+}
