@@ -57,6 +57,16 @@ population cap for your current Social science level, not that something's broke
 to research more Social to raise the cap. See
 [Social (population cap)](game-rules.md#social-population-cap).
 
+Social also drives **spontaneous growth** (the "baby boom" news item): at the daily update,
+one random planet sitting **6 or more population levels below your Social level** gets +1
+population for free — see [Science fields — effects](game-rules.md#science-fields--effects).
+In practice that means **Social 15** lets a population-9 planet roll up to 10, and population
+10 is the threshold for a planet to count toward your trade bonus. Social 14 stops the
+lottery at 9, which gets your lower planets to 9 faster (fewer planets share the daily
+roll), but nothing then carries them over the line to 10. Both are used in the alliance; with
+a high-Growth race you'll pass through Social 14 quickly anyway, so 15 is the common target
+during the trade-agreement phase.
+
 ### Production and buildings
 
 **Robotic Factories** and your population level both generate production points per hour,
@@ -87,6 +97,14 @@ server, Energy 35 gets you down to roughly 3.7% of unmodified flight time, 40 to
 and 45 to about 1.4% — pushing past ~40 mostly buys you a few extra seconds per hop, not
 minutes. **RZ:** Energy scales more gently there (95% per level instead of 91%), so higher
 levels keep paying off for longer — see the [RedZone rounds](#redzone-rounds) table.
+
+Biology also decides who can read **your** intel report — race picks, sciences, trade rate,
+artifacts. Anyone whose Biology is **6 or more levels above yours** sees all of it (see
+[Fleet and combat notes](game-rules.md#fleet-and-combat-notes)). Dedicated spies usually
+stop around Biology 31-32, so sitting at **26-27** keeps most of them out; that is the level
+the alliance aimed for in beta 6. Below that, assume a few opponents know your race. A
+common research rhythm before Biology 25 is to alternate Biology and Energy one level at a
+time rather than pushing either far ahead.
 
 **RZ:** flights have their own settings. The fixed minimum is **10 minutes within a system /
 25 minutes between systems**, compared with **20 / 45 minutes** on standard; the reducible
@@ -148,6 +166,33 @@ means several fights you individually lose instead of one you'd have won. Keep i
 and only commit to a fight the Battle Calculator says you're confident in; a target that
 slips away is a better outcome than a fight you didn't need to take.
 
+### Player level and experience
+
+Your **player level (PL)** decides which artifacts you can buy — Charcoal Diamond 1 needs
+PL 5, Memory Jar 1 PL 6, Memory Jar 2 PL 13 (full table in
+[Artifacts](game-rules.md#artifacts)) — and adds to your score and combat bonus. You level up
+by winning fights: the winner gains XP equal to the **combat value the loser lost**, so
+beating a starbase pays its whole CV. Full XP needs at least 2 of your ships to survive;
+otherwise you get only 25%. See [Full XP from combat](game-rules.md#full-xp-from-combat) and
+the [Player level](game-rules.md#player-level) table.
+
+Without an enemy nearby, alliance members level each other with **Friendly Fire (FF)**:
+you knock down an alliance-mate's starbase, which they agreed to let you hit. A few habits
+from beta 6:
+
+- **Run the Battle Calculator first** and send exactly what gives a 100% win. You're paying
+  for those ships, and a loss pays nothing.
+- **Starbases auto-grow by whole levels**, so a planet part-way through SB 8 grows the same
+  as one at exactly SB 8. Ask the owner when their next level lands if you want the bigger XP
+  payout.
+- **A few big starbases are quicker than many small ones**: one SB 11 pays about as much as
+  an SB 10 plus an SB 8, with one flight instead of two.
+- **Count it as spending.** Gaining PL costs real production, so do it when it unlocks
+  something you'll use, such as the next artifact, not just for the number.
+
+**RZ:** battles between allies pay only **25%** of the normal XP
+(`ExperiencePointsFactorFromAllied`), so Friendly Fire is a much weaker way to level there.
+
 ### Trade agreements, alliances, and NAPs
 
 **Trade agreements** boost your economy-related bonuses and cost 20,000 A$ to both send and
@@ -156,6 +201,29 @@ most 5 at once, and new agreements are only actually accepted at four fixed time
 (00:00/06:00/12:00/18:00 CET) rather than instantly on the standard server. **RZ:** its
 acceptance schedule still needs confirmation; do not divide these clock times by ten. See
 [Trade agreements](game-rules.md#trade-agreements).
+
+Only planets at **population 10 or more** count toward the trade bonus (**RZ:** 12). A planet
+an enemy is sieging stops contributing while the siege lasts, plus up to one 5-minute update
+after it ends.
+
+Agreements need a partner who has the money **at the same time**, so the alliance plans them
+together rather than first-come, first-served:
+
+- **Save, don't spend, when you're close.** Once the plan has you sending or accepting soon,
+  every PP you put into buildings or Supply Units pushes back your partner's agreement as well
+  as yours. The goal is that nobody sits on 20,000 A$ for more than a day waiting.
+- **Selling artifacts to fund an agreement early is normal.** An artifact holds its value on
+  the market, so selling one to sign 1-2 days sooner and buying it back afterwards is usually
+  worth it.
+- **If you'll wait several days for a partner anyway**, that gap is the time to buy Supply
+  Units or do some Friendly Fire for player level.
+- In a small alliance, everyone usually signs with the **dedicated trader** first, since that
+  account lives on trade bonus, and then the rest pair up with each other.
+
+The hub's **Trade agreements** panel has a **Schedule** tab that works out who should pair
+with whom and when, and a **My Savings** tab where you mark the planets you're saving on and
+the artifacts you're willing to sell. It only re-reads what you own when you visit the game's
+Trade page or press Reload, so do that before you trust the date it shows.
 
 **Alliances** pool players together for score, defense, and trade agreement partners. There's
 no cap on how many members an alliance can have, and no built-in way to remove a member short
@@ -312,6 +380,12 @@ one of the alliance's members who won't count toward the alliance's score (see
 [Scoring and winning](#scoring-and-winning) for why an alliance always has a few of those) —
 put the points into Attack, Speed, or Culture instead.
 
+Once you know the game, **+4 Production with +4 Culture** is still the alliance's go-to for a
+strong early game (checked again in beta 6). Production pays for everything, and Culture is
+the stat that keeps compounding as long as you have room to expand. If you take +Culture,
+make sure you'll actually have the free planets and the production to fill the slots it
+unlocks; otherwise those race points are wasted.
+
 ### Early build order
 
 A common early building order: **Robotic Factory → Galactic Cybernet → Hydroponic Farm →
@@ -352,6 +426,12 @@ uncontested Free planets:
   usually set up in parallel with — not instead of — normal growth. It's a one-shot: it can
   only catch whichever single fleet actually attacks that planet, so an opponent who commits
   several fleets at once only sacrifices one or two of them, not the whole attack.
+- **Guard fresh planets once opponents have Mathematics 12.** Mathematics 12 lets a player
+  choose a lower energy at launch (see
+  [Science fields — effects](game-rules.md#science-fields--effects)), so a slow fleet can
+  already be on its way to a planet before you colonize it. The alliance calls these
+  "ghosts". RAID's rule of thumb is to keep **at least 200 CV** on a newly colonized planet
+  for its **first 3 days** once anyone nearby has Mathematics 12.
 - **Position as a "road bump," not just a defender.** Rather than only reacting once you're
   attacked, put a fleet somewhere the enemy is likely to pass through on their way to a
   softer target — it costs them a fight (or a detour) even if that fleet was never the
@@ -367,3 +447,26 @@ uncontested Free planets:
   airports as they open up rather than assuming someone will get to it. The same logic makes
   a well-placed border system worth cutting an enemy's territory in half over: it's not about
   the planets in it, it's about what falls out of everyone's reach once you hold it.
+
+### Knowing when to stop investing
+
+Every building and Supply Unit is an investment. It only pays off if it earns back its cost
+**before the round ends**, so the closer the end is, the less long-term building is worth.
+
+- **Work out the payback time.** In beta 6, with about three weeks left, a Supply Unit cost
+  about 1,000 PP and took 450-500 hours (around three weeks) to earn that back in extra
+  production. That was the alliance's signal to stop buying Supply Units and Robotic Factories
+  for production, and to save PP for fleet instead. One earlier round, the alliance kept
+  farming about a week too long and had nothing to fight with when it counted.
+- **Watch the leading alliance.** A round ends once an alliance holds the win condition (see
+  [Scoring and winning](#scoring-and-winning)), and its last stretch is the **countdown** ("CD"
+  in chat), when everyone else attacks the leader. When a ranking alliance's farms and scores
+  start climbing fast, the round may be only weeks from ending. Plan your last big
+  investments against that date, not against a normal round length.
+- **Artifacts are a safer place for late money than buildings.** An artifact can be sold
+  back on the market, so buying one late is closer to parking money than spending it. Sell
+  it before you need the A$ for a fight, and buy it back if the round carries on.
+- **Don't enter the countdown by accident.** Being the alliance that triggers it makes you
+  everyone's target. If you're not ready to defend for the whole countdown, keep your score
+  under the threshold, for example by holding back +Growth artifacts or killing some of your
+  own population, until you are.
