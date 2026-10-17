@@ -39,6 +39,10 @@ a group, starting together on **day 2-3** of a round tends to land everyone clos
 than day 0-1 (the map hasn't had time to spread out yet) or day 5+ (you're pushed to the
 rim, further from everyone and from the more-developed core).
 
+The game's code of conduct forbids **bots, AI systems or scripts that automate player
+actions**. Outside tools that collect or enrich data, like this hub, are allowed within
+reason, and the game admins ask that you tell them about such tools in advance.
+
 ### Your home planet: population and growth
 
 Population is your most basic resource — more population means more production and more
@@ -67,6 +71,12 @@ roll), but nothing then carries them over the line to 10. Both are used in the a
 a high-Growth race you'll pass through Social 14 quickly anyway, so 15 is the common target
 during the trade-agreement phase.
 
+Population and Social also cap your **fleet**: the most combat value you may field is your
+total population levels × (Social + 3) × 11 (see
+[Max Combat Value](game-rules.md#max-combat-value)). Farms that look slow early are what
+let you build a big fleet late in the round. The alliance's rule of thumb is **at least 12
+Hydroponic Farms** on planets you plan to keep.
+
 ### Production and buildings
 
 **Robotic Factories** and your population level both generate production points per hour,
@@ -85,7 +95,9 @@ in short:
 
 - **Biology** lets you see further on the map, and at level 25 opens up the whole map, letting
   you send fleets by system ID instead of by name.
-- **Economy** makes your ships cheaper to build.
+- **Economy** makes your ships cheaper to build. It adds up: the same PP buys about 23% more
+  ships at Economy 27 than at Economy 10, and about 43% more at Economy 30 than at Economy 0
+  (see [Economy (ship costs)](game-rules.md#economy-ship-costs)).
 - **Energy** makes your fleets travel faster.
 - **Mathematics** means fewer losses when you're attacked.
 - **Physics** means a better chance of winning when you attack.
@@ -124,6 +136,28 @@ production points. Sending more Colony Ships than you need lets the extras "disb
 starting production points instead, but only once you send at least two extra ships — see
 [Ship types](game-rules.md#ship-types) for the exact numbers. This is a common way to give a
 new colony a real head start instead of leaving it at zero.
+
+How many to send? Each Colony Ship costs 60 PP and returns only 15 PP when it disbands, so
+it only pays off while the new planet's buildings are far below your developed planets'. A
+rule of thumb from the alliance's research channel, which checks out against the
+[Buildings](game-rules.md#buildings) cost table:
+
+| Colony Ships sent | Enough to raise Robotic Factory, Cybernet and Lab to |
+|---|---|
+| 14 | level 5 |
+| 22 | level 6 |
+| 34 | level 7 |
+
+Aim for about **22** and straight level 6 unless you have production to spare. Beyond about
+level 7, each extra ship buys very little, so that production does more on your developed
+planets or in Supply Units. A built-up planet pays for itself sooner, so sending generously
+is rarely wasted while you're not fighting.
+
+Another way to build up a new planet fast is a **Friendly Siege**: an ally sieges your
+developed planets, so production you buy lands on a lower planet in your list instead (see
+[Non-aggression pacts](game-rules.md#non-aggression-pacts) and
+[Buying production points](game-rules.md#buying-production-points)). Spend everything on the
+developed planet before the siege lands, since sieged planets lose some of what you sell.
 
 ### Ships and combat basics
 
@@ -165,6 +199,10 @@ smaller ones to cover more ground (or to intercept from multiple directions) usu
 means several fights you individually lose instead of one you'd have won. Keep it together,
 and only commit to a fight the Battle Calculator says you're confident in; a target that
 slips away is a better outcome than a fight you didn't need to take.
+
+When a landing has to hit an exact second, such as a counter-attack in the attacker's fleet
+cycle (see [Fleet and combat notes](game-rules.md#fleet-and-combat-notes)), **launch from a
+computer**. Members have found mobile launches register about a second late.
 
 ### Player level and experience
 
@@ -215,6 +253,9 @@ together rather than first-come, first-served:
 - **Selling artifacts to fund an agreement early is normal.** An artifact holds its value on
   the market, so selling one to sign 1-2 days sooner and buying it back afterwards is usually
   worth it.
+- **Convert PP to A$ early when you're saving.** While the whole galaxy is signing
+  agreements, everyone sells PP for A$, so each PP buys fewer A$ the longer you wait. When the
+  A$ price starts rising again, the trade-agreement season is ending.
 - **If you'll wait several days for a partner anyway**, that gap is the time to buy Supply
   Units or do some Friendly Fire for player level.
 - In a small alliance, everyone usually signs with the **dedicated trader** first, since that
@@ -380,6 +421,12 @@ one of the alliance's members who won't count toward the alliance's score (see
 [Scoring and winning](#scoring-and-winning) for why an alliance always has a few of those) —
 put the points into Attack, Speed, or Culture instead.
 
+**Production** is the one trait the alliance's strongest players never skimp on: take **+3
+or +4**. +2 falls clearly behind, and the gap grows once trade-agreement bonuses multiply on
+top of it. Between **Attack** and **Defence**, Attack lets you win with a smaller fleet, which
+matters most early. Defence pays off mainly if you plan to hold your planets through a
+countdown late in the round, since you keep more of your fleet in each fight.
+
 Once you know the game, **+4 Production with +4 Culture** is still the alliance's go-to for a
 strong early game (checked again in beta 6). Production pays for everything, and Culture is
 the stat that keeps compounding as long as you have room to expand. If you take +Culture,
@@ -396,6 +443,16 @@ science (Research Lab).
 The common mistake here is building the Hydroponic Farm or Research Lab too early — investing
 in population growth or science before your production can actually support the rest of your
 build queue just slows everything down.
+
+Culture compounds, so the earlier your Galactic Cybernets go up, the sooner every later
+planet arrives. A common habit is to keep Cybernet **one level above Robotic Factory**. Before
+you start saving for trade agreements, getting Robotic Factories to about **level 12** on
+every planet tends to finish all five agreements sooner than saving straight away. The
+alliance's beta-5 calculations put it almost five days ahead of staying at level 9.
+
+Losing a planet hurts most early on: with 6 planets, one planet is about a sixth of your
+production, while with 21 it's under 5%. Defend early planets even when the fight isn't
+perfect.
 
 ### Artifact priority
 
