@@ -96,9 +96,11 @@ function render() {
     const r = calc();
     const el = document.getElementById('bc-results');
     if (!el) return;
-    if (!r) { el.classList.add('hidden'); el.classList.remove('flex'); return; }
-    el.classList.remove('hidden');
-    el.classList.add('flex');
+    for (const box of [el, document.getElementById('bc-fight')]) {
+        box?.classList.toggle('hidden', !r);
+        box?.classList.toggle('flex', !!r);
+    }
+    if (!r) return;
 
     const shipRows = (fleet, surv, side) => SHIPS.map((s, i) => {
         if (fleet[i] === 0) return '';
@@ -243,6 +245,14 @@ export function initBattleCalc() {
             if (side) { selectedSides[side] = null; selectionGeneration[side]++; }
             render();
         });
+    });
+
+    // The fight window is only loaded when someone actually taps Fight.
+    document.getElementById('bc-fight-btn')?.addEventListener('click', async () => {
+        const r = calc();
+        if (!r) return;
+        const { openFightSimulation } = await import('./battle-anim.js');
+        openFightSimulation(r);
     });
 
     setupPlayerSearch('bc-def-player-input', 'bc-def-player-dropdown', 'def');
