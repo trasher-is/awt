@@ -22,6 +22,15 @@ const TYPES = [
 ];
 const VOLLEYS = 6, VOLLEY_MS = 1000, LEAD_MS = 500, DICE_TUMBLE = 1700, DICE_MS = 2900;
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+// Movement per ship type: how far toward the centre it closes in, how wide it weaves, spring
+// stiffness and damping, top speed (px/s), how hard it keeps facing the enemy, turn rate.
+const MOVE = [
+    { pull: .75, weave: 20, k: 14,  d: 4.5, vmax: 170, bias: 30,  turn: 6 },   // DS
+    { pull: .30, weave: 9,  k: 6,   d: 3.5, vmax: 95,  bias: 90,  turn: 3.2 }, // CR
+    { pull: .10, weave: 4,  k: 2.5, d: 2.8, vmax: 50,  bias: 160, turn: 1.6 }, // BS
+];
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const wrapAngle = a => Math.atan2(Math.sin(a), Math.cos(a));
 
 // Ship silhouettes, nose pointing +x, unit = size.
 const SHAPES = [
@@ -86,7 +95,8 @@ export function openFightSimulation(result) {
             sides[side] = { fleet, surv, plan };
             plan.forEach(({ icons, keep }, t) => {
                 const list = [];
-                for (let i = 0; i < icons; i++) list.push({ side, type: t, alive: true, flash: 0, fade: 1, die: false, phase: Math.random() * 6.28 });
+                for (let i = 0; i < icons; i++) list.push({ side, type: t, alive: true, flash: 0, fade: 1, die: false, phase: Math.random() * 6.28,
+                    vx: 0, vy: 0, ax: 0, ay: 0, ang: side === 'def' ? 0 : Math.PI, spin: 0 });
                 shuffle(list).slice(0, icons - keep).forEach(s => (s.die = true));
                 ships.push(...list);
             });
@@ -94,7 +104,8 @@ export function openFightSimulation(result) {
         const sb = r.sbLvl > 0 ? { level: r.sbLvl, cv0: M.sbCV(r.sbLvl), hp: 1, hpEnd: out.survSB, levelNow: r.sbLvl, flash: 0, x: 0, y: 0 } : null;
         if (sb) sb.levelEnd = P.sbLevelLeft(M.sbCV, r.sbLvl, out.survSB);
         const dice = { u: out.u, shown: Math.random(), flipAt: 0 };
-        return { r, out, winner: out.winner, ships, sides, sb, dice, bolts: [], parts: [], events: [], clock: 0, last: 0, done: false };
+        return { r, out, winner: out.winner, ships, sides, sb, dice, bolts: [], parts: [], events: [], clock: 0, last: 0, done: false,
+            engage: { def: 0, atk: 0 } };
     }
 
     function layout(b) {
@@ -116,8 +127,10 @@ export function openFightSimulation(result) {
                 const y0 = H / 2 - (Math.min(k.rows, items.length) - 1) * k.gap / 2;
                 items.forEach((s, i) => {
                     const c = Math.floor(i / k.rows), rr = i % k.rows;
-                    s.x = cursor - dir * (c * gx + gx / 2) + (Math.random() - .5) * 2 * g;
-                    s.y = y0 + rr * k.gap + (c % 2 ? k.gap * .3 : 0);
+                    // home slot; the ship flies around it once the fight starts (see step())
+                    s.hx = cursor - dir * (c * gx + gx / 2) + (Math.random() - .5) * 2 * g;
+                    s.hy = y0 + rr * k.gap + (c % 2 ? k.gap * .3 : 0);
+                    s.x = s.hx; s.y = s.hy;
                 });
                 cursor -= dir * (k.cols * gx + 10 * g * f);
             }
@@ -145,9 +158,9 @@ export function openFightSimulation(result) {
     }
 
     // ── drawing ──
-    function drawShip(x, y, type, dir, color, alpha, flash) {
+    function drawShip(x, y, type, ang, color, alpha, flash) {
         const s = TYPES[type].size * g;
-        ctx.save(); ctx.translate(x, y); ctx.scale(dir * s, s); ctx.globalAlpha = alpha;
+        ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.scale(s, s); ctx.globalAlpha = alpha;
         ctx.beginPath(); SHAPES[type].forEach(([px, py], i) => i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)); ctx.closePath();
         ctx.fillStyle = flash > 0 ? '#ffffff' : color; ctx.fill();
         if (type > 0) {
@@ -234,7 +247,7 @@ export function openFightSimulation(result) {
         return pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
     }
     function boom(b, s, now) {
-        s.alive = false;
+        s.alive = false; s.spin = (Math.random() - .5) * 5;
         for (let i = 0, n = [10, 18, 30][s.type]; i < n; i++) {
             const a = Math.random() * 6.28, sp = (.03 + Math.random() * .12) * g * (1 + s.type * .5);
             b.parts.push({ x: s.x, y: s.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t0: now, life: 400 + Math.random() * 500 + s.type * 200,
@@ -251,8 +264,10 @@ export function openFightSimulation(result) {
         }
         if (!shooter) { if (ev.kill) boom(b, target, now); return; }
         const exact = ev.kill || target === b.sb;
-        const tx = target.x + (exact ? 0 : (Math.random() - .5) * 18 * g), ty = target.y + (exact ? 0 : (Math.random() - .5) * 18 * g);
-        b.bolts.push({ x0: shooter.x, y0: shooter.y, x1: tx, y1: ty, t0: now, dur: 180 + Math.hypot(tx - shooter.x, ty - shooter.y) * .7,
+        const ox = exact ? 0 : (Math.random() - .5) * 18 * g, oy = exact ? 0 : (Math.random() - .5) * 18 * g;
+        const tx = target.x + ox, ty = target.y + oy;
+        // the far end follows its target, which keeps moving while the shot flies
+        b.bolts.push({ x0: shooter.x, y0: shooter.y, ox, oy, x1: tx, y1: ty, t0: now, dur: 180 + Math.hypot(tx - shooter.x, ty - shooter.y) * .7,
             w: [1.2, 1.8, 3, 3.4][shooter.type] * g, color: ev.from === 'def' ? COL.def : COL.atk, ev, target });
     }
     function hit(b, bolt, now) {
@@ -309,27 +324,81 @@ export function openFightSimulation(result) {
                 `<span class="text-right ${n - left > 0 ? 'text-red-400' : 'text-zinc-600'}">−${fmt(n - left)}</span>`).join('') + `</div>`;
     }
 
+    // ── movement ──
+    // Each ship is pulled toward a moving point near its home slot by a spring, pushed away
+    // from ships on its own side that get too close, and capped at a top speed. "engage"
+    // ramps each side from 0 (parked) to 1 (fighting) when the shooting starts, and down to a
+    // light hold once the enemy is gone. "pull" is how far toward the centre line a type
+    // closes in: destroyers meet in the middle and weave, battleships barely move.
+    function step(b, now, dt) {
+        const fightAt = LEAD_MS + (b.dice ? DICE_MS : 0) - 300, t = now / 1000;
+        const alive = { def: [], atk: [] };
+        for (const s of b.ships) if (s.alive) alive[s.side].push(s);
+        for (const side of ['def', 'atk']) {
+            const foe = side === 'def' ? 'atk' : 'def';
+            const want = now < fightAt ? 0 : alive[foe].length ? 1 : .2;
+            b.engage[side] += (want - b.engage[side]) * Math.min(1, dt * 1.2);
+            const list = alive[side], dir = side === 'def' ? 1 : -1, e = b.engage[side];
+            const sway = Math.sin(t * .7 + (side === 'def' ? 0 : 2)) * 10 * g * e, front = W / 2 - dir * W * .02;
+            for (const s of list) {
+                const m = MOVE[s.type], w = (3 + m.weave * e) * g;
+                const tx = s.hx + (front - s.hx) * m.pull * e + Math.cos(t * (1.6 - s.type * .4) + s.phase) * w;
+                const ty = s.hy + sway + Math.sin(t * (1.9 - s.type * .5) + s.phase * 1.3) * w * 1.3;
+                s.ax = (tx - s.x) * m.k - s.vx * m.d;
+                s.ay = (ty - s.y) * m.k - s.vy * m.d;
+            }
+            for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+                const a = list[i], c = list[j], dx = a.x - c.x, dy = a.y - c.y;
+                const r = (TYPES[a.type].gap + TYPES[c.type].gap) * .45 * g, d2 = dx * dx + dy * dy;
+                if (d2 >= r * r || d2 === 0) continue;
+                const d = Math.sqrt(d2), f = (r - d) / r * 900 * g;
+                a.ax += dx / d * f; a.ay += dy / d * f; c.ax -= dx / d * f; c.ay -= dy / d * f;
+            }
+            for (const s of list) {
+                const m = MOVE[s.type];
+                s.vx += s.ax * dt; s.vy += s.ay * dt;
+                const sp = Math.hypot(s.vx, s.vy), vmax = m.vmax * g;
+                if (sp > vmax) { s.vx *= vmax / sp; s.vy *= vmax / sp; }
+                s.x = clamp(s.x + s.vx * dt, 6, W - 6); s.y = clamp(s.y + s.vy * dt, 6, H - 6);
+                // face where you fly, but always lean toward the enemy line
+                s.ang += wrapAngle(Math.atan2(s.vy, s.vx + dir * m.bias * g) - s.ang) * Math.min(1, dt * m.turn);
+            }
+        }
+        for (const s of b.ships) if (!s.alive && s.fade > 0) { // wrecks drift, spin and fade
+            s.vx *= .97; s.vy *= .97; s.x += s.vx * dt; s.y += s.vy * dt; s.ang += s.spin * dt;
+            s.fade = Math.max(0, s.fade - dt * 1.4);
+        }
+    }
+
     // ── loop ──
     function frame(ts) {
         const b = B;
         if (!b.last) b.last = ts;
+        const prev = b.clock;
         b.clock += ts - b.last; b.last = ts;
         const now = b.clock;
+        step(b, now, Math.min(.05, (now - prev) / 1000));
         while (b.events.length && b.events[0].at <= now) fire(b, b.events.shift(), now);
         ctx.clearRect(0, 0, W, H);
         ctx.fillStyle = '#d4d4f5';
         for (const s of stars) { ctx.globalAlpha = s.a * (.7 + .3 * Math.sin(ts / 900 + s.p)); ctx.fillRect(s.x * W, s.y * H, s.r, s.r); }
         ctx.globalAlpha = 1;
         if (b.sb) { b.sb.flash -= 16; drawStarbase(b.sb, ts); }
-        for (const s of b.ships) {
-            if (!s.alive) { s.fade = Math.max(0, s.fade - .06); if (!s.fade) continue; }
-            s.flash -= 16;
-            drawShip(s.x, s.y + Math.sin(ts / 700 + s.phase) * 1.2 * g, s.type, s.side === 'def' ? 1 : -1,
-                s.side === 'def' ? COL.def : COL.atk, s.alive ? 1 : s.fade * .5, s.flash);
-        }
         ctx.lineCap = 'round';
+        for (const s of b.ships) {
+            if (!s.alive && !s.fade) continue;
+            s.flash -= 16;
+            const color = s.side === 'def' ? COL.def : COL.atk, sp = Math.hypot(s.vx, s.vy);
+            if (s.alive && sp > 40 * g) { // engine trail on anything moving fast
+                ctx.strokeStyle = color; ctx.globalAlpha = Math.min(.35, sp / (400 * g)); ctx.lineWidth = TYPES[s.type].size * g * .35;
+                ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x - s.vx * .09, s.y - s.vy * .09); ctx.stroke();
+                ctx.globalAlpha = 1;
+            }
+            drawShip(s.x, s.y, s.type, s.ang, color, s.alive ? 1 : s.fade * .5, s.flash);
+        }
         b.bolts = b.bolts.filter(bo => {
             const p = (now - bo.t0) / bo.dur;
+            if (bo.target !== b.sb && bo.target.alive) { bo.x1 = bo.target.x + bo.ox; bo.y1 = bo.target.y + bo.oy; }
             if (p >= 1) { hit(b, bo, now); return false; }
             const tail = Math.max(0, p - .25);
             ctx.strokeStyle = bo.color; ctx.lineWidth = bo.w; ctx.globalAlpha = .95;
