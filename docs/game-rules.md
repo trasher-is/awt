@@ -833,8 +833,11 @@ scaled by economy like the three combat ships above.
   it: no capture, no population killed. That lets transports wait on a friendly or neutral
   planet as a jump-off point before the final leg. A jump-off planet in the target's own
   alliance alerts every member of it (see [Fleet and combat notes](#fleet-and-combat-notes)).
-  (Stated by the alliance's lead player,
-  2026-10-14. What the Allied and Disregard NAP options change is not yet recorded here.)
+  (Stated by the alliance's lead player, 2026-10-14.)
+- **Allied** is the option that lets a fleet fight an ally. Leave it unticked (RAID never
+  ticks it) and land with Conquer and Bomb unticked to use an allied alliance's planet as a
+  jump-off. (Stated by the alliance's lead player, 2026-10-18. What Disregard NAP changes
+  is not yet recorded here.)
 - **Colony ships** found new colonies. Sending exactly **1 CS** colonizes a free planet with
   **0 buildings and 0 PP**. Sending **more than 1** uses one CS to colonize and the rest
   **disband into PP**, at a rate of **15 PP per extra CS**: 2 CS colonizes but the 1 extra CS
