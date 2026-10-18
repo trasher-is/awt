@@ -68,7 +68,10 @@ export function openFightSimulation(result) {
 
     const cv = root.querySelector('canvas'), ctx = cv.getContext('2d');
     const hud = k => root.querySelector(`[data-hud="${k}"]`);
-    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // No prefers-reduced-motion shortcut here: the window only opens when a member taps
+    // Fight to watch the animation. Android's "Remove animations" (also switched on by
+    // battery saver) reaches Firefox as reduced motion, and skipping straight to the
+    // result made the fight never play on those phones.
     let W = 0, H = 0, g = 1, B = null, raf = 0;
     const stars = Array.from({ length: 140 }, () => ({ x: Math.random(), y: Math.random(), r: Math.random() < .1 ? 2 : 1, a: .2 + Math.random() * .6, p: Math.random() * 6 }));
 
@@ -90,7 +93,7 @@ export function openFightSimulation(result) {
         }
         const sb = r.sbLvl > 0 ? { level: r.sbLvl, cv0: M.sbCV(r.sbLvl), hp: 1, hpEnd: out.survSB, levelNow: r.sbLvl, flash: 0, x: 0, y: 0 } : null;
         if (sb) sb.levelEnd = P.sbLevelLeft(M.sbCV, r.sbLvl, out.survSB);
-        const dice = reduce ? null : { u: out.u, shown: Math.random(), flipAt: 0 };
+        const dice = { u: out.u, shown: Math.random(), flipAt: 0 };
         return { r, out, winner: out.winner, ships, sides, sb, dice, bolts: [], parts: [], events: [], clock: 0, last: 0, done: false };
     }
 
@@ -364,10 +367,6 @@ export function openFightSimulation(result) {
         cancelAnimationFrame(raf);
         B = build();
         layout(B); schedule(B); renderKey(B); renderLedger(B);
-        if (reduce) { // no motion: straight to the result
-            for (const ev of B.events) if (ev.kill) { ev.target.alive = false; ev.target.fade = 0; }
-            B.events = []; B.clock = LEAD_MS + VOLLEYS * VOLLEY_MS + 1;
-        }
         raf = requestAnimationFrame(frame);
     }
 
