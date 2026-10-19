@@ -830,11 +830,15 @@ scaled by economy like the three combat ships above.
 - **Capture and pop-kill are launch options, not automatic.** The launch screen has
   **Conquer** and **Bomb** checkboxes (alongside **Disregard NAP** and **Allied**). With
   Conquer and Bomb both unticked, transports can land on **any** planet and do nothing to
-  it: no capture, no population killed. That lets transports wait on a friendly or neutral
-  planet as a jump-off point before the final leg. A jump-off planet in the target's own
+  it: no capture, no population killed. The landing still fights everything on the planet
+  (see below), so a jump-off planet must be empty: no starbase and no ships. That lets
+  transports wait on a friendly or neutral planet before the final leg. A jump-off planet in the target's own
   alliance alerts every member of it (see [Fleet and combat notes](#fleet-and-combat-notes)).
-  (Stated by the alliance's lead player,
-  2026-10-14. What the Allied and Disregard NAP options change is not yet recorded here.)
+  (Stated by the alliance's lead player, 2026-10-14.)
+- **Allied** is the option that lets a fleet fight an ally. RAID never ticks it; to use an
+  allied alliance's empty planet as a jump-off, land with Allied, Conquer and Bomb all
+  unticked. (Stated by the alliance's lead player, 2026-10-18. What Disregard NAP changes
+  is not yet recorded here.)
 - **Colony ships** found new colonies. Sending exactly **1 CS** colonizes a free planet with
   **0 buildings and 0 PP**. Sending **more than 1** uses one CS to colonize and the rest
   **disband into PP**, at a rate of **15 PP per extra CS**: 2 CS colonizes but the 1 extra CS
@@ -1139,8 +1143,11 @@ and caps on its buildings — though the exact numbers aren't published.
   another player's, you can see their full intel — race picks, sciences, trade rate %,
   artifacts. Below that gap you see nothing about them, **unless you're in the same alliance**,
   in which case you always see everything regardless of biology.
-- **An ally's fleet landing on your planet fights your starbase.** Allied fleets do not join a
-  planet's defence: landing on an ally's planet before an attack means destroying his
+- **A fleet landing on a planet always fights everything on it**: the starbase and any ships
+  sitting there, allies included. The launch options don't change that; unticking Conquer
+  and Bomb only stops the capture and the population kill. (Stated by the alliance's lead
+  player, 2026-10-18.) So **an ally's fleet landing on your planet fights your starbase.**
+  Allied fleets do not join a planet's defence: landing on an ally's planet before an attack means destroying his
   starbase and losing ships to it. Only the planet owner's own ships stand with his starbase.
   The way to help is to land in the **same 2-minute fleet cycle right after the attacker**: it
   has just fought the starbase, has lost ships to it, and cannot leave before the
