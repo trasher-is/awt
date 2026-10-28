@@ -108,6 +108,14 @@ const outcomes = (systemId, index = 1) => traceOf(systemId, index).map(r => r.ou
         ok('...the trace shows the held claim and then the confirmed drop, the drop credited to the confirming member',
             same(outcomes(6001), ['drop_pending', 'drop']) && traceOf(6001)[1].actor_user_id === memberB, traceOf(6001).map(r => [r.outcome, r.actor_user_id]));
 
+        console.log('\n── a bombed planet read again hours later (button-only scans) ' + '─'.repeat(11));
+        await sync(6011, [planet(1, 12)]);
+        await sync(6011, [planet(1, 2)], memberA);
+        advance(7 * 60 * MIN);
+        await sync(6011, [planet(1, 4)], memberA);
+        ok('a lower read 7 hours later confirms the drop instead of starting a new hold (12 → 4)',
+            same(eventsFor(6011), [{ o: 12, n: 4 }]) && stored(6011).p === 4 && same(outcomes(6011), ['drop_pending', 'drop']), { ev: eventsFor(6011), o: outcomes(6011) });
+
         console.log('\n── the same member has to wait for their next run ' + '─'.repeat(24));
         await sync(6002, [planet(1, 12)]);
         await sync(6002, [planet(1, 11)], memberA);
@@ -143,10 +151,10 @@ const outcomes = (systemId, index = 1) => traceOf(systemId, index).map(r => r.ou
         ok('a later read showing growth is accepted as a rise, and the held claim is discarded',
             stored(6005).p === 13 && outcomes(6005).includes('rise') && outcomes(6005).includes('drop_blip') && eventsFor(6005).length === 0, { s: stored(6005), o: outcomes(6005) });
 
-        console.log('\n── a held claim is forgotten after 30 minutes ' + '─'.repeat(28));
+        console.log('\n── a held claim is forgotten after a day ' + '─'.repeat(33));
         await sync(6006, [planet(1, 12)]);
         await sync(6006, [planet(1, 11)], memberA);
-        advance(31 * MIN);
+        advance(24 * 60 * MIN + MIN);
         await sync(6006, [planet(1, 11)], memberB);
         ok('the same low read after that starts a fresh claim instead of confirming the stale one',
             eventsFor(6006).length === 0 && stored(6006).p === 12 && outcomes(6006).filter(o => o === 'drop_pending').length === 2, outcomes(6006));

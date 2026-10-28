@@ -19,18 +19,24 @@
 //
 // "Late enough": CONFIRM_GAP_MS after the first lower claim when a DIFFERENT member reads it,
 // SAME_MEMBER_GAP_MS when the same member does (so the same stale source cannot confirm itself
-// within one run, but that member's next five-minute run can). A pending claim older than
-// PENDING_TTL_MS is forgotten, and so is one whose planet changed owner or whose held figure
-// moved in the meantime.
+// within one run). A pending claim older than PENDING_TTL_MS is forgotten, and so is one whose
+// planet changed owner or whose held figure moved in the meantime.
 //
-// State is in memory: it is a few seconds-to-minutes window, and losing it on a restart only
-// means a real drop is re-detected one read later. A gap of 0 switches the whole thing off
+// PENDING_TTL_MS must outlast the gap between two galaxy reads. It was 30 minutes while a seed
+// ran every 10 minutes; since the button-only rule (#349, 2026-10-17) reads come from a member's
+// tap, often hours apart, so every later read found its claim expired, started a new one, and
+// same-owner drops were practically never confirmed (1,404 pending vs 33 confirmed, 17-28 Oct;
+// a bombed 12-pop planet still stored at 12 a day and a half later). A day covers that, and a
+// stale read is still undone by the next read that shows the held figure.
+//
+// State is in memory: losing it on a restart only means a real drop is re-detected one read
+// later. A gap of 0 switches the whole thing off
 // (every lower claim is 'immediate'), which is also how the older tests keep exercising the
 // alert path itself.
 
 const CONFIRM_GAP_MS = 2 * 60 * 1000;
 const SAME_MEMBER_GAP_MS = 4 * 60 * 1000;
-const PENDING_TTL_MS = 30 * 60 * 1000;
+const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
 const SWEEP_EVERY = 500;
 
 function createProvisionalDrops(options = {}) {

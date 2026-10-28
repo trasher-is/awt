@@ -13,14 +13,14 @@ const ok = (name, cond, detail) => {
     if (cond) { pass++; console.log(`  ✅ ${name}`); }
     else { fail++; console.log(`  ❌ ${name}${detail !== undefined ? '  -> ' + JSON.stringify(detail) : ''}`); }
 };
-const S = 1000, MIN = 60 * S;
+const S = 1000, MIN = 60 * S, HOUR = 60 * MIN;
 const read = (d, key, storedPop, claimedPop, actor, now, ownerId = 7) => d.observe(key, { storedPop, claimedPop, ownerId, actor, now });
 
 console.log('provisional-drop.test.js');
 
 console.log('\n── defaults ' + '─'.repeat(62));
-ok('confirmation gap is 2 minutes for another member, 4 for the same member, 30 minutes to give up',
-    CONFIRM_GAP_MS === 2 * MIN && SAME_MEMBER_GAP_MS === 4 * MIN && PENDING_TTL_MS === 30 * MIN);
+ok('confirmation gap is 2 minutes for another member, 4 for the same member, a day to give up',
+    CONFIRM_GAP_MS === 2 * MIN && SAME_MEMBER_GAP_MS === 4 * MIN && PENDING_TTL_MS === 24 * HOUR);
 
 console.log('\n── a lower claim is held, not applied ' + '─'.repeat(37));
 {
@@ -69,12 +69,26 @@ console.log('\n── confirmation ' + '─'.repeat(58));
     ok('...and a read that is still lower once the gap has passed confirms', read(d, 'a', 12, 10, 3, 3 * MIN).kind === 'confirmed');
 }
 
+console.log('\n── reads hours apart (button-only galaxy scans) ' + '─'.repeat(27));
+{
+    // Chertan #5, 27 Oct 2026: stored at 12, bombed to 1, then read by taps hours apart while it regrew.
+    const d = createProvisionalDrops();
+    read(d, 'a', 12, 2, 1, 0);
+    const c = read(d, 'a', 12, 4, 1, 7 * HOUR);
+    ok('a lower read 7 hours later, by the same member, confirms the drop', c.kind === 'confirmed' && c.ageMs === 7 * HOUR, c);
+}
+{
+    const d = createProvisionalDrops();
+    read(d, 'a', 12, 11, 1, 0);
+    ok('a stale read is still undone by the next read hours later that shows the held figure', read(d, 'a', 12, 12, 2, 5 * HOUR).kind === 'blip');
+}
+
 console.log('\n── things that invalidate a pending claim ' + '─'.repeat(33));
 {
     const d = createProvisionalDrops();
     read(d, 'a', 12, 11, 1, 0);
-    const later = read(d, 'a', 12, 11, 2, 31 * MIN);
-    ok('after 30 minutes the old claim is forgotten: the same low read starts a fresh one instead of confirming',
+    const later = read(d, 'a', 12, 11, 2, 24 * HOUR + MIN);
+    ok('after a day the old claim is forgotten: the same low read starts a fresh one instead of confirming',
         later.kind === 'pending' && later.created === true, later);
 }
 {
@@ -113,11 +127,11 @@ console.log('\n── memory stays bounded ' + '─'.repeat(51));
     const d = createProvisionalDrops();
     for (let i = 0; i < 40; i++) read(d, `k${i}`, 5, 4, 1, 0);
     ok('forty abandoned claims are held', d.size() === 40, d.size());
-    d.sweep(31 * MIN);
+    d.sweep(24 * HOUR + MIN);
     ok('a sweep after the give-up time removes them all', d.size() === 0, d.size());
     const e = createProvisionalDrops();
     for (let i = 0; i < 40; i++) read(e, `k${i}`, 5, 4, 1, 0);
-    for (let i = 0; i < 500; i++) read(e, 'busy', 5, 5, 1, 31 * MIN);
+    for (let i = 0; i < 500; i++) read(e, 'busy', 5, 5, 1, 24 * HOUR + MIN);
     ok('and it happens by itself as reads keep arriving (no caller has to remember to)', e.size() === 0, e.size());
 }
 
