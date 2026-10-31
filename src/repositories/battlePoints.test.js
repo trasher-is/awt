@@ -263,6 +263,47 @@ ok('the since-window applies to logged conquests (2026-10-01 one left out: 5 + 3
 const dyn = battlePoints.getDynamicLeaderboard(null, 50, 'all').find(r => r.player_name === 'Moa');
 ok('!glory (dynamic leaderboard) gives Moa population points for them', dyn && dyn.pop_points > 0, dyn);
 
+// --- A News bombardment the game also wrote a battle report for (2026-10-31) ---
+// The game logs a won battle and its bombardment on the same planet in the same second, and
+// only the battle row links the report ("We won the battle at Achird #5" + "Your fleet has
+// bombed Achird #5", both 16:54:59). The report's killed_population IS that bombardment.
+db.prepare(`INSERT INTO systems (id, name) VALUES (2, 'Achird')`).run();
+db.prepare(`INSERT INTO planets (game_planet_id, system_id, planet_index) VALUES (12422, 2, 5), (12423, 2, 6)`).run();
+db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (50, 'Rex', 101), (51, 'Vic', NULL)`).run();
+const news = db.prepare(`
+    INSERT INTO news_events (player_id, message_type, occurred_at, game_planet_id, system_id, credited_player_id, population_delta)
+    VALUES (50, 'battle-bombarded', ?, ?, 2, 50, ?)
+`);
+news.run('2026-10-31T15:54:59.000Z', 12422, 43); // 16:54:59 Warsaw, same second as the battle
+news.run('2026-10-31T18:54:59.000Z', 12422, 10); // same planet 3 h later: an undefended bombardment
+news.run('2026-10-31T15:54:59.000Z', 12423, 7);  // same second, a different planet
+const rexPop = () => battlePoints.getLeaderboards(null, 50, 'all').pop.find(r => r.player_name === 'Rex');
+ok('before its battle report arrives, the News bombardment counts (43 + 10 + 7)', rexPop() && rexPop().raw === 60, rexPop());
+db.prepare(`
+    INSERT INTO battle_reports (id, started_at, att_player_id, att_player_name, att_alliance_tag, def_player_id, def_player_name,
+        att_lost_cv, def_lost_cv, killed_population, system_id, planet_index)
+    VALUES (9100, '2026-10-31T16:54:00+01:00', 50, 'Rex', 'VICT', 51, 'Vic', 609, 1164, 43, 2, 5)
+`).run();
+ok('once the report arrives (after the reset), the same 43 is counted once, from the report: 43 + 10 + 7',
+    rexPop() && rexPop().raw === 60, rexPop());
+const rexDyn = battlePoints.getDynamicLeaderboard(null, 50, 'all').find(r => r.player_name === 'Rex');
+const expectPop = battlePoints.popDynamicPoints(43) + battlePoints.popDynamicPoints(10) + battlePoints.popDynamicPoints(7);
+ok('!glory counts it once too', rexDyn && Math.abs(rexDyn.pop_points - expectPop) < 0.01, { rexDyn, expectPop });
+
+// --- Leaderboards show a renamed player's CURRENT name (2026-10-31) ---
+// Reports keep the name at battle time; BaldWithABeard was listed as his old name "h87".
+db.prepare(`INSERT INTO players (id, name, alliance_id) VALUES (60, 'BaldWithABeard', 101)`).run();
+insert.run({ id: 9200, started_at: '2026-09-01T01:10:00+02:00', att_player_id: 60, att_player_name: 'h87', att_alliance_tag: 'VICT',
+    att_lost_cv: 0, def_player_id: 51, def_player_name: 'Vic', def_alliance_tag: null, def_lost_cv: 900000, killed_population: 0 });
+insert.run({ id: 9201, started_at: '2026-10-20T00:24:00+02:00', att_player_id: 60, att_player_name: 'BaldWithABeard', att_alliance_tag: 'VICT',
+    att_lost_cv: 0, def_player_id: 51, def_player_name: 'Vic', def_alliance_tag: null, def_lost_cv: 100000, killed_population: 0 });
+const cvTop = battlePoints.getCvLeaderboard(null, 1, 'all')[0];
+ok('!mortal / !cvkills list him under his current name, with both reports summed',
+    cvTop && cvTop.player_id === 60 && cvTop.player_name === 'BaldWithABeard' && cvTop.raw === 1000000, cvTop);
+ok('...and no row carries the old name', !battlePoints.getLeaderboards(null, 50, 'all').cv.some(r => r.player_name === 'h87'));
+const gloryBald = battlePoints.getDynamicLeaderboard(null, 50, 'all').find(r => r.player_id === 60);
+ok('!glory too', gloryBald && gloryBald.player_name === 'BaldWithABeard', gloryBald);
+
 fs.rmSync(path.dirname(tmpDb), { recursive: true, force: true });
 
 if (failed > 0) {
