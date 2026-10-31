@@ -1550,6 +1550,9 @@ function initDatabase() {
             last_at_ms INTEGER NOT NULL
         )
     `);
+    // When a leased claim's data last reached the hub (sharedJobs.finish). Older than
+    // last_at_ms = that claim has not reported back yet.
+    addColumn('shared_jobs', 'done_at_ms', 'INTEGER');
     addColumn('population_trace', 'run_id', 'TEXT');
     addColumn('population_trace', 'payload_age_ms', 'INTEGER');
     db.exec(`CREATE INDEX IF NOT EXISTS idx_population_trace_run ON population_trace(run_id)`);

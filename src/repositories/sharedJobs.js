@@ -16,15 +16,24 @@ const { nextDailyWindow } = require('../../public/js/utils/daily-reset.js');
 // A claim is recorded the moment it is granted, so two browsers asking at once cannot both
 // win (better-sqlite3 runs the transaction synchronously).
 //
+// A job with `leaseMs` must also report back (finish()) once its data has reached the hub.
+// A claim that has not within leaseMs lapsed: the tab reloaded or closed right after
+// claiming, or its game session had expired. Another member may then claim it again the
+// same game day, instead of the day being skipped until the next reset (NSA hub, 30 Oct
+// 2026: a lapsed battle-sync claim left a whole day of battles out of !mortal). The same
+// member still waits sameMemberMs, so a member whose pulls keep failing does not retry
+// every few minutes on their own session.
+//
 // The manual scan buttons are recorded here too (record()), so every button can say when
 // it last ran and who ran it. They are member clicks, so they are never refused.
-const HOUR = 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
 const RESET_BUFFER_MINUTES = 5;
 const JOBS = {
     // Rankings only change once a day in-game: once per game day, after the reset.
     // Battle reports are published at the reset too: battle-sync pulls them at 00:05 and
     // their details are fetched once, 30 min later, after that pull has stored them.
-    'battle-sync':                { daily: true,                sameMemberMs: 6 * HOUR },
+    'battle-sync':                { daily: true, leaseMs: 15 * MINUTE, sameMemberMs: 6 * HOUR },
     'battle-report-detail':       { daily: true, resetBufferMinutes: 30, sameMemberMs: 6 * HOUR },
     'ranking-highest-population': { daily: true,                sameMemberMs: 6 * HOUR },
     'ranking-best-planets':       { daily: true,                sameMemberMs: 6 * HOUR },
@@ -36,13 +45,14 @@ const JOBS = {
     'player-page-scan':           null,
 };
 
-const getStmt = db.prepare(`SELECT job, last_user_id, last_game_name, last_at_ms FROM shared_jobs WHERE job = ?`);
+const getStmt = db.prepare(`SELECT job, last_user_id, last_game_name, last_at_ms, done_at_ms FROM shared_jobs WHERE job = ?`);
 const allStmt = db.prepare(`SELECT job, last_user_id, last_game_name, last_at_ms FROM shared_jobs`);
 const upsertStmt = db.prepare(`
     INSERT INTO shared_jobs (job, last_user_id, last_game_name, last_at_ms) VALUES (@job, @userId, @gameName, @at)
     ON CONFLICT(job) DO UPDATE SET last_user_id = excluded.last_user_id,
         last_game_name = excluded.last_game_name, last_at_ms = excluded.last_at_ms
 `);
+const finishStmt = db.prepare(`UPDATE shared_jobs SET done_at_ms = ? WHERE job = ?`);
 
 const isJob = job => Object.prototype.hasOwnProperty.call(JOBS, job);
 const isClaimable = job => isJob(job) && JOBS[job] !== null;
@@ -54,13 +64,20 @@ function actorOf(actor) {
     };
 }
 
+// A leased claim nobody has reported back for (done_at_ms unset or older than the claim).
+function unfinished(job, row) {
+    return !!JOBS[job].leaseMs && (row.done_at_ms == null || row.done_at_ms < row.last_at_ms);
+}
+
 // When `userId` may next run `job`, given its last run (null = never ran: now).
 function nextAllowedAt(job, row, userId) {
     if (!row) return 0;
-    const { intervalMs, daily, resetBufferMinutes = RESET_BUFFER_MINUTES, sameMemberMs } = JOBS[job];
-    const anyone = daily
-        ? nextDailyWindow(resetBufferMinutes, new Date(row.last_at_ms)).getTime()
-        : row.last_at_ms + intervalMs;
+    const { intervalMs, daily, resetBufferMinutes = RESET_BUFFER_MINUTES, sameMemberMs, leaseMs } = JOBS[job];
+    const anyone = unfinished(job, row)
+        ? row.last_at_ms + leaseMs
+        : daily
+            ? nextDailyWindow(resetBufferMinutes, new Date(row.last_at_ms)).getTime()
+            : row.last_at_ms + intervalMs;
     const sameMember = userId != null && row.last_user_id === userId;
     return sameMember ? Math.max(anyone, row.last_at_ms + sameMemberMs) : anyone;
 }
@@ -83,6 +100,12 @@ function record(job, actor, now = Date.now()) {
     upsertStmt.run({ job, ...actorOf(actor), at: now });
 }
 
+// The claimed job's data reached the hub: its claim no longer lapses.
+function finish(job, now = Date.now()) {
+    if (!isClaimable(job)) throw new Error(`unknown shared job: ${job}`);
+    finishStmt.run(now, job);
+}
+
 function status() {
     const out = {};
     for (const row of allStmt.all()) {
@@ -92,4 +115,4 @@ function status() {
     return out;
 }
 
-module.exports = { JOBS, claim, record, status, isJob, isClaimable, nextAllowedAt };
+module.exports = { JOBS, claim, finish, record, status, isJob, isClaimable, nextAllowedAt };

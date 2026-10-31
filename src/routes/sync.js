@@ -1865,6 +1865,8 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
         // daily pull actually happened, instead of guessing from watermark staleness alone.
         settingsRepo.setSetting('battle_sync_last_run_at', new Date().toISOString());
         settingsRepo.setSetting('battle_sync_last_inserted_count', String(inserted.length));
+        // The day's pull has landed: its battle-sync claim no longer lapses (sharedJobs.js).
+        sharedJobsRepo.finish('battle-sync');
 
         res.json({ success: true, inserted: inserted.length, skipped, published: published.length, detail_from_api: detailFromApi, newest_started_at: newest });
     } catch (err) {

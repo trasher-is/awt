@@ -18,6 +18,7 @@ delete process.env.BATTLE_DISCORD_TOKEN;
 
 const express = require('express');
 const syncRouter = require('./sync');
+const sharedJobs = require('../repositories/sharedJobs');
 
 let failed = 0;
 function ok(desc, cond, detail) {
@@ -99,6 +100,18 @@ function request(server, method, urlPath, body) {
         const afterResync = await request(server, 'GET', '/hub-api/sync/battle-reports-watermark');
         ok('last_inserted_count now reflects the re-sync (0 new)', afterResync.body.last_inserted_count === 0, afterResync.body);
         ok('last_run_at advanced past the first run', Date.parse(afterResync.body.last_run_at) >= Date.parse(status.body.last_run_at), afterResync.body);
+
+        console.log('\n── The sync finishes the day\'s battle-sync claim ' + '─'.repeat(27));
+        // Without it the claim lapses after 15 min and another member pulls again (sharedJobs.js).
+        // Fixed times (well clear of a reset) so the check never depends on the time of day.
+        const claimedAt = Date.UTC(2026, 9, 30, 23, 11, 48); // 00:11 Berlin, 31 Oct
+        const later = claimedAt + 20 * 60 * 1000;
+        ok('a tab claims the day\'s pull', sharedJobs.claim('battle-sync', { gameName: 'Darthtang' }, claimedAt).granted === true);
+        const lapsed = sharedJobs.nextAllowedAt('battle-sync', { last_user_id: null, last_at_ms: claimedAt, done_at_ms: null }, 2);
+        ok('(control) unfinished, 20 min on it would be open to another member', lapsed <= later, lapsed);
+        const pull = await request(server, 'POST', '/hub-api/sync/battle-reports', { reports: [] });
+        ok('its pull lands', pull.status === 200 && pull.body.success, pull.body);
+        ok('so another member is refused for the rest of the game day', sharedJobs.claim('battle-sync', { gameName: 'Bodhi' }, later).granted === false);
     } finally {
         server.close();
     }
