@@ -13,9 +13,10 @@
 // own localStorage day-lock. The call rides on that member's own game session, which the
 // game counts as them being active.
 //
-// A claim is recorded the moment it is granted, so a failed pull is not retried until the
-// next reset. Nothing is lost by that: the next pull starts from the hub's watermark (or the
-// newest TAKE reports), and the hub stores reports idempotently.
+// A claim is recorded the moment it is granted. The hub marks it done when the pull's POST
+// lands; a claim that has not after 15 minutes (tab reloaded, game session expired) lapses
+// and another member's browser may claim it again the same day (sharedJobs.js leaseMs).
+// Overlapping pulls cost nothing: the hub stores reports idempotently.
 //
 // This is background housekeeping: every failure is console.warn'd and swallowed.
 // No toasts — nobody wants a popup because their session expired hours ago.
