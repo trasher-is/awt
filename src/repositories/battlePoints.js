@@ -46,6 +46,34 @@ function toPoints(raw, ratio) {
     return Math.round((raw / ratio) * 10) / 10;
 }
 
+// Battle reports keep the name a player had at the time, so grouping by player_id picked
+// whichever old name SQLite met first (BaldWithABeard listed as his former name "h87",
+// 2026-10-31). Show the player's current name; the stored one only if the player row is gone.
+const currentNameStmt = db.prepare(`SELECT name FROM players WHERE id = ?`);
+function withCurrentNames(rows) {
+    for (const r of rows) {
+        const row = r.player_id != null ? currentNameStmt.get(r.player_id) : null;
+        if (row && row.name) r.player_name = row.name;
+    }
+    return rows;
+}
+
+// A News-page bombardment the game ALSO wrote a battle report for: the battle and its
+// bombardment are logged on the same planet in the same second ("We won the battle at
+// Achird #5" + "Your fleet has bombed Achird #5", both 16:54:59, RedZone News 2026-10-31),
+// and the report's killed_population is that bombardment. Only the battle row links the
+// report, so the News row is tied to it by planet and time — here, every time the board is
+// built, not once when the News page was read: reports only arrive after the daily reset,
+// usually after the member opened their News page. ±2 min absorbs report times that carry
+// no seconds; julianday() normalizes the reports' UTC offsets against the News UTC time.
+// A bombardment with no such report (undefended planet) still counts from News.
+const NEWS_BOMBARDMENT_HAS_REPORT = `EXISTS (
+                SELECT 1 FROM planets pl
+                JOIN battle_reports b ON b.system_id = pl.system_id AND b.planet_index = pl.planet_index
+                WHERE pl.game_planet_id = ne.game_planet_id
+                  AND ABS(julianday(b.started_at) - julianday(ne.occurred_at)) * 1440 <= 2
+            )`;
+
 // Who counts on the leaderboard. Applied on the OUTER query (after the union, against the
 // already-unified `player_id` column) rather than duplicated into every UNION branch's own
 // WHERE — the three scopes:
@@ -93,7 +121,7 @@ function getCvLeaderboard(sinceIso, limit, scope = 'members', allianceId = null)
         LIMIT ?
     `;
     const ratio = getCvRatio();
-    return db.prepare(sql).all(...wherePartParams, ...wherePartParams, ...scopeParams, limit).map(r => ({
+    return withCurrentNames(db.prepare(sql).all(...wherePartParams, ...wherePartParams, ...scopeParams, limit)).map(r => ({
         player_id: r.player_id,
         player_name: r.player_name,
         raw: r.raw_cv || 0,
@@ -225,6 +253,7 @@ function getPopLeaderboard(sinceIso, limit, scope = 'members', allianceId = null
             -- member to open their News page. Counting both would double every one.
             WHERE ne.message_type = 'battle-bombarded'
               AND ne.matched_battle_report_id IS NULL
+              AND NOT ${NEWS_BOMBARDMENT_HAS_REPORT}
               AND ne.credited_player_id IS NOT NULL
               ${neWherePart}
 
@@ -238,7 +267,7 @@ function getPopLeaderboard(sinceIso, limit, scope = 'members', allianceId = null
         LIMIT ?
     `;
     const ratio = getPopRatio();
-    return db.prepare(sql).all(...brParams, ...neParams, ...lc.params, ...scopeParams, limit).map(r => ({
+    return withCurrentNames(db.prepare(sql).all(...brParams, ...neParams, ...lc.params, ...scopeParams, limit)).map(r => ({
         player_id: r.player_id,
         player_name: r.player_name,
         raw: r.raw_pop || 0,
@@ -432,6 +461,7 @@ function getPopCreditRows(sinceIso, scope, allianceId) {
             LEFT JOIN alliances oa ON oa.id = op.alliance_id
             WHERE ne.message_type = 'battle-bombarded'
               AND ne.matched_battle_report_id IS NULL
+              AND NOT ${NEWS_BOMBARDMENT_HAS_REPORT}
               AND ne.credited_player_id IS NOT NULL
               ${neWherePart}
 
@@ -494,7 +524,7 @@ function getDynamicLeaderboard(sinceIso, limit = 10, scope = 'members', alliance
         })
         .filter(r => r.points > 0)
         .sort((a, b) => b.points - a.points);
-    return rows.slice(0, limit);
+    return withCurrentNames(rows.slice(0, limit));
 }
 
 module.exports = {
