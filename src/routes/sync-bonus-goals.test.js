@@ -105,8 +105,8 @@ function request(server, method, urlPath, body) {
         db.prepare(`INSERT INTO players (id, name) VALUES (800, 'ShipDetailAttacker')`).run();
         db.prepare(`
             INSERT INTO battle_reports (id, started_at, att_player_id, att_player_name, def_lost_cv, killed_population, conquered_planet)
-            VALUES (77001, '2026-09-11T09:00:00Z', 800, 'ShipDetailAttacker', 300, 8, 1)
-        `).run();
+            VALUES (77001, ?, 800, 'ShipDetailAttacker', 300, 8, 1)
+        `).run(new Date().toISOString()); // fought with the snapshot above in force
 
         const shipDetailRes = await request(server, 'POST', '/hub-api/sync/battle-report-ship-detail', {
             id: 77001,

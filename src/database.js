@@ -1277,9 +1277,9 @@ function initDatabase() {
         );
         CREATE INDEX IF NOT EXISTS idx_bonus_goal_awards_player ON bonus_goal_awards(player_id, awarded_at);
 
-        -- The current standing of whatever ranking page a 'ranking_match' goal watches —
-        -- replaced wholesale on every re-scrape (see bonusGoals.js's replaceRankingSnapshot),
-        -- so this always reflects only the latest pull, never a history of old ones.
+        -- The standing of whatever ranking page a 'ranking_match' goal watches: one dated
+        -- snapshot per scrape, kept for two weeks (see bonusGoals.js's recordRankingSnapshot),
+        -- so a battle report that syncs later is scored on the ranking of the battle's day.
         -- system_id/planet_index are resolved from game_planet_id via the planets table's
         -- own UNIQUE game_planet_id column and may be NULL when that planet has never been
         -- scanned into it yet — a later re-scrape naturally resolves it once it has been.

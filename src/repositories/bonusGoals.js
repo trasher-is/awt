@@ -3,8 +3,8 @@
 // secrecy reasoning (generic code + DB-only config, since the repo is public but the
 // database is not). Goal `type`s implemented so far:
 //   'ranking_match'  — award tiered points when a member's battle CONQUERS a planet
-//                      currently placed in some in-game ranking page (which page, which
-//                      tiers, is purely config, never named here).
+//                      placed in some in-game ranking page at the time of the battle
+//                      (which page, which tiers, is purely config, never named here).
 //   'random_target'  — pick a random planet somewhere in the galaxy on an irregular
 //                      schedule; first real hit on it (by anyone in scope) wins a flat
 //                      point award. No client scrape needed — the target comes from data
@@ -97,16 +97,24 @@ function deleteGoal(id) {
 
 // --- ranking_match: snapshot ingestion ---
 
-// Wholesale replace: a re-scrape reflects "the ranking as of right now," not a history to
-// merge with the last one. Runs in one transaction so a matcher query never sees a
-// half-replaced snapshot (all-old or all-new, nothing in between).
-const deleteSnapshotStmt = db.prepare(`DELETE FROM ranking_snapshot_rows WHERE goal_id = ?`);
-const insertSnapshotRowStmt = db.prepare(`
-    INSERT INTO ranking_snapshot_rows (goal_id, rank, game_planet_id, system_id, planet_index, owner_name, owner_alliance_tag)
-    VALUES (@goal_id, @rank, @game_planet_id, @system_id, @planet_index, @owner_name, @owner_alliance_tag)
+// Each scrape is kept as its own dated snapshot, because a battle report arrives up to a
+// day after the battle and must be scored on the ranking that was in force when it was
+// fought (see rankAtBattleStmt). Until 2026-11-05 a scrape replaced the last one, so a
+// fought-over planet that fell out of the ranking before its report synced scored nothing.
+// Runs in one transaction so a matcher query never sees a half-written snapshot. `now` is
+// injectable for tests.
+const SNAPSHOT_RETENTION_DAYS = 14;
+const deleteSnapshotAtStmt = db.prepare(`DELETE FROM ranking_snapshot_rows WHERE goal_id = ? AND captured_at = ?`);
+const pruneSnapshotsStmt = db.prepare(`
+    DELETE FROM ranking_snapshot_rows WHERE goal_id = ? AND captured_at < datetime(?, '-' || ? || ' days')
 `);
-const replaceSnapshotTxn = db.transaction((goalId, rows) => {
-    deleteSnapshotStmt.run(goalId);
+const insertSnapshotRowStmt = db.prepare(`
+    INSERT INTO ranking_snapshot_rows (goal_id, rank, game_planet_id, system_id, planet_index, owner_name, owner_alliance_tag, captured_at)
+    VALUES (@goal_id, @rank, @game_planet_id, @system_id, @planet_index, @owner_name, @owner_alliance_tag, @captured_at)
+`);
+const recordSnapshotTxn = db.transaction((goalId, rows, capturedAt) => {
+    deleteSnapshotAtStmt.run(goalId, capturedAt);
+    pruneSnapshotsStmt.run(goalId, capturedAt, SNAPSHOT_RETENTION_DAYS);
     for (const row of rows) {
         const loc = Number.isInteger(row.game_planet_id) ? systemsRepo.getPlanetLocationByGameId(row.game_planet_id) : null;
         insertSnapshotRowStmt.run({
@@ -117,11 +125,13 @@ const replaceSnapshotTxn = db.transaction((goalId, rows) => {
             planet_index: loc ? loc.planet_index : null,
             owner_name: row.owner_name || null,
             owner_alliance_tag: row.owner_alliance_tag || null,
+            captured_at: capturedAt,
         });
     }
 });
-function replaceRankingSnapshot(goalId, rows) {
-    replaceSnapshotTxn(goalId, Array.isArray(rows) ? rows : []);
+function recordRankingSnapshot(goalId, rows, now = new Date()) {
+    const capturedAt = now.toISOString().slice(0, 19).replace('T', ' ');
+    recordSnapshotTxn(goalId, Array.isArray(rows) ? rows : [], capturedAt);
 }
 
 // Which enabled ranking_match goals need a fresh scrape — no snapshot at all, or the
@@ -159,14 +169,21 @@ function computeRankPoints(config, rank) {
 // --- ranking_match: award on a battle report ---
 
 const battleReportForEvalStmt = db.prepare(`
-    SELECT id, system_id, planet_index, att_player_id, att_player_name, def_lost_cv, killed_population,
+    SELECT id, started_at, system_id, planet_index, att_player_id, att_player_name, def_lost_cv, killed_population,
            conquered_planet, att_alliance_id, def_alliance_id
     FROM battle_reports WHERE id = ?
 `);
-const currentRankStmt = db.prepare(`
+// The planet's rank in the newest snapshot taken at or before the battle. datetime() is what
+// makes this comparable: started_at carries a UTC offset, captured_at is plain UTC. No such
+// snapshot (a report older than the retained history) means the rank is unknown: no award.
+const rankAtBattleStmt = db.prepare(`
     SELECT rank FROM ranking_snapshot_rows
-    WHERE goal_id = ? AND system_id = ? AND planet_index = ?
-    ORDER BY captured_at DESC LIMIT 1
+    WHERE goal_id = @goalId AND system_id = @systemId AND planet_index = @planetIndex
+      AND captured_at = (
+          SELECT MAX(captured_at) FROM ranking_snapshot_rows
+          WHERE goal_id = @goalId AND captured_at <= datetime(@startedAt)
+      )
+    ORDER BY rank LIMIT 1
 `);
 const insertAwardStmt = db.prepare(`
     INSERT OR IGNORE INTO bonus_goal_awards (goal_id, player_id, player_name, points, source_key, detail)
@@ -200,9 +217,11 @@ function evaluateBattleReportForGoals(reportId, now = new Date()) {
     const sameAlliance = report.att_alliance_id != null && report.att_alliance_id === report.def_alliance_id;
     const tookPlanet = report.conquered_planet === 1 && !sameAlliance;
     for (const goal of (tookPlanet ? listEnabledGoalsByType('ranking_match') : [])) {
-        const current = currentRankStmt.get(goal.id, report.system_id, report.planet_index);
-        if (!current) continue;
-        const points = computeRankPoints(goal.config, current.rank);
+        const ranked = rankAtBattleStmt.get({
+            goalId: goal.id, systemId: report.system_id, planetIndex: report.planet_index, startedAt: report.started_at,
+        });
+        if (!ranked) continue;
+        const points = computeRankPoints(goal.config, ranked.rank);
         if (points <= 0) continue;
         const result = insertAwardStmt.run({
             goal_id: goal.id,
@@ -210,7 +229,7 @@ function evaluateBattleReportForGoals(reportId, now = new Date()) {
             player_name: report.att_player_name,
             points,
             source_key: `br:${reportId}`,
-            detail: JSON.stringify({ battle_report_id: reportId, rank: current.rank }),
+            detail: JSON.stringify({ battle_report_id: reportId, rank: ranked.rank }),
         });
         if (result.changes > 0) awarded.push({ goal_id: goal.id, points });
     }
@@ -473,7 +492,7 @@ function getAwardedPointsByPlayer(sinceIso = null, scope = 'members', allianceId
 module.exports = {
     getOrCreateAccessToken,
     listGoals, getGoal, createGoal, updateGoal, deleteGoal, listEnabledGoalsByType,
-    replaceRankingSnapshot, getStaleRankingGoals,
+    recordRankingSnapshot, getStaleRankingGoals,
     computeRankPoints, evaluateBattleReportForGoals,
     listRecentAwards, getAwardedPointsByPlayer,
     pickRandomTargetPlanet, getActiveTarget, getActiveTargetsForDisplay,

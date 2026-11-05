@@ -68,7 +68,7 @@ ok('rank 50 (bottom of tier 10) still scores 55', bonusGoals.computeRankPoints(t
 ok('rank 51 (past max_rank) scores 0', bonusGoals.computeRankPoints(tiers, 51) === 0);
 ok('rank 0 or negative scores 0', bonusGoals.computeRankPoints(tiers, 0) === 0 && bonusGoals.computeRankPoints(tiers, -3) === 0);
 
-console.log('\n── ranking snapshot: replace + resolve via game_planet_id ' + '─'.repeat(10));
+console.log('\n── ranking snapshot: dated history + resolve via game_planet_id ' + '─'.repeat(4));
 db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (500, 'Bonus Test System', 1, 1)`).run();
 db.prepare(`
     INSERT INTO planets (game_planet_id, system_id, planet_index, name)
@@ -76,7 +76,8 @@ db.prepare(`
 `).run();
 
 const goal = bonusGoals.createGoal({ type: 'ranking_match', name: 'snapshot goal', config: tiers, enabled: true });
-bonusGoals.replaceRankingSnapshot(goal.id, [
+const snapshotCount = goalId => db.prepare(`SELECT COUNT(*) AS n FROM ranking_snapshot_rows WHERE goal_id = ?`).get(goalId).n;
+bonusGoals.recordRankingSnapshot(goal.id, [
     { rank: 1, game_planet_id: 77001, owner_name: 'SomeOwner', owner_alliance_tag: 'TAG' },
     { rank: 2, game_planet_id: 999999, owner_name: 'NeverScanned', owner_alliance_tag: null }, // no matching planets row
 ]);
@@ -88,9 +89,13 @@ const snap2 = db.prepare(`SELECT * FROM ranking_snapshot_rows WHERE goal_id = ? 
 ok('a game_planet_id with no matching planets row stays unresolved (NULL), not an error',
     snap2.system_id === null && snap2.planet_index === null, snap2);
 
-bonusGoals.replaceRankingSnapshot(goal.id, [{ rank: 1, game_planet_id: 77001 }]);
-const afterReplace = db.prepare(`SELECT COUNT(*) AS n FROM ranking_snapshot_rows WHERE goal_id = ?`).get(goal.id);
-ok('a re-scrape REPLACES the old snapshot wholesale, not merges (2 rows -> 1 row)', afterReplace.n === 1, afterReplace);
+const inSameSecond = new Date('2026-09-20T12:00:00Z');
+const beforeRescrape = snapshotCount(goal.id);
+bonusGoals.recordRankingSnapshot(goal.id, [{ rank: 1, game_planet_id: 77001 }, { rank: 2, game_planet_id: 999999 }], inSameSecond);
+bonusGoals.recordRankingSnapshot(goal.id, [{ rank: 1, game_planet_id: 77001 }], inSameSecond);
+ok('two scrapes in the same second are one snapshot, the later one (never a merge of both)',
+    snapshotCount(goal.id) === beforeRescrape + 1, snapshotCount(goal.id));
+ok('a later scrape keeps the earlier snapshot', snap1 && db.prepare(`SELECT 1 FROM ranking_snapshot_rows WHERE id = ?`).get(snap1.id));
 
 console.log('\n── getStaleRankingGoals: who needs a re-scrape ' + '─'.repeat(18));
 const stale = bonusGoals.getStaleRankingGoals(20);
@@ -105,6 +110,8 @@ const staleAfterDisabled = bonusGoals.getStaleRankingGoals(20);
 ok('a DISABLED goal never counts as stale, even with no snapshot', !staleAfterDisabled.some(g => g.goal_id === disabled.id), staleAfterDisabled);
 
 console.log('\n── evaluateBattleReportForGoals: crediting a hit on a ranked planet ' + '─'.repeat(4));
+// The ranking in force for every report in this section, all dated 2026-09-11.
+bonusGoals.recordRankingSnapshot(goal.id, [{ rank: 1, game_planet_id: 77001 }], new Date('2026-09-10T23:00:00Z'));
 db.prepare(`INSERT INTO players (id, name) VALUES (700, 'Raider700')`).run();
 db.prepare(`
     INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_id, att_player_name,
@@ -164,6 +171,59 @@ const unalliedConquestEval = bonusGoals.evaluateBattleReportForGoals(88007);
 ok('conquering a ranked planet whose defender has no alliance still awards',
     unalliedConquestEval.length === 1 && unalliedConquestEval[0].points === 100, unalliedConquestEval);
 db.prepare(`DELETE FROM bonus_goal_awards WHERE source_key = 'br:88007'`).run();
+
+console.log('\n── ranking_match: the rank is the one in force at the battle ' + '─'.repeat(6));
+// Rank 11 when taken at 02:30 UTC, then fought over all day. Its report syncs next to the
+// following night's ranking, which may no longer contain it.
+db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (501, 'Rank History System', 2, 2)`).run();
+db.prepare(`
+    INSERT INTO planets (game_planet_id, system_id, planet_index, name)
+    VALUES (77101, 501, 1, 'FoughtOver'), (77102, 501, 2, 'RisingStar')
+`).run();
+const historyGoal = bonusGoals.createGoal({ type: 'ranking_match', name: 'history goal', config: tiers, enabled: true });
+bonusGoals.recordRankingSnapshot(historyGoal.id, [{ rank: 11, game_planet_id: 77101 }], new Date('2026-11-04T23:00:00Z'));
+const insertConquest = db.prepare(`
+    INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_id, att_player_name,
+        def_lost_cv, killed_population, conquered_planet, att_alliance_id, def_alliance_id)
+    VALUES (@id, @started_at, 501, @planet_index, 701, 'Raider701', 50, 5, 1, 10, 20)
+`);
+const historyAward = id => db.prepare(`SELECT points, detail FROM bonus_goal_awards WHERE goal_id = ? AND source_key = ?`)
+    .get(historyGoal.id, `br:${id}`);
+
+insertConquest.run({ id: 88101, started_at: '2026-11-05T03:30:00+01:00', planet_index: 1 });
+bonusGoals.recordRankingSnapshot(historyGoal.id, [{ rank: 1, game_planet_id: 77102 }], new Date('2026-11-05T23:00:00Z'));
+bonusGoals.evaluateBattleReportForGoals(88101);
+ok('a planet that left the ranking before its report synced still scores its rank at the battle',
+    historyAward(88101)?.points === 90 && JSON.parse(historyAward(88101).detail).rank === 11, historyAward(88101));
+
+insertConquest.run({ id: 88102, started_at: '2026-11-06T01:00:00+01:00', planet_index: 1 });
+bonusGoals.evaluateBattleReportForGoals(88102);
+ok('a conquest after it left the ranking scores nothing', !historyAward(88102), historyAward(88102));
+
+insertConquest.run({ id: 88103, started_at: '2026-11-05T12:00:00+01:00', planet_index: 2 });
+bonusGoals.evaluateBattleReportForGoals(88103);
+ok('a planet that only entered the ranking after the battle scores nothing', !historyAward(88103), historyAward(88103));
+
+// 23:30 at +01:00 is 22:30 UTC, before the 23:00 UTC snapshot; compared as plain text it
+// would look later than it, and pick up the wrong day's ranking.
+insertConquest.run({ id: 88104, started_at: '2026-11-04T23:30:00+01:00', planet_index: 1 });
+bonusGoals.evaluateBattleReportForGoals(88104);
+ok('a battle before the oldest snapshot has no known rank and scores nothing (offset respected)',
+    !historyAward(88104), historyAward(88104));
+
+insertConquest.run({ id: 88105, started_at: '2026-11-05T00:00:00+01:00', planet_index: 1 });
+bonusGoals.evaluateBattleReportForGoals(88105);
+ok('a battle at the exact moment of a snapshot uses that snapshot', historyAward(88105)?.points === 90, historyAward(88105));
+
+const pruneGoal = bonusGoals.createGoal({ type: 'ranking_match', name: 'prune goal', config: tiers, enabled: true });
+bonusGoals.recordRankingSnapshot(pruneGoal.id, [{ rank: 1, game_planet_id: 77101 }], new Date('2026-10-01T00:00:00Z'));
+bonusGoals.recordRankingSnapshot(pruneGoal.id, [{ rank: 2, game_planet_id: 77101 }], new Date('2026-10-14T00:00:00Z'));
+ok('a snapshot inside the two-week window is kept', snapshotCount(pruneGoal.id) === 2, snapshotCount(pruneGoal.id));
+bonusGoals.recordRankingSnapshot(pruneGoal.id, [{ rank: 3, game_planet_id: 77101 }], new Date('2026-10-16T00:00:00Z'));
+ok('a snapshot past the two-week window is pruned', snapshotCount(pruneGoal.id) === 2
+    && !db.prepare(`SELECT 1 FROM ranking_snapshot_rows WHERE goal_id = ? AND rank = 1`).get(pruneGoal.id), snapshotCount(pruneGoal.id));
+bonusGoals.recordRankingSnapshot(pruneGoal.id, [], new Date('2026-10-17T00:00:00Z'));
+ok('an empty scrape erases nothing', snapshotCount(pruneGoal.id) === 2, snapshotCount(pruneGoal.id));
 
 const noLocationEval = bonusGoals.evaluateBattleReportForGoals(999999);
 ok('evaluating a nonexistent report id is a no-op, not a crash', Array.isArray(noLocationEval) && noLocationEval.length === 0);
