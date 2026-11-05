@@ -1993,7 +1993,7 @@ router.post('/sync/bonus-goals/ranking-snapshot', requireAuth, (req, res) => {
             owner_alliance_tag: typeof r.owner_alliance_tag === 'string' ? r.owner_alliance_tag.slice(0, 20) : null,
         }));
     try {
-        bonusGoalsRepo.replaceRankingSnapshot(goalId, normalized);
+        bonusGoalsRepo.recordRankingSnapshot(goalId, normalized);
         res.json({ success: true, count: normalized.length });
     } catch (err) {
         console.error(`[DB Error] Failed to sync ranking snapshot for goal ${goalId}:`, err.message);
