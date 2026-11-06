@@ -7,6 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
+const vm = require('vm');
 
 const tmpDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'awt-my-planets-test-')), 'test.db');
 process.env.AWT_DB_PATH = tmpDb;
@@ -189,6 +190,96 @@ function request(server, method, urlPath, body) {
         let threw = false;
         try { memberDataSyncsRepo.stamp(301, 'galaxy'); } catch (e) { threw = true; }
         ok('only the three known kinds can be stamped', threw);
+
+        console.log('\n── A planet that changed owner does not block the new owner\'s sync ' + '─'.repeat(5));
+        db.prepare(`INSERT INTO players (id, name) VALUES (304, 'ConquerorA'), (305, 'ConquerorB')`).run();
+        usersRepo.createUser('ConquerorA', 'not-a-real-hash', 'user', null);
+        usersRepo.createUser('ConquerorB', 'not-a-real-hash', 'user', null);
+        const memberA = usersRepo.getUserByGameName('ConquerorA');
+        const memberB = usersRepo.getUserByGameName('ConquerorB');
+        const planet = (id, pp = 10) => ({ game_planet_id: id, system_id: 7, name: `Synthetic #${id}`, population: 2, production_pp: pp, production_rate: 1.5 });
+        const syncAs = (user, planets) => { sessionUserId = user.id; return request(server, 'POST', '/hub-api/sync/my-planets', { planets }); };
+        const planetsOf = async (user) => {
+            sessionUserId = user.id;
+            const res = await request(server, 'GET', '/hub-api/my-planets');
+            return res.body.planets;
+        };
+        const idsOf = (planets) => JSON.stringify(planets.map(p => p.game_planet_id).sort((x, y) => x - y));
+
+        await syncAs(memberA, [planet(92001), planet(92002)]);
+        await syncAs(memberB, [planet(92003), planet(92004)]);
+        sessionUserId = memberA.id;
+        await request(server, 'POST', '/hub-api/my-planets/92001/banking', { banking: true });
+        sessionUserId = memberB.id;
+        await request(server, 'POST', '/hub-api/my-planets/92003/banking', { banking: true });
+        memberDataSyncsRepo.stamp(305, 'planets', 1760000000000);
+
+        // B conquers 92001. A has not synced since, so A's row still holds it.
+        r = await syncAs(memberB, [planet(92001, 50), planet(92003, 60), planet(92004, 70)]);
+        ok('the conqueror\'s sync succeeds while the previous owner\'s row still holds the planet', r.status === 200 && r.body.success, r.body);
+        let planetsB = await planetsOf(memberB);
+        ok('the conquered planet is now on the conqueror\'s list', idsOf(planetsB) === '[92001,92003,92004]', planetsB);
+        ok('it is gone from the previous owner\'s list, before they sync', idsOf(await planetsOf(memberA)) === '[92002]');
+        ok('the previous owner\'s banking flag does not come with it', planetsB.find(p => p.game_planet_id === 92001).banking === 0, planetsB);
+        ok('the conqueror keeps the flag on a planet they already held', planetsB.find(p => p.game_planet_id === 92003).banking === 1, planetsB);
+        ok('the rest of the sync ran: production_points is the conqueror\'s new total', Number(db.prepare('SELECT production_points FROM alliance_member_stats WHERE player_id = 305').get().production_points) === 180);
+        ok('the rest of the sync ran: the Planets age is fresh', Date.now() - memberDataSyncsRepo.getForPlayer(305).planets < 60 * 1000);
+
+        // Each member takes a planet from the other before either has synced: each list
+        // holds a planet still on the other's row, so whoever syncs first must not be blocked.
+        await syncAs(memberA, [planet(92011)]);
+        await syncAs(memberB, [planet(92012)]);
+        r = await syncAs(memberA, [planet(92012)]);
+        ok('a swap: the first member to sync succeeds', r.status === 200 && r.body.success, r.body);
+        r = await syncAs(memberB, [planet(92011)]);
+        ok('a swap: the second member to sync succeeds', r.status === 200 && r.body.success, r.body);
+        ok('a swap: each member ends up with the planet they hold now', idsOf(await planetsOf(memberA)) === '[92012]' && idsOf(await planetsOf(memberB)) === '[92011]');
+
+        console.log('\n── An open Planets tab does not keep re-sending its list ' + '─'.repeat(17));
+        const parserSource = fs.readFileSync(path.join(__dirname, '../../public/js/utils/my-planets-parser.js'), 'utf8')
+            .replace(/^import .*$/gm, '')
+            .replace(/^export /gm, '');
+        const cell = (text, sort) => ({ textContent: text, getAttribute: () => sort ?? null, querySelector: () => null });
+        const pageRow = (id, pp) => ({
+            getAttribute: () => String(id),
+            querySelectorAll: () => [cell('', '7'), cell('Synthetic'), cell('2'), cell(''), cell('1'), cell(String(pp), String(pp)), cell('1')],
+        });
+        let pageRows = [pageRow(92021, 10)];
+        let clock = 1760000000000;
+        let hubAnswersOk = true;
+        const posts = [];
+        const page = vm.createContext({
+            AWNumber: require('../../public/js/utils/parse-number.js'),
+            document: { querySelectorAll: () => pageRows },
+            Date: { now: () => clock },
+            fetch: async (url, options) => { posts.push({ url, options }); return { ok: hubAnswersOk }; },
+        });
+        vm.runInContext(parserSource, page);
+        const scrape = () => vm.runInContext('scrapeMyPlanets()', page);
+        const MINUTE = 60 * 1000;
+
+        await scrape();
+        ok('the first read of the page is sent', posts.length === 1 && posts[0].url === '/hub-api/sync/my-planets', posts);
+        clock += 17 * 60 * MINUTE;
+        await scrape();
+        ok('an unchanged list the hub stored is not sent again, even hours later', posts.length === 1, posts.length);
+        pageRows = [pageRow(92021, 11)];
+        await scrape();
+        ok('a list that changed in the page is sent right away', posts.length === 2, posts.length);
+        pageRows = [pageRow(92021, 12)];
+        hubAnswersOk = false;
+        await scrape();
+        ok('a changed list is sent even when the hub then refuses it', posts.length === 3, posts.length);
+        clock += 30 * 1000;
+        await scrape();
+        ok('a refused list is not retried within the minute', posts.length === 3, posts.length);
+        clock += MINUTE;
+        hubAnswersOk = true;
+        await scrape();
+        ok('a refused list is retried after a minute', posts.length === 4, posts.length);
+        clock += 2 * MINUTE;
+        await scrape();
+        ok('once stored, that list is not sent again either', posts.length === 4, posts.length);
     } finally {
         server.close();
     }
