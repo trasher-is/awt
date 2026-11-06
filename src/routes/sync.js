@@ -1867,6 +1867,11 @@ router.post('/sync/battle-reports', requireAuth, (req, res) => {
         settingsRepo.setSetting('battle_sync_last_inserted_count', String(inserted.length));
         // The day's pull has landed: its battle-sync claim no longer lapses (sharedJobs.js).
         sharedJobsRepo.finish('battle-sync');
+        // Yesterday's reports are all in now, which is what the ranked conquests wait for.
+        // Never let a bonus-goal bug fail the sync itself; the reports are already saved.
+        try { bonusGoalsRepo.settleRankedConquests(); } catch (err) {
+            console.error('[DB Error] Ranked conquest settlement failed:', err.message);
+        }
 
         res.json({ success: true, inserted: inserted.length, skipped, published: published.length, detail_from_api: detailFromApi, newest_started_at: newest });
     } catch (err) {
@@ -1946,8 +1951,8 @@ router.post('/sync/battle-report-ship-detail', requireAuth, (req, res) => {
                 if (Number.isSafeInteger(playerId) && playerId > 0) inference.enqueue(playerId);
             }
         }
-        // A report's system_id/planet_index (and therefore whether it lands on a
-        // currently-ranked planet) are only known from this point on — see
+        // A report's system_id/planet_index (and therefore whether it lands on an active
+        // target) are only known from this point on — see
         // bonusGoalsRepo.evaluateBattleReportForGoals's own comment. Never let a bonus-goal
         // bug fail the ship-detail sync itself; the report's own data is already saved.
         try { bonusGoalsRepo.evaluateBattleReportForGoals(id); } catch (err) {

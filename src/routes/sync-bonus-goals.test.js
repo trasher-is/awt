@@ -1,7 +1,7 @@
 // Route-level coverage for the bonus-goals sync endpoints added to sync.js
 // (/sync/bonus-goals/ranking-targets, /sync/bonus-goals/ranking-snapshot) and for the hook
-// into /sync/battle-report-ship-detail that evaluates a report against active
-// ranking_match goals once its location is known. The engine's own logic (tier math,
+// into /sync/battle-reports that settles the ranked conquests once the day's pull has
+// landed. The engine's own logic (tier math,
 // dedupe, scoping) has thorough unit coverage in bonusGoals.test.js; this file exists to
 // confirm the routes actually wire it up correctly.
 //
@@ -101,22 +101,22 @@ function request(server, method, urlPath, body) {
         const badPayload = await request(server, 'POST', '/hub-api/sync/bonus-goals/ranking-snapshot', { goal_id: 'not-a-number', rows: [] });
         ok('a non-integer goal_id is rejected (400)', badPayload.status === 400, badPayload);
 
-        console.log('\n── ship-detail sync triggers goal evaluation once location is known ' + '─'.repeat(4));
+        console.log('\n── the battle-report pull settles the ranked conquests ' + '─'.repeat(14));
         db.prepare(`INSERT INTO players (id, name) VALUES (800, 'ShipDetailAttacker')`).run();
+        const twoDaysAgo = new Date(Date.now() - 2 * 24 * 3600 * 1000);
+        bonusGoalsRepo.recordRankingSnapshot(goal.id, [{ rank: 1, game_planet_id: 55001 }], twoDaysAgo);
         db.prepare(`
-            INSERT INTO battle_reports (id, started_at, att_player_id, att_player_name, def_lost_cv, killed_population, conquered_planet)
-            VALUES (77001, ?, 800, 'ShipDetailAttacker', 300, 8, 1)
-        `).run(new Date().toISOString()); // fought with the snapshot above in force
+            INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_id, att_player_name, def_lost_cv, killed_population, conquered_planet)
+            VALUES (77001, ?, 700, 1, 800, 'ShipDetailAttacker', 300, 8, 1)
+        `).run(new Date(twoDaysAgo.getTime() + 3600 * 1000).toISOString()); // fought with that snapshot in force
 
-        const shipDetailRes = await request(server, 'POST', '/hub-api/sync/battle-report-ship-detail', {
-            id: 77001,
-            system_id: 700, planet_index: 1, // matches the ranked planet from the snapshot above
-            att_destroyers: 5, att_destroyers_lost: 1,
-        });
-        ok('ship-detail sync itself still succeeds', shipDetailRes.status === 200 && shipDetailRes.body.success, shipDetailRes.body);
+        const noAwardYet = db.prepare(`SELECT COUNT(*) AS n FROM bonus_goal_awards WHERE goal_id = ?`).get(goal.id).n;
+        ok('nothing is awarded before the pull', noAwardYet === 0, noAwardYet);
+        const pullRes = await request(server, 'POST', '/hub-api/sync/battle-reports', { reports: [] });
+        ok('the pull itself succeeds', pullRes.status === 200 && pullRes.body.success, pullRes.body);
 
-        const award = db.prepare(`SELECT * FROM bonus_goal_awards WHERE goal_id = ? AND source_key = ?`).get(goal.id, 'br:77001');
-        ok('the ship-detail sync triggered goal evaluation and credited the rank-1 tier (100 pts)',
+        const award = db.prepare(`SELECT * FROM bonus_goal_awards WHERE goal_id = ? AND source_key LIKE 'first-conquest:700:1:%'`).get(goal.id);
+        ok('the pull settled the conquest and credited the rank-1 tier (100 pts)',
             award && award.player_id === 800 && award.points === 100, award);
 
         console.log('\n── active-target: what the client marker/highlight reads ' + '─'.repeat(10));
