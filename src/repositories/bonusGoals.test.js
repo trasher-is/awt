@@ -109,8 +109,8 @@ const disabled = bonusGoals.createGoal({ type: 'ranking_match', name: 'disabled 
 const staleAfterDisabled = bonusGoals.getStaleRankingGoals(20);
 ok('a DISABLED goal never counts as stale, even with no snapshot', !staleAfterDisabled.some(g => g.goal_id === disabled.id), staleAfterDisabled);
 
-console.log('\n── evaluateBattleReportForGoals: crediting a hit on a ranked planet ' + '─'.repeat(4));
-// The ranking in force for every report in this section, all dated 2026-09-11.
+console.log('\n── settleRankedConquests: the rank is the one in force at the conquest ' + '─'.repeat(2));
+// The ranking in force for this section's report, dated 2026-09-11.
 bonusGoals.recordRankingSnapshot(goal.id, [{ rank: 1, game_planet_id: 77001 }], new Date('2026-09-10T23:00:00Z'));
 db.prepare(`INSERT INTO players (id, name) VALUES (700, 'Raider700')`).run();
 db.prepare(`
@@ -119,101 +119,129 @@ db.prepare(`
     VALUES (88001, '2026-09-11T10:00:00Z', 500, 3, 700, 'Raider700', 250, 5, 1, 10, 20)
 `).run();
 
-const awarded = bonusGoals.evaluateBattleReportForGoals(88001);
+ok('a report alone awards nothing: one report cannot tell whether it was first',
+    bonusGoals.evaluateBattleReportForGoals(88001).length === 0);
+const settled = bonusGoals.settleRankedConquests(new Date('2026-09-12T01:00:00Z'));
 ok('conquering the #1-ranked planet from another alliance awards the tier-1 points (100)',
-    awarded.length === 1 && awarded[0].points === 100, awarded);
-
-const awardRow = db.prepare(`SELECT * FROM bonus_goal_awards WHERE goal_id = ? AND source_key = ?`).get(goal.id, 'br:88001');
+    settled.some(a => a.goal_id === goal.id && a.points === 100), settled);
+const awardRow = db.prepare(`SELECT * FROM bonus_goal_awards WHERE goal_id = ? AND source_key = ?`)
+    .get(goal.id, 'first-conquest:500:3:2026-09-11');
 ok('the award row is credited to the attacker', awardRow && awardRow.player_id === 700 && awardRow.points === 100, awardRow);
+ok('settling the same day again awards nothing new (deduped by source_key)',
+    bonusGoals.settleRankedConquests(new Date('2026-09-12T01:00:00Z')).filter(a => a.goal_id === goal.id).length === 0);
 
-const secondEval = bonusGoals.evaluateBattleReportForGoals(88001);
-ok('re-evaluating the SAME report a second time awards nothing new (deduped by source_key)', secondEval.length === 0, secondEval);
-
-db.prepare(`
-    INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_id, att_player_name, def_lost_cv, killed_population)
-    VALUES (88002, '2026-09-11T11:00:00Z', 500, 3, 700, 'Raider700', 0, 0)
-`).run();
-const noOpEval = bonusGoals.evaluateBattleReportForGoals(88002);
-ok('a report with no CV lost and no population killed (a probe/no-op) awards nothing',
-    noOpEval.length === 0, noOpEval);
-
-db.prepare(`
-    INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_id, att_player_name, def_lost_cv, killed_population)
-    VALUES (88003, '2026-09-11T12:00:00Z', 600, 9, 700, 'Raider700', 500, 10)
-`).run();
-const unrankedEval = bonusGoals.evaluateBattleReportForGoals(88003);
-ok('a real hit on a planet NOT in any active ranking snapshot awards nothing', unrankedEval.length === 0, unrankedEval);
-
-// The 2026-10-06 rule: damage alone no longer scores a ranked planet — real data had 42 of
-// 45 awards coming from members farming starbases on their own alliance's planets.
-const insertRankedHit = db.prepare(`
-    INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_id, att_player_name,
-        def_lost_cv, killed_population, conquered_planet, att_alliance_id, def_alliance_id)
-    VALUES (@id, '2026-09-11T13:00:00Z', 500, 3, 700, 'Raider700', @def_lost_cv, 0, @conquered, @att, @def)
-`);
-insertRankedHit.run({ id: 88004, def_lost_cv: 99, conquered: 0, att: 10, def: 20 });
-const enemyNoConquestEval = bonusGoals.evaluateBattleReportForGoals(88004);
-ok('a damaging hit on a ranked enemy planet that does NOT take it awards nothing',
-    enemyNoConquestEval.length === 0, enemyNoConquestEval);
-
-insertRankedHit.run({ id: 88005, def_lost_cv: 99, conquered: 0, att: 10, def: 10 });
-const allyFarmEval = bonusGoals.evaluateBattleReportForGoals(88005);
-ok('starbase farming on an own-alliance ranked planet awards nothing (the Harpyie/Moardin25 case)',
-    allyFarmEval.length === 0, allyFarmEval);
-
-insertRankedHit.run({ id: 88006, def_lost_cv: 5, conquered: 1, att: 10, def: 10 });
-const allyHandoverEval = bonusGoals.evaluateBattleReportForGoals(88006);
-ok('conquering a ranked planet from an ally (a handover) awards nothing',
-    allyHandoverEval.length === 0, allyHandoverEval);
-
-insertRankedHit.run({ id: 88007, def_lost_cv: 5, conquered: 1, att: 10, def: null });
-const unalliedConquestEval = bonusGoals.evaluateBattleReportForGoals(88007);
-ok('conquering a ranked planet whose defender has no alliance still awards',
-    unalliedConquestEval.length === 1 && unalliedConquestEval[0].points === 100, unalliedConquestEval);
-db.prepare(`DELETE FROM bonus_goal_awards WHERE source_key = 'br:88007'`).run();
-
-console.log('\n── ranking_match: the rank is the one in force at the battle ' + '─'.repeat(6));
-// Rank 11 when taken at 02:30 UTC, then fought over all day. Its report syncs next to the
-// following night's ranking, which may no longer contain it.
+console.log('\n── settleRankedConquests: first conquest of the game day only ' + '─'.repeat(8));
+// Game day under test: 2026-11-05 Europe/Berlin, 23:00 UTC 11-04 to 23:00 UTC 11-05.
 db.prepare(`INSERT INTO systems (id, name, x, y) VALUES (501, 'Rank History System', 2, 2)`).run();
+for (let i = 1; i <= 16; i++) {
+    db.prepare(`INSERT INTO planets (game_planet_id, system_id, planet_index, name) VALUES (?, 501, ?, ?)`).run(77100 + i, i, `Ranked${i}`);
+}
+db.prepare(`INSERT INTO alliances (id, name, tag) VALUES (401, 'Enemy One', 'ENEMY'), (402, 'Friends', 'FRIENDTAG')`).run();
+settingsRepo.setSetting('alliance_relations_allied', 'FRIENDTAG');
 db.prepare(`
-    INSERT INTO planets (game_planet_id, system_id, planet_index, name)
-    VALUES (77101, 501, 1, 'FoughtOver'), (77102, 501, 2, 'RisingStar')
+    INSERT INTO players (id, name, alliance_id, last_activity_at) VALUES
+        (710, 'FirstTaker', NULL, '2026-11-05 00:00:00'),
+        (711, 'LaterTaker', NULL, '2026-11-05 00:00:00'),
+        (712, 'ActiveEnemy', 401, '2026-11-05 00:00:00'),
+        (713, 'IdleEnemy', 401, '2026-09-01 00:00:00'),
+        (714, 'Friend', 402, '2026-11-05 00:00:00')
 `).run();
-const historyGoal = bonusGoals.createGoal({ type: 'ranking_match', name: 'history goal', config: tiers, enabled: true });
-bonusGoals.recordRankingSnapshot(historyGoal.id, [{ rank: 11, game_planet_id: 77101 }], new Date('2026-11-04T23:00:00Z'));
+
+const firstGoal = bonusGoals.createGoal({ type: 'ranking_match', name: 'first goal', config: tiers, enabled: true });
+const allPlanets = Array.from({ length: 16 }, (_, i) => 77101 + i);
+bonusGoals.recordRankingSnapshot(firstGoal.id, allPlanets.map(id => ({ rank: 11, game_planet_id: id })), new Date('2026-11-04T23:00:00Z'));
+// Planets 1 and 3-9 have left the next night's ranking.
+bonusGoals.recordRankingSnapshot(firstGoal.id, [2, 10, 11].map(i => ({ rank: 1, game_planet_id: 77100 + i })), new Date('2026-11-05T23:00:00Z'));
+
 const insertConquest = db.prepare(`
     INSERT INTO battle_reports (id, started_at, system_id, planet_index, att_player_id, att_player_name,
         def_lost_cv, killed_population, conquered_planet, att_alliance_id, def_alliance_id)
-    VALUES (@id, @started_at, 501, @planet_index, 701, 'Raider701', 50, 5, 1, 10, 20)
+    VALUES (@id, @at, 501, @planet, @player, @name, @cv, 5, @conquered, @att, @def)
 `);
-const historyAward = id => db.prepare(`SELECT points, detail FROM bonus_goal_awards WHERE goal_id = ? AND source_key = ?`)
-    .get(historyGoal.id, `br:${id}`);
+let reportId = 88100;
+function report(planet, at, player = 710, { att = 10, def = 20, cv = 50, conquered = 1 } = {}) {
+    const name = player === 710 ? 'FirstTaker' : 'LaterTaker';
+    insertConquest.run({ id: ++reportId, at, planet, player, name, cv, conquered, att, def });
+    return reportId;
+}
+function scanLog(planet, at, from, to, popDrop = 7) {
+    db.prepare(`INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp) VALUES (501, ?, 1, ?, ?, ?)`)
+        .run(planet, from, to, at);
+    if (popDrop) {
+        db.prepare(`INSERT INTO planet_events (system_id, planet_index, event_type_id, old_value, new_value, timestamp) VALUES (501, ?, 2, ?, 0, ?)`)
+            .run(planet, popDrop, at);
+    }
+}
+const planetAward = (planet, day = '2026-11-05') => db.prepare(`SELECT * FROM bonus_goal_awards WHERE goal_id = ? AND source_key = ?`)
+    .get(firstGoal.id, `first-conquest:501:${planet}:${day}`);
+const planetAwards = planet => db.prepare(`SELECT * FROM bonus_goal_awards WHERE goal_id = ? AND source_key LIKE ?`)
+    .all(firstGoal.id, `first-conquest:501:${planet}:%`);
 
-insertConquest.run({ id: 88101, started_at: '2026-11-05T03:30:00+01:00', planet_index: 1 });
-bonusGoals.recordRankingSnapshot(historyGoal.id, [{ rank: 1, game_planet_id: 77102 }], new Date('2026-11-05T23:00:00Z'));
-bonusGoals.evaluateBattleReportForGoals(88101);
-ok('a planet that left the ranking before its report synced still scores its rank at the battle',
-    historyAward(88101)?.points === 90 && JSON.parse(historyAward(88101).detail).rank === 11, historyAward(88101));
-
-insertConquest.run({ id: 88102, started_at: '2026-11-06T01:00:00+01:00', planet_index: 1 });
-bonusGoals.evaluateBattleReportForGoals(88102);
-ok('a conquest after it left the ranking scores nothing', !historyAward(88102), historyAward(88102));
-
-insertConquest.run({ id: 88103, started_at: '2026-11-05T12:00:00+01:00', planet_index: 2 });
-bonusGoals.evaluateBattleReportForGoals(88103);
-ok('a planet that only entered the ranking after the battle scores nothing', !historyAward(88103), historyAward(88103));
-
+// Undefended, retaken twice with reports, and out of the ranking by the next night.
+scanLog(1, '2026-11-05 02:30:08', 712, 710);
+report(1, '2026-11-05T04:00:00+01:00', 711);
+report(1, '2026-11-05T09:40:00+01:00', 711);
+// Reports stored newest first: which came first must not depend on arrival order.
+report(2, '2026-11-05T12:00:00+01:00', 711);
+report(2, '2026-11-05T08:00:00+01:00', 710);
+// A handover uses the day up: the buildings are damaged all the same.
+report(3, '2026-11-05T08:00:00+01:00', 711, { att: 10, def: 10 });
+report(3, '2026-11-05T09:00:00+01:00', 710);
+// The scan saw this one 40 minutes late, and it has a report: one conquest, not two.
+report(4, '2026-11-05T09:40:00+01:00', 710);
+scanLog(4, '2026-11-05 09:22:40', 712, 710);
+scanLog(5, '2026-11-05 10:00:00', 713, 710); // inactive owner
+scanLog(6, '2026-11-05 10:00:00', 714, 710); // allied owner
+scanLog(7, '2026-11-05 10:00:00', 714, 711, 0); // no population drop: a stale scan, not a conquest
+report(7, '2026-11-05T12:00:00+01:00', 710);
+scanLog(8, '2026-11-05 10:00:00', null, 711); // colonized from nobody: not a conquest
+report(8, '2026-11-05T12:00:00+01:00', 710);
+report(9, '2026-11-05T12:00:00+01:00', 710, { def: null }); // no defending alliance
+report(10, '2026-11-05T12:00:00+01:00', 710, { conquered: 0 }); // a hit that doesn't take it
+// Either side of the game-day boundary.
+report(11, '2026-11-06T00:59:00+01:00', 710);
+report(11, '2026-11-05T23:59:00+01:00', 710);
+report(11, '2026-11-06T00:01:00+01:00', 711);
 // 23:30 at +01:00 is 22:30 UTC, before the 23:00 UTC snapshot; compared as plain text it
-// would look later than it, and pick up the wrong day's ranking.
-insertConquest.run({ id: 88104, started_at: '2026-11-04T23:30:00+01:00', planet_index: 1 });
-bonusGoals.evaluateBattleReportForGoals(88104);
-ok('a battle before the oldest snapshot has no known rank and scores nothing (offset respected)',
-    !historyAward(88104), historyAward(88104));
+// would look later than it, and pick up a ranking it had no right to.
+report(12, '2026-11-04T23:30:00+01:00', 710);
+report(13, '2026-11-05T00:00:00+01:00', 710); // the exact moment of a snapshot
+scanLog(14, '2026-11-05 22:50:00', 712, 710, 3);
+report(14, '2026-11-05T23:55:00+01:00', 711);
+report(15, '2026-11-06T02:00:00+01:00', 710); // the current game day below
 
-insertConquest.run({ id: 88105, started_at: '2026-11-05T00:00:00+01:00', planet_index: 1 });
-bonusGoals.evaluateBattleReportForGoals(88105);
-ok('a battle at the exact moment of a snapshot uses that snapshot', historyAward(88105)?.points === 90, historyAward(88105));
+bonusGoals.settleRankedConquests(new Date('2026-11-06T01:30:00Z'));
+
+ok('an undefended first conquest pays, with no report and from the scan log alone',
+    planetAward(1)?.player_id === 710 && planetAward(1)?.points === 90, planetAward(1));
+ok('it pays the rank at the conquest, though the planet has since left the ranking',
+    JSON.parse(planetAward(1).detail).rank === 11, planetAward(1)?.detail);
+ok('the later conquests of that planet the same day pay nothing', planetAwards(1).length === 1, planetAwards(1));
+ok('first is decided by battle time, not by the order reports arrived in', planetAward(2)?.player_id === 710, planetAward(2));
+ok('a handover first uses the day up, and pays nothing itself', planetAwards(3).length === 0, planetAwards(3));
+ok('a conquest with both a report and a scan-log entry pays once, as the report',
+    planetAwards(4).length === 1 && JSON.parse(planetAward(4).detail).battle_report_id > 0, planetAward(4));
+ok('an undefended conquest from an inactive owner pays nothing', planetAwards(5).length === 0, planetAwards(5));
+ok('an undefended conquest from an allied owner pays nothing', planetAwards(6).length === 0, planetAwards(6));
+ok('an owner change with no population drop is not a conquest, so the later report is first',
+    planetAward(7)?.player_id === 710, planetAward(7));
+ok('a colonization is not a conquest, so the later report is first', planetAward(8)?.player_id === 710, planetAward(8));
+ok('a planet with no defending alliance still pays', planetAward(9)?.points === 90, planetAward(9));
+ok('a damaging hit that does not take the planet pays nothing', planetAwards(10).length === 0, planetAwards(10));
+ok('a conquest a minute before midnight belongs to the day it ends', planetAward(11)?.player_id === 710, planetAward(11));
+ok('a conquest before the oldest snapshot has no known rank and pays nothing (offset respected)',
+    planetAwards(12).length === 0, planetAwards(12));
+ok('a conquest at the exact moment of a snapshot uses that snapshot', planetAward(13)?.points === 90, planetAward(13));
+ok('a retake minutes later does not displace the undefended first conquest', planetAward(14)?.player_id === 710, planetAward(14));
+ok('the current game day is not settled: its reports are not published yet', planetAwards(15).length === 0, planetAwards(15));
+
+bonusGoals.settleRankedConquests(new Date('2026-11-07T01:30:00Z'));
+ok('a new game day has a new first: the planet pays again, at that day\'s rank',
+    planetAward(11, '2026-11-06')?.player_id === 711 && planetAward(11, '2026-11-06')?.points === 100, planetAward(11, '2026-11-06'));
+ok('the next day\'s settlement leaves the first day\'s award alone', planetAward(11)?.points === 90, planetAward(11));
+ok('once that day is settled, a planet no longer ranked that day pays nothing',
+    planetAwards(15).length === 0, planetAwards(15));
+settingsRepo.setSetting('alliance_relations_allied', '');
 
 const pruneGoal = bonusGoals.createGoal({ type: 'ranking_match', name: 'prune goal', config: tiers, enabled: true });
 bonusGoals.recordRankingSnapshot(pruneGoal.id, [{ rank: 1, game_planet_id: 77101 }], new Date('2026-10-01T00:00:00Z'));

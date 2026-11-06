@@ -2,9 +2,9 @@
 // database.js's bonus_goals/bonus_goal_awards/ranking_snapshot_rows comment for the
 // secrecy reasoning (generic code + DB-only config, since the repo is public but the
 // database is not). Goal `type`s implemented so far:
-//   'ranking_match'  — award tiered points when a member's battle CONQUERS a planet
-//                      placed in some in-game ranking page at the time of the battle
-//                      (which page, which tiers, is purely config, never named here).
+//   'ranking_match'  — award tiered points for the FIRST conquest of the game day of a
+//                      planet placed in some in-game ranking page at the time (which page,
+//                      which tiers, is purely config, never named here).
 //   'random_target'  — pick a random planet somewhere in the galaxy on an irregular
 //                      schedule; first real hit on it (by anyone in scope) wins a flat
 //                      point award. No client scrape needed — the target comes from data
@@ -166,16 +166,16 @@ function computeRankPoints(config, rank) {
     return startPoints + step * tierIndex;
 }
 
-// --- ranking_match: award on a battle report ---
+// --- ranking_match + random_target: award on a battle report ---
 
 const battleReportForEvalStmt = db.prepare(`
     SELECT id, started_at, system_id, planet_index, att_player_id, att_player_name, def_lost_cv, killed_population,
            conquered_planet, att_alliance_id, def_alliance_id
     FROM battle_reports WHERE id = ?
 `);
-// The planet's rank in the newest snapshot taken at or before the battle. datetime() is what
+// The planet's rank in the newest snapshot taken at or before the conquest. datetime() is what
 // makes this comparable: started_at carries a UTC offset, captured_at is plain UTC. No such
-// snapshot (a report older than the retained history) means the rank is unknown: no award.
+// snapshot (a conquest older than the retained history) means the rank is unknown: no award.
 const rankAtBattleStmt = db.prepare(`
     SELECT rank FROM ranking_snapshot_rows
     WHERE goal_id = @goalId AND system_id = @systemId AND planet_index = @planetIndex
@@ -196,12 +196,8 @@ const insertAwardStmt = db.prepare(`
 // ATTACKER only (matches battlePoints.js's own convention: population/initiative credit
 // goes to whoever brought the fight), and only for a report that did real damage — a
 // report with neither a population kill nor any CV lost by the defender is a probe/no-op,
-// not a genuine hit on the planet.
-// ranking_match is stricter: only a report that took the planet (conquered_planet) from
-// someone outside the attacker's own alliance scores. Until 2026-10-06 any damaging hit
-// counted, and 42 of the first 45 awards turned out to be members farming starbases on
-// their own alliance's ranked planets — XP practice, not glory. An ally-to-ally handover
-// is excluded for the same reason; a planet with no defending alliance still counts.
+// not a genuine hit on the planet. ranking_match does not run here: see
+// settleRankedConquests, since one report can't tell whether it was the day's first.
 // `now` is injectable for the same reason every other function in this file takes one: the
 // random_target lookup below is time-bounded, and a test that pins the activation clock but
 // not the evaluation clock is testing whatever today's date happens to be. That is exactly
@@ -214,26 +210,6 @@ function evaluateBattleReportForGoals(reportId, now = new Date()) {
     if (!didDamage) return [];
 
     const awarded = [];
-    const sameAlliance = report.att_alliance_id != null && report.att_alliance_id === report.def_alliance_id;
-    const tookPlanet = report.conquered_planet === 1 && !sameAlliance;
-    for (const goal of (tookPlanet ? listEnabledGoalsByType('ranking_match') : [])) {
-        const ranked = rankAtBattleStmt.get({
-            goalId: goal.id, systemId: report.system_id, planetIndex: report.planet_index, startedAt: report.started_at,
-        });
-        if (!ranked) continue;
-        const points = computeRankPoints(goal.config, ranked.rank);
-        if (points <= 0) continue;
-        const result = insertAwardStmt.run({
-            goal_id: goal.id,
-            player_id: report.att_player_id,
-            player_name: report.att_player_name,
-            points,
-            source_key: `br:${reportId}`,
-            detail: JSON.stringify({ battle_report_id: reportId, rank: ranked.rank }),
-        });
-        if (result.changes > 0) awarded.push({ goal_id: goal.id, points });
-    }
-
     for (const goal of listEnabledGoalsByType('random_target')) {
         const active = getActiveTarget(goal.id, now);
         if (!active || active.system_id !== report.system_id || active.planet_index !== report.planet_index) continue;
@@ -255,6 +231,129 @@ function evaluateBattleReportForGoals(reportId, now = new Date()) {
         if (result.changes > 0) {
             claimActiveTargetStmt.run(result.lastInsertRowid, active.id);
             awarded.push({ goal_id: goal.id, points });
+        }
+    }
+    return awarded;
+}
+
+// --- ranking_match: settling each planet's first conquest of the game day ---
+
+// Conquests come from two places. A fight leaves a battle report; an undefended planet leaves
+// none (the game writes no report without a fight), only the owner change and population drop
+// a scan logged. The scan-log rule mirrors battlePoints.js's loggedConquestBranch (duplicated
+// rather than imported to avoid the same require cycle as scopeClauseFor below): a change
+// between two players, with a population drop, that no conquest report explains.
+const reportConquestsStmt = db.prepare(`
+    SELECT id, started_at AS at, system_id, planet_index, att_player_id AS player_id, att_player_name AS player_name,
+           att_alliance_id, def_alliance_id, def_lost_cv, killed_population
+    FROM battle_reports
+    WHERE conquered_planet = 1 AND system_id IS NOT NULL AND planet_index IS NOT NULL
+      AND datetime(started_at) >= datetime(?)
+`);
+const RANKED_CONQUEST_ACTIVE_DAYS = 7;
+const scanConquestsStmt = db.prepare(`
+    SELECT oc.id, oc.timestamp AS at, oc.system_id, oc.planet_index, oc.old_value AS previous_owner_id,
+           oc.new_value AS player_id, cp.name AS player_name,
+           cp.alliance_id AS new_alliance_id, op.alliance_id AS old_alliance_id, oa.tag AS previous_tag,
+           ((op.resigned_at IS NULL OR datetime(op.resigned_at) > datetime(oc.timestamp))
+            AND datetime(op.last_activity_at) >= datetime(oc.timestamp, '-${RANKED_CONQUEST_ACTIVE_DAYS} days')) AS previous_active
+    FROM planet_events oc
+    JOIN players cp ON cp.id = oc.new_value
+    JOIN players op ON op.id = oc.old_value
+    LEFT JOIN alliances oa ON oa.id = op.alliance_id
+    WHERE oc.event_type_id = 1 AND oc.timestamp >= datetime(?)
+      AND EXISTS (
+          SELECT 1 FROM planet_events pd
+          WHERE pd.system_id = oc.system_id AND pd.planet_index = oc.planet_index AND pd.event_type_id = 2
+            AND pd.old_value > pd.new_value
+            AND ABS(strftime('%s', pd.timestamp) - strftime('%s', oc.timestamp)) <= 60
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM battle_reports b
+          WHERE b.conquered_planet = 1 AND b.att_player_id = oc.new_value
+            AND ((b.system_id = oc.system_id AND b.planet_index = oc.planet_index)
+                 OR (b.system_id IS NULL AND b.def_player_id IS oc.old_value))
+            AND datetime(b.started_at) <= datetime(oc.timestamp, '+5 minutes')
+            AND datetime(b.started_at) > COALESCE((
+                SELECT MAX(prev.timestamp) FROM planet_events prev
+                WHERE prev.system_id = oc.system_id AND prev.planet_index = oc.planet_index
+                  AND prev.event_type_id = 1 AND prev.id < oc.id
+            ), '0000-00-00 00:00:00')
+      )
+`);
+const oldestSnapshotStmt = db.prepare(`SELECT MIN(captured_at) AS at FROM ranking_snapshot_rows WHERE goal_id = ?`);
+
+function reportConquestPays(c) {
+    const sameAlliance = c.att_alliance_id != null && c.att_alliance_id === c.def_alliance_id;
+    const didDamage = (c.killed_population > 0) || (c.def_lost_cv > 0);
+    return Number.isInteger(c.player_id) && didDamage && !sameAlliance;
+}
+
+// An undefended planet pays on the same terms as its population credit (trasheris,
+// 2026-10-12): taken from an active player outside our own and allied tags.
+function scanConquestPays(c, friendlyTags) {
+    const sameAlliance = c.new_alliance_id != null && c.new_alliance_id === c.old_alliance_id;
+    const friendly = c.previous_tag && friendlyTags.has(String(c.previous_tag).toUpperCase());
+    return !!c.previous_active && !friendly && !sameAlliance;
+}
+
+// Only the first conquest of a ranked planet each game day (00:00-00:00 Europe/Berlin) pays,
+// because every conquest damages the planet's buildings: by the third takeover of a day
+// there's little left of what the rank was earned for (trasheris, 2026-11-06). Any conquest
+// uses the day up, whoever made it and whether or not it pays: a handover or an enemy's
+// takeover trashes the buildings just the same.
+//
+// Runs when the daily battle-report pull has landed (sync.js), the one moment a finished day's
+// reports are all in. Which conquest was first is read from the data rather than from the
+// order reports arrive in, and the current game day is left alone: its reports aren't
+// published yet, so a scan-log conquest could look first when it wasn't. source_key makes
+// one planet-day pay once at most, however many times a day is looked at. `now` is injectable
+// for tests.
+function settleRankedConquests(now = new Date()) {
+    const goals = listEnabledGoalsByType('ranking_match');
+    const oldest = goals.map(g => oldestSnapshotStmt.get(g.id).at).filter(Boolean).sort()[0];
+    if (!oldest) return [];
+
+    const friendlyTags = friendlyAllianceTags();
+    const conquests = [
+        ...reportConquestsStmt.all(oldest).map(c => ({
+            ...c, time: new Date(c.at), pays: reportConquestPays(c), detail: { battle_report_id: c.id },
+        })),
+        ...scanConquestsStmt.all(oldest).map(c => ({
+            ...c, time: new Date(`${c.at.replace(' ', 'T')}Z`), pays: scanConquestPays(c, friendlyTags),
+            detail: { planet_event_id: c.id, previous_owner_id: c.previous_owner_id },
+        })),
+    ];
+
+    const today = dateKeyFor(now);
+    const firstByPlanetDay = new Map();
+    for (const c of conquests) {
+        const day = dateKeyFor(c.time);
+        if (day === today) continue;
+        const key = `${c.system_id}:${c.planet_index}:${day}`;
+        const first = firstByPlanetDay.get(key);
+        if (!first || c.time < first.time) firstByPlanetDay.set(key, c);
+    }
+
+    const awarded = [];
+    for (const [key, c] of firstByPlanetDay) {
+        if (!c.pays) continue;
+        for (const goal of goals) {
+            const ranked = rankAtBattleStmt.get({
+                goalId: goal.id, systemId: c.system_id, planetIndex: c.planet_index, startedAt: c.time.toISOString(),
+            });
+            if (!ranked) continue;
+            const points = computeRankPoints(goal.config, ranked.rank);
+            if (points <= 0) continue;
+            const result = insertAwardStmt.run({
+                goal_id: goal.id,
+                player_id: c.player_id,
+                player_name: c.player_name,
+                points,
+                source_key: `first-conquest:${key}`,
+                detail: JSON.stringify({ ...c.detail, rank: ranked.rank }),
+            });
+            if (result.changes > 0) awarded.push({ goal_id: goal.id, points, player_id: c.player_id, source_key: `first-conquest:${key}` });
         }
     }
     return awarded;
@@ -493,7 +592,7 @@ module.exports = {
     getOrCreateAccessToken,
     listGoals, getGoal, createGoal, updateGoal, deleteGoal, listEnabledGoalsByType,
     recordRankingSnapshot, getStaleRankingGoals,
-    computeRankPoints, evaluateBattleReportForGoals,
+    computeRankPoints, evaluateBattleReportForGoals, settleRankedConquests,
     listRecentAwards, getAwardedPointsByPlayer,
     pickRandomTargetPlanet, getActiveTarget, getActiveTargetsForDisplay,
     ensureTodayRolled, maybeActivateRandomTarget,
