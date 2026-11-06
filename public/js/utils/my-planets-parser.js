@@ -57,14 +57,18 @@ export async function postMyPlanets(planets) {
 
 // In-page (2026-10-17): the member is looking at /Game/Planets right now, so reading it costs
 // the game nothing. spy.js re-runs its view hooks on every DOM change, so an unchanged list
-// is not re-posted more than once a minute — same rule as scrapeScienceResearch.
-let lastPost = { key: '', at: 0 };
+// that the hub has stored is never sent again from this document, and one it refused is
+// retried at most once a minute. An open tab shows the list from when it loaded: re-sending
+// that would take back a planet the member has since lost to another member (a sync takes a
+// planet over from whoever holds its row, see planetBanking.js) and report it as fresh.
+let lastPost = { key: '', at: 0, stored: false };
 export async function scrapeMyPlanets() {
     const planets = parseMyPlanetsPage(document);
     if (!planets.length) return;
     const key = JSON.stringify(planets.map(p => [p.game_planet_id, p.population, p.production_pp]));
     const now = Date.now();
-    if (key === lastPost.key && now - lastPost.at < 60 * 1000) return;
-    lastPost = { key, at: now };
-    await postMyPlanets(planets);
+    if (key === lastPost.key && (lastPost.stored || now - lastPost.at < 60 * 1000)) return;
+    const post = { key, at: now, stored: false };
+    lastPost = post;
+    post.stored = await postMyPlanets(planets);
 }

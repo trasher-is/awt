@@ -7,8 +7,13 @@ const AWTables = require('../../public/js/utils/game-tables.js');
 
 const bankingFlagsForPlayerStmt = db.prepare(`SELECT game_planet_id, banking FROM planet_banking WHERE player_id = ?`);
 const deleteForPlayerStmt = db.prepare(`DELETE FROM planet_banking WHERE player_id = ?`);
+// OR REPLACE: game_planet_id is unique across players, and a conquered planet is still on
+// the previous owner's row until that owner syncs again. A plain INSERT failed the
+// conqueror's whole sync until then, and two members who took a planet off each other could
+// never sync again, because each one's row blocked the other. A member's own planet list
+// comes from the game, so it wins over what another member's older sync left behind.
 const insertStmt = db.prepare(`
-    INSERT INTO planet_banking (game_planet_id, player_id, system_id, name, population, population_progress, growth_rate, production_pp, production_rate, banking, updated_at)
+    INSERT OR REPLACE INTO planet_banking (game_planet_id, player_id, system_id, name, population, population_progress, growth_rate, production_pp, production_rate, banking, updated_at)
     VALUES (@game_planet_id, @player_id, @system_id, @name, @population, @population_progress, @growth_rate, @production_pp, @production_rate, @banking, CURRENT_TIMESTAMP)
 `);
 
@@ -17,7 +22,8 @@ const insertStmt = db.prepare(`
 // lost/gifted/conquered planet must disappear, same reasoning as best_planets_snapshot),
 // but every existing `banking` flag is read first and carried over by game_planet_id — a
 // fresh sync must never silently reset a planet the player already marked as banking back
-// to "still building".
+// to "still building". Only this player's own flags carry over: a planet taken from someone
+// else starts at "still building", because banking is the previous owner's call.
 function syncPlayerPlanets(playerId, planets) {
     const existing = new Map(bankingFlagsForPlayerStmt.all(playerId).map(row => [row.game_planet_id, row.banking]));
     const tx = db.transaction((rows) => {
