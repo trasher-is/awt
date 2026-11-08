@@ -87,8 +87,10 @@ function calculator() {
         AWApi: { getTravelTime: async () => { throw new Error('Unexpected game API call'); } },
         document: {
             getElementById: get,
-            querySelectorAll: selector => selector === '#travel-calc-panel .tc-in'
-                ? [...elements.values()].filter(node => node.classList.contains('tc-in')) : []
+            querySelectorAll: selector => {
+                const m = /^#travel-calc-panel \.(tc-in|tc-cmp-in)$/.exec(selector);
+                return m ? [...elements.values()].filter(node => node.classList.contains(m[1])) : [];
+            }
         }, window: {},
         setTimeout(fn) { timers.set(++timerId, fn); return timerId; },
         clearTimeout(id) { timers.delete(id); },
@@ -169,6 +171,21 @@ function archive() {
 async function main() {
     console.log('travel-route-link.test.js');
     const h = calculator();
+    // Compare speed rules: defaults are E50 −4 (A) vs E35 +4 (B) at 11 %/pt — the case
+    // worked out by hand for Harpyie on 2026-11-08.
+    const cmpRows = () => [...h.get('tc-cmp-rows').innerHTML.matchAll(/<tr\b[\s\S]*?<\/tr>/g)].map(m => m[0].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim());
+    ok('compare renders "This flight" plus the seven sample flights', cmpRows().length === 8 && cmpRows()[0].startsWith('This flight'), cmpRows());
+    ok('compare next-system row: now 0:55 / 1:01, new 1:30 / 0:48', cmpRows()[3] === 'Next system (d 1) 0:55 1:01 1:30 0:48', cmpRows()[3]);
+    const cmpText = () => h.get('tc-cmp-summary').textContent.replace(/\s+/g, ' ');
+    ok('compare summary: A faster everywhere now, B up to about d 8.4 under the new rule',
+        cmpText().includes('Now: A is faster on every flight') && cmpText().includes('New: B is faster up to about d 8.4, A beyond that'), cmpText());
+    ok('compare shows the new fixed minimums per fleet', cmpText().includes('A 0:35 / 1:20, B 0:13 / 0:31'), cmpText());
+    h.get('tc-cmp-step').value = '0';
+    await h.get('tc-cmp-step').fire('input');
+    ok('step 0 makes the new columns equal the live game', cmpRows().every(r => { const t = r.split(' ').slice(-4); return t[0] === t[2] && t[1] === t[3]; }), cmpRows());
+    h.get('tc-cmp-step').value = '11';
+    await h.get('tc-cmp-step').fire('input');
+    ok('compare makes no game or hub request', h.state.fetches.length === 0, h.state.fetches);
     ok('raw coordinates keep Plan this flight disabled with a system-pick explanation', h.get('tc-plan-route').disabled
         && h.get('tc-route-message').textContent.includes('Pick origin and destination systems'));
     await h.get('tc-plan-route').fire('click');
