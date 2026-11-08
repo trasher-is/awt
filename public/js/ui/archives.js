@@ -86,7 +86,7 @@ const rowsHtml = (table, rows, rowCls) =>
     rows.map(r => `<tr class="${rowCls}">${renderRowCells(table.columns, r, table.cellBase)}</tr>`).join('');
 
 function closeOtherPanels(exceptId) {
-    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'fleet-locations-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'road-to-ta-panel', 'battle-calc-panel', 'travel-calc-panel', 'route-planner-panel', 'galaxy-map-panel', 'build-order-panel', 'empire-sim-panel', 'battle-reports-panel'].forEach(id => {
+    ['database-panel', 'system-database-panel', 'planet-database-panel', 'fleet-database-panel', 'fleet-locations-panel', 'alliance-stats-panel', 'enemy-intel-panel', 'trade-agreements-panel', 'road-to-ta-panel', 'battle-calc-panel', 'travel-calc-panel', 'speed-rules-panel', 'route-planner-panel', 'galaxy-map-panel', 'build-order-panel', 'empire-sim-panel', 'battle-reports-panel'].forEach(id => {
         if (id !== exceptId) document.getElementById(id)?.classList.replace('translate-x-0', 'translate-x-full');
     });
 }
@@ -1758,6 +1758,21 @@ export async function openTravelCalcPanel() {
     }
     if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
     closeOtherPanels('travel-calc-panel');
+    panel.classList.replace('translate-x-full', 'translate-x-0');
+    if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
+}
+
+export async function openSpeedRulesPanel() {
+    let panel = document.getElementById('speed-rules-panel');
+    if (!panel) {
+        const res = await fetch('/hub-assets/components/speed-rules.html');
+        document.getElementById('dynamic-panels-container').insertAdjacentHTML('beforeend', await res.text());
+        panel = document.getElementById('speed-rules-panel');
+        const { initSpeedRules } = await import('./speed-rules.js');
+        initSpeedRules();
+    }
+    if (panel.classList.contains('translate-x-0')) return panel.classList.replace('translate-x-0', 'translate-x-full');
+    closeOtherPanels('speed-rules-panel');
     panel.classList.replace('translate-x-full', 'translate-x-0');
     if (document.getElementById('sidebar')?.classList.contains('expanded') && typeof window.toggleSidebar === 'function') window.toggleSidebar();
 }

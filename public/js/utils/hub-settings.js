@@ -48,6 +48,7 @@
         tool('battleCalc', 'Battle Calc', 'fa-explosion', 'open-battle-calc-btn', Object.assign({ note: 'Experimental' }, OFF)),
         tool('battleReports', 'Battle Reports', 'fa-file-medical', 'open-battle-reports-btn'),
         tool('travelCalc', 'Travel Calc', 'fa-route', 'open-travel-calc-btn'),
+        tool('speedRules', 'Speed Rules', 'fa-scale-balanced', 'open-speed-rules-btn'),
         tool('buildOrder', 'Build Order', 'fa-diagram-project', 'open-build-order-btn', OFF),
         tool('empireSim', 'Empire Simulator', 'fa-chart-line', 'open-empire-sim-btn', OFF),
         tool('routePlanner', 'Route Planner', 'fa-map-location-dot', 'open-route-planner-btn'),

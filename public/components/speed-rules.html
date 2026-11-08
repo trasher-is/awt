@@ -1,0 +1,141 @@
+<div id="speed-rules-panel" class="fixed top-0 right-0 h-full w-full md:w-[calc(100%-3.5rem)] bg-black border-l border-border transform translate-x-full transition-transform duration-300 z-40 flex flex-col shadow-2xl overflow-hidden">
+
+    <div class="h-14 border-b border-border flex items-center justify-between px-6 bg-zinc-900 shrink-0">
+        <div class="flex items-center gap-3 min-w-0">
+            <div class="w-8 h-8 rounded-md bg-white/5 flex items-center justify-center shrink-0">
+                <i class="fa-solid fa-scale-balanced text-base text-violet-400"></i>
+            </div>
+            <div class="min-w-0">
+                <h2 class="font-bold text-foreground tracking-wide">Speed Rules</h2>
+                <p class="text-sm text-muted-foreground truncate">Defender vs attacker, today's rule vs the proposed one</p>
+            </div>
+        </div>
+        <button id="close-speed-rules-btn" class="w-8 h-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
+            <i class="fa-solid fa-xmark text-base"></i>
+        </button>
+    </div>
+
+    <div class="flex-1 overflow-auto bg-black p-4 md:p-6">
+        <div class="max-w-3xl mx-auto flex flex-col gap-4">
+
+            <p class="text-xs text-muted-foreground">
+                <b>Now</b> = the live game: race speed only shrinks the distance part of a flight.
+                <b>New</b> = the proposal: race speed also shrinks the fixed 20 min (same system) / 45 min (other system) minimum.
+                Local math only. Nothing is sent to the game.
+            </p>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <!-- PLAYER A: DEFENDER -->
+                <div class="bg-zinc-900 border border-border rounded-lg p-4 flex flex-col gap-3">
+                    <div class="flex items-center gap-2 text-sky-400 font-semibold text-sm uppercase tracking-wider">
+                        <i class="fa-solid fa-shield-halved"></i> Player A · Defender
+                    </div>
+                    <div class="relative">
+                        <input type="text" id="sr-a-player-input" placeholder="Fill Energy/Speed from player…" autocomplete="off"
+                            class="h-8 w-full rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+                        <div id="sr-a-player-dropdown" class="hidden absolute top-9 left-0 right-0 z-50 bg-zinc-900 border border-border rounded shadow-xl max-h-48 overflow-y-auto"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <label class="flex flex-col gap-1 text-xs text-muted-foreground">Energy
+                            <input type="number" id="sr-a-energy" min="0" max="100" value="30" class="sr-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                        <label class="flex flex-col gap-1 text-xs text-muted-foreground">Race Speed
+                            <input type="number" id="sr-a-speed" min="-4" max="4" value="0" class="sr-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                    </div>
+                    <div class="text-xs text-muted-foreground">Parked at</div>
+                    <div class="relative">
+                        <input type="text" id="sr-a-sys-input" placeholder="Find system by name or id…" autocomplete="off"
+                            class="h-8 w-full rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+                        <div id="sr-a-sys-dropdown" class="hidden absolute top-9 left-0 right-0 z-50 bg-zinc-900 border border-border rounded shadow-xl max-h-48 overflow-y-auto"></div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2">
+                        <label class="flex flex-col gap-1 text-xs text-muted-foreground">X
+                            <input type="number" id="sr-a-x" value="0" class="sr-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                        <label class="flex flex-col gap-1 text-xs text-muted-foreground">Y
+                            <input type="number" id="sr-a-y" value="0" class="sr-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                        <label class="flex flex-col gap-1 text-xs text-muted-foreground">Planet
+                            <input type="number" id="sr-a-p" min="1" max="12" value="1" class="sr-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                    </div>
+                    <label class="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                        <input type="checkbox" id="sr-a-allied" class="sr-in w-4 h-4 rounded border-border bg-transparent cursor-pointer">
+                        Flying to an allied / own planet (½ time)
+                    </label>
+                </div>
+
+                <!-- PLAYER B: ATTACKER -->
+                <div class="bg-zinc-900 border border-border rounded-lg p-4 flex flex-col gap-3">
+                    <div class="flex items-center gap-2 text-red-400 font-semibold text-sm uppercase tracking-wider">
+                        <i class="fa-solid fa-khanda"></i> Player B · Attacker
+                    </div>
+                    <div class="relative">
+                        <input type="text" id="sr-b-player-input" placeholder="Fill Energy/Speed from player…" autocomplete="off"
+                            class="h-8 w-full rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+                        <div id="sr-b-player-dropdown" class="hidden absolute top-9 left-0 right-0 z-50 bg-zinc-900 border border-border rounded shadow-xl max-h-48 overflow-y-auto"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <label class="flex flex-col gap-1 text-xs text-muted-foreground">Energy
+                            <input type="number" id="sr-b-energy" min="0" max="100" value="30" class="sr-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                        <label class="flex flex-col gap-1 text-xs text-muted-foreground">Race Speed
+                            <input type="number" id="sr-b-speed" min="-4" max="4" value="0" class="sr-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                    </div>
+                    <div class="text-xs text-muted-foreground">Parked at</div>
+                    <div class="relative">
+                        <input type="text" id="sr-b-sys-input" placeholder="Find system by name or id…" autocomplete="off"
+                            class="h-8 w-full rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+                        <div id="sr-b-sys-dropdown" class="hidden absolute top-9 left-0 right-0 z-50 bg-zinc-900 border border-border rounded shadow-xl max-h-48 overflow-y-auto"></div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2">
+                        <label class="flex flex-col gap-1 text-xs text-muted-foreground">X
+                            <input type="number" id="sr-b-x" value="1" class="sr-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                        <label class="flex flex-col gap-1 text-xs text-muted-foreground">Y
+                            <input type="number" id="sr-b-y" value="0" class="sr-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                        <label class="flex flex-col gap-1 text-xs text-muted-foreground">Planet
+                            <input type="number" id="sr-b-p" min="1" max="12" value="1" class="sr-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                    </div>
+                    <div class="text-xs text-zinc-500">The attacker always flies at full (enemy) time.</div>
+                </div>
+            </div>
+
+            <!-- DESTINATION -->
+            <div class="bg-zinc-900 border border-border rounded-lg p-4 flex flex-col gap-3">
+                <div class="flex items-center gap-2 text-amber-400 font-semibold text-sm uppercase tracking-wider">
+                    <i class="fa-solid fa-flag-checkered"></i> Destination
+                </div>
+                <div class="relative">
+                    <input type="text" id="sr-d-sys-input" placeholder="Find system by name or id…" autocomplete="off"
+                        class="h-8 w-full rounded border border-input bg-zinc-950 px-2 text-xs text-foreground focus:outline-none focus:border-zinc-500">
+                    <div id="sr-d-sys-dropdown" class="hidden absolute top-9 left-0 right-0 z-50 bg-zinc-900 border border-border rounded shadow-xl max-h-48 overflow-y-auto"></div>
+                </div>
+                <div class="grid grid-cols-3 gap-2">
+                    <label class="flex flex-col gap-1 text-xs text-muted-foreground">X
+                        <input type="number" id="sr-d-x" value="0" class="sr-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                    <label class="flex flex-col gap-1 text-xs text-muted-foreground">Y
+                        <input type="number" id="sr-d-y" value="0" class="sr-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                    <label class="flex flex-col gap-1 text-xs text-muted-foreground">Planet
+                        <input type="number" id="sr-d-p" min="1" max="12" value="3" class="sr-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                </div>
+                <label class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    New rule: speed shrinks the fixed part by
+                    <input type="number" id="sr-step" min="0" max="20" step="1" value="11" class="sr-in h-8 w-16 rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500">
+                    % per point <span class="text-zinc-500">(11 = same as the distance part)</span>
+                </label>
+            </div>
+
+            <!-- RESULT -->
+            <div class="bg-zinc-900 border border-border rounded-lg p-4 flex flex-col gap-3">
+                <table class="w-full text-sm tabular-nums">
+                    <thead>
+                        <tr class="text-xs text-muted-foreground border-b border-zinc-800">
+                            <th class="py-1 pr-2 text-left font-normal"></th>
+                            <th class="py-1 px-2 text-right font-normal">Now</th>
+                            <th class="py-1 pl-2 text-right font-normal">New</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sr-rows"></tbody>
+                </table>
+                <div id="sr-verdict" class="flex flex-col gap-1 text-sm"></div>
+                <div id="sr-meta" class="text-xs text-muted-foreground"></div>
+            </div>
+
+        </div>
+    </div>
+</div>
