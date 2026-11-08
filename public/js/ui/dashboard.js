@@ -13,6 +13,7 @@ import {
     openRoadToTaPanel,
     openBattleCalcPanel,
     openTravelCalcPanel,
+    openSpeedRulesPanel,
     openRoutePlannerPanel,
     openBuildOrderPanel,
     openEmpireSimPanel,
@@ -71,6 +72,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('open-battle-calc-btn')?.addEventListener('click', openBattleCalcPanel);
     document.getElementById('open-battle-reports-btn')?.addEventListener('click', openBattleReportsPanel);
     document.getElementById('open-travel-calc-btn')?.addEventListener('click', openTravelCalcPanel);
+    document.getElementById('open-speed-rules-btn')?.addEventListener('click', openSpeedRulesPanel);
     document.getElementById('open-route-planner-btn')?.addEventListener('click', openRoutePlannerPanel);
     document.getElementById('open-build-order-btn')?.addEventListener('click', openBuildOrderPanel);
     document.getElementById('open-empire-sim-btn')?.addEventListener('click', openEmpireSimPanel);
