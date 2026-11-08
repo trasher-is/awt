@@ -20,6 +20,11 @@
 //
 // ALLIANCE / own-destination move: ×0.5 (always halved).
 //
+// WHAT-IF (not the game today): opts.fixedSpeedStep lets race speed shrink the fixed
+// minimum too — minimum ÷ (1 + fixedSpeedStep·speed). Default 0 = the live game. 0.11
+// (= SPEED_STEP) is the proposed rule, where speed divides the WHOLE flight. Only the
+// travel calculator's "Compare speed rules" section passes it.
+//
 // Rounding: floor at the end, then floor again after halving. Confirmed against the
 // measurements in travel-fixtures.json — floor matches 9 of 9, round only 5 of 9,
 // including a case whose unfloored value ends in .970. See docs/travel-calibration.md.
@@ -48,18 +53,32 @@
         return Math.pow(ENERGY_BASE, level(energy)) / (1 + SPEED_STEP * level(raceSpeed));
     }
 
-    function calcTravelSeconds(startX, startY, startPlanet, endX, endY, endPlanet, energy, raceSpeed, isAlliance) {
+    // Divisor on the fixed minimum: 1 in the live game (step 0). Clamped so an extreme
+    // what-if step can never divide by zero or flip the sign.
+    function fixedDivisor(raceSpeed, opts) {
+        const step = Number(opts && opts.fixedSpeedStep) || 0;
+        return Math.max(0.05, 1 + step * level(raceSpeed));
+    }
+
+    // The fixed minimums in seconds for this speed under opts: { sameSystem, deepSpace }.
+    function fixedMinimums(raceSpeed, opts) {
+        const div = fixedDivisor(raceSpeed, opts);
+        return { sameSystem: SAME_SYSTEM_MIN / div, deepSpace: DEEP_SPACE_MIN / div };
+    }
+
+    function calcTravelSeconds(startX, startY, startPlanet, endX, endY, endPlanet, energy, raceSpeed, isAlliance, opts) {
         const mod = speedModifier(energy, raceSpeed);
         const planetTerm = Math.sqrt(Math.abs(startPlanet - endPlanet) + 1);
+        const fixed = fixedDivisor(raceSpeed, opts);
 
         let travelTime;
         if (startX === endX && startY === endY) {
-            travelTime = SAME_SYSTEM_MIN + SAME_SYSTEM_PLANET * planetTerm * mod;
+            travelTime = SAME_SYSTEM_MIN / fixed + SAME_SYSTEM_PLANET * planetTerm * mod;
         } else {
             const dx = endX - startX;
             const dy = endY - startY;
             const dist = Math.sqrt(dx * dx + dy * dy);
-            travelTime = DEEP_SPACE_MIN + (DEEP_SPACE_DIST * dist + DEEP_SPACE_PLANET * planetTerm) * mod;
+            travelTime = DEEP_SPACE_MIN / fixed + (DEEP_SPACE_DIST * dist + DEEP_SPACE_PLANET * planetTerm) * mod;
         }
 
         travelTime = Math.floor(travelTime);
@@ -94,7 +113,7 @@
     }
 
     return {
-        calcTravelSeconds, formatTime, systemDistance, speedModifier, isochroneRadius,
+        calcTravelSeconds, formatTime, systemDistance, speedModifier, isochroneRadius, fixedMinimums,
         constants: {
             SAME_SYSTEM_MIN, SAME_SYSTEM_PLANET,
             DEEP_SPACE_MIN, DEEP_SPACE_DIST, DEEP_SPACE_PLANET,

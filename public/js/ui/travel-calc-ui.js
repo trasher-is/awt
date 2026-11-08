@@ -12,7 +12,7 @@ import '../utils/battle-model.js';   // side-effect import: cvOf for the system 
 import '../utils/game-rate-limit.js'; // side-effect import: the shared 5/s gate AWApi rides
 import '../utils/aw-api.js';          // side-effect import: game REST client on globalThis
 
-const { calcTravelSeconds, formatTime: fmt, systemDistance } = globalThis.AWTravelModel;
+const { calcTravelSeconds, formatTime: fmt, systemDistance, fixedMinimums } = globalThis.AWTravelModel;
 const { getTravelTime, getSystemPlanets, resolvePlanetOwners, mapPlanetsToSyncPayload } = globalThis.AWApi;
 
 let sysCache = null, playerCache = null;
@@ -49,6 +49,7 @@ function render() {
 
     const secs = calcTravelSeconds(sx, sy, sp, ex, ey, ep, energy, speed, alliance);
     document.getElementById('tc-time').textContent = fmt(secs);
+    renderSpeedCompare({ from: [sx, sy, sp], to: [ex, ey, ep] });
 
     const sameSys = (sx === ex && sy === ey);
     const dist = sameSys ? 0 : systemDistance(sx, sy, ex, ey);
@@ -73,6 +74,101 @@ function render() {
     const params = { fromSystem: origSysId, fromPlanetIndex: sp, toSystem: destSysId, toPlanetIndex: ep, energyLevel: energy };
     const context = { ...params, from: [sx, sy], to: [ex, ey], raceSpeed: speed, alliance: !!alliance, localSeconds: secs };
     apiTimer = setTimeout(() => { apiTimer = null; showApiTime(params, context); }, API_DEBOUNCE_MS);
+}
+
+// ─── COMPARE SPEED RULES (what-if) ────────────────────────────────────────────
+// Today's rule against a proposal where race speed also shrinks the fixed minimum
+// (travel-model opts.fixedSpeedStep). Pure local math: no game or hub request.
+const SAMPLE_FLIGHTS = [
+    { label: 'Same system, 1 slot',  from: [0, 0, 1], to: [0, 0, 2] },
+    { label: 'Same system, 5 slots', from: [0, 0, 1], to: [0, 0, 6] },
+    { label: 'Next system (d 1)',    from: [0, 0, 1], to: [1, 0, 1] },
+    { label: 'Diagonal (d 2.24)',    from: [0, 0, 1], to: [2, 1, 1] },
+    { label: 'd 5',                  from: [0, 0, 1], to: [5, 0, 1] },
+    { label: 'd 10',                 from: [0, 0, 1], to: [10, 0, 1] },
+    { label: 'd 20',                 from: [0, 0, 1], to: [20, 0, 1] },
+];
+const CROSSOVER_MAX_DIST = 60, CROSSOVER_STEP = 0.05;
+
+// h:mm keeps five columns inside a 390 px phone.
+function shortTime(seconds) {
+    const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60);
+    return `${h}:${String(m).padStart(2, '0')}`;
+}
+
+function flightSeconds(flight, fleet, opts) {
+    return calcTravelSeconds(...flight.from, ...flight.to, fleet.energy, fleet.speed, false, opts);
+}
+
+// Where A and B swap places on a deep-space flight (same planet index on both ends),
+// scanned outward from the next system. Returns { short, long, at[] }: who wins on the
+// shortest hop, who wins at the far end, and every distance where the lead changes.
+function deepSpaceCrossovers(a, b, opts) {
+    const lead = d => {
+        const flight = { from: [0, 0, 1], to: [d, 0, 1] };
+        const diff = flightSeconds(flight, a, opts) - flightSeconds(flight, b, opts);
+        return diff < 0 ? 'A' : diff > 0 ? 'B' : '=';
+    };
+    const at = [];
+    let prev = lead(1);
+    const short = prev;
+    for (let d = 1 + CROSSOVER_STEP; d <= CROSSOVER_MAX_DIST + 1e-9; d += CROSSOVER_STEP) {
+        const cur = lead(d);
+        if (cur !== '=' && prev !== '=' && cur !== prev) at.push(d);
+        if (cur !== '=') prev = cur;
+    }
+    return { short, long: prev, at };
+}
+
+function crossoverSentence(name, c) {
+    const who = x => x === 'A' ? '<span class="text-sky-400 font-semibold">A</span>' : x === 'B' ? '<span class="text-amber-400 font-semibold">B</span>' : 'neither';
+    if (!c.at.length) {
+        return c.short === '='
+            ? `<div><b>${name}:</b> A and B fly the same times between systems.</div>`
+            : `<div><b>${name}:</b> ${who(c.short)} is faster on every flight between systems.</div>`;
+    }
+    const first = c.at[0].toFixed(1);
+    return c.at.length === 1
+        ? `<div><b>${name}:</b> ${who(c.short)} is faster up to about d ${first}, ${who(c.long)} beyond that.</div>`
+        : `<div><b>${name}:</b> the lead changes at d ${c.at.map(d => d.toFixed(1)).join(', ')}.</div>`;
+}
+
+function renderSpeedCompare(route) {
+    const body = document.getElementById('tc-cmp-rows');
+    if (!body) return;
+    const num = (id, lo, hi) => Math.max(lo, Math.min(hi, parseFloat(document.getElementById(id)?.value) || 0));
+    const a = { energy: num('tc-cmp-a-energy', 0, 100), speed: num('tc-cmp-a-speed', -4, 4) };
+    const b = { energy: num('tc-cmp-b-energy', 0, 100), speed: num('tc-cmp-b-speed', -4, 4) };
+    const stepPct = num('tc-cmp-step', 0, 20);
+    const now = {}, next = { fixedSpeedStep: stepPct / 100 };
+
+    const flights = route ? [{ label: 'This flight', ...route }, ...SAMPLE_FLIGHTS] : SAMPLE_FLIGHTS;
+    const cell = (secs, other, extra = '') => {
+        const win = secs < other ? ' text-emerald-400 font-semibold' : ' text-foreground';
+        return `<td class="py-1 px-1 text-right font-mono${win}${extra}">${shortTime(secs)}</td>`;
+    };
+    body.innerHTML = flights.map((f, i) => {
+        const nA = flightSeconds(f, a, now), nB = flightSeconds(f, b, now);
+        const pA = flightSeconds(f, a, next), pB = flightSeconds(f, b, next);
+        const rowClass = i === 0 && route ? 'border-b border-zinc-700' : 'border-b border-zinc-800/50';
+        return `<tr class="${rowClass}">
+            <td class="py-1 pr-2 text-muted-foreground whitespace-nowrap">${esc(f.label)}</td>
+            ${cell(nA, nB)}${cell(nB, nA)}${cell(pA, pB, ' border-l border-zinc-800')}${cell(pB, pA)}
+        </tr>`;
+    }).join('');
+
+    const minFixed = (fleet, opts) => {
+        const m = fixedMinimums(fleet.speed, opts);
+        return `${shortTime(Math.floor(m.sameSystem))} / ${shortTime(Math.floor(m.deepSpace))}`;
+    };
+    const summary = document.getElementById('tc-cmp-summary');
+    if (summary) {
+        summary.innerHTML = crossoverSentence('Now', deepSpaceCrossovers(a, b, now))
+            + crossoverSentence('New', deepSpaceCrossovers(a, b, next))
+            + `<div class="text-muted-foreground">Fixed minimum (same system / other system) under the new rule: `
+            + `<span class="text-sky-400">A</span> ${minFixed(a, next)}, <span class="text-amber-400">B</span> ${minFixed(b, next)} `
+            + `(now ${minFixed(a, now)} for everyone).</div>`;
+    }
 }
 
 async function showApiTime(params, context) {
@@ -347,6 +443,10 @@ export function initTravelCalc() {
         id => { destSysId = id; if (id != null) renderSystemView(id); });
     document.getElementById('tc-plan-route')?.addEventListener('click', () => openPlannedRoute(false));
     document.getElementById('tc-saved-routes')?.addEventListener('click', () => openPlannedRoute(true));
+    document.querySelectorAll('#travel-calc-panel .tc-cmp-in').forEach(el => {
+        el.addEventListener('input', render);
+        el.addEventListener('change', render);
+    });
     wirePlayerSearch();
     render();
 }

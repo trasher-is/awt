@@ -173,6 +173,37 @@ if (gridBad === 0) {
     failed = true;
 }
 
+// ─── 3b. WHAT-IF: SPEED ON THE FIXED MINIMUM ──────────────────────────────────
+// opts.fixedSpeedStep is a proposal, not the game. Step 0 / no opts must stay the live
+// formula; step = SPEED_STEP must divide the whole flight by (1 + 0.11·speed).
+console.log('\n── What-if: speed on the fixed minimum ' + '─'.repeat(37));
+{
+    const { SPEED_STEP } = model.constants;
+    const checks = [];
+    const t = (...a) => model.calcTravelSeconds(...a);
+    // Live game unchanged: every fixture again with an explicit step 0.
+    checks.push(['step 0 reproduces every fixture',
+        CASES.every(c => t(...c.from, ...c.to, c.energy, c.speed, c.alliance, { fixedSpeedStep: 0 }) === hmsToSecs(c.expect))]);
+    // Speed 0 is untouched by any step.
+    checks.push(['speed 0 ignores the step',
+        t(0, 0, 1, 3, 4, 1, 30, 0, false, { fixedSpeedStep: SPEED_STEP }) === t(0, 0, 1, 3, 4, 1, 30, 0, false)]);
+    // Full step: same system and deep space = (live time at speed 0) ÷ (1 + 0.11·speed), ±2 s (the base is floored before the ÷0.56).
+    for (const [label, args] of [['same system', [0, 0, 1, 0, 0, 2]], ['deep space d5', [0, 0, 1, 3, 4, 1]]]) {
+        for (const s of [-4, 4]) {
+            const base = t(...args, 35, 0, false);
+            const got = t(...args, 35, s, false, { fixedSpeedStep: SPEED_STEP });
+            checks.push([`${label}, speed ${s}: whole flight ÷ ${(1 + SPEED_STEP * s).toFixed(2)}`, Math.abs(got - base / (1 + SPEED_STEP * s)) <= 2]);
+        }
+    }
+    // Hand-checked numbers quoted to Harpyie (2026-11-08): next system d1, E50 −4 vs E35 +4.
+    checks.push(['E50 −4 next system = 1:30:54 under the proposal', t(0, 0, 1, 1, 0, 1, 50, -4, false, { fixedSpeedStep: SPEED_STEP }) === 5454]);
+    checks.push(['E35 +4 next system = 0:48:08 under the proposal', t(0, 0, 1, 1, 0, 1, 35, 4, false, { fixedSpeedStep: SPEED_STEP }) === 2888]);
+    // An absurd step never divides by zero or goes negative.
+    checks.push(['extreme step stays finite and positive',
+        [1, 5].every(step => { const v = t(0, 0, 1, 1, 0, 1, 0, -4, false, { fixedSpeedStep: step }); return Number.isFinite(v) && v > 0; })]);
+    for (const [name, pass] of checks) { console.log(`  ${pass ? '✅' : '❌'} ${name}`); if (!pass) failed = true; }
+}
+
 // ─── 4. COVERAGE ──────────────────────────────────────────────────────────────
 console.log('\n── Coverage: where there is no ground truth ' + '─'.repeat(32));
 const sameSystem = CASES.filter(c => c.from[0] === c.to[0] && c.from[1] === c.to[1]);
