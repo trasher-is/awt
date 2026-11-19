@@ -341,7 +341,9 @@ and demand-driven rather than fixed, without relying on a specific number here.
 ## Culture and planet slots
 
 **Culture level is the number of planets you may own.** Reaching the next culture level is
-what unlocks the next colony slot.
+what unlocks the next colony slot. **Conquering a planet also needs a free slot**, the same as
+colonising one, so culture limits how fast a fighter can take planets. (Stated by the
+alliance's lead player, 2026-11-19.)
 
 | Culture Level | Max Planets |
 |---|---|
@@ -835,7 +837,8 @@ scaled by economy like the three combat ships above.
 
 - **Transports** capture/conquer a planet that already has population (owned by another
   player, or Unknown with leftover population) — you need at least as many transports as
-  the target's population level. They're also used to pop-kill/bomb a planet: e.g. sending
+  the target's population level, and you need a free culture slot (see
+  [Culture and planet slots](#culture-and-planet-slots)). They're also used to pop-kill/bomb a planet: e.g. sending
   20 transports against a planet with 10 population kills all 10 population. Building
   damage from a pop-kill is random and scales with how much PP was spent on the transports
   used in the attack.
