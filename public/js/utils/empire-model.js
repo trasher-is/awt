@@ -16,15 +16,8 @@
 //   population is capped by social level; culture level is the planet cap
 //   bonuses stack multiplicatively: total = Π(1 + each) − 1
 //
-// NOT CONFIRMED — the one formula in here with no published source:
-//   cult/h = galactic cybernets × culture bonus
-// docs/game-rules.md publishes the culture COST table but never a culture RATE formula. The
-// line above is inherited from the old standalone sim and has never been checked against the
-// game. It decides how fast planet slots unlock, which is the single biggest driver of a
-// wide build, so treat planet-count output as indicative until someone verifies it in game.
-// `cultureFormula: 'gc+1'` is offered because every other rate in the game has a base term;
-// if the real rate turns out to have one, switch the default rather than editing rates
-// elsewhere. Whatever is confirmed belongs in docs/game-rules.md first, per AGENTS.md.
+//   cult/h   = galactic cybernets × culture bonus          summed over all planets, no base term
+//              (confirmed by the alliance's lead player 2026-11-19; see docs/game-rules.md)
 (function (root, factory) {
     const api = factory();
     if (typeof module === 'object' && module !== null && module.exports) module.exports = api;
@@ -106,7 +99,6 @@
         artifact: null,
         artifactFromDay: 0,
 
-        cultureFormula: 'gc',      // 'gc' (assumed default) or 'gc+1'
         startingPP: 300
     };
 
@@ -212,8 +204,7 @@
 
         cultureRate() {
             const m = this.multiplier('culture');
-            const base = this.cfg.cultureFormula === 'gc+1' ? 1 : 0;
-            return this.planets.reduce((s, p) => s + (p.buildings.GC + base) * m, 0);
+            return this.planets.reduce((s, p) => s + p.buildings.GC * m, 0);
         }
 
         totalPop() { return this.planets.reduce((s, p) => s + p.popLevel, 0); }
@@ -479,9 +470,6 @@
         if (cfg.tradeRate > 0) {
             warnings.push(`TR ${Math.round(cfg.tradeRate * 100)}% assumed held for the whole run; ` +
                 'trade-agreement cost, the 5-per-player cap and the 6-hourly accept window are not simulated');
-        }
-        if (cfg.cultureFormula === 'gc') {
-            warnings.push('culture rate = cybernets × bonus is ASSUMED, not published — planet count is indicative');
         }
     }
 
