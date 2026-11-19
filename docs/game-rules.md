@@ -448,6 +448,18 @@ what unlocks the next colony slot.
 
 ### Culture growth
 
+Culture comes **only from Galactic Cybernets**:
+
+    culture/h = (sum of GC levels on all your planets) × (1 + 0.04 × race culture pick)
+                × TR% factor × artifact factor
+
+There is no per-planet base term and no population term. A planet with no GC adds no culture.
+The factors multiply as described in
+[Bonuses stack multiplicatively](#bonuses-stack-multiplicatively-not-additively).
+(Stated by the alliance's lead player, 2026-11-19.) Beta 6 round-end member data agrees: each
+member's culture/h was 1.8–2.1× their GC total × race factor, which their trade rate and
+artifacts explain.
+
 **RZ:** culture output has **×10** pace (`Output.Factor`) and a **1-minute** hosting interval,
 compared with standard's **5-minute** economic cycle. The point requirements below have
 not been re-recorded from RedZone; do not divide the points or planet-slot counts by ten.

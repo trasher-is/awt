@@ -99,7 +99,6 @@ function buildConfig() {
         economyBonus: $('es-economy-bonus').checked,
         artifact: artifact || null,
         artifactFromDay: Number($('es-artifact-from-day').value) || 0,
-        cultureFormula: $('es-culture-formula').value,
         startingPP: Number($('es-starting-pp').value) || 0,
     };
 }

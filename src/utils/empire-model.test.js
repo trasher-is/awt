@@ -218,22 +218,21 @@ const NO_TARGETS = { HF: 0, RF: 0, GC: 0, RL: 0, SB: 0 };
         T.destroyerCost(overflowed.final.fleetIfSpent.economy) < T.destroyerCost(0));
 
     console.log('');
-    console.log('── The unverified culture rate is declared, and it matters ' + '─'.repeat(21));
-    const assumed = E.simulate({ days: 30, targets: { HF: 6, RF: 6, GC: 6, RL: 0, SB: 0 } });
-    ok('a run says out loud that the culture rate is assumed',
-        assumed.warnings.some(w => /ASSUMED/.test(w)), assumed.warnings);
-    const noCybernet = E.simulate({
-        days: 30, targets: { HF: 6, RF: 6, GC: 0, RL: 0, SB: 0 }, cultureFormula: 'gc'
-    });
-    ok('under the assumed formula, no cybernets means no culture and no second planet',
+    console.log('── Culture comes only from cybernets ' + '─'.repeat(43));
+    const noCybernet = E.simulate({ days: 30, targets: { HF: 6, RF: 6, GC: 0, RL: 0, SB: 0 } });
+    ok('no cybernets means no culture and no second planet',
         noCybernet.final.cultureLevel === 1 && noCybernet.final.planets === 1,
         { culture: noCybernet.final.cultureLevel, planets: noCybernet.final.planets });
-    const withBase = E.simulate({
-        days: 30, targets: { HF: 6, RF: 6, GC: 0, RL: 0, SB: 0 }, cultureFormula: 'gc+1'
+    const withGc = E.simulate({ days: 30, targets: { HF: 6, RF: 6, GC: 6, RL: 0, SB: 0 } });
+    ok('cybernets expand the empire, and no run calls the culture rate assumed',
+        withGc.final.planets > 1 && !withGc.warnings.some(w => /ASSUMED/.test(w)),
+        { planets: withGc.final.planets, warnings: withGc.warnings });
+    const oneGc6 = E.simulate({
+        days: 30, maxPlanets: 1, race: { culture: -2 }, tradeRate: 0.5,
+        targets: { HF: 6, RF: 6, GC: 6, RL: 0, SB: 0 }
     });
-    ok('the gc+1 variant expands without cybernets — which is why the formula must be verified',
-        withBase.final.planets > noCybernet.final.planets,
-        { gc: noCybernet.final.planets, 'gc+1': withBase.final.planets });
+    ok('culture/h = GC levels × race × TR%, with no base term (GC6, culture -2, TR 50%)',
+        Math.abs(oneGc6.final.cultureRate - 6 * 0.92 * 1.5) < 1e-9, oneGc6.final.cultureRate);
 
     console.log('');
     console.log('── A run is reproducible ' + '─'.repeat(55));
@@ -247,7 +246,7 @@ const NO_TARGETS = { HF: 0, RF: 0, GC: 0, RL: 0, SB: 0 };
     ok('the same config twice gives byte-identical output',
         JSON.stringify(a) === JSON.stringify(b));
     ok('and the caller\'s config object was not mutated',
-        cfg.days === 45 && cfg.targets.HF === 12 && !('cultureFormula' in cfg));
+        cfg.days === 45 && cfg.targets.HF === 12 && !('tradeRate' in cfg));
 
     console.log('');
     console.log('── Tick size changes resolution, not the answer ' + '─'.repeat(32));
