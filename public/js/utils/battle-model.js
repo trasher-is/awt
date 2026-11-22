@@ -59,7 +59,8 @@
 //                          × (1 + 0.12·ownRD)
 //     ownToughness includes a defending starbase's att + 2·def.
 //     Since 7.2 the starbase itself loses min(1, 2·lossFrac) of its CV (double damage);
-//     what is left maps back to a FRACTIONAL level, which is what the next fight sees.
+//     what is left maps back to a FRACTIONAL level (straight lines between whole levels),
+//     which is what the next fight sees. See sbCV / sbTough for the 7.2 details.
 //     Physics, Race Attack never touch survivors. Player level never touches
 //     anything unless the side has destroyers AND cruisers AND battleships.
 //
@@ -104,23 +105,46 @@
 
     // Starbase: cv = round(4·1.5^n) − 4; att = def = floor(cv/2).
     // Confirmed in-game: lvl1=2, 2=5, 3=10, 4=16, 5=26, 6=42, 7=64, 10=227, 15=1748, 20=13297.
-    // The level can be FRACTIONAL: a damaged starbase keeps the part of a level it did not
-    // lose (10 hit down to 9.5 fights the next battle as 9.5, not as 9 or 10), even though
-    // the game's pages and reports only ever print whole levels. The same formula serves a
-    // fractional level; sbLevelFromCV() is its inverse.
-    function sbCV(n) { return n > 0 ? Math.round(4 * Math.pow(1.5, n)) - 4 : 0; }
+    //
+    // FRACTIONAL LEVELS (7.2): a damaged starbase keeps the part of a level it did not lose
+    // and fights the next battle with it, though the game's pages and reports only print
+    // whole levels. Between two whole levels the CV is a STRAIGHT LINE (9.5 = 150 + ½·77 =
+    // 188.5), and the CV left after a fight maps back to a level along the same line. Seven
+    // game-calculator readings (2026-11-22: SB 10/9.5/12 and the 11.99 → 10.86 chain of
+    // 4 × 10 DS) match to the displayed 0.01; the 1.5^n curve was off by up to 0.1.
+    function sbCV(n) {
+        if (!(n > 0)) return 0;
+        const whole = Math.floor(n), f = n - whole;
+        const at = k => (k > 0 ? Math.round(4 * Math.pow(1.5, k)) - 4 : 0);
+        return f > 1e-9 ? at(whole) + f * (at(whole + 1) - at(whole)) : at(whole);
+    }
     function sbHalf(n) { return Math.floor(sbCV(n) / 2); }
     const r2 = x => Math.round(x * 100) / 100;
-    const sbLevelExact = cv => Math.log((cv + 4) / 4) / Math.log(1.5);
-    function sbLevelFromCV(cv) { return cv > 0 ? r2(sbLevelExact(cv)) : 0; }
-    // The level left after a fight in which the starbase kept survFrac of its CV. The CV it
-    // LOST comes off the unrounded curve 4·1.5^n − 4, so an untouched starbase stays exactly
-    // at its level (mapping the rounded CV back would turn an undamaged 5 into 4.97).
+    // Inverse of sbCV along the same straight lines, to two decimals.
+    function sbLevelFromCV(cv) {
+        if (!(cv > 0)) return 0;
+        let n = 0;
+        while (n < 60 && sbCV(n + 1) <= cv + 1e-9) n++;
+        const step = sbCV(n + 1) - sbCV(n);
+        return r2(n + (cv - sbCV(n)) / step);
+    }
+    // The level left after a fight in which the starbase kept survFrac of its CV.
     function sbLevelAfter(level, survFrac) {
         if (!(level > 0) || !(survFrac > 0)) return 0;
         if (survFrac >= 1) return level;
-        const left = 4 * Math.pow(1.5, level) - 4 - (1 - survFrac) * sbCV(level);
-        return left > 0 ? Math.min(level, r2(sbLevelExact(left))) : 0;
+        return Math.min(level, sbLevelFromCV(sbCV(level) * survFrac));
+    }
+    // A starbase's toughness (the denominator of its side's loss fraction).
+    //   pre-7.2: 3·floor(CV/2), fitted on the old calculator.
+    //   7.2:     floor(1.5·whole-level CV + ½·the fractional extra). For a whole level that is
+    //            floor(1.5·CV): 10 DS + SB 8 vs 40 DS leaves 3.62 DS, as the game shows (3.58
+    //            with 147). The ½ on the fractional extra is fitted on five fractional
+    //            readings (all within 0.004 of a level); not confirmed as the game's rule.
+    function sbTough(n, rules) {
+        if (!(n > 0)) return 0;
+        if (!rules || rules.sbToughness !== '7.2') return sbHalf(n) * 3;
+        const whole = sbCV(Math.floor(n));
+        return Math.floor(1.5 * whole + 0.5 * (sbCV(n) - whole));
     }
 
     // ─── rules per game version ────────────────────────────────────────────────
@@ -128,13 +152,13 @@
     // starbase takes DOUBLE damage in combat. Everything else below was fitted on the
     // pre-7.2 calculator and is unchanged by that patch. The pre-7.2 set stays so the
     // calculator readings collected under it (battle-fixtures.json) still test the model.
-    // UNVERIFIED for 7.2: how "double damage" is applied. Modelled as the starbase losing
-    // twice the loss fraction its side takes (capped at 100%), ships unchanged.
+    // Checked on the 7.2 game calculator (2026-11-22): the starbase loses twice the loss
+    // fraction its side takes (capped at 100%); ships beside it keep the shared fraction.
     // `from`: first battle time the set applies to. 7.2 started with the round reset on
     // 2026-11-22 at 20:00 CET (19:00 UTC).
     const RULES = Object.freeze({
-        'pre-7.2': Object.freeze({ version: 'pre-7.2', raceAtkPct: 0.08, sbDamageMult: 1, from: 0 }),
-        '7.2': Object.freeze({ version: '7.2', raceAtkPct: 0.09, sbDamageMult: 2, from: Date.parse('2026-11-22T19:00:00Z') }),
+        'pre-7.2': Object.freeze({ version: 'pre-7.2', raceAtkPct: 0.08, sbDamageMult: 1, sbToughness: 'pre-7.2', sbWinFloor: false, from: 0 }),
+        '7.2': Object.freeze({ version: '7.2', raceAtkPct: 0.09, sbDamageMult: 2, sbToughness: '7.2', sbWinFloor: true, from: Date.parse('2026-11-22T19:00:00Z') }),
     });
     const CURRENT_RULES = RULES['7.2'];
     // The rules a battle at time `when` (ms or a date string) was fought under, for
@@ -380,7 +404,7 @@
         // that put the starbase 0.49 levels off on average (and wiped starbases the
         // calculator leaves at level 6-10); counting it gives 0.13 levels, and 0.01-0.05
         // on six new calculator readings (2026-10-04). Fleet survivors improve with it too.
-        const defTough = toughOf(defFleet) + (sbLvl > 0 ? sbHalf(sbLvl) * 3 : 0);
+        const defTough = toughOf(defFleet) + sbTough(sbLvl, rules);
         const atkTough = toughOf(atkFleet);
 
         const defMult = toughnessMult(def.math, atk.math, def.rd, defFleet, def.lvl, atk.lvl);
@@ -410,6 +434,9 @@
             const shipCount = fleet.reduce((a, b) => a + b, 0);
             if (shipCount >= 5 && ships[top] < 1) ships[top] = 1;
             else if (shipCount === 0 && sbCvHere > 0 && sbLoss >= 1) sbFrac = sbCV(1) / sbCvHere;
+            // 7.2: a starbase defending alone never ends below level 1 (game calculator:
+            // "keeps 1 SB, that's a minimum after a win"); the certain loser is still wiped below.
+            if (rules.sbWinFloor && shipCount === 0 && sbCvHere > 0 && sbFrac * sbCvHere < sbCV(1)) sbFrac = Math.min(1, sbCV(1) / sbCvHere);
             return { ships, sbFrac };
         };
 
@@ -495,7 +522,7 @@
     }
 
     return {
-        SHIPS, TOUGH, sbCV, sbHalf, sbLevelFromCV, sbLevelAfter, RULES, CURRENT_RULES, rulesAt,
+        SHIPS, TOUGH, sbCV, sbHalf, sbTough, sbLevelFromCV, sbLevelAfter, RULES, CURRENT_RULES, rulesAt,
         cvOf, attOf, toughOf, toFleet,
         clampScience, clampRace, clampStarbase, clampLevel, normalizeInputs,
         hasCurrentIntel, resolveStats, simulate, winChance, winBand, strengthOf, sbStrength,

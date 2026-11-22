@@ -1298,19 +1298,32 @@ toughness is wiped even with a large bonus.
 - A **starbase defending alone** keeps level 1 when its loss reaches 100%. Next to 5+ ships,
   the floor goes to a ship instead.
 
-**Starbases since 7.2.0-beta:**
+**Starbases since 7.2.0-beta** (checked on the 7.2 game calculator, 2026-11-22):
 
-- **Double damage** (patch note: "Damage taken by starbases in combat was doubled"). The hub
-  models it as the starbase losing **2 × loss** of its CV (capped at 100%), while the ships
-  beside it keep the loss above. That reading is not yet checked against the 7.2 calculator.
+- **Double damage** (patch note: "Damage taken by starbases in combat was doubled"): the
+  starbase loses **2 × loss** of its CV (capped at 100%); ships beside it keep the shared loss.
+- **Toughness** is `floor(1.5 × CV)` for a whole level (pre-7.2: 3 × floor(CV / 2)). 10 DS +
+  SB 8 against 40 DS: the defender keeps 3.62 DS, as the game shows (3.58 with the old value).
 - **Starbase levels are fractional.** A damaged starbase keeps the part of a level it did not
-  lose and fights the next battle with it: 10 destroyers take a level-10 starbase (227 CV) to
-  about **9.5** (184 CV), and the next 10 destroyers only get that 9.5 to about 8.9. They do
-  not reach 8, as two whole-level steps (10 → 9 → 8) would suggest. Pages and reports
-  print whole levels only, so the hidden fraction is invisible in the game. The level left
-  is the unrounded curve 4 × 1.5^level − 4 minus the CV lost, mapped back to a level. The
-  battle calculator, `!battle --sb 9.5` and the landing planner all take and carry fractional
-  levels.
+  lose and fights the next battle with it. Pages and reports print whole levels only, so a
+  visible SB 11 can be anything from 11.00 to 11.99 (count it as 11.99 to be safe).
+  Between two whole levels the **CV is a straight line**: SB 9.5 = 150 + ½ × (227 − 150) =
+  188.5 CV. The CV left after a fight maps back to a level along the same line. For a
+  fractional level the toughness is `floor(1.5 × whole-level CV + ½ × the extra CV above it)`.
+  The ½ is fitted on five fractional readings, all within 0.004 of a level.
+- A starbase defending alone **never ends a fight below level 1**, unless it is the certain loser.
+
+| Game calculator, 7.2 | Game | Hub |
+|---|---|---|
+| SB 10 vs 10 DS | 9.48 | 9.48 |
+| SB 9.5 vs 10 DS | 8.85 | 8.85 |
+| SB 12 vs 60 DS | 10.42 | 10.42 |
+| SB 11.99 vs 4 × 10 DS in a row | 11.69, 11.41, 11.15, 10.86 | same |
+| 10 DS + SB 8 vs 40 DS | 46.14%, att 7.75 DS, def 3.62 DS, SB 0 | same |
+| SB 8 vs 30 DS (race attack +2) | 73.16%, att 5.25 DS, SB 1 if it wins | same |
+
+The win chance against a *fractional* starbase (its strength from the straight-line CV) has not
+been checked yet.
 
 Survivor counts are fractions; the fractional part is a survival chance (see
 [Fleet and combat notes](#fleet-and-combat-notes)).

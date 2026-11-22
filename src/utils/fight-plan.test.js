@@ -78,9 +78,8 @@ test('a winner with one surviving ship keeps one icon even when grouped', () => 
 test('starbase level left keeps the fraction of the remaining CV', () => {
     assert.strictEqual(P.sbLevelLeft(M, 8, 1), 8);
     assert.strictEqual(P.sbLevelLeft(M, 8, 0), 0);
-    // level 8 = 99 CV; losing 73% of it (72.3 CV) off the unrounded curve (98.5) leaves
-    // 26.3: level 5 (26 CV) give or take the game's CV rounding, far below 6 (42)
-    assert.strictEqual(P.sbLevelLeft(M, 8, 0.27), 4.99);
+    // level 8 = 99 CV; 27% left = 26.73 CV: level 5 (26 CV) plus 0.73/16 of the way to 6 (42)
+    assert.strictEqual(P.sbLevelLeft(M, 8, 0.27), 5.05);
     // a fractional level carries on: 9.5 at full CV stays 9.5
     assert.strictEqual(P.sbLevelLeft(M, 9.5, 1), 9.5);
 });

@@ -176,25 +176,27 @@ console.log('\n── 7.2 rules: race attack 9%, starbase double damage, fractio
     check('race attack +2 is worth more under 7.2 (30 DS vs SB 8: 73.2% vs 70.5%)',
         Math.abs(ra72 - 0.73163) < 1e-4 && Math.abs(raOld - 0.70458) < 1e-4, [ra72, raOld]);
 
-    // His example (2026-11-22): 10 DS hit SB 10 down to 9.5, and the next 10 DS cannot
-    // get the 9.5 down to 8. The old hub rounded to whole levels (10 → 9 → 8).
+    // Game-calculator readings on 7.2 (trasheris, 2026-11-22), all other stats 0.
     const hit = (sb, d, rules) => model.simulate({ atkFleet: [d, 0, 0], defFleet: [0, 0, 0], sbLevel: sb, atk: z, def: z, rules });
-    const first = hit(10, 10);
-    const second = hit(first.sbLevelLeft, 10);
-    check('10 DS take SB 10 to ~9.5 (double damage)', first.sbLevelLeft >= 9.45 && first.sbLevelLeft <= 9.6, first.sbLevelLeft);
-    check('pre-7.2 the same 10 DS only took it to ~9.8', Math.abs(hit(10, 10, 'pre-7.2').sbLevelLeft - 9.78) < 0.02, hit(10, 10, 'pre-7.2').sbLevelLeft);
-    check('the next 10 DS fight a 9.5 starbase and leave it above 8', second.sbLvl === first.sbLevelLeft && second.sbLevelLeft > 8.5, second.sbLevelLeft);
-    check('a 9.5 starbase is stronger than a whole 9 (184 vs 150 CV)', model.sbCV(9.5) === 184 && model.sbCV(9) === 150);
+    check('BC A: 10 DS vs SB 10 leave SB 9.48', hit(10, 10).sbLevelLeft === 9.48, hit(10, 10).sbLevelLeft);
+    check('BC B: 10 DS vs SB 9.5 leave SB 8.85', hit(9.5, 10).sbLevelLeft === 8.85, hit(9.5, 10).sbLevelLeft);
+    check('BC E: 60 DS vs SB 12 leave SB 10.42', hit(12, 60).sbLevelLeft === 10.42, hit(12, 60).sbLevelLeft);
+    const c = model.simulate({ atkFleet: [40, 0, 0], defFleet: [10, 0, 0], sbLevel: 8, atk: z, def: z });
+    check('BC C: 40 DS vs 10 DS + SB 8: attacker 46.14%, keeps 7.75 DS; defender keeps 3.62 DS, SB 0',
+        (c.winA * 100).toFixed(2) === '46.14' && c.survAtk[0].toFixed(2) === '7.75' && c.survDef[0].toFixed(2) === '3.62' && c.sbLevelLeft === 0,
+        [c.winA, c.survAtk, c.survDef, c.sbLevelLeft]);
+    const d = model.simulate({ atkFleet: [30, 0, 0], defFleet: [0, 0, 0], sbLevel: 8, atk: { ra: 2 }, def: z });
+    check('BC D: 30 DS (race attack +2) vs SB 8: attacker 73.16%, keeps 5.25 DS; a winning SB keeps level 1',
+        (d.winA * 100).toFixed(2) === '73.16' && d.survAtk[0].toFixed(2) === '5.25' && d.sbLevelLeft === 1, [d.winA, d.survAtk, d.sbLevelLeft]);
+    // His buster example: visible SB 11 counted as 11.99, four fleets of 10 DS in a row.
+    let level = 11.99;
+    const chain = [1, 2, 3, 4].map(() => (level = hit(level, 10).sbLevelLeft));
+    check('4 × 10 DS take SB 11.99 to 11.69, 11.41, 11.15, 10.86', chain.join(' ') === '11.69 11.41 11.15 10.86', chain);
+    check('pre-7.2 the same 10 DS only took SB 10 to 9.74', hit(10, 10, 'pre-7.2').sbLevelLeft === 9.74, hit(10, 10, 'pre-7.2').sbLevelLeft);
+    check('a fractional level\'s CV is the straight line between whole levels (9.5 = 188.5)',
+        model.sbCV(9.5) === 188.5 && model.sbCV(9) === 150 && model.sbCV(10) === 227);
     check('an untouched starbase keeps exactly its level, whole or fractional',
-        [1, 5, 8, 9.5, 12, 20].every(l => model.sbLevelAfter(l, 1) === l && hit(l, 0).sbLevelLeft === l), [1, 5, 8, 9.5, 12, 20].map(l => model.sbLevelAfter(l, 1)));
-    check('sbLevelFromCV maps a whole level\'s CV back to within 0.05 of it',
-        [1, 5, 9, 12, 20].every(l => Math.abs(model.sbLevelFromCV(model.sbCV(l)) - l) <= 0.05));
-
-    const mixed = { atkFleet: [40, 0, 0], defFleet: [10, 0, 0], sbLevel: 8, atk: z, def: z };
-    const m72 = model.simulate(mixed), mOld = model.simulate({ ...mixed, rules: 'pre-7.2' });
-    check('double damage hits the starbase only: ships beside it keep the same survivors',
-        m72.survDef[0] === mOld.survDef[0] && m72.winA === mOld.winA && m72.survSB < mOld.survSB, [m72.survDef, mOld.survDef, m72.survSB, mOld.survSB]);
-    check('a starbase defending alone still keeps level 1 when wiped', hit(8, 200).sbLevelLeft === 1 || hit(8, 200).winA === 1, hit(8, 200));
+        [1, 5, 8, 9.5, 11.99, 20].every(l => model.sbLevelAfter(l, 1) === l && model.sbLevelFromCV(model.sbCV(l)) === l));
     check('starbase input keeps two decimals', model.clampStarbase('9.5') === 9.5 && model.clampStarbase(9.456) === 9.46
         && model.clampStarbase(-1) === 0 && model.clampStarbase('x') === 0 && model.normalizeInputs({ sbLevel: '9.5' }).sbLevel === 9.5);
 }
