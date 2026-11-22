@@ -102,7 +102,7 @@ export function openFightSimulation(result) {
             });
         }
         const sb = r.sbLvl > 0 ? { level: r.sbLvl, cv0: M.sbCV(r.sbLvl), hp: 1, hpEnd: out.survSB, levelNow: r.sbLvl, flash: 0, x: 0, y: 0 } : null;
-        if (sb) sb.levelEnd = P.sbLevelLeft(M.sbCV, r.sbLvl, out.survSB);
+        if (sb) sb.levelEnd = P.sbLevelLeft(M, r.sbLvl, out.survSB);
         const dice = { u: out.u, shown: Math.random(), flipAt: 0 };
         return { r, out, winner: out.winner, ships, sides, sb, dice, bolts: [], parts: [], events: [], clock: 0, last: 0, done: false,
             engage: { def: 0, atk: 0 } };
@@ -276,7 +276,7 @@ export function openFightSimulation(result) {
         if (target === b.sb) {
             const sb = b.sb;
             sb.hp = Math.max(sb.hpEnd, Math.min(sb.hp, 1 - (1 - sb.hpEnd) * (ev.sbHit + 1) / VOLLEYS));
-            sb.levelNow = Math.max(sb.levelEnd, P.sbLevelLeft(M.sbCV, sb.level, sb.hp));
+            sb.levelNow = Math.max(sb.levelEnd, P.sbLevelLeft(M, sb.level, sb.hp));
             sb.flash = 70;
         } else if (target.alive) target.flash = 60;
         for (let i = 0; i < 4; i++) b.parts.push({ x: bolt.x1, y: bolt.y1, vx: (Math.random() - .5) * .12 * g, vy: (Math.random() - .5) * .12 * g, t0: now, life: 220, c: COL.hot, r: g });

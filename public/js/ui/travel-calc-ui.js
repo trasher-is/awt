@@ -77,7 +77,7 @@ function render() {
 }
 
 // ─── COMPARE SPEED RULES (what-if) ────────────────────────────────────────────
-// Today's rule against a proposal where race speed also shrinks the fixed minimum
+// The pre-7.2 rule against 7.2, where race speed also shrinks the fixed minimum
 // (travel-model opts.fixedSpeedStep). Pure local math: no game or hub request.
 const SAMPLE_FLIGHTS = [
     { label: 'Same system, 1 slot',  from: [0, 0, 1], to: [0, 0, 2] },
@@ -140,7 +140,7 @@ function renderSpeedCompare(route) {
     const a = { energy: num('tc-cmp-a-energy', 0, 100), speed: num('tc-cmp-a-speed', -4, 4) };
     const b = { energy: num('tc-cmp-b-energy', 0, 100), speed: num('tc-cmp-b-speed', -4, 4) };
     const stepPct = num('tc-cmp-step', 0, 20);
-    const now = {}, next = { fixedSpeedStep: stepPct / 100 };
+    const now = { fixedSpeedStep: 0 }, next = { fixedSpeedStep: stepPct / 100 }; // old rule vs 7.2
 
     const flights = route ? [{ label: 'This flight', ...route }, ...SAMPLE_FLIGHTS] : SAMPLE_FLIGHTS;
     const cell = (secs, other, extra = '') => {
@@ -163,11 +163,11 @@ function renderSpeedCompare(route) {
     };
     const summary = document.getElementById('tc-cmp-summary');
     if (summary) {
-        summary.innerHTML = crossoverSentence('Now', deepSpaceCrossovers(a, b, now))
-            + crossoverSentence('New', deepSpaceCrossovers(a, b, next))
-            + `<div class="text-muted-foreground">Fixed minimum (same system / other system) under the new rule: `
+        summary.innerHTML = crossoverSentence('Old', deepSpaceCrossovers(a, b, now))
+            + crossoverSentence('7.2', deepSpaceCrossovers(a, b, next))
+            + `<div class="text-muted-foreground">Fixed minimum (same system / other system) under 7.2: `
             + `<span class="text-sky-400">A</span> ${minFixed(a, next)}, <span class="text-amber-400">B</span> ${minFixed(b, next)} `
-            + `(now ${minFixed(a, now)} for everyone).</div>`;
+            + `(old rule ${minFixed(a, now)} for everyone).</div>`;
     }
 }
 

@@ -7,7 +7,7 @@
             </div>
             <div class="min-w-0">
                 <h2 class="font-bold text-foreground tracking-wide">Speed Rules</h2>
-                <p class="text-sm text-muted-foreground truncate">Defender vs attacker, today's rule vs the proposed one</p>
+                <p class="text-sm text-muted-foreground truncate">Defender vs attacker, the 7.2 travel rule vs the old one</p>
             </div>
         </div>
         <button id="close-speed-rules-btn" class="w-8 h-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
@@ -19,8 +19,8 @@
         <div class="max-w-3xl mx-auto flex flex-col gap-4">
 
             <p class="text-xs text-muted-foreground">
-                <b>Now</b> = the live game: race speed only shrinks the distance part of a flight.
-                <b>New</b> = the proposal: race speed also shrinks the fixed 20 min (same system) / 45 min (other system) minimum.
+                <b>Old</b> = before 7.2: race speed only shrinks the distance part of a flight.
+                <b>7.2</b> = the live game since 7.2.0-beta: race speed also shrinks the fixed 20 min (same system) / 45 min (other system) minimum.
                 Local math only. Nothing is sent to the game.
             </p>
 
@@ -114,7 +114,7 @@
                         <input type="number" id="sr-d-p" min="1" max="12" value="3" class="sr-in h-9 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
                 </div>
                 <label class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    New rule: speed shrinks the fixed part by
+                    7.2 rule: speed shrinks the fixed part by
                     <input type="number" id="sr-step" min="0" max="20" step="1" value="11" class="sr-in h-8 w-16 rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500">
                     % per point <span class="text-zinc-500">(11 = same as the distance part)</span>
                 </label>
@@ -126,8 +126,8 @@
                     <thead>
                         <tr class="text-xs text-muted-foreground border-b border-zinc-800">
                             <th class="py-1 pr-2 text-left font-normal"></th>
-                            <th class="py-1 px-2 text-right font-normal">Now</th>
-                            <th class="py-1 pl-2 text-right font-normal">New</th>
+                            <th class="py-1 px-2 text-right font-normal">Old</th>
+                            <th class="py-1 pl-2 text-right font-normal">7.2</th>
                         </tr>
                     </thead>
                     <tbody id="sr-rows"></tbody>

@@ -75,11 +75,14 @@ screen enforces this directly, so a bonus anywhere is a malus somewhere else.
 | Culture | 4% | Culture growth |
 | Production | 4% | Production points/hour |
 | Speed | 11% | Fleet travel time |
-| Attack | 8% | Battles — win chance |
+| Attack | 9% | Battles — win chance |
 | Defence | 12% | Battles — survivors |
 
 Attack and Defence were raised from 7%/11% to 8%/12% by patch **6.0.0-beta** (2026-08-28
 changelog: "Combat Balance Changes"). Growth/Science/Culture/Production/Speed were untouched.
+Patch **7.2.0-beta** (round starting 2026-11-22) raised Attack again, to **9%** (±8% → ±9%);
+Defence stays 12%. The same patch made Speed also shrink the fixed part of travel time, and
+doubled the damage starbases take in combat (see [Battle formula](#battle-formula)).
 
 Two additional picks are one-time toggles rather than a scalable stat — each has a fixed
 point **cost** that must be offset by the seven traits above summing correspondingly
@@ -1199,8 +1202,12 @@ and caps on its buildings — though the exact numbers aren't published.
   formula below, a 1.2× power ratio gives **80.00%** and 1.5× gives 100%.
 - **Travel time has a fixed floor and a reducible part — both config pairs are real, not
   redundant.** `FixedTravelTimeInterPlanets`/`FixedTravelTimeInterSystems` (**20 min / 45
-  min**) are hard minimums — energy and speed can never bring a flight below them, except the
-  own-planet/alliance 50% halving, which can. `TravelTimeInterPlanets`/`TravelTimeInterSystems`
+  min**) are the minimums at Speed 0. Energy never shrinks them. **Since 7.2.0-beta race Speed
+  does** (patch note: "the race speed bonus now also applies to the fixed portion of travel
+  time"): the floor is divided by 1 + 0.11 × Speed, so Speed divides the whole flight (+4: 14
+  / 31 min, −4: 36 / 80 min). Before 7.2 Speed could not go below the floor either. The
+  own-planet/alliance 50% halving still applies on top. Whether the game floors the fixed part
+  before or after dividing is not yet measured (a second or two either way). `TravelTimeInterPlanets`/`TravelTimeInterSystems`
   (**4h / 10h**) are the coefficients for the *reducible* part of the flight, which energy
   and speed actually shrink. At 0 Energy and +0 Speed, a flight is the full 4h/10h reducible
   time plus the 20min/45min floor on top — matches
@@ -1243,7 +1250,7 @@ An odd starbase CV gives defence the extra point (level 8, CV 99: attack 49, def
 The bonuses enter as factors on each side; their logarithms add up to one score:
 
     score = ln(strength_att / strength_def)
-          + ln(1 + 0.08 × race attack_att)  − ln(1 + 0.08 × race attack_def)
+          + ln(1 + 0.09 × race attack_att)  − ln(1 + 0.09 × race attack_def)   (0.08 before 7.2)
           + ln(1 + 0.015 × physics_att)     − ln(1 + 0.015 × physics_def)
           + ln(edge_att) − ln(edge_def)
 
@@ -1290,6 +1297,20 @@ toughness is wiped even with a large bonus.
 - A side of **4 ships or fewer** gets no such floor.
 - A **starbase defending alone** keeps level 1 when its loss reaches 100%. Next to 5+ ships,
   the floor goes to a ship instead.
+
+**Starbases since 7.2.0-beta:**
+
+- **Double damage** (patch note: "Damage taken by starbases in combat was doubled"). The hub
+  models it as the starbase losing **2 × loss** of its CV (capped at 100%), while the ships
+  beside it keep the loss above. That reading is not yet checked against the 7.2 calculator.
+- **Starbase levels are fractional.** A damaged starbase keeps the part of a level it did not
+  lose and fights the next battle with it: 10 destroyers take a level-10 starbase (227 CV) to
+  about **9.5** (184 CV), and the next 10 destroyers only get that 9.5 to about 8.9. They do
+  not reach 8, as two whole-level steps (10 → 9 → 8) would suggest. Pages and reports
+  print whole levels only, so the hidden fraction is invisible in the game. The level left
+  is the unrounded curve 4 × 1.5^level − 4 minus the CV lost, mapped back to a level. The
+  battle calculator, `!battle --sb 9.5` and the landing planner all take and carry fractional
+  levels.
 
 Survivor counts are fractions; the fractional part is a survival chance (see
 [Fleet and combat notes](#fleet-and-combat-notes)).

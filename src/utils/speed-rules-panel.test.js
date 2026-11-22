@@ -103,11 +103,11 @@ async function main() {
     ok('defender row: now 01:01:53, new 00:48:08', h.rows()[0].includes('01:01:53 00:48:08'), h.rows()[0]);
     ok('attacker row: now 00:55:33, new 01:30:54', h.rows()[1].includes('00:55:33 01:30:54'), h.rows()[1]);
     ok('verdict: attacker first now, defender first under the new rule',
-        h.verdict().includes('Now: Attacker lands 0:06:20 before the defender') && h.verdict().includes('New: Defender lands 0:42:46 before the attacker'), h.verdict());
+        h.verdict().includes('Old: Attacker lands 0:06:20 before the defender') && h.verdict().includes('7.2: Defender lands 0:42:46 before the attacker'), h.verdict());
 
     h.get('sr-a-allied').checked = true; await h.get('sr-a-allied').fire('change');
     ok('allied box halves only the defender', h.rows()[0].includes('00:30:56 00:24:04') && h.rows()[1].includes('00:55:33 01:30:54'), h.rows());
-    ok('allied defender now beats the attacker under both rules', h.verdict().includes('Now: Defender lands 0:24:37') && h.verdict().includes('New: Defender lands 1:06:50'), h.verdict());
+    ok('allied defender now beats the attacker under both rules', h.verdict().includes('Old: Defender lands 0:24:37') && h.verdict().includes('7.2: Defender lands 1:06:50'), h.verdict());
 
     await h.set('sr-step', 0);
     ok('step 0 makes the new column the live game', h.rows().every(r => /no change/.test(r)), h.rows());

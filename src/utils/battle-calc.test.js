@@ -31,6 +31,10 @@ const toStats = s => ({
     ra: s.raceAttack || 0, rd: s.raceDefense || 0, lvl: s.level || 0
 });
 
+// Every fixture was read off the pre-7.2 calculator (race attack 8%/level, starbases
+// taking single damage), so it tests the model under those rules.
+const FIXTURE_RULES = 'pre-7.2';
+
 // ─── 1. WIN % vs the game ─────────────────────────────────────────────────────
 console.log('── Win % vs in-game observations ' + '─'.repeat(44));
 
@@ -42,7 +46,8 @@ for (const c of fixtures.winChance) {
         atkFleet: c.atk.fleet,
         sbLevel: c.def.starbase || 0,
         def: toStats(c.def),
-        atk: toStats(c.atk)
+        atk: toStats(c.atk),
+        rules: FIXTURE_RULES
     });
     if (!r) {
         console.log(`❌ ${c.id}: the model returned no result for this fixture`);
@@ -66,7 +71,7 @@ console.log(`\nWorst win-% error: ${worst.toFixed(2)} pp on "${worstId}"  (gate:
 const stated = model.uncertainty.BASE_ERROR_PP;
 const outside = [];
 for (const c of fixtures.winChance) {
-    const r = model.simulate({ defFleet: c.def.fleet, atkFleet: c.atk.fleet, sbLevel: c.def.starbase || 0, def: toStats(c.def), atk: toStats(c.atk) });
+    const r = model.simulate({ defFleet: c.def.fleet, atkFleet: c.atk.fleet, sbLevel: c.def.starbase || 0, def: toStats(c.def), atk: toStats(c.atk), rules: FIXTURE_RULES });
     if (!r) continue;
     const band = model.winBand(r.winD, { defFleet: c.def.fleet, atkFleet: c.atk.fleet }).marginPp;
     const err = Math.abs(r.winD * 100 - c.observedDefenderWinPct);
@@ -110,7 +115,8 @@ for (const c of survCases) {
         atkFleet: c.atk.fleet,
         sbLevel: c.def.starbase || 0,
         def: toStats(c.def),
-        atk: toStats(c.atk)
+        atk: toStats(c.atk),
+        rules: FIXTURE_RULES
     });
     if (!r) {
         console.log(`❌ ${c.id}: the model returned no result for this fixture`);
@@ -148,6 +154,50 @@ for (const [lvl, cv] of Object.entries(fixtures.starbaseCv.levels)) {
 }
 if (sbBad === 0) console.log(`✅ all ${Object.keys(fixtures.starbaseCv.levels).length} confirmed levels exact`);
 else failed = true;
+
+// ─── 2b. 7.2.0-beta rules ─────────────────────────────────────────────────────
+// Patch notes: race attack ±8% → ±9% per level, starbases take double damage. Starbase
+// levels are fractional: a damaged starbase fights the next battle with what it kept.
+console.log('\n── 7.2 rules: race attack 9%, starbase double damage, fractional levels ' + '─'.repeat(6));
+{
+    const z = {};
+    const check = (name, cond, got) => { console.log(`${cond ? '✅' : '❌'} ${name}${cond ? '' : `  (got ${JSON.stringify(got)})`}`); if (!cond) failed = true; };
+    check('the current rules are 7.2: race attack 0.09, starbase damage ×2',
+        model.CURRENT_RULES.version === '7.2' && model.CURRENT_RULES.raceAtkPct === 0.09 && model.CURRENT_RULES.sbDamageMult === 2
+        && model.constants.RACE_ATK_PCT === 0.09, model.CURRENT_RULES);
+    check('the pre-7.2 rules stay available: 0.08, single damage',
+        model.RULES['pre-7.2'].raceAtkPct === 0.08 && model.RULES['pre-7.2'].sbDamageMult === 1);
+    check('reports are replayed with the rules of their date: 7.2 from the 2026-11-22 20:00 CET reset',
+        model.rulesAt('2026-11-22T18:59:59Z').version === 'pre-7.2' && model.rulesAt('2026-11-22T20:00:00+01:00').version === '7.2'
+        && model.rulesAt('2026-10-01T12:00:00Z').version === 'pre-7.2' && model.rulesAt('garbage').version === '7.2');
+
+    const ra = { atkFleet: [30, 0, 0], defFleet: [0, 0, 0], sbLevel: 8, atk: { ra: 2 }, def: { ra: 0 } };
+    const ra72 = model.simulate(ra).winA, raOld = model.simulate({ ...ra, rules: 'pre-7.2' }).winA;
+    check('race attack +2 is worth more under 7.2 (30 DS vs SB 8: 73.2% vs 70.5%)',
+        Math.abs(ra72 - 0.73163) < 1e-4 && Math.abs(raOld - 0.70458) < 1e-4, [ra72, raOld]);
+
+    // His example (2026-11-22): 10 DS hit SB 10 down to 9.5, and the next 10 DS cannot
+    // get the 9.5 down to 8. The old hub rounded to whole levels (10 → 9 → 8).
+    const hit = (sb, d, rules) => model.simulate({ atkFleet: [d, 0, 0], defFleet: [0, 0, 0], sbLevel: sb, atk: z, def: z, rules });
+    const first = hit(10, 10);
+    const second = hit(first.sbLevelLeft, 10);
+    check('10 DS take SB 10 to ~9.5 (double damage)', first.sbLevelLeft >= 9.45 && first.sbLevelLeft <= 9.6, first.sbLevelLeft);
+    check('pre-7.2 the same 10 DS only took it to ~9.8', Math.abs(hit(10, 10, 'pre-7.2').sbLevelLeft - 9.78) < 0.02, hit(10, 10, 'pre-7.2').sbLevelLeft);
+    check('the next 10 DS fight a 9.5 starbase and leave it above 8', second.sbLvl === first.sbLevelLeft && second.sbLevelLeft > 8.5, second.sbLevelLeft);
+    check('a 9.5 starbase is stronger than a whole 9 (184 vs 150 CV)', model.sbCV(9.5) === 184 && model.sbCV(9) === 150);
+    check('an untouched starbase keeps exactly its level, whole or fractional',
+        [1, 5, 8, 9.5, 12, 20].every(l => model.sbLevelAfter(l, 1) === l && hit(l, 0).sbLevelLeft === l), [1, 5, 8, 9.5, 12, 20].map(l => model.sbLevelAfter(l, 1)));
+    check('sbLevelFromCV maps a whole level\'s CV back to within 0.05 of it',
+        [1, 5, 9, 12, 20].every(l => Math.abs(model.sbLevelFromCV(model.sbCV(l)) - l) <= 0.05));
+
+    const mixed = { atkFleet: [40, 0, 0], defFleet: [10, 0, 0], sbLevel: 8, atk: z, def: z };
+    const m72 = model.simulate(mixed), mOld = model.simulate({ ...mixed, rules: 'pre-7.2' });
+    check('double damage hits the starbase only: ships beside it keep the same survivors',
+        m72.survDef[0] === mOld.survDef[0] && m72.winA === mOld.winA && m72.survSB < mOld.survSB, [m72.survDef, mOld.survDef, m72.survSB, mOld.survSB]);
+    check('a starbase defending alone still keeps level 1 when wiped', hit(8, 200).sbLevelLeft === 1 || hit(8, 200).winA === 1, hit(8, 200));
+    check('starbase input keeps two decimals', model.clampStarbase('9.5') === 9.5 && model.clampStarbase(9.456) === 9.46
+        && model.clampStarbase(-1) === 0 && model.clampStarbase('x') === 0 && model.normalizeInputs({ sbLevel: '9.5' }).sbLevel === 9.5);
+}
 
 // ─── 3. NO DRIFT: the model lives in exactly one file ─────────────────────────
 // This is the check that would have caught the original defect. The bot carried its own

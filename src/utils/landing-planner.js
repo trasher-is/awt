@@ -28,19 +28,16 @@
 const battleModel = require('../../public/js/utils/battle-model.js');
 const { xpGained, levelAfter, ceilFleet, floorFleet } = require('./incoming-battle');
 
-const { simulate, cvOf, sbCV, toFleet } = battleModel;
+const { simulate, cvOf, sbLevelAfter, toFleet } = battleModel;
 
 const roundFor = side => (side === 'enemy' ? ceilFleet : floorFleet);
 const addFleets = (a, b) => toFleet(a).map((n, i) => n + toFleet(b)[i]);
 const empty = f => cvOf(f) <= 0;
 
-// The level a damaged starbase is left at: the highest level its remaining CV still pays for.
+// The level a damaged starbase is left at, FRACTION KEPT: the game's next fight on the
+// planet sees the 9.5 starbase as 9.5 (not 9), so a chain of landings must carry it.
 function sbLevelLeft(level, fraction) {
-    if (!(level > 0) || !(fraction > 0)) return 0;
-    const left = sbCV(level) * fraction;
-    let l = level;
-    while (l > 0 && sbCV(l) > left + 1e-9) l--;
-    return l;
+    return sbLevelAfter(level, fraction);
 }
 
 /**

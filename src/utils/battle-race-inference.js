@@ -77,6 +77,11 @@ function starbaseLevel(report, defFleet) {
     for (let level = 1; battleModel.sbCV(level) <= starbaseCv; level++) {
         if (battleModel.sbCV(level) === starbaseCv) return { level };
     }
+    // A damaged starbase keeps a fraction of a level (7.2 rules note). If the combat value
+    // is a fractional level's CV within a level of the printed one, use that level.
+    const fractional = battleModel.sbLevelFromCV(starbaseCv);
+    if (Math.abs(battleModel.sbCV(fractional) - starbaseCv) <= 1
+        && Number.isFinite(report.def_starbases) && Math.abs(fractional - report.def_starbases) < 1) return { level: fractional };
     return { skip: 'inconsistent_combat_value' };
 }
 
@@ -256,6 +261,7 @@ function defenseObservation(report, playerId, notBefore, options, context = null
                 atkFleet: fleets.att, defFleet: fleets.def, sbLevel: starbase.level || 0,
                 atk: own === 'att' ? self : known.stats,
                 def: own === 'att' ? known.stats : self,
+                rules: battleModel.rulesAt(base.when),
             });
             if ((own === 'att' ? result.winA : result.winD) <= 0) return true;
             bounds.push(own === 'att' ? result.survAtk : result.survDef);
@@ -287,7 +293,7 @@ function attackCandidates(report, base) {
             for (let lvl = 0; lvl <= levelCeiling; lvl++) {
                 const self = { ra, rd: BEST_PICK, phys, math: scienceCeiling, lvl };
                 const result = battleModel.simulate({ atkFleet: fleets.att, defFleet: fleets.def, sbLevel: starbase.level,
-                    atk: own === 'att' ? self : known.stats, def: own === 'att' ? known.stats : self });
+                    atk: own === 'att' ? self : known.stats, def: own === 'att' ? known.stats : self, rules: battleModel.rulesAt(base.when) });
                 const value = result.winA * 100;
                 if (observed === 0 ? value <= tolerance : observed === 100 ? value >= 100 - tolerance : Math.abs(value - observed) <= tolerance) return true;
             }

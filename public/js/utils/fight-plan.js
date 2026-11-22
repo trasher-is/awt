@@ -48,12 +48,10 @@
         });
     }
 
-    // Highest whole starbase level whose CV fits in what is left.
-    function sbLevelLeft(sbCV, sbLvl, survSB) {
-        const left = survSB * sbCV(sbLvl);
-        let n = 0;
-        while (n < 50 && sbCV(n + 1) <= left + 1e-9) n++;
-        return n;
+    // The starbase level left, fraction kept (2 decimals): the game fights the next battle
+    // with a 9.5 starbase as 9.5, not as a whole level. M is the battle model.
+    function sbLevelLeft(M, sbLvl, survSB) {
+        return M.sbLevelAfter(sbLvl, survSB);
     }
 
     return { ICON_CAPS, rollOutcome, iconPlan, sbLevelLeft };

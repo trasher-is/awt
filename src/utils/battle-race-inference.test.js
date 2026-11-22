@@ -121,8 +121,8 @@ ok('captured intel changes the method, invalidating current-row results saved as
 ok('ATK stays unresolved: the stored win_chance column is the dice roll',
     basic.attack.status === 'insufficient' && equal(basic.attack.candidates, ALL_PICKS)
     && /dice/.test(basic.attack.reason) && /#277/.test(basic.attack.reason), basic.attack);
-ok('percent ranges describe race bonuses, not confidence probabilities',
-    equal(basic.attack.bonus_percent_range, { min: -32, max: 32 }) && !('probability' in basic.defense));
+ok('percent ranges describe race bonuses (±9% per level since 7.2), not confidence probabilities',
+    equal(basic.attack.bonus_percent_range, { min: -36, max: 36 }) && !('probability' in basic.defense));
 ok('all results are JSON-safe', equal(JSON.parse(JSON.stringify(basic)), basic));
 
 console.log('\n── Two-sided Defence from a known opponent and a science ceiling ──');

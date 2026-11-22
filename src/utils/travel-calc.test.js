@@ -35,6 +35,8 @@ if (CASES.length === 0) {
     process.exit(0);
 }
 
+const PRE_72 = { fixedSpeedStep: 0 };
+
 // ─── 1. EVERY FIXTURE, TO THE SECOND ──────────────────────────────────────────
 console.log('── Travel time vs the game ' + '─'.repeat(49));
 
@@ -42,7 +44,8 @@ let worst = 0, worstDesc = '';
 for (const c of CASES) {
     const [sx, sy, sp] = c.from;
     const [ex, ey, ep] = c.to;
-    const got = calcTravelSeconds(sx, sy, sp, ex, ey, ep, c.energy, c.speed, c.alliance);
+    // Every fixture was measured before 7.2, when speed did not touch the fixed minimum.
+    const got = calcTravelSeconds(sx, sy, sp, ex, ey, ep, c.energy, c.speed, c.alliance, PRE_72);
     const want = hmsToSecs(c.expect);
     const err = Math.abs(got - want);
     if (err > worst) { worst = err; worstDesc = c.desc; }
@@ -173,16 +176,18 @@ if (gridBad === 0) {
     failed = true;
 }
 
-// ─── 3b. WHAT-IF: SPEED ON THE FIXED MINIMUM ──────────────────────────────────
-// opts.fixedSpeedStep is a proposal, not the game. Step 0 / no opts must stay the live
-// formula; step = SPEED_STEP must divide the whole flight by (1 + 0.11·speed).
+// ─── 3b. 7.2: SPEED ON THE FIXED MINIMUM ──────────────────────────────────────
+// Since 7.2.0-beta race speed divides the whole flight by (1 + 0.11·speed): that is the
+// default (no opts). Step 0 is the pre-7.2 rule and must still reproduce every fixture.
 console.log('\n── What-if: speed on the fixed minimum ' + '─'.repeat(37));
 {
     const { SPEED_STEP } = model.constants;
     const checks = [];
     const t = (...a) => model.calcTravelSeconds(...a);
     // Live game unchanged: every fixture again with an explicit step 0.
-    checks.push(['step 0 reproduces every fixture',
+    checks.push(['no opts = the 7.2 rule (step 0.11)',
+        [[0, 0, 1, 1, 0, 1, 50, -4], [0, 0, 1, 0, 0, 2, 35, 4], [0, 0, 1, 3, 4, 1, 20, 2]].every(a => t(...a, false) === t(...a, false, { fixedSpeedStep: SPEED_STEP }))]);
+    checks.push(['step 0 reproduces every (pre-7.2) fixture',
         CASES.every(c => t(...c.from, ...c.to, c.energy, c.speed, c.alliance, { fixedSpeedStep: 0 }) === hmsToSecs(c.expect))]);
     // Speed 0 is untouched by any step.
     checks.push(['speed 0 ignores the step',
@@ -196,8 +201,8 @@ console.log('\n── What-if: speed on the fixed minimum ' + '─'.repeat(37));
         }
     }
     // Hand-checked numbers quoted to Harpyie (2026-11-08): next system d1, E50 −4 vs E35 +4.
-    checks.push(['E50 −4 next system = 1:30:54 under the proposal', t(0, 0, 1, 1, 0, 1, 50, -4, false, { fixedSpeedStep: SPEED_STEP }) === 5454]);
-    checks.push(['E35 +4 next system = 0:48:08 under the proposal', t(0, 0, 1, 1, 0, 1, 35, 4, false, { fixedSpeedStep: SPEED_STEP }) === 2888]);
+    checks.push(['E50 −4 next system = 1:30:54 under 7.2', t(0, 0, 1, 1, 0, 1, 50, -4, false, { fixedSpeedStep: SPEED_STEP }) === 5454]);
+    checks.push(['E35 +4 next system = 0:48:08 under 7.2', t(0, 0, 1, 1, 0, 1, 35, 4, false, { fixedSpeedStep: SPEED_STEP }) === 2888]);
     // An absurd step never divides by zero or goes negative.
     checks.push(['extreme step stays finite and positive',
         [1, 5].every(step => { const v = t(0, 0, 1, 1, 0, 1, 0, -4, false, { fixedSpeedStep: step }); return Number.isFinite(v) && v > 0; })]);

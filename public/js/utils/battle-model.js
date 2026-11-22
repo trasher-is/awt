@@ -35,7 +35,7 @@
 //     lneff = ln(Satk / Sdef)                                        [force]
 //       S = Σ ships·(3·attack + 2·defence) (D 8, C 56, B 156) + starbase 3·att + 2·def,
 //           starbase att = floor(CV/2), def = CV − att
-//           + ln(1+0.08·RAatk) − ln(1+0.08·RAdef)                   [race attack]
+//           + ln(1+0.09·RAatk) − ln(1+0.09·RAdef)                   [race attack; 0.08 before 7.2]
 //           + ln(1+0.015·PHatk) − ln(1+0.015·PHdef)                 [physics, 1.5%/level]
 //           + ln(EDGEatk) − ln(EDGEdef)                             [bracket + player level]
 //     EDGEside = 1 + 0.25 (if this side is 6+ physics ahead)
@@ -58,6 +58,8 @@
 //                                                                     level only with all 3 types]
 //                          × (1 + 0.12·ownRD)
 //     ownToughness includes a defending starbase's att + 2·def.
+//     Since 7.2 the starbase itself loses min(1, 2·lossFrac) of its CV (double damage);
+//     what is left maps back to a FRACTIONAL level, which is what the next fight sees.
 //     Physics, Race Attack never touch survivors. Player level never touches
 //     anything unless the side has destroyers AND cruisers AND battleships.
 //
@@ -102,8 +104,47 @@
 
     // Starbase: cv = round(4·1.5^n) − 4; att = def = floor(cv/2).
     // Confirmed in-game: lvl1=2, 2=5, 3=10, 4=16, 5=26, 6=42, 7=64, 10=227, 15=1748, 20=13297.
+    // The level can be FRACTIONAL: a damaged starbase keeps the part of a level it did not
+    // lose (10 hit down to 9.5 fights the next battle as 9.5, not as 9 or 10), even though
+    // the game's pages and reports only ever print whole levels. The same formula serves a
+    // fractional level; sbLevelFromCV() is its inverse.
     function sbCV(n) { return n > 0 ? Math.round(4 * Math.pow(1.5, n)) - 4 : 0; }
     function sbHalf(n) { return Math.floor(sbCV(n) / 2); }
+    const r2 = x => Math.round(x * 100) / 100;
+    const sbLevelExact = cv => Math.log((cv + 4) / 4) / Math.log(1.5);
+    function sbLevelFromCV(cv) { return cv > 0 ? r2(sbLevelExact(cv)) : 0; }
+    // The level left after a fight in which the starbase kept survFrac of its CV. The CV it
+    // LOST comes off the unrounded curve 4·1.5^n − 4, so an untouched starbase stays exactly
+    // at its level (mapping the rounded CV back would turn an undamaged 5 into 4.97).
+    function sbLevelAfter(level, survFrac) {
+        if (!(level > 0) || !(survFrac > 0)) return 0;
+        if (survFrac >= 1) return level;
+        const left = 4 * Math.pow(1.5, level) - 4 - (1 - survFrac) * sbCV(level);
+        return left > 0 ? Math.min(level, r2(sbLevelExact(left))) : 0;
+    }
+
+    // ─── rules per game version ────────────────────────────────────────────────
+    // 7.2.0-beta (round starting 2026-11-22): race attack ±8% → ±9% per level, and a
+    // starbase takes DOUBLE damage in combat. Everything else below was fitted on the
+    // pre-7.2 calculator and is unchanged by that patch. The pre-7.2 set stays so the
+    // calculator readings collected under it (battle-fixtures.json) still test the model.
+    // UNVERIFIED for 7.2: how "double damage" is applied. Modelled as the starbase losing
+    // twice the loss fraction its side takes (capped at 100%), ships unchanged.
+    // `from`: first battle time the set applies to. 7.2 started with the round reset on
+    // 2026-11-22 at 20:00 CET (19:00 UTC).
+    const RULES = Object.freeze({
+        'pre-7.2': Object.freeze({ version: 'pre-7.2', raceAtkPct: 0.08, sbDamageMult: 1, from: 0 }),
+        '7.2': Object.freeze({ version: '7.2', raceAtkPct: 0.09, sbDamageMult: 2, from: Date.parse('2026-11-22T19:00:00Z') }),
+    });
+    const CURRENT_RULES = RULES['7.2'];
+    // The rules a battle at time `when` (ms or a date string) was fought under, for
+    // replaying real reports: last round's battles must not be read with 7.2 numbers.
+    function rulesAt(when) {
+        const ms = typeof when === 'number' ? when : Date.parse(when);
+        if (!Number.isFinite(ms)) return CURRENT_RULES;
+        return Object.values(RULES).filter(r => r.from <= ms).sort((a, b) => b.from - a.from)[0] || CURRENT_RULES;
+    }
+    const rulesOf = r => (typeof r === 'string' ? RULES[r] : r) || CURRENT_RULES;
 
     // ─── fitted constants ──────────────────────────────────────────────────────
     // Fight strength: Σ ships × (3·attack + 2·defence). Found 2026-10-04: the old
@@ -111,7 +152,7 @@
     // a lone starbase) are exactly this rule for pure fights, and the mixed-fleet fallback
     // 0.813 was its approximation; 176 bonus-free mixed readings now fit to 0.002pp.
     const N_EXP = 1.79375;           // saturation curve exponent (joint fit, 2,956 readings)
-    const RACE_ATK_PCT = 0.08;       // confirmed exact, 6.0.0-beta (was 0.07)
+    const RACE_ATK_PCT = CURRENT_RULES.raceAtkPct; // 0.09 since 7.2.0-beta (0.08 from 6.0.0-beta, 0.07 before)
     const RACE_DEF_PCT = 0.12;       // confirmed exact, 6.0.0-beta (was 0.11)
     const PHYS_SLOPE = 0.015;        // 1.5% per physics level (was fitted as 0.01491)
     const PHYS_BRACKET = Math.log(1.25); // fitted 0.2235 ≈ ln(1.25); triggers at |diff| >= 6
@@ -160,7 +201,8 @@
     const int = v => { const n = Math.trunc(Number(v)); return Number.isFinite(n) ? n : 0; };
     const clampScience = v => Math.max(0, Math.min(100, int(v)));
     const clampRace = v => Math.max(-4, Math.min(4, int(v)));
-    const clampStarbase = v => Math.max(0, Math.min(50, int(v)));
+    // Starbase levels keep two decimals: a damaged starbase fights on with its fraction.
+    const clampStarbase = v => { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.min(50, r2(n))) : 0; };
     const clampLevel = v => Math.max(0, int(v));
 
     // Take whatever a caller collected (form fields, chat flags, a DB row) and produce the
@@ -273,7 +315,7 @@
     }
 
     // Attacker's win fraction (0-1). def gets the starbase; atk never does.
-    function calcAttackerWin(atk, def, atkFleet, defFleet, sbLevel) {
+    function calcAttackerWin(atk, def, atkFleet, defFleet, sbLevel, rules = CURRENT_RULES) {
         const aCV = cvOf(atkFleet), dCV = cvOf(defFleet) + sbCV(sbLevel);
         if (aCV === 0 && dCV === 0) return 0; // empty vs empty: confirmed 0%, not a coin flip
         if (dCV === 0) return 1;
@@ -284,7 +326,7 @@
         // One rule for every mix; it replaced seven fitted blend weights.
         let lneff = Math.log(strengthOf(atkFleet) / (strengthOf(defFleet) + sbStrength(sbLevel)));
 
-        lneff += Math.log(1 + RACE_ATK_PCT * atk.ra) - Math.log(1 + RACE_ATK_PCT * def.ra);
+        lneff += Math.log(1 + rules.raceAtkPct * atk.ra) - Math.log(1 + rules.raceAtkPct * def.ra);
 
         const physDiff = atk.phys - def.phys;
         lneff += Math.log(1 + PHYS_SLOPE * atk.phys) - Math.log(1 + PHYS_SLOPE * def.phys);
@@ -301,9 +343,13 @@
     }
 
     // Full simulation: survivors + win chance.
-    //   input: { defFleet, atkFleet, sbLevel, def: {phys,math,ra,rd,lvl}, atk: {...} }
-    // Returns null when neither side has anything that can fight.
+    //   input: { defFleet, atkFleet, sbLevel, def: {phys,math,ra,rd,lvl}, atk: {...}, rules? }
+    //   rules: a RULES entry or its name; default = the round being played (CURRENT_RULES).
+    // sbLevel may be fractional. Returns null when neither side has anything that can fight.
+    // The result's sbLevelLeft is the starbase level after the fight, fraction included —
+    // feed it to the next fight on the same planet.
     function simulate(input) {
+        const rules = rulesOf(input.rules);
         const defFleet = toFleet(input.defFleet);
         const atkFleet = toFleet(input.atkFleet);
         const sbLvl = Math.max(0, input.sbLevel || 0);
@@ -312,7 +358,7 @@
         const sbCv = sbCV(sbLvl);
         if (cvOf(defFleet) + sbCv === 0 && cvOf(atkFleet) === 0) return null;
 
-        const winA = calcAttackerWin(atk, def, atkFleet, defFleet, sbLvl);
+        const winA = calcAttackerWin(atk, def, atkFleet, defFleet, sbLvl, rules);
         const winD = 1 - winA;
 
         // Own-side toughness: mathematics (absolute level), then the maths bracket and the
@@ -355,13 +401,15 @@
         // 49 of 49 calculator cases. A starbase defending ALONE keeps level 1 when wiped
         // (16 of 16 readings); beside 5+ ships the floor goes to a ship and the starbase can
         // reach 0 (50 destroyers + level 9, wiped: 1 destroyer, starbase 0).
+        // Since 7.2 the starbase takes rules.sbDamageMult × its side's loss fraction.
         const floorOne = (fleet, frac, sbCvHere) => {
             const ships = fleet.map(n => (n > 0 ? Math.max(0, n * (1 - frac)) : 0));
-            let sbFrac = sbCvHere > 0 ? Math.max(0, 1 - frac) : 0;
+            const sbLoss = Math.min(1, frac * rules.sbDamageMult);
+            let sbFrac = sbCvHere > 0 ? Math.max(0, 1 - sbLoss) : 0;
             const top = [DE, CR, BS].reduce((b, x) => (fleet[x] * SHIPS[x].def > fleet[b] * SHIPS[b].def ? x : b), DE);
             const shipCount = fleet.reduce((a, b) => a + b, 0);
             if (shipCount >= 5 && ships[top] < 1) ships[top] = 1;
-            else if (shipCount === 0 && sbCvHere > 0 && frac >= 1) sbFrac = sbCV(1) / sbCvHere;
+            else if (shipCount === 0 && sbCvHere > 0 && sbLoss >= 1) sbFrac = sbCV(1) / sbCvHere;
             return { ships, sbFrac };
         };
 
@@ -385,7 +433,8 @@
 
         return {
             defFleet, atkFleet, sbLvl, survDef, survAtk, survSB,
-            initCVD, initCVA, cvDefRemain, cvAtkRemain, winD, winA
+            sbLevelLeft: sbLevelAfter(sbLvl, survSB),
+            initCVD, initCVA, cvDefRemain, cvAtkRemain, winD, winA, rules: rules.version
         };
     }
 
@@ -446,14 +495,14 @@
     }
 
     return {
-        SHIPS, TOUGH, sbCV, sbHalf,
+        SHIPS, TOUGH, sbCV, sbHalf, sbLevelFromCV, sbLevelAfter, RULES, CURRENT_RULES, rulesAt,
         cvOf, attOf, toughOf, toFleet,
         clampScience, clampRace, clampStarbase, clampLevel, normalizeInputs,
         hasCurrentIntel, resolveStats, simulate, winChance, winBand, strengthOf, sbStrength,
         uncertainty: { BASE_ERROR_PP, MIXED_FLEET_EXTRA_PP },
         constants: {
             N_EXP,
-            RACE_ATK_PCT, RACE_DEF_PCT,
+            RACE_ATK_PCT, RACE_DEF_PCT, SB_DAMAGE_MULT: CURRENT_RULES.sbDamageMult,
             PHYS_SLOPE, PHYS_BRACKET, PHYS_BRACKET_PCT,
             PLEVEL_WIN_K, PLEVEL_SURV_SLOPE,
             MATH_SLOPE, MATH_BRACKET, LN_CAP

@@ -1892,7 +1892,7 @@ async function handleMessage(message) {
     // ----------------------------------------------------
     // !battle - COMBAT SIMULATOR
     // Syntax: !battle <defD> <defC> <defB> vs <atkD> <atkC> <atkB> [opts]
-    // Options: --sb N  (defender starbase level, 0-5)
+    // Options: --sb N  (defender starbase level, 0-50; decimals allowed: 9.5)
     //          --dp N  (defender physics 0-10)
     //          --ap N  (attacker physics 0-10)
     //          --dra N (defender race atk mod -4..+4)
@@ -1926,7 +1926,9 @@ async function handleMessage(message) {
         // 10 while the web calculator capped it at 30, so `--dp 20` reached the model as
         // two different numbers depending on where you asked.
         const { clampScience: sci, clampRace: race, clampStarbase: sb, clampLevel: lvl } = battleModel;
-        const sbLevel  = sb(optParse('--sb',  0));
+        // --sb takes decimals: a damaged starbase fights on with its fraction (9.5).
+        const sbFlag = rawArgs.match(/--sb\s+(\d+(?:[.,]\d+)?)/);
+        const sbLevel  = sb(sbFlag ? sbFlag[1].replace(',', '.') : 0);
         let defPhys    = sci(optParse('--dp',  0));
         let atkPhys    = sci(optParse('--ap',  0));
         let defRaceAtk = race(optParse('--dra', 0));
@@ -1966,7 +1968,7 @@ async function handleMessage(message) {
         }
 
         // Strip flags from the raw string and split on "vs"
-        const stripped = rawArgs.replace(/--\w+\s+[\w\s]*/g, '').trim();
+        const stripped = rawArgs.replace(/--\w+\s+[\w\s.,]*/g, '').trim(); // . and , for --sb 9.5
         const vsSplit = stripped.split(/\bvs\b/i);
         if (vsSplit.length !== 2) {
             return message.reply('❌ **Usage:** `!battle <D> <C> <B> vs <D> <C> <B> [--sb N] [--dp N] [--ap N] [--dm N] [--am N] [--dra N] [--ara N] [--drd N] [--ard N]`\nOr: `!battle <D> <C> <B> vs <D> <C> <B> --def DefenderName --atk AttackerName`');
@@ -2004,8 +2006,7 @@ async function handleMessage(message) {
                 if (n > 0) parts.push(`${SHIP_NAME[i]}: ${fmt(n)} → **${fmt(surv[i])}**`);
             });
             if (sbLevel > 0 && label === 'Defender') {
-                const sbSurv = survSB * 1;
-                parts.push(`Starbase (lvl ${sbLevel}): 1 → **${fmt(sbSurv)}**`);
+                parts.push(`Starbase: lvl ${fmt(sbLevel)} → **lvl ${fmt(sim.sbLevelLeft)}** (${fmt(survSB * 100)}% CV left)`);
             }
             return parts.length ? parts.join('\n') : '*No ships*';
         };
@@ -2156,7 +2157,7 @@ function slashToPrefix(interaction) {
         if (sub === 'distance') return `!dist ${s('from')} ${s('to')}`;
         if (sub === 'battle') {
             const flags = [];
-            if (i('starbase') != null) flags.push(`--sb ${i('starbase')}`);
+            if (n('starbase') != null) flags.push(`--sb ${n('starbase')}`);
             if (s('defender_player')) flags.push(`--def ${s('defender_player')}`);
             if (s('attacker_player')) flags.push(`--atk ${s('attacker_player')}`);
             return `!battle ${s('defender')} vs ${s('attacker')} ${flags.join(' ')}`.trim();

@@ -115,9 +115,9 @@ function render() {
         </div>`;
     }).join('');
 
-    // Starbase result is shown as the level its surviving CV maps back to (matches the game).
-    const sbRemCv = r.survSB * sbCV(r.sbLvl);
-    const sbResultLvl = sbRemCv > 0 ? Math.log((sbRemCv + 4) / 4) / Math.log(1.5) : 0;
+    // Starbase result: the level left, fraction kept. The game fights the next battle with
+    // that fraction (9.5 stays 9.5) even though its pages print whole levels.
+    const sbResultLvl = r.sbLevelLeft;
     const sbRow = r.sbLvl > 0 ? `<div class="flex items-center gap-2 text-xs font-mono">
         <span class="w-20 text-muted-foreground">Starbase</span>
         <span class="text-emerald-300 font-semibold">lvl ${sbResultLvl.toFixed(2)}</span>
