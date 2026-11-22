@@ -3,8 +3,8 @@
 // ─── WHY ──────────────────────────────────────────────────────────────────────
 // The hub adds a lot to the game's own pages and a lot of tools to its sidebar, and not
 // every member wants all of it: members asked to lose the Supply Unit buttons and the
-// building hints on the planet page, and a few tools (Battle Calc, Road to TA, Build Order,
-// Empire Simulator) are not ready for everyone. This file is the ONE list of what can be
+// building hints on the planet page, and a few tools (Road to TA, Build Order, Empire
+// Simulator) are not ready for everyone. This file is the ONE list of what can be
 // switched, with each item's default; the Settings panel is drawn from it, the sidebar and
 // the game-page hooks consult it, and the server validates against it.
 //
@@ -55,12 +55,14 @@
         tool('planets', 'Planets', 'fa-globe', 'open-planets-db-btn'),
         tool('fleets', 'Fleets', 'fa-crow', 'open-fleets-db-btn'),
         tool('fleetLocations', 'Fleet Locations', 'fa-crosshairs', 'open-fleet-locations-btn'),
-        // Matches the 7.2 game calculator to its displayed decimals (PR #367).
-        tool('battleCalc', 'Battle Calc', 'fa-explosion', 'open-battle-calc-btn', Object.assign(status('ingame'), OFF)),
+        // Matches the 7.2 game calculator to its displayed decimals (PR #367); on for everyone
+        // since 2026-11-22 (was off while experimental).
+        tool('battleCalc', 'Battle Calc', 'fa-explosion', 'open-battle-calc-btn', status('ingame')),
         tool('battleReports', 'Battle Reports', 'fa-file-medical', 'open-battle-reports-btn'),
         tool('travelCalc', 'Travel Calc', 'fa-route', 'open-travel-calc-btn', status('ingame')),
         // Compared the pre-7.2 travel rule with the proposal that 7.2 made the live rule.
-        tool('speedRules', 'Speed Rules', 'fa-scale-balanced', 'open-speed-rules-btn', status('deprecated')),
+        // Off by default since 2026-11-22; members can still switch it on.
+        tool('speedRules', 'Speed Rules', 'fa-scale-balanced', 'open-speed-rules-btn', Object.assign(status('deprecated'), OFF)),
         tool('buildOrder', 'Build Order', 'fa-diagram-project', 'open-build-order-btn', Object.assign(status('experimental'), OFF)),
         tool('empireSim', 'Empire Simulator', 'fa-chart-line', 'open-empire-sim-btn', Object.assign(status('experimental'), OFF)),
         tool('routePlanner', 'Route Planner', 'fa-map-location-dot', 'open-route-planner-btn'),

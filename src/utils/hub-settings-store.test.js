@@ -85,7 +85,7 @@ const tick = () => new Promise(r => setImmediate(r));
         const gate = new Promise(r => { release = r; });
         const { store, ls } = await load({ fetchImpl: async () => { await gate; return server({ 'inject.suButtons': false }); } });
         ok('before anything is known the store is not ready', store.isReady() === false);
-        ok('and answers with the defaults meanwhile', store.isEnabled('inject.suButtons') === true && store.isEnabled('tool.battleCalc') === false);
+        ok('and answers with the defaults meanwhile', store.isEnabled('inject.suButtons') === true && store.isEnabled('tool.buildOrder') === false);
         let settled = false;
         const ready = store.whenReady().then(() => { settled = true; });
         await tick();
@@ -110,20 +110,20 @@ const tick = () => new Promise(r => setImmediate(r));
     {
         let release;
         const gate = new Promise(r => { release = r; });
-        const { store, calls } = await load({ cache: { 'tool.battleCalc': true }, fetchImpl: async () => { await gate; return server({ 'tool.battleCalc': false, 'inject.popTimers': false }); } });
+        const { store, calls } = await load({ cache: { 'tool.buildOrder': true }, fetchImpl: async () => { await gate; return server({ 'tool.buildOrder': false, 'inject.popTimers': false }); } });
         ok('a cached copy makes the store ready at once', store.isReady() === true);
-        ok('and answers from it synchronously', store.isEnabled('tool.battleCalc') === true);
+        ok('and answers from it synchronously', store.isEnabled('tool.buildOrder') === true);
         let changes = 0;
         store.onChange(() => { changes++; });
         await store.whenReady();   // resolves without waiting on the server
-        ok('whenReady does not wait for the server', calls.length === 1 && store.isEnabled('tool.battleCalc') === true);
+        ok('whenReady does not wait for the server', calls.length === 1 && store.isEnabled('tool.buildOrder') === true);
         release();
         await tick(); await tick();
-        ok('the server copy is still read, to catch a change from another device', store.isEnabled('tool.battleCalc') === false && store.isEnabled('inject.popTimers') === false);
+        ok('the server copy is still read, to catch a change from another device', store.isEnabled('tool.buildOrder') === false && store.isEnabled('inject.popTimers') === false);
         ok('and listeners are told it changed, once', changes === 1, changes);
     }
     {
-        const { store, calls } = await load({ cache: { 'tool.battleCalc': true }, fetchImpl: async () => server({ 'tool.battleCalc': true }) });
+        const { store, calls } = await load({ cache: { 'tool.buildOrder': true }, fetchImpl: async () => server({ 'tool.buildOrder': true }) });
         let changes = 0;
         store.onChange(() => { changes++; });
         await store.whenReady(); await tick();
@@ -131,7 +131,7 @@ const tick = () => new Promise(r => setImmediate(r));
     }
     {
         const { store } = await load({ cache: '{ corrupt', fetchImpl: async () => server({}) });
-        ok('a corrupt cached copy reads as the defaults', store.isEnabled('inject.suButtons') === true && store.isEnabled('tool.battleCalc') === false);
+        ok('a corrupt cached copy reads as the defaults', store.isEnabled('inject.suButtons') === true && store.isEnabled('tool.buildOrder') === false);
     }
 
     // ─── Failures ─────────────────────────────────────────────────────────────
@@ -141,7 +141,7 @@ const tick = () => new Promise(r => setImmediate(r));
         const { store } = await load({ fetchImpl: async () => json({ error: 'nope' }, 500) });
         await store.whenReady();
         console.warn = warn;
-        ok('a failed first read counts as ready, with the defaults', store.isReady() === true && store.isEnabled('inject.suButtons') === true && store.isEnabled('tool.battleCalc') === false);
+        ok('a failed first read counts as ready, with the defaults', store.isReady() === true && store.isEnabled('inject.suButtons') === true && store.isEnabled('tool.buildOrder') === false);
     }
     {
         const warn = console.warn; console.warn = () => {};
@@ -190,14 +190,14 @@ const tick = () => new Promise(r => setImmediate(r));
     {
         // The save fails: what the member saw is wrong, so go back to what the server holds.
         const { store } = await load({
-            cache: { 'tool.battleCalc': true },
-            fetchImpl: async (url, opts) => (opts && opts.method === 'POST' ? json({ success: false, error: 'Failed to save settings' }, 500) : server({ 'tool.battleCalc': true })),
+            cache: { 'tool.buildOrder': true },
+            fetchImpl: async (url, opts) => (opts && opts.method === 'POST' ? json({ success: false, error: 'Failed to save settings' }, 500) : server({ 'tool.buildOrder': true })),
         });
         await store.whenReady(); await tick();
         let error = null;
-        await store.change({ 'tool.battleCalc': false }).catch(e => { error = e; });
+        await store.change({ 'tool.buildOrder': false }).catch(e => { error = e; });
         ok('a failed save rejects, with the server\'s reason', error && /Failed to save settings/.test(error.message), error && error.message);
-        ok('and the change is undone to what the server holds', store.isEnabled('tool.battleCalc') === true);
+        ok('and the change is undone to what the server holds', store.isEnabled('tool.buildOrder') === true);
     }
     {
         const { store } = await load({ cache: {}, fetchImpl: statefulServer() });
@@ -235,10 +235,10 @@ const tick = () => new Promise(r => setImmediate(r));
     // ─── Logout ───────────────────────────────────────────────────────────────
     console.log('\n── Logout ' + '─'.repeat(65));
     {
-        const { store, ls } = await load({ cache: { 'tool.battleCalc': true }, fetchImpl: async () => server({ 'tool.battleCalc': true }) });
+        const { store, ls } = await load({ cache: { 'tool.buildOrder': true }, fetchImpl: async () => server({ 'tool.buildOrder': true }) });
         store.clearCache();
         ok('clearing forgets the cached copy', !ls.has(CACHE_KEY));
-        ok('and the next account starts from the defaults', store.isEnabled('tool.battleCalc') === false && store.isReady() === false);
+        ok('and the next account starts from the defaults', store.isEnabled('tool.buildOrder') === false && store.isReady() === false);
     }
 
     // ─── Source rules ─────────────────────────────────────────────────────────

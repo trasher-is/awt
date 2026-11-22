@@ -98,25 +98,25 @@ const same = (a, b) => canon(a) === canon(b);
     let r = await get();
     ok('GET answers 200 with success', r.status === 200 && r.body.success === true, r);
     ok('nothing changed: overrides are empty', same(r.body.overrides, {}), r.body.overrides);
-    ok('the four experimental tools start off', ['tool.battleCalc', 'tool.roadToTa', 'tool.buildOrder', 'tool.empireSim'].every(k => r.body.settings[k] === false), r.body.settings);
-    ok('every extra and the other tools start on', Object.entries(r.body.settings).filter(([k]) => !['tool.battleCalc', 'tool.roadToTa', 'tool.buildOrder', 'tool.empireSim'].includes(k)).every(([, v]) => v === true));
+    ok('the experimental tools and Speed Rules start off', ['tool.roadToTa', 'tool.buildOrder', 'tool.empireSim', 'tool.speedRules'].every(k => r.body.settings[k] === false), r.body.settings);
+    ok('every extra and the other tools start on', Object.entries(r.body.settings).filter(([k]) => !['tool.roadToTa', 'tool.buildOrder', 'tool.empireSim', 'tool.speedRules'].includes(k)).every(([, v]) => v === true));
 
     // ─── A change ─────────────────────────────────────────────────────────────
-    r = await post({ changes: { 'inject.suButtons': false, 'tool.battleCalc': true } });
+    r = await post({ changes: { 'inject.suButtons': false, 'tool.buildOrder': true } });
     ok('POST a change answers 200', r.status === 200 && r.body.success === true, r);
-    ok('the answer carries the new state', same(r.body.overrides, { 'inject.suButtons': false, 'tool.battleCalc': true }), r.body.overrides);
-    ok('resolved settings follow', r.body.settings['inject.suButtons'] === false && r.body.settings['tool.battleCalc'] === true && r.body.settings['inject.buildingHints'] === true);
-    ok('it is stored as only the difference', same(JSON.parse(stored(alice)), { 'inject.suButtons': false, 'tool.battleCalc': true }), stored(alice));
-    ok('GET reads it back', same((await get()).body.overrides, { 'inject.suButtons': false, 'tool.battleCalc': true }));
+    ok('the answer carries the new state', same(r.body.overrides, { 'inject.suButtons': false, 'tool.buildOrder': true }), r.body.overrides);
+    ok('resolved settings follow', r.body.settings['inject.suButtons'] === false && r.body.settings['tool.buildOrder'] === true && r.body.settings['inject.buildingHints'] === true);
+    ok('it is stored as only the difference', same(JSON.parse(stored(alice)), { 'inject.suButtons': false, 'tool.buildOrder': true }), stored(alice));
+    ok('GET reads it back', same((await get()).body.overrides, { 'inject.suButtons': false, 'tool.buildOrder': true }));
 
     // ─── Merge, not replace ───────────────────────────────────────────────────
     r = await post({ changes: { 'inject.popTimers': false } });
-    ok('a second change keeps the first (two devices must not wipe each other)', same(r.body.overrides, { 'inject.suButtons': false, 'tool.battleCalc': true, 'inject.popTimers': false }), r.body.overrides);
+    ok('a second change keeps the first (two devices must not wipe each other)', same(r.body.overrides, { 'inject.suButtons': false, 'tool.buildOrder': true, 'inject.popTimers': false }), r.body.overrides);
 
     // ─── Back to the default ──────────────────────────────────────────────────
     r = await post({ changes: { 'inject.suButtons': true } });
-    ok('turning one back on removes it from what is stored', same(r.body.overrides, { 'tool.battleCalc': true, 'inject.popTimers': false }), r.body.overrides);
-    r = await post({ changes: { 'tool.battleCalc': false, 'inject.popTimers': true } });
+    ok('turning one back on removes it from what is stored', same(r.body.overrides, { 'tool.buildOrder': true, 'inject.popTimers': false }), r.body.overrides);
+    r = await post({ changes: { 'tool.buildOrder': false, 'inject.popTimers': true } });
     ok('with every switch back at its default the column is NULL again', same(r.body.overrides, {}) && stored(alice) === null, stored(alice));
 
     // ─── Bad input stores nothing ─────────────────────────────────────────────
@@ -163,8 +163,8 @@ const same = (a, b) => canon(a) === canon(b);
     ok('a corrupt stored value reads as the defaults, not a 500', r.status === 200 && same(r.body.overrides, {}), r);
     r = await post({ changes: { 'inject.popTimers': false } });
     ok('and the next save repairs it', r.status === 200 && same(JSON.parse(stored(alice)), { 'inject.popTimers': false }), stored(alice));
-    db.prepare(`UPDATE app_users SET ui_settings = ? WHERE id = ?`).run(JSON.stringify({ 'inject.gone': false, 'inject.suButtons': 'no', 'tool.battleCalc': true }), alice.id);
-    ok('stored junk keys and values are filtered on the way out', same((await get()).body.overrides, { 'tool.battleCalc': true }));
+    db.prepare(`UPDATE app_users SET ui_settings = ? WHERE id = ?`).run(JSON.stringify({ 'inject.gone': false, 'inject.suButtons': 'no', 'tool.buildOrder': true }), alice.id);
+    ok('stored junk keys and values are filtered on the way out', same((await get()).body.overrides, { 'tool.buildOrder': true }));
 
     // ─── Guests ───────────────────────────────────────────────────────────────
     as(greta, 'guest');

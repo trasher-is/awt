@@ -34,10 +34,11 @@ ok('every declared group has at least one injection', S.GROUPS.every(g => S.INJE
 ok('every injection has a label and a description a member can read', S.INJECTIONS.every(i => i.label && i.description && i.description.length > 10));
 ok('every tool has a label, an icon and a button id', S.TOOLS.every(t => t.label && /^fa-/.test(t.icon) && /^open-[a-z-]+-btn$/.test(t.button)));
 
-// The four tools the operator asked to start switched off, and nothing else.
+// The tools the operator asked to start switched off, and nothing else. On 2026-11-22
+// Battle Calc came on (it matches the 7.2 game calculator) and Speed Rules went off.
 const offByDefault = S.ALL.filter(i => !i.defaultOn).map(i => i.key).sort();
-ok('exactly Battle Calc, Road to TA, Build Order and Empire Simulator start off',
-    same(offByDefault, ['tool.battleCalc', 'tool.buildOrder', 'tool.empireSim', 'tool.roadToTa']), offByDefault);
+ok('exactly Road to TA, Build Order, Empire Simulator and Speed Rules (deprecated) start off; Battle Calc starts on',
+    same(offByDefault, ['tool.buildOrder', 'tool.empireSim', 'tool.roadToTa', 'tool.speedRules']), offByDefault);
 ok('every game-page extra starts on, so nobody loses a feature by upgrading', S.INJECTIONS.every(i => i.defaultOn));
 
 // ─── RESOLVING ────────────────────────────────────────────────────────────────
@@ -46,9 +47,9 @@ const none = S.resolve({});
 ok('nothing stored means every default', S.ALL.every(i => none[i.key] === i.defaultOn));
 ok('resolve covers every key', same(Object.keys(none).sort(), keys.slice().sort()));
 ok('resolve tolerates null and undefined', same(S.resolve(null), none) && same(S.resolve(undefined), none));
-const mine = S.resolve({ 'inject.suButtons': false, 'tool.battleCalc': true });
+const mine = S.resolve({ 'inject.suButtons': false, 'tool.buildOrder': true });
 ok('a stored false switches an extra off', mine['inject.suButtons'] === false);
-ok('a stored true switches an off-by-default tool on', mine['tool.battleCalc'] === true);
+ok('a stored true switches an off-by-default tool on', mine['tool.buildOrder'] === true);
 ok('everything else keeps its default', mine['inject.buildingHints'] === true && mine['tool.roadToTa'] === false);
 ok('isEnabled agrees with resolve', S.isEnabled('inject.suButtons', { 'inject.suButtons': false }) === false && S.isEnabled('tool.roadToTa', {}) === false && S.isEnabled('inject.suButtons', {}) === true);
 ok('an unknown key reads as ON — a typo at a call site must not quietly remove a feature', S.isEnabled('inject.doesNotExist', {}) === true);
@@ -57,7 +58,7 @@ ok('a stored non-boolean is ignored, not coerced', S.isEnabled('inject.suButtons
 // ─── WHAT IS STORED ───────────────────────────────────────────────────────────
 console.log('\n── Storing only the difference ' + '─'.repeat(44));
 ok('sanitize keeps a real difference', same(S.sanitizeOverrides({ 'inject.suButtons': false }), { 'inject.suButtons': false }));
-ok('sanitize drops a value equal to its default', same(S.sanitizeOverrides({ 'inject.suButtons': true, 'tool.battleCalc': false }), {}));
+ok('sanitize drops a value equal to its default', same(S.sanitizeOverrides({ 'inject.suButtons': true, 'tool.buildOrder': false }), {}));
 ok('sanitize drops unknown keys (a later release may remove one)', same(S.sanitizeOverrides({ 'inject.gone': false, 'inject.suButtons': false }), { 'inject.suButtons': false }));
 ok('sanitize drops non-boolean values', same(S.sanitizeOverrides({ 'inject.suButtons': 'no', 'inject.popTimers': null }), {}));
 ok('sanitize survives junk input', ['x', 5, null, undefined, [], [1, 2]].every(v => same(S.sanitizeOverrides(v), {})));
@@ -70,7 +71,7 @@ const afterOff = S.applyChanges({}, { 'inject.suButtons': false });
 ok('a change away from the default is stored', same(afterOff, { 'inject.suButtons': false }));
 ok('a change back to the default removes it, leaving nothing', same(S.applyChanges(afterOff, { 'inject.suButtons': true }), {}));
 ok('changes merge into what is stored rather than replacing it',
-    same(S.applyChanges({ 'inject.suButtons': false }, { 'tool.battleCalc': true }), { 'inject.suButtons': false, 'tool.battleCalc': true }));
+    same(S.applyChanges({ 'inject.suButtons': false }, { 'tool.buildOrder': true }), { 'inject.suButtons': false, 'tool.buildOrder': true }));
 ok('unknown keys in a change are ignored', same(S.applyChanges({}, { 'inject.gone': false }), {}));
 ok('applyChanges does not mutate its input', (() => { const base = { 'inject.suButtons': false }; S.applyChanges(base, { 'inject.popTimers': false }); return same(base, { 'inject.suButtons': false }); })());
 
