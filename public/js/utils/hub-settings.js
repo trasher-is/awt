@@ -3,8 +3,8 @@
 // ─── WHY ──────────────────────────────────────────────────────────────────────
 // The hub adds a lot to the game's own pages and a lot of tools to its sidebar, and not
 // every member wants all of it: members asked to lose the Supply Unit buttons and the
-// building hints on the planet page, and a few tools (Battle Calc, Road to TA, Build Order,
-// Empire Simulator) are not ready for everyone. This file is the ONE list of what can be
+// building hints on the planet page, and a few tools (Road to TA, Build Order, Empire
+// Simulator) are not ready for everyone. This file is the ONE list of what can be
 // switched, with each item's default; the Settings panel is drawn from it, the sidebar and
 // the game-page hooks consult it, and the server validates against it.
 //
@@ -32,25 +32,39 @@
     const tool = (key, label, icon, button, extra) => Object.assign({ kind: 'tool', key: `tool.${key}`, label, icon, button, defaultOn: true }, extra);
     const OFF = { defaultOn: false };
 
+    // A status tag shown beside an item in Settings. `status` on a tool or an extra is one of
+    // these keys; the panel draws the label in the tone's colours.
+    const STATUSES = Object.freeze({
+        experimental: Object.freeze({ label: 'Experimental', tone: 'amber' }),
+        ingame: Object.freeze({ label: 'Works as in-game', tone: 'emerald' }),
+        deprecated: Object.freeze({ label: 'Deprecated', tone: 'zinc' }),
+        broken: Object.freeze({ label: 'Not working', tone: 'red' }),
+    });
+    const status = s => ({ status: s });
+
     const TOOLS = [
         tool('defence', 'Defence', 'fa-shield-halved', 'open-defence-btn'),
         tool('galaxyDashboard', 'Galaxy Dashboard', 'fa-gauge-high', 'open-galaxy-dashboard-btn'),
         tool('warRoom', 'War Room', 'fa-bomb', 'open-war-room-btn'),
         tool('allianceStats', 'Alliance Stats', 'fa-chess', 'open-alliance-stats-btn'),
         tool('tradeAgreements', 'Trade Agreements', 'fa-handshake', 'open-trade-agreements-btn'),
-        tool('roadToTa', 'Road to TA', 'fa-road', 'open-road-to-ta-btn', Object.assign({ note: 'Experimental' }, OFF)),
+        tool('roadToTa', 'Road to TA', 'fa-road', 'open-road-to-ta-btn', Object.assign(status('experimental'), OFF)),
         tool('sleepMap', 'Sleep Map', 'fa-moon', 'open-sleep-map-btn'),
         tool('players', 'Players', 'fa-hand-fist', 'open-players-db-btn'),
         tool('systems', 'Systems', 'fa-meteor', 'open-systems-db-btn'),
         tool('planets', 'Planets', 'fa-globe', 'open-planets-db-btn'),
         tool('fleets', 'Fleets', 'fa-crow', 'open-fleets-db-btn'),
         tool('fleetLocations', 'Fleet Locations', 'fa-crosshairs', 'open-fleet-locations-btn'),
-        tool('battleCalc', 'Battle Calc', 'fa-explosion', 'open-battle-calc-btn', Object.assign({ note: 'Experimental' }, OFF)),
+        // Matches the 7.2 game calculator to its displayed decimals (PR #367); on for everyone
+        // since 2026-11-22 (was off while experimental).
+        tool('battleCalc', 'Battle Calc', 'fa-explosion', 'open-battle-calc-btn', status('ingame')),
         tool('battleReports', 'Battle Reports', 'fa-file-medical', 'open-battle-reports-btn'),
-        tool('travelCalc', 'Travel Calc', 'fa-route', 'open-travel-calc-btn'),
-        tool('speedRules', 'Speed Rules', 'fa-scale-balanced', 'open-speed-rules-btn'),
-        tool('buildOrder', 'Build Order', 'fa-diagram-project', 'open-build-order-btn', OFF),
-        tool('empireSim', 'Empire Simulator', 'fa-chart-line', 'open-empire-sim-btn', OFF),
+        tool('travelCalc', 'Travel Calc', 'fa-route', 'open-travel-calc-btn', status('ingame')),
+        // Compared the pre-7.2 travel rule with the proposal that 7.2 made the live rule.
+        // Off by default since 2026-11-22; members can still switch it on.
+        tool('speedRules', 'Speed Rules', 'fa-scale-balanced', 'open-speed-rules-btn', Object.assign(status('deprecated'), OFF)),
+        tool('buildOrder', 'Build Order', 'fa-diagram-project', 'open-build-order-btn', Object.assign(status('experimental'), OFF)),
+        tool('empireSim', 'Empire Simulator', 'fa-chart-line', 'open-empire-sim-btn', Object.assign(status('experimental'), OFF)),
         tool('routePlanner', 'Route Planner', 'fa-map-location-dot', 'open-route-planner-btn'),
         tool('galaxyArchive', 'Galaxy Archive', 'fa-satellite-dish', 'open-galaxy-map-btn'),
     ];
@@ -68,7 +82,7 @@
         { id: 'everywhere', label: 'Every page' },
     ];
 
-    const inject = (key, group, label, description) => ({ kind: 'inject', key: `inject.${key}`, group, label, description, defaultOn: true });
+    const inject = (key, group, label, description, extra) => Object.assign({ kind: 'inject', key: `inject.${key}`, group, label, description, defaultOn: true }, extra);
 
     const INJECTIONS = [
         inject('suButtons', 'planet', 'Supply Unit buttons', '+1 SU and +All SU on each building row. One tap spends once.'),
@@ -94,7 +108,7 @@
         inject('systemPlan', 'systems', 'System plan note', 'The admins’ standing note on a system page.'),
         inject('newsBroadcasts', 'systems', 'Alliance broadcasts', 'Alliance announcements at the top of the News page.'),
 
-        inject('profilePlGrowth', 'profiles', 'Player Level growth ETA', 'When the next Player Level lands, on profiles.'),
+        inject('profilePlGrowth', 'profiles', 'Player Level growth ETA', 'When the next Player Level lands, on profiles.', status('broken')),
         inject('profileIntel', 'profiles', 'Profile activity and intel', 'Login heatmap and last-known intel. Also hides the Supporter promo.'),
         inject('ecoBonusJoined', 'profiles', 'Eco Bonus join dates', 'A “joined” column on the Eco Bonus ranking.'),
 
@@ -178,5 +192,5 @@
         return out;
     }
 
-    return { TOOLS, INJECTIONS, GROUPS, ALL, defaultFor, sanitizeOverrides, parseStored, applyChanges, invalidChanges, isEnabled, resolve };
+    return { TOOLS, INJECTIONS, GROUPS, ALL, STATUSES, defaultFor, sanitizeOverrides, parseStored, applyChanges, invalidChanges, isEnabled, resolve };
 });

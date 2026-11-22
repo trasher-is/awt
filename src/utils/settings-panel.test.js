@@ -61,17 +61,25 @@ process.on('exit', () => { if (!finished) { console.error('  NOT OK - the suite 
     ok('each key appears exactly once', S.ALL.every(i => count(defaults, new RegExp(`data-setting="${i.key.replace('.', '\\.')}"`, 'g')) === 1));
     ok('on by default means checked, off means not', count(defaults, /type="checkbox"[^>]*checked>/g) === S.ALL.filter(i => i.defaultOn).length, count(defaults, /type="checkbox"[^>]*checked>/g));
     const row = key => (defaults.match(new RegExp(`<input[^>]*data-setting="${key.replace('.', '\\.')}"[^>]*>`)) || [''])[0];
-    ok('Battle Calc starts unchecked', !/checked/.test(row('tool.battleCalc')), row('tool.battleCalc'));
+    ok('Build Order starts unchecked', !/checked/.test(row('tool.buildOrder')), row('tool.buildOrder'));
+    ok('Battle Calc starts checked (on for everyone since it matches the game)', /checked/.test(row('tool.battleCalc')), row('tool.battleCalc'));
     ok('Supply Unit buttons start checked', /checked/.test(row('inject.suButtons')), row('inject.suButtons'));
 
-    const custom = panel.settingsHtml(S.resolve({ 'tool.battleCalc': true, 'inject.suButtons': false }));
+    const custom = panel.settingsHtml(S.resolve({ 'tool.buildOrder': true, 'inject.suButtons': false }));
     const customRow = key => (custom.match(new RegExp(`<input[^>]*data-setting="${key.replace('.', '\\.')}"[^>]*>`)) || [''])[0];
-    ok('a stored choice flips its own switch only', /checked/.test(customRow('tool.battleCalc')) && !/checked/.test(customRow('inject.suButtons')) && /checked/.test(customRow('inject.buildingHints')));
+    ok('a stored choice flips its own switch only', /checked/.test(customRow('tool.buildOrder')) && !/checked/.test(customRow('inject.suButtons')) && /checked/.test(customRow('inject.buildingHints')));
 
     ok('every label and description is shown', S.ALL.every(i => defaults.includes(i.label.replace(/&/g, '&amp;')) ), S.ALL.filter(i => !defaults.includes(i.label)).map(i => i.label));
     ok('every group has its heading', S.GROUPS.every(g => defaults.includes(g.label)));
-    ok('it says which tools start off, naming all four', /Off until you turn them on:[^<]*Road to TA[^<]*Battle Calc[^<]*Build Order and Empire Simulator\./.test(defaults), (defaults.match(/Off until[^<]*/) || [])[0]);
-    ok('the experimental tools are tagged', count(defaults, />Experimental</g) === S.TOOLS.filter(t => t.note).length && S.TOOLS.some(t => t.note));
+    ok('it says which tools start off, naming all four', /Off until you turn them on: Road to TA, Speed Rules, Build Order and Empire Simulator\./.test(defaults), (defaults.match(/Off until[^<]*/) || [])[0]);
+    ok('every item with a status shows exactly one tag, and no other item has one',
+        count(defaults, /data-status="/g) === S.ALL.filter(i => i.status).length && S.ALL.some(i => i.status), count(defaults, /data-status="/g));
+    const tagOf = key => { const at = defaults.indexOf(`data-setting="${key}"`); const next = defaults.indexOf('<label', at); return (defaults.slice(at, next < 0 ? undefined : next).match(/data-status="([^"]+)">([^<]+)</) || []).slice(1).join(':'); };
+    ok('Battle Calc and Travel Calc: Works as in-game', tagOf('tool.battleCalc') === 'ingame:Works as in-game' && tagOf('tool.travelCalc') === 'ingame:Works as in-game', [tagOf('tool.battleCalc'), tagOf('tool.travelCalc')]);
+    ok('Road to TA, Build Order and Empire Simulator: Experimental', ['tool.roadToTa', 'tool.buildOrder', 'tool.empireSim'].every(k => tagOf(k) === 'experimental:Experimental'));
+    ok('Speed Rules: Deprecated', tagOf('tool.speedRules') === 'deprecated:Deprecated', tagOf('tool.speedRules'));
+    ok('Player Level growth ETA: Not working', tagOf('inject.profilePlGrowth') === 'broken:Not working', tagOf('inject.profilePlGrowth'));
+    ok('every status names a known kind with a label and a tone', S.ALL.filter(i => i.status).every(i => S.STATUSES[i.status] && S.STATUSES[i.status].label && S.STATUSES[i.status].tone));
     ok('there is no switch for Settings, Link Discord, Logout or Admin', !/data-setting="[^"]*(settings|discord|logout|admin)/i.test(defaults));
     ok('it explains what cannot be switched off, and why', /Not listed:[^<]*alliance relies/.test(defaults));
     ok('each switch is a real checkbox inside a label (keyboard and screen readers)', count(defaults, /<label /g) === S.ALL.length && count(defaults, /type="checkbox"/g) === S.ALL.length);
@@ -93,13 +101,14 @@ process.on('exit', () => { if (!finished) { console.error('  NOT OK - the suite 
     fake.overrides = {};
     let doc = makeDoc(S.TOOLS.map(t => t.button).concat('open-settings-btn', 'link-discord-btn'));
     panel.applySidebarTools(doc);
-    ok('the four experimental tools are hidden by default', ['open-battle-calc-btn', 'open-road-to-ta-btn', 'open-build-order-btn', 'open-empire-sim-btn'].every(id => doc.buttons[id].style.display === 'none'));
+    ok('the experimental tools and Speed Rules are hidden by default', ['open-road-to-ta-btn', 'open-build-order-btn', 'open-empire-sim-btn', 'open-speed-rules-btn'].every(id => doc.buttons[id].style.display === 'none'));
+    ok('Battle Calc is shown by default', doc.buttons['open-battle-calc-btn'].style.display === '');
     ok('every other tool is shown', S.TOOLS.filter(t => t.defaultOn).every(t => doc.buttons[t.button].style.display === ''));
     ok('Settings and Link Discord are never touched', doc.buttons['open-settings-btn'].style.display === '' && doc.buttons['link-discord-btn'].style.display === '');
 
-    fake.overrides = { 'tool.battleCalc': true, 'tool.warRoom': false };
+    fake.overrides = { 'tool.buildOrder': true, 'tool.warRoom': false };
     panel.applySidebarTools(doc);
-    ok('turning an off-by-default tool on shows it again', doc.buttons['open-battle-calc-btn'].style.display === '');
+    ok('turning an off-by-default tool on shows it again', doc.buttons['open-build-order-btn'].style.display === '');
     ok('turning a default tool off hides it', doc.buttons['open-war-room-btn'].style.display === 'none');
     ok('the display is an inline style, not a class Tailwind\'s .flex could beat', /style\.display = isEnabled/.test(read('public/js/ui/settings-panel.js')));
 
