@@ -28,7 +28,7 @@ db.prepare(`INSERT INTO players(id,name,has_intel,race_attack,race_defense,physi
 function insertReport(id) {
     const atkFleet = [0, 300, 0], defFleet = [2600, 0, 0];
     const outcome = model.simulate({ atkFleet, defFleet, atk: { ra: 2, rd: 1, phys: 12, math: 11, lvl: 20 },
-        def: { ra: 0, rd: 0, phys: 12, math: 12, lvl: 20 } });
+        def: { ra: 0, rd: 0, phys: 12, math: 12, lvl: 20 }, rules: model.rulesAt('2026-10-01T12:00:00Z') });
     const row = { id, started_at: '2026-10-01T12:00:00Z', is_public: 1, att_player_id: playerId,
         def_player_id: knownId, att_has_won: 1, def_has_won: 0, att_win_chance: outcome.winA * 100,
         dice_roll: 0, dice_consistent: 1, stats_snapshot_at: '2026-10-01 12:05:00',

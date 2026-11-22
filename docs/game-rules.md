@@ -75,11 +75,14 @@ screen enforces this directly, so a bonus anywhere is a malus somewhere else.
 | Culture | 4% | Culture growth |
 | Production | 4% | Production points/hour |
 | Speed | 11% | Fleet travel time |
-| Attack | 8% | Battles — win chance |
+| Attack | 9% | Battles — win chance |
 | Defence | 12% | Battles — survivors |
 
 Attack and Defence were raised from 7%/11% to 8%/12% by patch **6.0.0-beta** (2026-08-28
 changelog: "Combat Balance Changes"). Growth/Science/Culture/Production/Speed were untouched.
+Patch **7.2.0-beta** (round starting 2026-11-22) raised Attack again, to **9%** (±8% → ±9%);
+Defence stays 12%. The same patch made Speed also shrink the fixed part of travel time, and
+doubled the damage starbases take in combat (see [Battle formula](#battle-formula)).
 
 Two additional picks are one-time toggles rather than a scalable stat — each has a fixed
 point **cost** that must be offset by the seven traits above summing correspondingly
@@ -1199,8 +1202,12 @@ and caps on its buildings — though the exact numbers aren't published.
   formula below, a 1.2× power ratio gives **80.00%** and 1.5× gives 100%.
 - **Travel time has a fixed floor and a reducible part — both config pairs are real, not
   redundant.** `FixedTravelTimeInterPlanets`/`FixedTravelTimeInterSystems` (**20 min / 45
-  min**) are hard minimums — energy and speed can never bring a flight below them, except the
-  own-planet/alliance 50% halving, which can. `TravelTimeInterPlanets`/`TravelTimeInterSystems`
+  min**) are the minimums at Speed 0. Energy never shrinks them. **Since 7.2.0-beta race Speed
+  does** (patch note: "the race speed bonus now also applies to the fixed portion of travel
+  time"): the floor is divided by 1 + 0.11 × Speed, so Speed divides the whole flight (+4: 14
+  / 31 min, −4: 36 / 80 min). Before 7.2 Speed could not go below the floor either. The
+  own-planet/alliance 50% halving still applies on top. Whether the game floors the fixed part
+  before or after dividing is not yet measured (a second or two either way). `TravelTimeInterPlanets`/`TravelTimeInterSystems`
   (**4h / 10h**) are the coefficients for the *reducible* part of the flight, which energy
   and speed actually shrink. At 0 Energy and +0 Speed, a flight is the full 4h/10h reducible
   time plus the 20min/45min floor on top — matches
@@ -1243,7 +1250,7 @@ An odd starbase CV gives defence the extra point (level 8, CV 99: attack 49, def
 The bonuses enter as factors on each side; their logarithms add up to one score:
 
     score = ln(strength_att / strength_def)
-          + ln(1 + 0.08 × race attack_att)  − ln(1 + 0.08 × race attack_def)
+          + ln(1 + 0.09 × race attack_att)  − ln(1 + 0.09 × race attack_def)   (0.08 before 7.2)
           + ln(1 + 0.015 × physics_att)     − ln(1 + 0.015 × physics_def)
           + ln(edge_att) − ln(edge_def)
 
@@ -1290,6 +1297,33 @@ toughness is wiped even with a large bonus.
 - A side of **4 ships or fewer** gets no such floor.
 - A **starbase defending alone** keeps level 1 when its loss reaches 100%. Next to 5+ ships,
   the floor goes to a ship instead.
+
+**Starbases since 7.2.0-beta** (checked on the 7.2 game calculator, 2026-11-22):
+
+- **Double damage** (patch note: "Damage taken by starbases in combat was doubled"): the
+  starbase loses **2 × loss** of its CV (capped at 100%); ships beside it keep the shared loss.
+- **Toughness** is `floor(1.5 × CV)` for a whole level (pre-7.2: 3 × floor(CV / 2)). 10 DS +
+  SB 8 against 40 DS: the defender keeps 3.62 DS, as the game shows (3.58 with the old value).
+- **Starbase levels are fractional.** A damaged starbase keeps the part of a level it did not
+  lose and fights the next battle with it. Pages and reports print whole levels only, so a
+  visible SB 11 can be anything from 11.00 to 11.99 (count it as 11.99 to be safe).
+  Between two whole levels the **CV is a straight line**: SB 9.5 = 150 + ½ × (227 − 150) =
+  188.5 CV. The CV left after a fight maps back to a level along the same line. For a
+  fractional level the toughness is `floor(1.5 × whole-level CV + ½ × the extra CV above it)`.
+  The ½ is fitted on five fractional readings, all within 0.004 of a level.
+- A starbase defending alone **never ends a fight below level 1**, unless it is the certain loser.
+
+| Game calculator, 7.2 | Game | Hub |
+|---|---|---|
+| SB 10 vs 10 DS | 9.48 | 9.48 |
+| SB 9.5 vs 10 DS | 8.85 | 8.85 |
+| SB 12 vs 60 DS | 10.42 | 10.42 |
+| SB 11.99 vs 4 × 10 DS in a row | 11.69, 11.41, 11.15, 10.86 | same |
+| 10 DS + SB 8 vs 40 DS | 46.14%, att 7.75 DS, def 3.62 DS, SB 0 | same |
+| SB 8 vs 30 DS (race attack +2) | 73.16%, att 5.25 DS, SB 1 if it wins | same |
+
+The win chance against a *fractional* starbase (its strength from the straight-line CV) has not
+been checked yet.
 
 Survivor counts are fractions; the fractional part is a survival chance (see
 [Fleet and combat notes](#fleet-and-combat-notes)).

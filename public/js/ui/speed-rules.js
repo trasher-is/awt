@@ -1,6 +1,6 @@
-// Speed Rules panel — defender vs attacker under today's travel rule and a proposed one.
+// Speed Rules panel — defender vs attacker under the 7.2 travel rule and the old one.
 //
-// The proposal: race speed also shrinks the fixed 20/45-minute minimum of every flight
+// Since 7.2.0-beta race speed also shrinks the fixed 20/45-minute minimum of every flight
 // (travel-model opts.fixedSpeedStep). Player A (defender) and Player B (attacker) fly to the
 // same destination; the panel shows both flight times under both rules and who lands first.
 //
@@ -68,7 +68,7 @@ function render() {
     const a = readSide('a'), b = readSide('b');
     const dest = [num('sr-d-x', -1e6, 1e6), num('sr-d-y', -1e6, 1e6), num('sr-d-p', 1, 12, 1)];
     const allied = !!$('sr-a-allied')?.checked;
-    const now = {}, next = { fixedSpeedStep: num('sr-step', 0, 20, 11) / 100 };
+    const now = { fixedSpeedStep: 0 }, next = { fixedSpeedStep: num('sr-step', 0, 20, 11) / 100 }; // old rule vs 7.2
 
     const aNow = flight(a, dest, allied, now), aNew = flight(a, dest, allied, next);
     const bNow = flight(b, dest, false, now), bNew = flight(b, dest, false, next);
@@ -87,7 +87,7 @@ function render() {
         row(`A · Defender${allied ? ' <span class="text-xs font-normal text-zinc-500">(½)</span>' : ''}`, 'text-sky-400', aNow, aNew)
         + row('B · Attacker', 'text-red-400', bNow, bNew);
 
-    $('sr-verdict').innerHTML = verdict('Now', aNow, bNow) + verdict('New', aNew, bNew);
+    $('sr-verdict').innerHTML = verdict('Old', aNow, bNow) + verdict('7.2', aNew, bNew);
 
     const mins = side => {
         const m = fixedMinimums(side.speed, next);
@@ -95,7 +95,7 @@ function render() {
     };
     $('sr-meta').innerHTML = `A: E${a.energy} speed ${a.speed > 0 ? '+' : ''}${a.speed}, ${esc(describeLeg(a, dest))}. `
         + `B: E${b.energy} speed ${b.speed > 0 ? '+' : ''}${b.speed}, ${esc(describeLeg(b, dest))}.<br>`
-        + `Fixed minimum (same system / other system): now 0:20:00 / 0:45:00 for everyone; new A ${mins(a)}, B ${mins(b)}.`;
+        + `Fixed minimum (same system / other system): old rule 0:20:00 / 0:45:00 for everyone; 7.2 A ${mins(a)}, B ${mins(b)}.`;
 }
 
 function wirePicker({ inputId, dropId, load, match, button, onPick }) {

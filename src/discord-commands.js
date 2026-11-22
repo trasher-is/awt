@@ -116,7 +116,7 @@ function buildCommands() {
             .addSubcommand(s => s.setName('battle').setDescription('Battle estimate')
                 .addStringOption(o => o.setName('defender').setDescription('Defender fleet as "D C B", e.g. "1000 0 0"').setRequired(true))
                 .addStringOption(o => o.setName('attacker').setDescription('Attacker fleet as "D C B"').setRequired(true))
-                .addIntegerOption(o => o.setName('starbase').setDescription('Defender starbase level').setMinValue(0).setMaxValue(50))
+                .addNumberOption(o => o.setName('starbase').setDescription('Defender starbase level; decimals allowed (a damaged 9.5)').setMinValue(0).setMaxValue(50))
                 .addStringOption(o => o.setName('defender_player').setDescription('Fill defender stats from a player').setAutocomplete(true))
                 .addStringOption(o => o.setName('attacker_player').setDescription('Fill attacker stats from a player').setAutocomplete(true)))
             .addSubcommand(s => s.setName('distance').setDescription('Distance and biology needed between two systems')

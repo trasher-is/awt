@@ -19,7 +19,7 @@ db.prepare(`INSERT INTO players(id,name,has_intel,race_attack,race_defense,physi
     VALUES(22,'Synthetic member',1,0,0,12,12,20,'2026-10-01 10:00:00')`).run();
 function report(id,ra=2,rd=1){
     const atkFleet=[0,300,0],defFleet=[2600,0,0];
-    const result=model.simulate({atkFleet,defFleet,atk:{ra,rd,phys:12,math:11,lvl:20},def:{ra:0,rd:0,phys:12,math:12,lvl:20}});
+    const result=model.simulate({atkFleet,defFleet,atk:{ra,rd,phys:12,math:11,lvl:20},def:{ra:0,rd:0,phys:12,math:12,lvl:20},rules:model.rulesAt('2026-10-01T12:00:00Z')});
     const row={id,started_at:'2026-10-01T12:00:00Z',is_public:1,att_player_id:11,def_player_id:22,att_has_won:1,def_has_won:0,
         att_win_chance:result.winA*100,dice_roll:0,dice_consistent:1,stats_snapshot_at:'2026-10-01 12:05:00',
         def_race_attack:0,def_race_defense:0,def_physics:12,def_mathematics:12,def_player_level:20,def_intel_at:'2026-10-01 10:00:00'};

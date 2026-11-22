@@ -32,6 +32,7 @@
             phys: trait === 'attack' ? science : observation.scienceCeiling,
             math: trait === 'defence' ? science : observation.scienceCeiling, lvl: level };
         return model.simulate({ atkFleet: observation.atkFleet, defFleet: observation.defFleet, sbLevel: observation.sbLevel,
+            rules: observation.rules || (typeof model.rulesAt === 'function' ? model.rulesAt(observation.when) : undefined),
             atk: observation.side === 'att' ? self : observation.known,
             def: observation.side === 'att' ? observation.known : self });
     }

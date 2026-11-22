@@ -106,7 +106,7 @@ function helpEntries({ bioConfirmed, bioSuspected }) {
             items: [
                 {
                     names: ['battle'], usage: '!battle <D> <C> <B> vs <D> <C> <B>', short: 'simulate a fight',
-                    detail: 'Simulates a battle. Flags: `--sb N` starbase (0-50), `--dp/--ap N` physics, `--dm/--am N` math, `--dra/--ara N` race atk, `--drd/--ard N` race def, `--dl/--al N` player level. Or `--def Name --atk Name` to auto-fill all stats from DB.',
+                    detail: 'Simulates a battle. Flags: `--sb N` starbase (0-50, decimals allowed: a damaged 9.5 fights as 9.5), `--dp/--ap N` physics, `--dm/--am N` math, `--dra/--ara N` race atk, `--drd/--ard N` race def, `--dl/--al N` player level. Or `--def Name --atk Name` to auto-fill all stats from DB.',
                     example: '!battle 50 10 0 vs 40 8 2 --dp 5 --ap 3 --dl 12 --al 8',
                 },
                 {

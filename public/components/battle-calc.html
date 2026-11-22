@@ -65,7 +65,7 @@
                 </div>
                 <div class="bc-row grid grid-cols-[120px_1fr_1fr] border-b border-border/50">
                     <div class="px-3 py-2 flex items-center text-xs text-muted-foreground">Starbase lvl</div>
-                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-def-sb" min="0" max="50" value="0" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
+                    <div class="px-3 py-2 border-l border-border/50"><input type="number" id="bc-def-sb" min="0" max="50" step="any" value="0" title="A damaged starbase keeps a fraction of a level: 9.5 fights as 9.5" class="bc-num-input h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></div>
                     <div class="px-3 py-2 border-l border-border/50 flex items-center text-xs text-zinc-600">— attacker has none —</div>
                 </div>
                 <div class="bc-row grid grid-cols-[120px_1fr_1fr] border-b border-border/50">
@@ -104,6 +104,44 @@
                 <p class="text-xs text-zinc-500">Watch these fleets fight it out. A dice roll against the win chance picks the winner and the loser is wiped, like a real battle.</p>
                 <button id="bc-fight-btn" type="button" class="self-start h-9 px-6 rounded bg-orange-500 hover:bg-orange-400 text-black font-bold uppercase tracking-wider text-sm"><i class="fa-solid fa-dice mr-2"></i>Fight</button>
             </div>
+
+            <!-- SB buster: fleets landing in front of the main fleet to grind a starbase down -->
+            <details id="bcb" class="bg-zinc-900 border border-border rounded-lg p-4">
+                <summary class="cursor-pointer select-none text-violet-400 font-semibold text-sm uppercase tracking-wider">
+                    <i class="fa-solid fa-hammer"></i> SB buster
+                </summary>
+                <div class="mt-3 flex flex-col gap-3">
+                    <p class="text-xs text-muted-foreground">
+                        How many ships to send in the fleets that land before your main fleet, to bring a
+                        starbase down to a level. Since 7.2 a starbase takes double damage and keeps the
+                        fraction of a level it did not lose, so each losing fleet grinds it down. The
+                        defender's Mathematics, race defence and level come from the calculator above.
+                    </p>
+                    <div class="grid grid-cols-2 gap-3">
+                        <label class="flex flex-col gap-1 text-xs text-muted-foreground">Starbase now
+                            <input type="number" id="bcb-sb" min="0" max="50" step="any" value="11" class="bcb-in h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                        <label class="flex flex-col gap-1 text-xs text-muted-foreground">Drop it to level
+                            <input type="number" id="bcb-target" min="1" max="50" step="any" value="10" class="bcb-in h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                        <label class="flex flex-col gap-1 text-xs text-muted-foreground">Buster fleets
+                            <input type="number" id="bcb-fleets" min="1" max="12" step="1" value="4" class="bcb-in h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500"></label>
+                        <label class="flex flex-col gap-1 text-xs text-muted-foreground">Ships
+                            <select id="bcb-ship" class="bcb-in h-8 w-full rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500">
+                                <option value="destroyers">Destroyers</option>
+                                <option value="cruisers">Cruisers</option>
+                                <option value="battleships">Battleships</option>
+                            </select></label>
+                    </div>
+                    <label class="flex items-start gap-2 text-xs text-muted-foreground">
+                        <input type="checkbox" id="bcb-hidden" checked class="bcb-in mt-0.5">
+                        <span>Count a whole level as x.99. The game only shows whole levels, so a visible 11 can be up to 11.99.</span>
+                    </label>
+                    <label class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        Or check your own count per fleet:
+                        <input type="number" id="bcb-own" min="0" step="1" placeholder="—" class="bcb-in h-8 w-20 rounded border border-input bg-zinc-950 px-2 text-sm text-foreground focus:outline-none focus:border-zinc-500">
+                    </label>
+                    <div id="bcb-out" class="flex flex-col gap-2 text-sm"></div>
+                </div>
+            </details>
 
         </div>
     </div>

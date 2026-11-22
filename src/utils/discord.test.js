@@ -175,6 +175,7 @@ const capture = () => { const out = []; return { out, reply: (t) => { out.push(t
             getSubcommand: () => sub,
             getString: (k) => (opts[k] === undefined ? null : String(opts[k])),
             getInteger: (k) => (opts[k] === undefined ? null : Number(opts[k])),
+            getNumber: (k) => (opts[k] === undefined ? null : Number(opts[k])),
         },
     });
     const cases = [
@@ -190,6 +191,7 @@ const capture = () => { const out = []; return { out, reply: (t) => { out.push(t
         // put the destination system into planetA and the energy into sysB.
         [fake('calc', 'travel', { from: '10', from_planet: 1, to: '20', to_planet: 7, speed: 2, energy: 9 }), '!tt 10 1 20 7 2 9'],
         [fake('calc', 'battle', { defender: '1000 0 0', attacker: '0 125 0', starbase: 5 }), '!battle 1000 0 0 vs 0 125 0 --sb 5'],
+        [fake('calc', 'battle', { defender: '0 0 0', attacker: '10 0 0', starbase: 9.5 }), '!battle 0 0 0 vs 10 0 0 --sb 9.5'],
         [fake('plan', 'add', { system: '137', planet: 4, note: 'hit this' }), '!plan 137 4 hit this'],
         [fake('scan', 'holes'), '!holes'],
         [fake('scan', 'vision', { system: '137' }), '!vision 137'],

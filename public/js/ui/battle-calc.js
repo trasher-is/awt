@@ -8,10 +8,12 @@
 
 import { esc } from '../utils/escape.js';
 import '../utils/battle-model.js';
+import '../utils/sb-buster.js';
 import '../utils/race-inference.js';
 import '../utils/race-estimate-display.js';
 
 const M = globalThis.AWBattleModel;
+const Buster = globalThis.AWSbBuster;
 const { SHIPS, sbCV } = M;
 const RaceDisplay = globalThis.AWRaceEstimateDisplay;
 const selectedSides = { def: null, atk: null };
@@ -94,6 +96,7 @@ function calc() {
 
 function render() {
     const r = calc();
+    renderBuster();
     const el = document.getElementById('bc-results');
     if (!el) return;
     for (const box of [el, document.getElementById('bc-fight')]) {
@@ -115,9 +118,9 @@ function render() {
         </div>`;
     }).join('');
 
-    // Starbase result is shown as the level its surviving CV maps back to (matches the game).
-    const sbRemCv = r.survSB * sbCV(r.sbLvl);
-    const sbResultLvl = sbRemCv > 0 ? Math.log((sbRemCv + 4) / 4) / Math.log(1.5) : 0;
+    // Starbase result: the level left, fraction kept. The game fights the next battle with
+    // that fraction (9.5 stays 9.5) even though its pages print whole levels.
+    const sbResultLvl = r.sbLevelLeft;
     const sbRow = r.sbLvl > 0 ? `<div class="flex items-center gap-2 text-xs font-mono">
         <span class="w-20 text-muted-foreground">Starbase</span>
         <span class="text-emerald-300 font-semibold">lvl ${sbResultLvl.toFixed(2)}</span>
@@ -234,6 +237,56 @@ function setupPlayerSearch(inputId, dropdownId, prefix) {
     });
 }
 
+// ─── SB BUSTER ────────────────────────────────────────────────────────────────
+// Fewest ships per buster fleet to bring a starbase to a target level (sb-buster.js).
+// Defender (and attacker) stats come from the calculator's own columns, so the player
+// picker fills them. Pure local math: no game or hub request.
+const SHIP_SHORT = { destroyers: 'DS', cruisers: 'CR', battleships: 'BS' };
+function renderBuster() {
+    const out = document.getElementById('bcb-out');
+    if (!out || !Buster) return;
+    const val = id => document.getElementById(id)?.value;
+    const hidden = !!document.getElementById('bcb-hidden')?.checked;
+    const start = Buster.worstCase(val('bcb-sb'), hidden);
+    const target = M.clampStarbase(val('bcb-target'));
+    const fleets = Math.max(1, Math.min(12, parseInt(val('bcb-fleets'), 10) || 4));
+    const ship = val('bcb-ship') || 'destroyers';
+    const own = parseInt(val('bcb-own'), 10);
+    const stats = { def: lastInputs.def, atk: lastInputs.atk };
+    const short = SHIP_SHORT[ship] || 'DS';
+
+    const table = steps => steps.length ? `<table class="w-full text-xs tabular-nums">
+        <thead><tr class="text-muted-foreground border-b border-zinc-800">
+            <th class="py-1 pr-2 text-left font-normal">Fleet</th><th class="py-1 px-2 text-right font-normal">Ships</th>
+            <th class="py-1 px-2 text-right font-normal">SB after</th><th class="py-1 pl-2 text-right font-normal">Fleet wins</th>
+        </tr></thead>
+        <tbody>${steps.map(s => `<tr class="border-b border-zinc-800/50">
+            <td class="py-1 pr-2 text-muted-foreground">#${s.fleet}</td>
+            <td class="py-1 px-2 text-right font-mono">${s.ships} ${short}</td>
+            <td class="py-1 px-2 text-right font-mono text-emerald-300">${s.before.toFixed(2)} → ${s.after.toFixed(2)}</td>
+            <td class="py-1 pl-2 text-right font-mono ${s.winA > 0 ? 'text-amber-400' : 'text-zinc-500'}">${(s.winA * 100).toFixed(1)}%</td>
+        </tr>`).join('')}</tbody></table>` : '';
+
+    const p = Buster.plan({ sbLevel: start, target, fleets, ship, ...stats });
+    const from = `SB ${start.toFixed(2)}${hidden && start !== M.clampStarbase(val('bcb-sb')) ? ' (visible ' + esc(String(M.clampStarbase(val('bcb-sb')))) + ')' : ''}`;
+    let html;
+    if (p.reason === 'already_at_target') html = `<div class="text-muted-foreground">${from} is already at or below level ${target}.</div>`;
+    else if (p.reason === 'below_level_1') html = `<div class="text-amber-400">A starbase defending alone never ends a fight below level 1, so busters that lose cannot take it under 1. Your main fleet has to win that fight.</div>`;
+    else if (p.reason === 'too_many') html = `<div class="text-red-400">More than a million ${short} per fleet. Try more fleets or bigger ships.</div>`;
+    else {
+        html = `<div>${from} → level ${target}: send <b class="text-foreground">${fleets} × ${p.perFleet} ${short}</b>
+            <span class="text-muted-foreground">(${p.total} ${short}), one fleet after another before the main fleet.</span></div>`
+            + table(p.steps);
+        if (p.steps.some(s => s.winA > 0)) html += `<div class="text-xs text-amber-400">A buster fleet that wins takes the starbase out completely. The table shows the levels left when each fleet loses.</div>`;
+    }
+    if (own > 0) {
+        const c = Buster.chainFor({ sbLevel: start, perFleet: own, fleets, ship, ...stats });
+        html += `<div class="mt-2 text-xs text-muted-foreground">${fleets} × ${own} ${short}: SB ends at <b class="${c.end <= target ? 'text-emerald-400' : 'text-red-400'}">${c.end.toFixed(2)}</b>.</div>`
+            + (own === p.perFleet ? '' : table(c.steps));
+    }
+    out.innerHTML = html;
+}
+
 export function initBattleCalc() {
     document.getElementById('close-battle-calc-btn')?.addEventListener('click', () => {
         document.getElementById('battle-calc-panel')?.classList.replace('translate-x-0', 'translate-x-full');
@@ -254,6 +307,12 @@ export function initBattleCalc() {
         const { openFightSimulation } = await import('./battle-anim.js');
         openFightSimulation(r);
     });
+
+    document.querySelectorAll('#battle-calc-panel .bcb-in').forEach(el => {
+        el.addEventListener('input', renderBuster);
+        el.addEventListener('change', renderBuster);
+    });
+    renderBuster();
 
     setupPlayerSearch('bc-def-player-input', 'bc-def-player-dropdown', 'def');
     setupPlayerSearch('bc-atk-player-input', 'bc-atk-player-dropdown', 'atk');

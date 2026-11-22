@@ -74,8 +74,9 @@ const enemy = (fleet) => ({ name: 'Enemy', fleet, stats: worst });
     const e = [1, 1, 20];   // all three types: player level counts for him
     const chain = P.simulateChain({ planet: planet(12), enemy: enemy(e), landings: [] });
     ok('taking SB 12 (515 CV) lifts a 300-XP PL 4 attacker to PL 6', chain.enemyEndLevel === 6, chain.enemyEndLevel);
-    ok('damaged-starbase levels: the level its remaining CV pays for', P.sbLevelLeft(12, 1) === 12 && P.sbLevelLeft(12, 0) === 0
-        && model.sbCV(P.sbLevelLeft(12, 0.5)) <= model.sbCV(12) * 0.5 && model.sbCV(P.sbLevelLeft(12, 0.5) + 1) > model.sbCV(12) * 0.5);
+    const half = P.sbLevelLeft(12, 0.5);
+    ok('damaged-starbase levels keep their fraction: SB 12 at half CV is ~10.3, not 10', P.sbLevelLeft(12, 1) === 12 && P.sbLevelLeft(12, 0) === 0
+        && half > 10 && half < 11 && Math.abs(model.sbCV(half) - model.sbCV(12) * 0.5) <= 1, half);
 }
 
 // --- The sacrifice search -----------------------------------------------------------------

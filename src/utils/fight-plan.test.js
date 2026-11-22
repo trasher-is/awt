@@ -75,11 +75,13 @@ test('a winner with one surviving ship keeps one icon even when grouped', () => 
     assert.strictEqual(plan[0].keep, 1);
 });
 
-test('starbase level left uses whole levels of the remaining CV', () => {
-    assert.strictEqual(P.sbLevelLeft(M.sbCV, 8, 1), 8);
-    assert.strictEqual(P.sbLevelLeft(M.sbCV, 8, 0), 0);
-    // level 8 = 99 CV; 27% left = 26.7 CV, level 5 is 26 CV and level 6 is 42
-    assert.strictEqual(P.sbLevelLeft(M.sbCV, 8, 0.27), 5);
+test('starbase level left keeps the fraction of the remaining CV', () => {
+    assert.strictEqual(P.sbLevelLeft(M, 8, 1), 8);
+    assert.strictEqual(P.sbLevelLeft(M, 8, 0), 0);
+    // level 8 = 99 CV; 27% left = 26.73 CV: level 5 (26 CV) plus 0.73/16 of the way to 6 (42)
+    assert.strictEqual(P.sbLevelLeft(M, 8, 0.27), 5.05);
+    // a fractional level carries on: 9.5 at full CV stays 9.5
+    assert.strictEqual(P.sbLevelLeft(M, 9.5, 1), 9.5);
 });
 
 if (failed) process.exit(1);

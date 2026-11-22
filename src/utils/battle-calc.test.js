@@ -31,6 +31,10 @@ const toStats = s => ({
     ra: s.raceAttack || 0, rd: s.raceDefense || 0, lvl: s.level || 0
 });
 
+// Every fixture was read off the pre-7.2 calculator (race attack 8%/level, starbases
+// taking single damage), so it tests the model under those rules.
+const FIXTURE_RULES = 'pre-7.2';
+
 // ─── 1. WIN % vs the game ─────────────────────────────────────────────────────
 console.log('── Win % vs in-game observations ' + '─'.repeat(44));
 
@@ -42,7 +46,8 @@ for (const c of fixtures.winChance) {
         atkFleet: c.atk.fleet,
         sbLevel: c.def.starbase || 0,
         def: toStats(c.def),
-        atk: toStats(c.atk)
+        atk: toStats(c.atk),
+        rules: FIXTURE_RULES
     });
     if (!r) {
         console.log(`❌ ${c.id}: the model returned no result for this fixture`);
@@ -66,7 +71,7 @@ console.log(`\nWorst win-% error: ${worst.toFixed(2)} pp on "${worstId}"  (gate:
 const stated = model.uncertainty.BASE_ERROR_PP;
 const outside = [];
 for (const c of fixtures.winChance) {
-    const r = model.simulate({ defFleet: c.def.fleet, atkFleet: c.atk.fleet, sbLevel: c.def.starbase || 0, def: toStats(c.def), atk: toStats(c.atk) });
+    const r = model.simulate({ defFleet: c.def.fleet, atkFleet: c.atk.fleet, sbLevel: c.def.starbase || 0, def: toStats(c.def), atk: toStats(c.atk), rules: FIXTURE_RULES });
     if (!r) continue;
     const band = model.winBand(r.winD, { defFleet: c.def.fleet, atkFleet: c.atk.fleet }).marginPp;
     const err = Math.abs(r.winD * 100 - c.observedDefenderWinPct);
@@ -110,7 +115,8 @@ for (const c of survCases) {
         atkFleet: c.atk.fleet,
         sbLevel: c.def.starbase || 0,
         def: toStats(c.def),
-        atk: toStats(c.atk)
+        atk: toStats(c.atk),
+        rules: FIXTURE_RULES
     });
     if (!r) {
         console.log(`❌ ${c.id}: the model returned no result for this fixture`);
@@ -148,6 +154,52 @@ for (const [lvl, cv] of Object.entries(fixtures.starbaseCv.levels)) {
 }
 if (sbBad === 0) console.log(`✅ all ${Object.keys(fixtures.starbaseCv.levels).length} confirmed levels exact`);
 else failed = true;
+
+// ─── 2b. 7.2.0-beta rules ─────────────────────────────────────────────────────
+// Patch notes: race attack ±8% → ±9% per level, starbases take double damage. Starbase
+// levels are fractional: a damaged starbase fights the next battle with what it kept.
+console.log('\n── 7.2 rules: race attack 9%, starbase double damage, fractional levels ' + '─'.repeat(6));
+{
+    const z = {};
+    const check = (name, cond, got) => { console.log(`${cond ? '✅' : '❌'} ${name}${cond ? '' : `  (got ${JSON.stringify(got)})`}`); if (!cond) failed = true; };
+    check('the current rules are 7.2: race attack 0.09, starbase damage ×2',
+        model.CURRENT_RULES.version === '7.2' && model.CURRENT_RULES.raceAtkPct === 0.09 && model.CURRENT_RULES.sbDamageMult === 2
+        && model.constants.RACE_ATK_PCT === 0.09, model.CURRENT_RULES);
+    check('the pre-7.2 rules stay available: 0.08, single damage',
+        model.RULES['pre-7.2'].raceAtkPct === 0.08 && model.RULES['pre-7.2'].sbDamageMult === 1);
+    check('reports are replayed with the rules of their date: 7.2 from the 2026-11-22 20:00 CET reset',
+        model.rulesAt('2026-11-22T18:59:59Z').version === 'pre-7.2' && model.rulesAt('2026-11-22T20:00:00+01:00').version === '7.2'
+        && model.rulesAt('2026-10-01T12:00:00Z').version === 'pre-7.2' && model.rulesAt('garbage').version === '7.2');
+
+    const ra = { atkFleet: [30, 0, 0], defFleet: [0, 0, 0], sbLevel: 8, atk: { ra: 2 }, def: { ra: 0 } };
+    const ra72 = model.simulate(ra).winA, raOld = model.simulate({ ...ra, rules: 'pre-7.2' }).winA;
+    check('race attack +2 is worth more under 7.2 (30 DS vs SB 8: 73.2% vs 70.5%)',
+        Math.abs(ra72 - 0.73163) < 1e-4 && Math.abs(raOld - 0.70458) < 1e-4, [ra72, raOld]);
+
+    // Game-calculator readings on 7.2 (trasheris, 2026-11-22), all other stats 0.
+    const hit = (sb, d, rules) => model.simulate({ atkFleet: [d, 0, 0], defFleet: [0, 0, 0], sbLevel: sb, atk: z, def: z, rules });
+    check('BC A: 10 DS vs SB 10 leave SB 9.48', hit(10, 10).sbLevelLeft === 9.48, hit(10, 10).sbLevelLeft);
+    check('BC B: 10 DS vs SB 9.5 leave SB 8.85', hit(9.5, 10).sbLevelLeft === 8.85, hit(9.5, 10).sbLevelLeft);
+    check('BC E: 60 DS vs SB 12 leave SB 10.42', hit(12, 60).sbLevelLeft === 10.42, hit(12, 60).sbLevelLeft);
+    const c = model.simulate({ atkFleet: [40, 0, 0], defFleet: [10, 0, 0], sbLevel: 8, atk: z, def: z });
+    check('BC C: 40 DS vs 10 DS + SB 8: attacker 46.14%, keeps 7.75 DS; defender keeps 3.62 DS, SB 0',
+        (c.winA * 100).toFixed(2) === '46.14' && c.survAtk[0].toFixed(2) === '7.75' && c.survDef[0].toFixed(2) === '3.62' && c.sbLevelLeft === 0,
+        [c.winA, c.survAtk, c.survDef, c.sbLevelLeft]);
+    const d = model.simulate({ atkFleet: [30, 0, 0], defFleet: [0, 0, 0], sbLevel: 8, atk: { ra: 2 }, def: z });
+    check('BC D: 30 DS (race attack +2) vs SB 8: attacker 73.16%, keeps 5.25 DS; a winning SB keeps level 1',
+        (d.winA * 100).toFixed(2) === '73.16' && d.survAtk[0].toFixed(2) === '5.25' && d.sbLevelLeft === 1, [d.winA, d.survAtk, d.sbLevelLeft]);
+    // His buster example: visible SB 11 counted as 11.99, four fleets of 10 DS in a row.
+    let level = 11.99;
+    const chain = [1, 2, 3, 4].map(() => (level = hit(level, 10).sbLevelLeft));
+    check('4 × 10 DS take SB 11.99 to 11.69, 11.41, 11.15, 10.86', chain.join(' ') === '11.69 11.41 11.15 10.86', chain);
+    check('pre-7.2 the same 10 DS only took SB 10 to 9.74', hit(10, 10, 'pre-7.2').sbLevelLeft === 9.74, hit(10, 10, 'pre-7.2').sbLevelLeft);
+    check('a fractional level\'s CV is the straight line between whole levels (9.5 = 188.5)',
+        model.sbCV(9.5) === 188.5 && model.sbCV(9) === 150 && model.sbCV(10) === 227);
+    check('an untouched starbase keeps exactly its level, whole or fractional',
+        [1, 5, 8, 9.5, 11.99, 20].every(l => model.sbLevelAfter(l, 1) === l && model.sbLevelFromCV(model.sbCV(l)) === l));
+    check('starbase input keeps two decimals', model.clampStarbase('9.5') === 9.5 && model.clampStarbase(9.456) === 9.46
+        && model.clampStarbase(-1) === 0 && model.clampStarbase('x') === 0 && model.normalizeInputs({ sbLevel: '9.5' }).sbLevel === 9.5);
+}
 
 // ─── 3. NO DRIFT: the model lives in exactly one file ─────────────────────────
 // This is the check that would have caught the original defect. The bot carried its own

@@ -13,17 +13,19 @@
 //     • Speed: the race attribute raises velocity ±11%/level, so it DIVIDES time
 //       (+4 -> ÷1.44, −4 -> ÷0.56).
 //
-// Each flight is a FIXED minimum (never reduced) plus a reducible part scaled by mod:
-//   same system: 1200 + 14400·√(|Δplanet|+1) · mod                  (20-minute minimum)
-//   deep space:  2700 + (36000·dist + 3600·√(|Δplanet|+1)) · mod    (45-minute minimum)
+// Each flight is a FIXED minimum plus a reducible part scaled by mod:
+//   same system: 1200/f + 14400·√(|Δplanet|+1) · mod                  (20-minute minimum)
+//   deep space:  2700/f + (36000·dist + 3600·√(|Δplanet|+1)) · mod    (45-minute minimum)
+//   f = 1 + 0.11·speed since 7.2.0-beta (round of 2026-11-22): race speed also shrinks the
+//   fixed minimum, so it divides the WHOLE flight. Before 7.2, f = 1 (never reduced).
 //     dist = Euclidean distance between the two systems' (x, y) coordinates.
 //
 // ALLIANCE / own-destination move: ×0.5 (always halved).
 //
-// WHAT-IF (not the game today): opts.fixedSpeedStep lets race speed shrink the fixed
-// minimum too — minimum ÷ (1 + fixedSpeedStep·speed). Default 0 = the live game. 0.11
-// (= SPEED_STEP) is the proposed rule, where speed divides the WHOLE flight. Only the
-// travel calculator's "Compare speed rules" section passes it.
+// opts.fixedSpeedStep sets that step: default SPEED_STEP (0.11) = the live game since 7.2,
+// 0 = the pre-7.2 rule (the "Compare speed rules" tools and the pre-7.2 fixtures pass it).
+// UNVERIFIED for 7.2: whether the game floors the fixed part before or after dividing;
+// the times shown can be a second or two off until 7.2 fixtures are measured.
 //
 // Rounding: floor at the end, then floor again after halving. Confirmed against the
 // measurements in travel-fixtures.json — floor matches 9 of 9, round only 5 of 9,
@@ -53,10 +55,11 @@
         return Math.pow(ENERGY_BASE, level(energy)) / (1 + SPEED_STEP * level(raceSpeed));
     }
 
-    // Divisor on the fixed minimum: 1 in the live game (step 0). Clamped so an extreme
-    // what-if step can never divide by zero or flip the sign.
+    // Divisor on the fixed minimum: 1 + 0.11·speed in the live game (7.2), 1 with step 0
+    // (pre-7.2). Clamped so an extreme step can never divide by zero or flip the sign.
     function fixedDivisor(raceSpeed, opts) {
-        const step = Number(opts && opts.fixedSpeedStep) || 0;
+        const given = opts && opts.fixedSpeedStep;
+        const step = given == null ? SPEED_STEP : (Number(given) || 0);
         return Math.max(0.05, 1 + step * level(raceSpeed));
     }
 
@@ -93,15 +96,15 @@
     // Analytic inverse of the deep-space branch, for the galaxy map's isochrone rings:
     // how far (in coordinate units) a fleet gets within a time budget of `seconds`.
     // The planet term is fixed at √(0+1) = 1 (same planet index on both ends), so
-    //   T = 2700 + (36000·dist + 3600)·mod   inverts to
-    //   dist = ((T[÷0.5 if alliance] − 2700)/mod − 3600)/36000
+    //   T = 2700/f + (36000·dist + 3600)·mod   inverts to
+    //   dist = ((T[÷0.5 if alliance] − 2700/f)/mod − 3600)/36000     (f = fixed divisor, 7.2)
     // Clamped at 0: a budget below the fixed deep-space minimum reaches no other system.
     // The alliance halving is undone BEFORE inverting, mirroring where the forward
     // formula applies it (after everything else).
-    function isochroneRadius(seconds, energy, raceSpeed, isAlliance) {
+    function isochroneRadius(seconds, energy, raceSpeed, isAlliance, opts) {
         const mod = speedModifier(energy, raceSpeed);
         const budget = isAlliance ? seconds / ALLIANCE_FACTOR : seconds;
-        const dist = ((budget - DEEP_SPACE_MIN) / mod - DEEP_SPACE_PLANET) / DEEP_SPACE_DIST;
+        const dist = ((budget - DEEP_SPACE_MIN / fixedDivisor(raceSpeed, opts)) / mod - DEEP_SPACE_PLANET) / DEEP_SPACE_DIST;
         return Math.max(0, dist);
     }
 

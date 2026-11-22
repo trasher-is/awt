@@ -80,7 +80,9 @@ let firstClampBad = null;
 for (const energy of ENERGIES) {
     for (const speed of SPEEDS) {
         for (const allied of [false, true]) {
-            const tMin = allied ? DEEP_SPACE_MIN * ALLIANCE_FACTOR : DEEP_SPACE_MIN;
+            // Since 7.2 race speed shrinks the fixed 45-min minimum too: 2700 / (1 + 0.11·speed).
+            const floorSecs = DEEP_SPACE_MIN / (1 + model.constants.SPEED_STEP * speed);
+            const tMin = allied ? floorSecs * ALLIANCE_FACTOR : floorSecs;
             for (const T of [0, -60, tMin - 1, tMin]) {
                 clampChecked++;
                 const r = isochroneRadius(T, energy, speed, allied);

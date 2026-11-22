@@ -11,7 +11,7 @@ const known = { ra: 0, rd: 0, phys: 12, math: 12, lvl: 20 };
 function observation({ id = 1, role = 'att', atkFleet = [0, 300, 0], defFleet = [2600, 0, 0],
     stats = { ra: 2, rd: 1, phys: 12, math: 11, lvl: 20 }, ally = known, scienceCeiling = 14, levelCeiling = 0,
     noise = 0, when = Date.parse('2026-10-01T12:00:00Z'), sbLevel = 0 } = {}) {
-    const result = model.simulate({ atkFleet, defFleet, sbLevel, atk: role === 'att' ? stats : ally, def: role === 'att' ? ally : stats });
+    const result = model.simulate({ atkFleet, defFleet, sbLevel, atk: role === 'att' ? stats : ally, def: role === 'att' ? ally : stats, rules: model.rulesAt(when) });
     const survivors = (role === 'att' ? result.survAtk : result.survDef).map(Math.round);
     const fleet = role === 'att' ? atkFleet : defFleet;
     return { report_id: id, side: role, when, atkFleet, defFleet, sbLevel, known: ally, scienceCeiling, levelCeiling,

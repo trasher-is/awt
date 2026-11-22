@@ -79,7 +79,7 @@ Four mechanics, two outcomes, **no cross-interaction between them**:
 
 ```
 lneff =  ln(S_att / S_def)                                    force
-       + ln(1+0.08·RAatk) − ln(1+0.08·RAdef)                  race attack, 8% per pick
+       + ln(1+0.09·RAatk) − ln(1+0.09·RAdef)                  race attack, 9% per pick (8% before 7.2.0-beta)
        + ln(1+0.015·PHatk) − ln(1+0.015·PHdef)                physics, 1.5% per level
        + ln(EDGEatk) − ln(EDGEdef)                            physics bracket + player level
 

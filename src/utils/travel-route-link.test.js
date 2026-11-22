@@ -177,8 +177,8 @@ async function main() {
     ok('compare renders "This flight" plus the seven sample flights', cmpRows().length === 8 && cmpRows()[0].startsWith('This flight'), cmpRows());
     ok('compare next-system row: now 0:55 / 1:01, new 1:30 / 0:48', cmpRows()[3] === 'Next system (d 1) 0:55 1:01 1:30 0:48', cmpRows()[3]);
     const cmpText = () => h.get('tc-cmp-summary').textContent.replace(/\s+/g, ' ');
-    ok('compare summary: A faster everywhere now, B up to about d 8.4 under the new rule',
-        cmpText().includes('Now: A is faster on every flight') && cmpText().includes('New: B is faster up to about d 8.4, A beyond that'), cmpText());
+    ok('compare summary: A faster everywhere under the old rule, B up to about d 8.4 under 7.2',
+        cmpText().includes('Old: A is faster on every flight') && cmpText().includes('7.2: B is faster up to about d 8.4, A beyond that'), cmpText());
     ok('compare shows the new fixed minimums per fleet', cmpText().includes('A 0:35 / 1:20, B 0:13 / 0:31'), cmpText());
     h.get('tc-cmp-step').value = '0';
     await h.get('tc-cmp-step').fire('input');
