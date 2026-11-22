@@ -119,7 +119,7 @@ async function main() {
     // Registration: sidebar button, settings tool, opener, panel list.
     const wrapper = read('public/Wrapper.html'), archives = read('public/js/ui/archives.js'), dash = read('public/js/ui/dashboard.js'), settings = read('public/js/utils/hub-settings.js');
     ok('sidebar has the Speed Rules button', wrapper.includes('id="open-speed-rules-btn"'));
-    ok('the button is a switchable tool in settings', /tool\('speedRules', 'Speed Rules', 'fa-scale-balanced', 'open-speed-rules-btn'\)/.test(settings));
+    ok('the button is a switchable tool in settings', /tool\('speedRules', 'Speed Rules', 'fa-scale-balanced', 'open-speed-rules-btn'[,)]/.test(settings));
     ok('dashboard wires the button to the opener', /open-speed-rules-btn'\)\?\.addEventListener\('click', openSpeedRulesPanel\)/.test(dash));
     ok('other panels close when it opens, and it closes when they do', (archives.match(/'speed-rules-panel'/g) || []).length >= 4 && /closeOtherPanels\('speed-rules-panel'\)/.test(archives));
     ok('it never auto-opens: the opener is only called from the click handler',

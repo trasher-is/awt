@@ -36,7 +36,18 @@ export function initSidebarTools() {
 // "a", "a and b", "a, b and c" — for the line naming what starts switched off.
 const sentenceList = names => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 
-const TAG = 'text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-amber-700/60 text-amber-400';
+// Status tags. Whole class strings, so Tailwind finds every one of them.
+const TAG_BASE = 'text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border';
+const TONES = {
+    amber: 'border-amber-700/60 text-amber-400',
+    emerald: 'border-emerald-700/60 text-emerald-400',
+    zinc: 'border-zinc-600 text-zinc-400',
+    red: 'border-red-700/60 text-red-400',
+};
+function statusTag(item) {
+    const s = item.status && S.STATUSES[item.status];
+    return s ? `<span class="${TAG_BASE} ${TONES[s.tone] || TONES.zinc}" data-status="${esc(item.status)}">${esc(s.label)}</span>` : '';
+}
 
 // One labelled switch. A real checkbox underneath, so it works with keyboard and screen
 // readers; the visible track and thumb are siblings that react to it through `peer`.
@@ -53,16 +64,15 @@ function toggleRow(item, on, bodyHtml) {
 }
 
 function toolRow(tool, on) {
-    const tag = tool.note ? `<span class="${TAG}">${esc(tool.note)}</span>` : '';
     return toggleRow(tool, on, `
         <span class="flex flex-wrap items-center gap-2 text-sm text-foreground">
-            <i class="fa-solid ${esc(tool.icon)} w-5 text-center text-muted-foreground"></i>${esc(tool.label)}${tag}
+            <i class="fa-solid ${esc(tool.icon)} w-5 text-center text-muted-foreground"></i>${esc(tool.label)}${statusTag(tool)}
         </span>`);
 }
 
 function injectionRow(item, on) {
     return toggleRow(item, on, `
-        <span class="block text-sm text-foreground">${esc(item.label)}</span>
+        <span class="flex flex-wrap items-center gap-2 text-sm text-foreground">${esc(item.label)}${statusTag(item)}</span>
         <span class="block text-xs text-muted-foreground mt-0.5">${esc(item.description)}</span>`);
 }
 

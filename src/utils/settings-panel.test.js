@@ -71,7 +71,14 @@ process.on('exit', () => { if (!finished) { console.error('  NOT OK - the suite 
     ok('every label and description is shown', S.ALL.every(i => defaults.includes(i.label.replace(/&/g, '&amp;')) ), S.ALL.filter(i => !defaults.includes(i.label)).map(i => i.label));
     ok('every group has its heading', S.GROUPS.every(g => defaults.includes(g.label)));
     ok('it says which tools start off, naming all four', /Off until you turn them on:[^<]*Road to TA[^<]*Battle Calc[^<]*Build Order and Empire Simulator\./.test(defaults), (defaults.match(/Off until[^<]*/) || [])[0]);
-    ok('the experimental tools are tagged', count(defaults, />Experimental</g) === S.TOOLS.filter(t => t.note).length && S.TOOLS.some(t => t.note));
+    ok('every item with a status shows exactly one tag, and no other item has one',
+        count(defaults, /data-status="/g) === S.ALL.filter(i => i.status).length && S.ALL.some(i => i.status), count(defaults, /data-status="/g));
+    const tagOf = key => { const at = defaults.indexOf(`data-setting="${key}"`); const next = defaults.indexOf('<label', at); return (defaults.slice(at, next < 0 ? undefined : next).match(/data-status="([^"]+)">([^<]+)</) || []).slice(1).join(':'); };
+    ok('Battle Calc and Travel Calc: Works as in-game', tagOf('tool.battleCalc') === 'ingame:Works as in-game' && tagOf('tool.travelCalc') === 'ingame:Works as in-game', [tagOf('tool.battleCalc'), tagOf('tool.travelCalc')]);
+    ok('Road to TA, Build Order and Empire Simulator: Experimental', ['tool.roadToTa', 'tool.buildOrder', 'tool.empireSim'].every(k => tagOf(k) === 'experimental:Experimental'));
+    ok('Speed Rules: Deprecated', tagOf('tool.speedRules') === 'deprecated:Deprecated', tagOf('tool.speedRules'));
+    ok('Player Level growth ETA: Not working', tagOf('inject.profilePlGrowth') === 'broken:Not working', tagOf('inject.profilePlGrowth'));
+    ok('every status names a known kind with a label and a tone', S.ALL.filter(i => i.status).every(i => S.STATUSES[i.status] && S.STATUSES[i.status].label && S.STATUSES[i.status].tone));
     ok('there is no switch for Settings, Link Discord, Logout or Admin', !/data-setting="[^"]*(settings|discord|logout|admin)/i.test(defaults));
     ok('it explains what cannot be switched off, and why', /Not listed:[^<]*alliance relies/.test(defaults));
     ok('each switch is a real checkbox inside a label (keyboard and screen readers)', count(defaults, /<label /g) === S.ALL.length && count(defaults, /type="checkbox"/g) === S.ALL.length);
