@@ -1493,14 +1493,29 @@ Experience needed per player level; **aggregated** is the running total.
 
 ### Full XP from combat
 
-Winning a battle only pays out full XP if you had **at least 1 starbase and at least 2
-surviving ships** in the fight — otherwise XP is reduced to **25%**.
-
-**How much:** the winner gains XP equal to the **combat value the loser lost** — measured on
-the hub's battle reports (2026-10-04): 1,481 of 1,534 match exactly, and most of the rest are
-the reduced 25% payout, seen when the winner kept fewer than 2 ships. The loser gains nothing.
+The winner gains XP equal to the **combat value the loser lost**. The loser gains nothing.
 Beating a starbase therefore pays its whole CV (SB 12 = 515 XP), which can lift a low-level
 attacker a level or two before a counter-attack lands; the incoming alerts count that.
+
+**Full or 25%:** the payout is full only if the winner ends the battle with **at least 2
+survivors**, where **each surviving starbase level counts as one**. Below 2 the winner gets
+**25%, rounded up**: `ceil(lost CV / 4)`. Losing 3 CV pays 1 XP, 5 pays 2, 15 pays 4.
+
+- A defender winning with its starbase alone gets full XP if the starbase still has 2 or more
+  levels after the fight. SB3 that drops to SB2 pays full; SB2 that drops to SB1 pays 25%.
+- A starbase plus 1 surviving ship also counts as 2.
+- An attacker never has a starbase, so it needs 2 surviving ships.
+
+This rule fits every battle report from the round that ended on 2026-11-08 (4,439 of 4,439):
+1,495 defender wins and 2,784 attacker wins at full XP, and 60 defender wins and 100 attacker
+wins at 25%. The earlier text said "at least 1 starbase and at least 2 surviving ships". That
+does not match: a winner with no starbase and 2+ ships gets full XP.
+
+**7.2.0-beta, unverified:** starbases now take double damage and keep hidden fractional levels
+(see [Starbase](#starbase)). The 2-survivor test probably uses the whole level shown after the
+battle, but no 7.2 report has been checked yet. Under 7.2 a lone 1-destroyer hit takes SB3 to
+about SB2.3, and a second hit takes it to about SB1.2. Two full-XP kills in a row (6 XP, enough
+for player level 1) therefore need SB4.
 
 **RZ:** `Fleet.ExperiencePointsFactorFromAllied` is **0.25**, compared with standard's **1**.
 The standard XP examples above must therefore not be treated as full RedZone allied-battle
