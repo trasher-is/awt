@@ -20,7 +20,9 @@ async function runCheck() {
     if (!globalThis.AWGameRate.isMemberActive()) return; // member away: no game traffic on their session (game-rate-limit.js)
     if (!(await claimSharedJob(JOB))) return; // another member has it, or it already ran today
     try {
-        const pageRes = await gameFetch(RANKING_PATH);
+        // no-store: a page the member opened earlier must not answer from the browser cache,
+        // or yesterday's ranking is stored as today's (2026-11-24).
+        const pageRes = await gameFetch(RANKING_PATH, { cache: 'no-store' });
         if (!pageRes.ok) return;
         const doc = new DOMParser().parseFromString(await pageRes.text(), 'text/html');
         const rows = parseBestPlanetsPage(doc);

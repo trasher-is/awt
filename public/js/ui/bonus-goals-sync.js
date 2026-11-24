@@ -22,7 +22,9 @@ const JOB = 'ranking-bonus-goals';
 async function syncOneTarget(target) {
     const path = target && target.config && target.config.ranking_path;
     if (typeof path !== 'string' || !path.startsWith('/')) return; // malformed config — nothing sane to fetch
-    const pageRes = await gameFetch(path);
+    // no-store: a page the member opened earlier must not answer from the browser cache,
+    // or yesterday's ranking is stored as today's (2026-11-24).
+    const pageRes = await gameFetch(path, { cache: 'no-store' });
     if (!pageRes.ok) return;
     const doc = new DOMParser().parseFromString(await pageRes.text(), 'text/html');
     const rows = parseRankingPage(doc);
