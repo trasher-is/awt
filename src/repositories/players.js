@@ -266,7 +266,16 @@ function getPlayerJoinedWithTag(id) {
     return getPlayerJoinedWithTagStmt.get(id);
 }
 
-const getPlayerRestartCheckStmt = db.prepare(`SELECT logins, points, origin_system FROM players WHERE id = ?`);
+// Also carries the stored home, and whether the hub still records that planet as this
+// player's — see keepStoredHome in routes/sync.js.
+const getPlayerRestartCheckStmt = db.prepare(`
+    SELECT p.logins, p.points, p.origin_system,
+           p.home_planet_id, p.home_system_id, p.home_planet_index, p.possible_homes,
+           EXISTS (SELECT 1 FROM planets h
+                   WHERE h.system_id = p.home_system_id AND h.planet_index = p.home_planet_index
+                     AND h.owner_id = p.id) AS home_still_theirs
+    FROM players p WHERE p.id = ?
+`);
 function getPlayerRestartCheck(id) {
     return getPlayerRestartCheckStmt.get(id);
 }
@@ -727,14 +736,16 @@ function getPlayerAllianceIdByName(name) {
 }
 
 // Where a colony ship launches from, absent any other tracking of where a player's colony
-// ships actually sit (v1 — see routes/intel.js's colonize-launch-windows route). Same
-// COALESCE fallback as the intercept-homes queries below: home_system_id/home_planet_index
-// only populate from a full profile scrape (player-parser.js), so before that ever runs
-// this falls back to origin_system (known from the API's ListPlayer sync) + planet index 1
-// (a player's very first planet, per docs/game-rules.md's spawn rules).
+// ships actually sit (v1 — see routes/intel.js's colonize-launch-windows route).
+// home_system_id/home_planet_index only populate from a profile scrape that could see the
+// player's planets (player-parser.js). Without one there is no launch planet to name: the
+// origin system is known from the API, but which planet in it is not. This used to answer
+// "planet #1" there, and players do not start on #1, so a short hop inside the home system
+// came out hours wrong (2026-11-23: 4h51m early). planet_index is null until a home is
+// known, and the caller must say so rather than compute a time.
 const getPlayerLaunchOriginStmt = db.prepare(`
     SELECT COALESCE(p.home_system_id, p.origin_system) AS system_id,
-           COALESCE(p.home_planet_index, 1) AS planet_index,
+           CASE WHEN p.home_system_id IS NOT NULL THEN p.home_planet_index END AS planet_index,
            s.x, s.y
     FROM players p
     JOIN systems s ON s.id = COALESCE(p.home_system_id, p.origin_system)
@@ -749,6 +760,7 @@ function getPlayerLaunchOrigin(playerId) {
 const getInterceptHomesByAllianceStmt = db.prepare(`
     SELECT p.name AS owner_name, p.energy, p.race_speed, p.economy,
            COALESCE(p.home_planet_index, 1) AS launch_planet,
+           (p.home_system_id IS NOT NULL AND p.home_planet_index IS NOT NULL) AS home_known,
            ams.production_points, ams.astro_dollars,
            s.x AS sx, s.y AS sy
     FROM players p
@@ -763,6 +775,7 @@ function getInterceptHomesByAlliance(allianceId) {
 const getInterceptHomesByActiveUsersStmt = db.prepare(`
     SELECT p.name AS owner_name, p.energy, p.race_speed, p.economy,
            COALESCE(p.home_planet_index, 1) AS launch_planet,
+           (p.home_system_id IS NOT NULL AND p.home_planet_index IS NOT NULL) AS home_known,
            ams.production_points, ams.astro_dollars,
            s.x AS sx, s.y AS sy
     FROM players p

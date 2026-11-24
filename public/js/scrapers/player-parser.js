@@ -35,6 +35,7 @@ export function extractPlayerData(playerId, doc = document, report = new ScrapeR
         home_system_id: null,
         home_planet_index: null,
         possible_homes: [],
+        visible_planets: [],
 
         // Infrastructure Metrics (Populated later by background stats scan)
         total_planets: 0,
@@ -227,6 +228,9 @@ export function extractPlayerData(playerId, doc = document, report = new ScrapeR
                 }
             }
             p.possible_homes = alternatives;
+            // Which planets this viewer could see at all, so the server can tell "the home
+            // moved" from "the home is out of my sight" (see sync.js's keepStoredHome).
+            p.visible_planets = parsedPlanets.map(({ system_id, planet_index }) => ({ system_id, planet_index }));
         }
     }
 

@@ -670,6 +670,24 @@ router.post('/sync/system', requireAuth, (req, res) => {
 });
 
 // --- PLAYER PROFILE SCRAPER RECEIVER ---
+
+// Should this profile scrape leave the stored home alone? A profile only lists the planets
+// its VIEWER can see, so a member without sight of the player's system posts a partial or
+// empty list. Two cases where that list says nothing about the home:
+//  - it names no home at all. Writing that erased every member's home on each roster scan
+//    by someone who could not see them (2026-11-23).
+//  - it names another planet, but the stored home was not among the planets the viewer saw
+//    and the hub still records it as this player's: the pick is just the biggest planet in
+//    view. (Older tabs do not send visible_planets; their pick is accepted as before.)
+// A changed origin means a different life of this account, so nothing is kept then.
+function keepStoredHome(stored, seenHome, visiblePlanets, originChanged) {
+    if (originChanged || !stored || stored.home_system_id == null || stored.home_planet_index == null) return false;
+    if (seenHome.home_system_id == null || seenHome.home_planet_index == null) return true;
+    if (!Array.isArray(visiblePlanets) || !stored.home_still_theirs) return false;
+    return !visiblePlanets.some(v => v && v.system_id === stored.home_system_id
+        && v.planet_index === stored.home_planet_index);
+}
+
 router.post('/sync/player', requireAuth, (req, res) => {
     const p = req.body;
 
@@ -785,6 +803,12 @@ router.post('/sync/player', requireAuth, (req, res) => {
         } else {
             if (player.origin_system === null && oldPlayer && Number.isSafeInteger(oldPlayer.origin_system) && oldPlayer.origin_system > 0) {
                 player.origin_system = oldPlayer.origin_system;
+            }
+            if (keepStoredHome(oldPlayer, player, p.visible_planets, originChanged)) {
+                player.home_planet_id = oldPlayer.home_planet_id;
+                player.home_system_id = oldPlayer.home_system_id;
+                player.home_planet_index = oldPlayer.home_planet_index;
+                player.possible_homes = oldPlayer.possible_homes || '[]';
             }
             if (originChanged) {
                 console.log(`[SYSTEM] Player ${player.id} origin changed ${oldPlayer.origin_system} -> ${player.origin_system} without a login reset; keeping recorded fleet intel.`);

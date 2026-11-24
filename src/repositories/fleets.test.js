@@ -157,7 +157,7 @@ const legacyHistory = fleets.getFleetSightingHistory(303, 5);
 ok('a rankings row with no location falls back to the player\'s registered home system, marked unconfirmed',
     legacyHistory.length === 1 && legacyHistory[0].source === 'rankings'
     && legacyHistory[0].system_id === 400 && legacyHistory[0].system_name === 'Praepes'
-    && legacyHistory[0].planet_index === 1 // COALESCE(home_planet_index, 1): Loner has none on record
+    && legacyHistory[0].planet_index === null // Loner has no home planet on record, so none is named
     && legacyHistory[0].location_status === 'unknown' && legacyHistory[0].location_confirmed === false, legacyHistory);
 
 // Several ranked fleets are several sightings; one older than the window is left out.

@@ -67,11 +67,11 @@ db.prepare(`UPDATE players SET origin_system = 10 WHERE id = 1`).run();
 const observers = players.getVisionObservers([1, 2]);
 ok('getVisionObservers only returns players with a mapped origin system', observers.length === 1 && observers[0].playerId === 1);
 
-// ── getPlayerLaunchOrigin: falls back to origin_system + planet index 1 until a full
-// profile scrape sets home_system_id/home_planet_index (see the repo function's comment).
+// ── getPlayerLaunchOrigin: only the origin SYSTEM is known until a profile scrape sets
+// home_system_id/home_planet_index; the planet is never guessed (2026-11-23).
 const originFallback = players.getPlayerLaunchOrigin(1);
-ok('before a home is known, falls back to origin_system + planet index 1',
-    originFallback && originFallback.system_id === 10 && originFallback.planet_index === 1, originFallback);
+ok('before a home is known, the origin system is returned with no planet, never #1',
+    originFallback && originFallback.system_id === 10 && originFallback.planet_index === null, originFallback);
 ok('carries the origin system\'s coordinates for a travel-time calc',
     originFallback && originFallback.x === 5 && originFallback.y === 5, originFallback);
 

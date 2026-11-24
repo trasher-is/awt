@@ -341,6 +341,17 @@ export async function initColonizeLaunchWindows() {
     }
     if (!data || !data.success || !data.origin || !Array.isArray(data.plans) || !data.plans.length) return;
 
+    // No launch planet on record: say so. A time computed from a guessed planet looks exactly
+    // like a real one and can be hours off (2026-11-23).
+    if (!Number.isInteger(data.origin.planet_index)) {
+        const note = document.createElement('div');
+        note.id = 'custom-colonize-windows';
+        note.style.cssText = 'margin-top:4px;font-size:11px;color:#e8a;';
+        note.textContent = 'Launch times: your home planet is not known yet. Open your own player profile once, then reload this page.';
+        if (cultureRow.cells[4]) cultureRow.cells[4].appendChild(note);
+        return;
+    }
+
     const energyState = readScienceState(SCIENCES.find(s => s.name === 'Energy'));
     const energyLevel = energyState ? energyState.level : 0;
 
@@ -1400,12 +1411,14 @@ function fleetAgeLabel(iso) {
 function fleetLocationCell(entry) {
     if (entry.system_id == null) return `<span class="lowlight" title="No location on record">—</span>`;
     const name = entry.system_name ? `${esc(entry.system_name)} ` : '';
-    const label = `[${entry.system_id}] ${name}#${entry.planet_index}`;
+    // The home fallback can know the system without knowing the planet.
+    const planet = entry.planet_index == null ? '' : `#${entry.planet_index}`;
+    const label = `[${entry.system_id}] ${name}${planet}`.trim();
     // A rankings entry from before the ranking printed planets has no location of its own
     // -- this is the player's registered home planet instead, offered
     // because a plausible location plus the Last Seen column beats a bare dash, but marked
     // so it's never mistaken for a live sighting.
-    const suffix = entry.location_confirmed === false ? ' <span class="lowlight" title="Not confirmed live — this is the registered home planet, shown as a best guess">(home base)</span>' : '';
+    const suffix = entry.location_confirmed === false ? ' <span class="lowlight" title="Not confirmed live — this is the registered home ${entry.planet_index == null ? 'system' : 'planet'}, shown as a best guess">(home base)</span>' : '';
     return `<a href="/Game/Map/SolarSystem/${entry.system_id}">${label}</a>${suffix}`;
 }
 function fleetSourceCell(entry) {
