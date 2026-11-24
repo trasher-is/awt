@@ -1418,7 +1418,7 @@ function fleetLocationCell(entry) {
     // -- this is the player's registered home planet instead, offered
     // because a plausible location plus the Last Seen column beats a bare dash, but marked
     // so it's never mistaken for a live sighting.
-    const suffix = entry.location_confirmed === false ? ' <span class="lowlight" title="Not confirmed live — this is the registered home ${entry.planet_index == null ? 'system' : 'planet'}, shown as a best guess">(home base)</span>' : '';
+    const suffix = entry.location_confirmed === false ? ` <span class="lowlight" title="Not confirmed live — this is the registered home ${entry.planet_index == null ? 'system' : 'planet'}, shown as a best guess">(home base)</span>` : '';
     return `<a href="/Game/Map/SolarSystem/${entry.system_id}">${label}</a>${suffix}`;
 }
 function fleetSourceCell(entry) {
