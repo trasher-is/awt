@@ -88,5 +88,23 @@ for (const href of ['/Game/Map/SolarSystem/0', '/Game/Map/SolarSystem/-2', '/Gam
     ok(`an invalid system path remains unknown: ${href}`, player.origin_system === null, player.origin_system);
 }
 
+// The planets a viewer could see travel with the profile, so the server can tell a home that
+// moved from one out of sight (sync-player-home.test.js covers what it does with them).
+function planetRow(id, href, pop) {
+    return { closest: () => null, getAttribute: () => String(id),
+        querySelector: () => link(href), querySelectorAll: () => [cell(''), cell(''), cell(String(pop))] };
+}
+const withRows = profile([]);
+const baseAll = withRows.querySelectorAll;
+withRows.querySelectorAll = selector => selector === 'tr[data-planet-id]'
+    ? [planetRow(71, '/Game/Map/SolarSystem/4/11', 9), planetRow(72, '/Game/Map/SolarSystem/4/12', 3)] : baseAll(selector);
+context.syntheticProfile = withRows;
+player = vm.runInContext('extractPlayerData(701, syntheticProfile)', context);
+ok('every planet row the viewer saw is listed', JSON.stringify(player.visible_planets)
+    === '[{"system_id":4,"planet_index":11},{"system_id":4,"planet_index":12}]', player.visible_planets);
+ok('the home is still the first row', player.home_system_id === 4 && player.home_planet_index === 11);
+player = extract([]);
+ok('a profile with no visible planets lists none and names no home', player.visible_planets.length === 0 && player.home_system_id === null);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exitCode = 1;

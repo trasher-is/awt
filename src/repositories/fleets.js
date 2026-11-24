@@ -266,12 +266,12 @@ function getFleetLocationMatchesForPlayer(playerId) {
 }
 
 // Best-known home location for a player, used ONLY as a fallback below when a rankings
-// entry has no location of its own (a row from before the Planet column) — same COALESCE(home_system_id, origin_system) /
-// COALESCE(home_planet_index, 1) convention already used for the intercept-homes queries
-// elsewhere in players.js.
+// entry has no location of its own (a row from before the Planet column) — same COALESCE(home_system_id, origin_system)
+// convention as the intercept-homes queries in players.js. planet_index is null when only
+// the origin system is known: the planet in it is not #1 by any rule, so none is named.
 const getHomeFallbackStmt = db.prepare(`
     SELECT COALESCE(p.home_system_id, p.origin_system) AS system_id,
-           COALESCE(p.home_planet_index, 1) AS planet_index,
+           CASE WHEN p.home_system_id IS NOT NULL THEN p.home_planet_index END AS planet_index,
            s.name AS system_name
     FROM players p
     LEFT JOIN systems s ON s.id = COALESCE(p.home_system_id, p.origin_system)

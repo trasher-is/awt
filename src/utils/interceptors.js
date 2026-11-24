@@ -167,7 +167,10 @@ function computeInterceptors(attack, nowUnix) {
         const fleet = buildableFleet(pp + (ppPrice > 0 ? ad / ppPrice : 0), h.economy);
         if (!fleet) continue;
         const travel = calcTravelSeconds(h.sx, h.sy, h.launch_planet, target.x, target.y, attack.planetIndex, h.energy, h.race_speed, true);
-        consider(h.owner_name, cvOf(fleet.ships), travel, 'build', `build & launch: ${fleet.label}`, { ships: fleet.ships });
+        // Home unknown: the query assumed planet #1 of the origin system. Dropping a possible
+        // defender from an alert is worse than a rough ETA, so keep the line and say so.
+        const rough = h.home_known ? '' : ' (home planet unknown, ETA rough)';
+        consider(h.owner_name, cvOf(fleet.ships), travel, 'build', `build & launch: ${fleet.label}${rough}`, { ships: fleet.ships });
     }
 
     // One line per member: the strongest option that makes it in time; when none does,
