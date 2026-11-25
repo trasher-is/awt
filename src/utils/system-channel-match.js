@@ -17,7 +17,8 @@
 // The one thing every convention shares is the system's NAME, so that is what this matches
 // on. Numbers are then used only as confirmation, never as the primary key: a channel
 // naming a system AND carrying its id is a certainty, while a bare number is just as likely
-// to be a coordinate.
+// to be a coordinate. The one exception to the full name is a shortened one right after the
+// id ("4-ras-al-asad") — see shortenedNameMatch.
 //
 // LOADING: dual Node/browser, same pattern as sqlite-time.js — server-side today, but it
 // belongs with the other shared models rather than buried in the bot.
@@ -77,7 +78,26 @@
                 bestSlugLength = nameSlug.length;
             }
         }
-        return best;
+        return best || shortenedNameMatch(slug, systems);
+    }
+
+    // Long names get shortened: "4-ras-al-asad" for Ras al Asad al Shamaliyy dropped its
+    // alerts silently on 2026-11-24. Only tried when no full name fits, and deliberately
+    // narrow, because a wrong match posts one system's intel into another's channel: the
+    // channel must START with the system's id (a later number may be a coordinate) and go
+    // straight on with at least two leading words of THAT system's name. One word is not
+    // enough — "al" alone opens many real names.
+    function shortenedNameMatch(slug, systems) {
+        const tokens = slug.split('-');
+        if (!/^\d+$/.test(tokens[0])) return null;
+        const id = parseInt(tokens[0], 10);
+        const rest = tokens.slice(1);
+        for (const system of Array.isArray(systems) ? systems : []) {
+            if (!system || system.id !== id) continue;
+            const words = slugifyName(system.name).split('-');
+            if (rest.length >= 2 && words.length >= 2 && rest[0] === words[0] && rest[1] === words[1]) return system;
+        }
+        return null;
     }
 
     return { slugifyName, containsTokens, bestSystemForChannel };
