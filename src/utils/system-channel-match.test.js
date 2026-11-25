@@ -19,7 +19,8 @@ const ok = (name, cond, detail) => {
 
 // A slice of the real galaxy, including every nesting trap it actually contains.
 const SYSTEMS = [
-    { id: 1, name: 'Rana' }, { id: 3, name: 'Meboula' }, { id: 6, name: 'Benetnash' },
+    { id: 1, name: 'Rana' }, { id: 3, name: 'Meboula' },
+    { id: 4, name: 'Ras al Asad al Shamaliyy' }, { id: 143, name: 'Al Kalb al Asad' }, { id: 6, name: 'Benetnash' },
     { id: 9, name: 'Alphirk' }, { id: 14, name: 'Al Bali' }, { id: 15, name: 'Gorgonea Secunda' },
     { id: 16, name: 'Beshgar Noctis' }, { id: 22, name: 'Albaldah' }, { id: 27, name: 'Al Dhiba' },
     { id: 28, name: 'Arich' }, { id: 29, name: 'Praepes' }, { id: 30, name: 'Okda' },
@@ -93,6 +94,21 @@ console.log('\n── An id alone is not enough ' + '─'.repeat(47));
 // nothing matches without the name to anchor it.
 ok('a channel that is just a number matches nothing', matchId('41') === null, matchId('41'));
 ok('a number with unrelated words matches nothing', matchId('top-41-players') === null, matchId('top-41-players'));
+
+console.log('\n── A shortened name after the id ' + '─'.repeat(43));
+// "4-ras-al-asad" is the real Beta 7 channel whose alerts were dropped on 2026-11-24.
+for (const [channel, id] of [['4-ras-al-asad', 4], ['4_ras-al', 4], ['4-ras-al-asad-operation', 4],
+    ['4-ras-al-asad-al-shalamiyy', 4], ['4-ras-al-asad-al-shamaliyy', 4], ['143-al-kalb', 143]]) {
+    ok(`${channel} -> ${id}`, matchId(channel) === id, matchId(channel));
+}
+ok('the id must be that system\'s own', matchId('3-ras-al-asad') === null, matchId('3-ras-al-asad'));
+ok('no id, no shortened match', matchId('ras-al-asad') === null, matchId('ras-al-asad'));
+ok('an id that is not first may be a coordinate', matchId('ras-al-asad-4') === null, matchId('ras-al-asad-4'));
+ok('one leading word is not enough', matchId('4-ras') === null, matchId('4-ras'));
+ok('"14-al-dhibah" shares only "al" with Al Bali', matchId('14-al-dhibah') === null, matchId('14-al-dhibah'));
+ok('a full name still beats a shortened one', matchId('4-ras-al-rana') === 1, matchId('4-ras-al-rana'));
+ok('a system row with no name is skipped here too',
+    bestSystemForChannel('4-ras-al-asad', [{ id: 4, name: null }]) === null);
 
 console.log('\n── Degenerate input ' + '─'.repeat(56));
 ok('empty name', matchId('') === null);
