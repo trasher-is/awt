@@ -1,7 +1,5 @@
 import { esc } from '../utils/escape.js';
 import { readUtcTimestamp } from '../utils/fleet-time.js';
-import { mountBattleRaceIntel } from '../ui/battle-race-intel.js';
-import '../utils/battle-model.js';
 import '../utils/sqlite-time.js';    // side-effect import: puts the model on globalThis
 import '../utils/game-rate-limit.js';
 import '../utils/game-tables.js';    // side-effect import: empire-model.js's own dependency
@@ -10,6 +8,7 @@ import '../utils/empire-model.js';   // side-effect import: TRAIT_PCT, the ONE s
 import '../utils/aw-api.js';         // side-effect import: getTravelTime, for initColonizeLaunchWindows
 import '../utils/login-gaps.js';     // side-effect import: AWLoginGaps, the profile's quiet-window analysis
 import '../utils/manual-intel-form.js'; // side-effect import: AWManualIntelForm, the screenshot-entry form
+import '../utils/player-history-parser.js'; // side-effect import: AWPlayerHistory, old names off the History page
 import '../utils/system-plan-panel.js'; // side-effect import: AWSystemPlanPanel, the collapsed system-plan panel's HTML
 import '../utils/social-hint.js';    // side-effect import: AWSocialHint, the Science page's Social marker (needs game-tables above)
 import '../utils/research-time.js';  // side-effect import: AWResearch, research time shared by the calculator and the Economy countdown
@@ -1189,7 +1188,8 @@ export async function initProfileHubIntel() {
     const p = data.player;
     const partnerIntel = await partnerIntelReq;
 
-    const hasLiveIntel = genuineLiveIntelTables(document, '.race-summary, .ir-summary').length > 0;
+    const liveTables = genuineLiveIntelTables(document, '.race-summary, .ir-summary');
+    const hasLiveIntel = liveTables.length > 0;
 
     const wrap = document.createElement('div');
     wrap.className = 'col-12';
@@ -1204,11 +1204,10 @@ export async function initProfileHubIntel() {
         </div>`;
     anchor.parentNode.insertBefore(wrap, anchor);
     mountFleetsCardExpand(wrap);
-    mountBattleRaceIntel(wrap, { playerId, hasBio: globalThis.AWBattleModel.hasCurrentIntel(p), hasLiveIntel });
-    // Only where the hub has no live view of its own: with the game's real Intelligence
-    // Report on screen there is nothing to type in, and offering to overwrite a live capture
-    // with a hand-typed one would be a way to make good data worse.
-    if (!hasLiveIntel) mountManualIntelEntry(wrap, { ...p, id: playerId });
+
+    // The column that shows the intel: the game's own when it has some, else the one added
+    // below. The action buttons go under it.
+    let intelHost = hasLiveIntel ? liveTables[liveTables.length - 1].closest('[class*="col-"]') : null;
 
     // Without live intel, the game renders the player-info card as a single col-12 instead
     // of its usual col-lg-6 paired with an Intelligence Report column — there is no "top
@@ -1227,8 +1226,11 @@ export async function initProfileHubIntel() {
             intelCol.id = 'awt-hub-intel-col';
             intelCol.innerHTML = buildIntelCard(p, partnerIntel);
             playerInfoCol.insertAdjacentElement('afterend', intelCol);
+            intelHost = intelCol;
         }
     }
+
+    mountProfileActions(intelHost || wrap, { ...p, id: playerId }, { hasLiveIntel });
 }
 
 function hideSupporterPromo() {
@@ -1461,7 +1463,7 @@ function buildFleetsCard(history) {
             <tbody>${rows}${moreRow}</tbody>
         </table>`;
 }
-// Separate mount step (same convention as mountBattleRaceIntel/mountManualIntelEntry below)
+// Separate mount step (same convention as mountManualIntelEntry below)
 // since the "Show more" toggle needs a real event listener, not an inline handler, once
 // buildFleetsCard's string has already been inserted via innerHTML.
 function mountFleetsCardExpand(wrap) {
@@ -1626,19 +1628,151 @@ function buildStaleIntelCard(p) {
     return buildIrTable(intelCardCaption(p), irRows) + buildRaceTable(raceCellKnown, p);
 }
 
-// The form lives under the card rather than replacing it, so the values already on record
-// stay readable while they are being corrected against a fresh screenshot.
-function mountManualIntelEntry(wrap, player) {
+// The buttons under the intel card, styled and laid out like the game's own button row under
+// the player card (a table cell with .bg-black and .btn .btn-md). What they open goes below
+// the row, so the values on record stay readable while a form or a list is open.
+function mountProfileActions(container, player, { hasLiveIntel }) {
+    const row = document.createElement('table');
+    row.className = 'table mb-2';
+    row.id = 'awt-profile-actions';
+    row.innerHTML = '<tbody><tr><td class="bg-black"></td></tr></tbody>';
+    const cell = row.querySelector('td');
+    const panels = document.createElement('div');
+    container.append(row, panels);
+
+    // Only where the hub has no live view of its own: with the game's real Intelligence
+    // Report on screen there is nothing to type in, and offering to overwrite a live capture
+    // with a hand-typed one would be a way to make good data worse.
+    if (!hasLiveIntel) mountManualIntelEntry(cell, panels, player);
+    mountOldNames(cell, panels, player);
+}
+
+function profileActionButton(cell, className, icon, label) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `btn btn-md ${className} mt-1`;
+    button.innerHTML = `<i class="bi ${icon}"></i> ${esc(label)}`;
+    // The game separates its own buttons with the whitespace between the links.
+    if (cell.children.length) cell.append(' ');
+    cell.append(button);
+    return button;
+}
+
+// Past names from the game's History page (one game request, only when the member taps), and
+// the names members entered by hand, from the hub. The two load separately: either one failing
+// leaves the other usable. Once the History page has been read, the button just shows or hides
+// the panel.
+function mountOldNames(cell, panels, player) {
+    const { parseStarts, oldNames } = globalThis.AWPlayerHistory;
+    const button = profileActionButton(cell, 'btn-primary', 'bi-clock-history', 'Old names');
+    const panel = document.createElement('div');
+    panel.id = 'awt-old-names';
+    panel.hidden = true;
+    panel.innerHTML = '<div></div><div></div>';
+    const [history, known] = panel.children;
+    panels.append(panel);
+    const knownUrl = `/hub-api/intel/player/${player.id}/known-names`;
+    let historyRead = false, knownRead = false;
+
+    async function loadHistory() {
+        history.innerHTML = buildOldNamesTable(null, 'Loading…');
+        try {
+            const res = await gameFetch(`/Game/Players/History/${player.id}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const starts = parseStarts(new DOMParser().parseFromString(await res.text(), 'text/html'));
+            if (!starts) throw new Error('not a History page');
+            // The page's own heading is the newest name there is; the hub's copy can lag a rename.
+            const heading = document.querySelector(`th a[href="/Game/Players/Profile/${player.id}"]`);
+            history.innerHTML = buildOldNamesTable(oldNames(starts, heading?.textContent || player.name), 'No other names.');
+            historyRead = true;
+        } catch (err) {
+            history.innerHTML = buildOldNamesTable(null, `Could not read the History page (${err.message}). Tap Old names to retry.`);
+        }
+    }
+
+    // One call for list, add and remove: each answers with the list as it now stands.
+    async function callKnown(url, init) {
+        const res = await fetch(url, init);
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !body.success) throw new Error(body.error || `HTTP ${res.status}`);
+        return body.names;
+    }
+
+    async function loadKnown() {
+        try {
+            known.innerHTML = buildKnownNamesTable(await callKnown(knownUrl, { cache: 'no-store' }));
+            knownRead = true;
+        } catch (err) {
+            known.innerHTML = `<div class="small mb-2">${esc(`Could not load known names (${err.message}).`)}</div>`;
+        }
+    }
+
+    // Redraws on success. On failure the server's reason is shown and what was typed is kept.
+    async function changeKnown(control, url, init) {
+        control.disabled = true;
+        try {
+            known.innerHTML = buildKnownNamesTable(await callKnown(url, init));
+        } catch (err) {
+            known.querySelector('[data-kn-status]').textContent = err.message;
+            control.disabled = false;
+        }
+    }
+
+    known.addEventListener('submit', event => {
+        event.preventDefault();
+        changeKnown(event.target.querySelector('button'), knownUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: event.target.querySelector('input').value }),
+        });
+    });
+    known.addEventListener('click', event => {
+        const remove = event.target.closest('[data-kn-remove]');
+        if (remove) changeKnown(remove, `${knownUrl}/${remove.dataset.knRemove}`, { method: 'DELETE' });
+    });
+
+    button.addEventListener('click', async () => {
+        if (historyRead && knownRead) { panel.hidden = !panel.hidden; return; }
+        button.disabled = true;
+        panel.hidden = false;
+        await Promise.all([historyRead || loadHistory(), knownRead || loadKnown()]);
+        button.disabled = false;
+    });
+}
+
+function buildOldNamesTable(names, message) {
+    const rows = names && names.length
+        ? names.map(({ name, uses }) => `<tr><td>${esc(name)}</td><td class="lowlight">${
+            uses.map(u => esc([u.round, u.date && `(${u.date})`].filter(Boolean).join(' '))).join('<br>')}</td></tr>`).join('')
+        : `<tr><td colspan="2" class="lowlight">${esc(message)}</td></tr>`;
+    return `
+        <table class="table mb-2">
+            <thead><tr><th colspan="2"><i class="bi bi-clock-history"></i> Old names</th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>`;
+}
+
+function buildKnownNamesTable(names) {
+    const rows = names.map(n => `<tr><td>${esc(n.name)}</td><td class="lowlight">${n.addedBy ? `added by ${esc(n.addedBy)}` : ''}${
+        n.canRemove ? ` <button type="button" class="btn btn-sm btn-danger ms-1" data-kn-remove="${Number(n.id)}" title="Remove this name" aria-label="Remove ${esc(n.name)}"><i class="bi bi-x-lg"></i> Remove</button>` : ''}</td></tr>`).join('');
+    return `
+        <table class="table mb-2">
+            <thead><tr><th colspan="2"><i class="bi bi-person-badge"></i> Other known names</th></tr></thead>
+            <tbody>${rows}
+                <tr><td colspan="2" class="bg-black">
+                    <form class="d-flex gap-2">
+                        <input type="text" class="form-control" maxlength="50" placeholder="Other name" aria-label="Other known name" autocomplete="off">
+                        <button type="submit" class="btn btn-md btn-success">Add</button>
+                    </form>
+                    <div class="small" data-kn-status role="status"></div>
+                </td></tr>
+            </tbody>
+        </table>`;
+}
+
+function mountManualIntelEntry(cell, host, player) {
     const { buildManualIntelFormHtml, readManualIntelForm, racePointTotal } = globalThis.AWManualIntelForm;
-    const host = document.createElement('div');
-    host.id = 'aw-manual-intel-host';
-    const toggle = document.createElement('button');
-    toggle.type = 'button';
-    toggle.className = 'btn btn-sm btn-outline-info';
-    toggle.style.cssText = 'margin-bottom:8px;';
-    toggle.textContent = player.has_intel ? '✎ Correct / re-enter intel from a screenshot' : '✎ Enter intel from a screenshot';
-    host.appendChild(toggle);
-    wrap.appendChild(host);
+    const toggle = profileActionButton(cell, 'btn-success', 'bi-pencil', 'Enter intel manually');
 
     toggle.addEventListener('click', () => {
         if (host.querySelector('.aw-manual-intel')) return;

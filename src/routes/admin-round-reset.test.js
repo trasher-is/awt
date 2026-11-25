@@ -102,6 +102,7 @@ function seedRound({ coords, routeToo }) {
         db.prepare(`INSERT INTO rz_plans (planet_id, text) VALUES (77, 'redzone note')`).run();
         db.prepare(`INSERT INTO alliance_broadcasts (message, author_name, display_time) VALUES ('hi', 'admin', '10:00')`).run();
         db.prepare(`INSERT INTO starbase_order_audit (order_id, system_id, planet_index, actor_user_id, actor_game_name) VALUES (1, 11, 2, ?, 'Planner')`).run(planner.id);
+        db.prepare(`INSERT INTO player_known_names (player_id, name, added_by) VALUES (500, 'Old Runner', 'Planner')`).run();
         const usersBefore = count('app_users');
         const roundsBefore = count('rounds');
 
@@ -125,6 +126,7 @@ function seedRound({ coords, routeToo }) {
         ok('it archived the round on the way', r.body.archived && r.body.archived.systems === 3 && count('rounds') === roundsBefore + 1, r.body.archived);
 
         const after = { systems: count('systems'), routes: count('routes'), legs: count('route_legs'), takeovers: count('planet_takeovers') };
+        ok('names members entered for a player survive the reset', count('player_known_names') === 1);
         ok('systems are gone', after.systems === 0, after);
         ok('routes are gone too — the fix', after.routes === 0, after);
         ok('and their legs', after.legs === 0, after);
