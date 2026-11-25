@@ -1,13 +1,13 @@
 # Stored race estimates in member views
 
-The battle-report evidence card keeps its existing hard compatible range. The stored
-estimate card alongside it reads the hub's saved Attack and Defence estimates; opening
-the profile does not recompute evidence or call an AI provider. Confirmed Bio intel,
-including intel already visible on the open game page, takes precedence.
+The profile cards that showed these (battle-report evidence and stored estimate) were
+removed on 2026-11-25. The battle calculator, `!race` and the admin page read the hub's
+saved Attack and Defence estimates; reading them does not recompute evidence or call an AI
+provider. Confirmed Bio intel takes precedence.
 
 Before calibration passes, estimates are visible only to admins. Their range is labelled
 **compatible range (uncalibrated)** and the raw posterior mass set is explicitly
-uncalibrated. Members see calibration progress and keep the existing worst-case numbers.
+uncalibrated. Members keep the existing worst-case numbers.
 No empirical accuracy or coverage is claimed from synthetic tests.
 
 Presentation distinguishes probable, unchecked estimates from **Estimate confirmed by
@@ -48,7 +48,7 @@ enemy estimate may add a separate estimated planet-defence result. True Power ca
 an unknown Physics observation still produces `?`.
 
 Members may explicitly request an AI check for admin approval. The admin control says
-**Run AI check (paid)**. Reading a card, refreshing it, using the calculator, viewing
+**Run AI check (paid)**. Using the calculator, viewing
 incoming alerts or computing a rating never initiates a paid call.
 
 Regression suites use hand-written evidence, synthetic player IDs and mocked hub

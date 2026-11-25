@@ -31,6 +31,7 @@ rather than "whatever cascades from `systems`".
 | `incoming_alerts`, `incoming_msgs` | **removed** | keyed by attack identities of this round |
 | `trade_agreements` | **removed** | pairs of this round's player names |
 | `app_users`, `discord_link_codes` | kept | accounts and their Discord links |
+| `player_known_names` | kept | names members entered for a player, keyed by the stable player id |
 | `app_settings`, `alliance_broadcasts` | kept | hub configuration and announcements |
 | `discord_timers` | kept | a member's `!timer` is not about the map |
 | `rz_plans` | kept | the RedZone planner is a different game |

@@ -1688,6 +1688,20 @@ function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_peer_intel_kind ON peer_intel(kind, changed_at);
     `);
 
+    // Names members typed in for a player (src/repositories/knownNames.js). No foreign key to
+    // players on purpose: a round reset empties that table, and these must outlive it.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS player_known_names (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id INTEGER NOT NULL,
+            name TEXT NOT NULL COLLATE NOCASE,
+            added_by TEXT,
+            added_by_user_id INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(player_id, name)
+        )
+    `);
+
     // --- CREATE DEFAULT ADMIN IF DB IS EMPTY ---
     const userCount = db.prepare(`SELECT COUNT(*) as count FROM app_users`).get();
     if (userCount.count === 0) {

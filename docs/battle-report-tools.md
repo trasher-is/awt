@@ -31,10 +31,10 @@ them, attach them to public issues, or use captured reports as test fixtures.
 
 ## Update a player's race range
 
-Player profiles now include **Race evidence from battle reports** and an **Update from
-battle reports** button. The action recalculates from that player's stored reports and
-saves a separate, dated assessment. A result saved by an earlier version of the method is
-not shown; press the button again to recalculate. It shows percentage ranges for Attack and Defence,
+The profile card for this (**Race evidence from battle reports**) was removed on 2026-11-25.
+The API below is still there; nothing in the hub's pages calls it. A `POST` recalculates
+from that player's stored reports and saves a separate, dated assessment. A result saved by
+an earlier version of the method is not returned; recalculate instead. It gives percentage ranges for Attack and Defence,
 the number of usable reports, links to evidence, and reasons other reports were excluded.
 
 These are **conditional compatibility ranges**, not confidence intervals or probabilities.
@@ -45,13 +45,12 @@ pick is still a model-based estimate, not confirmed bio.
 
 Each eligible report intersects the remaining Defence candidates. More informative
 reports can narrow the range; duplicate, incomplete, or uninformative reports cannot
-manufacture certainty. If no candidate fits the observations, the card reports a model/data
+manufacture certainty. If no candidate fits the observations, the result reports a model/data
 conflict instead of choosing the nearest value. Recalculating after correcting or removing
 evidence can widen the range.
 
-**Bio always wins.** A previously recorded `has_intel=1` locks the button, including neutral
-zero race picks and expired-but-recorded bio. Native live intel also locks the UI before
-its background sync completes. The server checks the current bio flag inside an immediate
+**Bio always wins.** A previously recorded `has_intel=1` blocks the update, including neutral
+zero race picks and expired-but-recorded bio. The server checks the current bio flag inside an immediate
 transaction and conditionally saves only when `has_intel=0`, returning HTTP 409 otherwise.
 A later bio scan suppresses an older estimate. Inference never writes `race_*`, science,
 `has_intel`, or `intel_updated_at`, and does not feed estimates into the battle calculator,
@@ -109,7 +108,7 @@ a **known side** and treats the player's own historical stats as unknowns under 
   ceiling of zero (`science_level_unknown`). Player level matters only when the player's
   fleet fields all three fighting ship types; then a missing level is
   `player_level_unknown`.
-- **The model, backwards.** For each Defence pick, the card runs `AWBattleModel.simulate`
+- **The model, backwards.** For each Defence pick, it runs `AWBattleModel.simulate`
   with the known side's stats and every Mathematics level up to the ceiling (and both ends
   of the player-level range). A pick stays when some combination reproduces the player's
   surviving ships of every type within 1.5 ships. The model's constants are reused, not
@@ -184,5 +183,5 @@ record cap; very large archives can require noticeable server memory and respons
 Run `npm test` on Node 22. Focused suites cover complete exports beyond the old 5,000-row
 source cap, both formats, CSV escaping, authentication, asynchronous search/download
 behavior, interval containment across science/PL/rounding combinations, bio precedence,
-restart boundaries, and profile states. All evidence is synthetic; production deployment
+and restart boundaries. All evidence is synthetic; production deployment
 and live-profile acceptance require the human review/deployment workflow in `AGENTS.md`.

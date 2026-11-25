@@ -394,7 +394,7 @@ ORDER BY id DESC;
 
 ### Race evidence runs the survivor model backwards
 
-The battle-report race card (`src/utils/battle-race-inference.js`,
+The battle-report race evidence (`src/utils/battle-race-inference.js`,
 [battle-report-tools.md](battle-report-tools.md#why-science-and-player-level-do-not-become-a-false-race-bonus))
 does not carry its own formula. For each Defence pick it calls `simulate` with the
 opponent's recorded intel and every Mathematics level up to the player's public science

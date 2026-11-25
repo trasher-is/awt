@@ -1,9 +1,6 @@
-// Synthetic saved estimates and a tiny DOM. No live game, provider or paid call.
-const fs = require('fs');
-const path = require('path');
+// Synthetic saved estimates. No live game, provider or paid call.
 const Display = require('../../public/js/utils/race-estimate-display');
 const Model = require('../../public/js/utils/battle-model');
-const Time = require('../../public/js/utils/sqlite-time');
 const Inference = require('../../public/js/utils/race-inference');
 const { truePower } = require('./true-power');
 let failed = 0;
@@ -100,113 +97,5 @@ ok('even a gated race estimate cannot manufacture physics for a numeric rating',
 rating = truePower(sheetPlayer, {}, { ...envelope, check: { ...envelope.check, state: 'outdated' } });
 ok('outdated checks preserve the unknown True Power rating', rating.tp === null && rating.tpx === null, rating);
 
-class Node {
-    constructor(tag, text = '') { this.tagName = tag; this._text = text; this.children = []; this.events = {}; this.attrs = {}; this.parent = null; this.connected = false; }
-    get isConnected() { return this.connected || !!this.parent?.isConnected; }
-    get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
-    set textContent(value) { this._text = String(value); this.children = []; }
-    appendChild(node) { this.children.push(node); node.parent = this; return node; }
-    replaceChildren(...nodes) { this.children = []; this._text = ''; nodes.forEach(node => this.appendChild(node)); }
-    setAttribute(key, value) { this.attrs[key] = String(value); }
-    addEventListener(type, callback) { this.events[type] = callback; }
-    click() { if (!this.disabled && !this.hidden) this.events.click?.(); }
-}
-const descendants = node => [node, ...node.children.flatMap(descendants)];
-const response = (data, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => data });
-const source = fs.readFileSync(path.join(__dirname, '../../public/js/ui/race-estimate-card.js'), 'utf8');
-const load = new Function('document', 'fetch', 'globalThis', `${source.replace(/^import .*;\s*$/gm, '').replace(/^export /gm, '')};return mountRaceEstimateCard;`);
-const flush = () => new Promise(resolve => setImmediate(resolve));
-function setup(snapshot, { liveIntel = false, hasBio = false, hasLiveIntel = false } = {}) {
-    const calls = [], replies = [response(snapshot)];
-    const fetch = async (url, init = {}) => { calls.push({ url, ...init }); return replies.shift() || response({ success: true }); };
-    const mount = load({ createElement: tag => new Node(tag), querySelectorAll: () => liveIntel ? [{ closest: () => null }] : [] }, fetch,
-        { AWSqliteTime: Time, AWRaceEstimateDisplay: Display, AWBattleModel: Model });
-    const root = new Node('main'); root.connected = true;
-    const controller = mount(root, { playerId: 710, hasBio, hasLiveIntel });
-    return { root, calls, replies, controller, mount };
-}
-(async () => {
-    const admin = setup({ success: true, ...envelope, viewer_role: 'admin', check_request_allowed: true, llm_enabled: true,
-        check: { ...envelope.check, explanation: 'Synthetic AI note.' },
-        gate: { ...envelope.gate, allowed: false, players: 0, pairs: 0, reasons: ['Calibration is required.'] } });
-    await admin.controller.ready;
-    ok('mounting the admin card reads the stored endpoint without computation or paid calls',
-        admin.calls.length === 1 && admin.calls[0].url === '/hub-api/intel/player/710/race-estimate'
-        && !admin.calls[0].method);
-    ok('the card shows labelled estimates, credible sets, prior, evidence and gate progress',
-        /Attack: estimate ~\+2/.test(admin.root.textContent) && /Defence: estimate ~-1/.test(admin.root.textContent)
-        && /compatible range/.test(admin.root.textContent) && /uncalibrated/.test(admin.root.textContent) && /prior: uniform/.test(admin.root.textContent)
-        && /Evidence reports/.test(admin.root.textContent) && /0\/30/.test(admin.root.textContent));
-    ok('AI-written prose has an explicit origin label', /AI-written explanation: Synthetic AI note\./.test(admin.root.textContent));
-    ok('the LLM badge identifies a review of the estimate and keeps its approximate values',
-        /Estimate confirmed by LLM/.test(admin.root.textContent) && /estimate ~\+2/.test(admin.root.textContent)
-        && /calculations and evidence/.test(admin.root.textContent));
-    const unchecked = setup({ success: true, ...envelope, viewer_role: 'admin', check_request_allowed: true,
-        llm_enabled: false, check: { state: 'not_checked' }, gate: { ...envelope.gate, allowed: false } });
-    await unchecked.controller.ready;
-    ok('an admin can read the probable uncalibrated estimate without any LLM call',
-        /Probable estimate — not checked by LLM/.test(unchecked.root.textContent)
-        && /estimate ~\+2/.test(unchecked.root.textContent) && /uncalibrated/.test(unchecked.root.textContent)
-        && unchecked.calls.length === 1 && !unchecked.calls[0].method);
-    ok('repeated mounting does not add cards or fetches', admin.mount(admin.root, { playerId: 710 }) === admin.controller
-        && admin.root.children.length === 1 && admin.calls.length === 1);
-    const paid = descendants(admin.root).find(node => node.tagName === 'button' && node.textContent === 'Run AI check (paid)');
-    admin.replies.push(response({ request: { id: 41, status: 'done' }, check: { status: 'ok' } }));
-    paid.click(); await flush();
-    ok('only an explicit paid admin button calls the AI-check action', admin.calls.length === 2
-        && admin.calls[1].url === '/hub-api/admin/race/710/check' && admin.calls[1].method === 'POST'
-        && /AI check completed/.test(admin.root.textContent));
-    const off = setup({ success: true, ...envelope, viewer_role: 'admin', check_request_allowed: true, llm_enabled: false });
-    await off.controller.ready;
-    const disabled = descendants(off.root).find(node => node.tagName === 'button' && node.textContent === 'Run AI check (paid)');
-    ok('the paid admin action is disabled when the hub AI switch is off', disabled.disabled === true);
-    disabled.events.click(); await flush();
-    ok('the action handler also blocks disabled paid checks before any request', off.calls.length === 1);
-    const member = setup({ success: true, ...envelope, viewer_role: 'user', check_request_allowed: true, llm_enabled: false });
-    await member.controller.ready;
-    const ask = descendants(member.root).find(node => node.tagName === 'button' && /Request AI check/.test(node.textContent));
-    member.replies.push(response({ request: { id: 42, status: 'pending' } }));
-    ask.click(); await flush();
-    ok('members enqueue admin approval and accept its actual persisted request receipt',
-        member.calls[1].url === '/hub-api/intel/race/710/check-request' && /AI check requested/.test(member.root.textContent));
-    const shadow = setup({ success: true, player: envelope.player, estimate: null, viewer_role: 'user', check_request_allowed: false,
-        gate: { ...envelope.gate, allowed: false, players: 0, pairs: 0 } });
-    await shadow.controller.ready;
-    ok('shadow estimates stay absent from member cards and no check control is available',
-        !/estimate ~/.test(shadow.root.textContent) && /Worst case remains/.test(shadow.root.textContent)
-        && descendants(shadow.root).filter(node => node.tagName === 'button').find(node => /Request AI check/.test(node.textContent)).hidden);
-    const bio = setup({ success: true, ...envelope, viewer_role: 'admin', check_request_allowed: true }, { liveIntel: true });
-    await bio.controller.ready;
-    ok('visible Bio intel overrides stale saved estimates before profile sync catches up',
-        /Observed intel is available/.test(bio.root.textContent) && !/estimate ~/.test(bio.root.textContent)
-        && descendants(bio.root).find(node => node.tagName === 'button' && /Run AI check/.test(node.textContent)).hidden);
-    const historical = setup({ success: true, ...envelope, player: historicalBio,
-        viewer_role: 'admin', check_request_allowed: true, llm_enabled: true }, { hasBio: true });
-    await historical.controller.ready;
-    ok('a current snapshot removes an initial stale bio lock and keeps its estimate available',
-        /estimate ~/.test(historical.root.textContent) && !/Observed intel is available/.test(historical.root.textContent)
-        && !descendants(historical.root).find(node => node.tagName === 'button' && /Run AI check/.test(node.textContent)).hidden);
-    const beforeReset = setup({ success: true, ...envelope,
-        player: { ...historicalBio, intel_updated_at: '2026-10-02 12:00:00' },
-        viewer_role: 'admin', check_request_allowed: true, llm_enabled: true });
-    await beforeReset.controller.ready;
-    ok('a snapshot with current bio locks the stored-estimate card', /Observed intel is available/.test(beforeReset.root.textContent));
-    beforeReset.replies.push(response({ success: true, ...envelope, player: historicalBio,
-        viewer_role: 'admin', check_request_allowed: true, llm_enabled: true }));
-    await beforeReset.controller.refresh();
-    ok('a later reset snapshot can invalidate stored bio without latching the old lock', /estimate ~/.test(beforeReset.root.textContent));
-    const explicitLive = setup({ success: true, ...envelope, player: historicalBio,
-        viewer_role: 'admin', check_request_allowed: true }, { hasLiveIntel: true });
-    await explicitLive.controller.ready;
-    ok('explicit genuine live bio stays authoritative even when the stored snapshot is historical',
-        /Observed intel is available/.test(explicitLive.root.textContent) && !/estimate ~/.test(explicitLive.root.textContent));
-    const wrong = setup({ success: true, ...envelope, player: { ...envelope.player, id: 999 } });
-    await wrong.controller.ready;
-    ok('a response for a different player cannot appear on this profile',
-        /invalid estimate/.test(wrong.root.textContent) && !/estimate ~/.test(wrong.root.textContent));
-    ok('no card contains a request to a game API or a write until a user clicks',
-        [admin, member, shadow].every(state => state.calls.every(call => call.url.startsWith('/hub-api/')))
-        && shadow.calls.length === 1);
-    console.log(`race-display-ui.test.js: ${failed} failures`);
-    process.exitCode = failed ? 1 : 0;
-})();
+console.log(`race-display-ui.test.js: ${failed} failures`);
+process.exitCode = failed ? 1 : 0;

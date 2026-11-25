@@ -17,6 +17,7 @@ router.use(require('./intel'));
 router.use(require('./unicorn'));
 router.use(require('./userSettings'));
 router.use(require('./battleRace'));
+router.use(require('./knownNames'));
 router.use(require('./race-checks'));
 router.use(require('./race-intel'));
 router.use(require('./race-display'));
